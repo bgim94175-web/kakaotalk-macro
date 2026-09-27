@@ -33,7 +33,14 @@
     <p class="eyebrow">구매 신청</p>
     <h1 style="font-size:clamp(23px,6vw,31px)">필요한 기능 고르고<br>입금 정보만 남겨줘</h1>
     <p class="lead" style="margin-bottom:22px">접수하면 주문번호와 입금 계좌를 바로 보여줄게.
-      입금이 확인되면 관리자가 키를 발급해.</p>
+      알려준 <b>정확한 금액</b>을 입금하면 보통 1~2분 안에 자동으로 키가 발급돼.</p>
+
+    <!-- 아이폰 미지원 — 구매 버튼 위. 환불 분쟁 방지용이니 절대 지우지 마라 -->
+    <div class="note alert" style="margin-bottom:20px" id="iosWarn">
+      <span class="ic" aria-hidden="true">!</span>
+      <span>이 앱은 <b>안드로이드 전용</b>이야. 아이폰에서는 카톡 알림을 다른 앱이 읽고 답장할 수 없어서(iOS 제약)
+        기술적으로 동작하지 않아. 구매 전에 꼭 확인해줘.</span>
+    </div>
 
     <!-- 접수 결과 (제출 성공하면 여기에 그려짐) -->
     <div id="result" hidden></div>
@@ -94,6 +101,20 @@
                     placeholder="요청사항이 있으면 적어줘 (예: 저녁에 연락 부탁)"></textarea>
         </div>
 
+        <!-- 안드로이드 확인 — 체크 안 하면 제출을 막는다 -->
+        <div class="fld" id="fld-android">
+          <label class="chk" for="androidOk" style="align-items:flex-start;padding:12px">
+            <input type="checkbox" id="androidOk" name="android_ok" aria-describedby="android-hint">
+            <span class="box" aria-hidden="true" style="margin-top:2px"></span>
+            <span class="t">
+              <span style="display:block;color:var(--text);font-size:14.5px">안드로이드 기기인 것을 확인했어
+                <span class="req" aria-hidden="true">*</span><span class="sr">필수</span></span>
+              <span class="tiny dim" id="android-hint" style="display:block;font-weight:600;line-height:1.45">아이폰(iOS)에서는 동작하지 않아. 이건 필수 확인이야.</span>
+            </span>
+          </label>
+          <p class="err" id="err-android" role="alert" hidden></p>
+        </div>
+
         <p class="hint" id="bankHint" style="margin:0"></p>
         <p class="err" id="submitErr" role="alert" hidden></p>
 
@@ -116,7 +137,7 @@
       <a href="/">처음으로</a>
       <a href="/my">내 키 조회</a>
     </div>
-    <p style="margin:0">키 1개 = 기기 1대 · 무통장 입금 · 입금 확인은 수동이야</p>
+    <p style="margin:0">키 1개 = 기기 1대 · 안드로이드 전용 · 금액이 맞으면 자동으로 확인돼</p>
   </div>
 </footer>
 </body>

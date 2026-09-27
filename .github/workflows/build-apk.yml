@@ -40,6 +40,10 @@ jobs:
           # (base64 -w0 android/keystore/app.jks 결과를 그대로 붙여넣기)
           # 비워두면 레포에 커밋된 keystore/app.jks 를 그대로 쓴다.
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          # 키스토어 비밀번호. Secret 이 비어있으면 build.sh 가 기본값으로 떨어지고
+          # 로그에 "기본 키스토어 비밀번호를 쓰고 있어" 경고를 찍는다.
+          # 레포를 공개로 전환할 거면 KEYSTORE_B64 + KS_PASS 두 개를 반드시 Secret 으로 넣어라.
+          KS_PASS: ${{ secrets.KS_PASS }}
         run: ./build.sh all
 
       - name: 빌드 결과 확인

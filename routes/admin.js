@@ -9,6 +9,7 @@ const features = require('../lib/features');
 const audit = require('../lib/audit');
 const pricing = require('../lib/pricing');
 const license = require('./license');
+const rl = require('../lib/ratelimit');
 
 const router = express.Router();
 
@@ -23,22 +24,82 @@ function clamp(v, lo, hi, dflt) {
   return Math.min(Math.max(n, lo), hi);
 }
 
-// 비밀번호 비교는 길이 노출을 줄이려고 timingSafeEqual 사용
-function pwOk(given) {
-  const want = String(process.env.ADMIN_PASSWORD || 'change-me-now');
-  const a = Buffer.from(String(given === null || given === undefined ? '' : given), 'utf8');
-  const b = Buffer.from(want, 'utf8');
-  if (a.length !== b.length) return false;
-  try { return crypto.timingSafeEqual(a, b); } catch (e) { return false; }
+// 공개된 기본값 — 이 값이 그대로 들어있으면 비밀번호가 없는 것과 같다
+const DEFAULT_PW = 'change-me-now';
+
+// 관리자 API 를 열어도 되는 상태인지. 문제가 있으면 사람이 읽을 사유를 돌려준다.
+function passwordProblem() {
+  const raw = process.env.ADMIN_PASSWORD;
+  const pw = (raw === null || raw === undefined) ? '' : String(raw);
+  if (!pw.trim()) return 'ADMIN_PASSWORD 환경변수가 비어 있어';
+  if (pw === DEFAULT_PW) return 'ADMIN_PASSWORD 가 공개된 기본값(' + DEFAULT_PW + ') 그대로야';
+  return null;
 }
 
-function guard(req, res, next) {
+// 비밀번호 비교. 길이가 달라도 같은 시간이 걸리게 sha256 을 떠서 비교한다
+// (예전 구현은 길이가 다르면 즉시 false 라서 응답시간으로 길이를 알아낼 수 있었다).
+function pwOk(given) {
+  if (passwordProblem()) return false;
+  const want = String(process.env.ADMIN_PASSWORD);
+  const g = crypto.createHash('sha256').update(String(given === null || given === undefined ? '' : given), 'utf8').digest();
+  const w = crypto.createHash('sha256').update(want, 'utf8').digest();
+  try { return crypto.timingSafeEqual(g, w); } catch (e) { return false; }
+}
+
+let warnedProblem = '';
+
+async function guard(req, res, next) {
+  // ── 비밀번호가 없거나 기본값이면 관리자 API 를 통째로 닫는다 (503)
+  const problem = passwordProblem();
+  if (problem) {
+    if (warnedProblem !== problem) {
+      warnedProblem = problem;
+      console.error('[admin] ★ 관리자 API 전체를 503 으로 막았어 — ' + problem +
+                    ' / ADMIN_PASSWORD 를 제대로 설정하고 다시 배포해라');
+    }
+    return res.status(503).json({ ok: false, error: 'admin_disabled',
+      reason: 'admin_password_unset',
+      detail: '서버에 관리자 비밀번호가 설정돼 있지 않아서 관리자 API 를 닫아뒀어. ' +
+              '서버 환경변수 ADMIN_PASSWORD 를 채우고 다시 배포해줘' });
+  }
+  warnedProblem = '';
+
+  const ip = rl.ipOf(req);
+
+  // ── 연속 실패로 차단된 IP (server.js 에서도 막지만, 라우터 단독 사용도 대비한다)
+  const left = rl.adminBlockedMs(ip);
+  if (left > 0) {
+    const mins = Math.ceil(left / 60000);
+    res.set('Retry-After', String(Math.ceil(left / 1000)));
+    return res.status(429).json({ ok: false, error: 'too_many_attempts',
+      detail: '비밀번호를 너무 많이 틀렸어. ' + mins + '분 뒤에 다시 해줘' });
+  }
+
+  // ── 인증 실패는 기록한다 (관리자앱 [기록] 탭에서 공격을 눈으로 볼 수 있게)
   if (!pwOk(req.header('x-admin-password'))) {
+    const st = rl.noteAdminFail(ip);
+    console.log('[admin] 비밀번호 틀림 ' + ip + ' ' + req.method + ' ' + req.path +
+                ' (' + st.fails + '회' + (st.blocked ? ' → ' + Math.round(st.blockMs / 60000) + '분 차단' : '') + ')');
+    await audit.record(req, 'bad_admin_pw', {
+      detail: '관리자 비밀번호 틀림 ' + req.method + ' ' + req.path + ' / 연속 ' + st.fails + '회' +
+              (st.blocked ? ' → ' + Math.round(st.blockMs / 60000) + '분 차단' : ''),
+    });
+    if (st.blocked) {
+      res.set('Retry-After', String(Math.ceil(st.blockMs / 1000)));
+      return res.status(429).json({ ok: false, error: 'too_many_attempts',
+        detail: '비밀번호를 너무 많이 틀렸어. ' + Math.round(st.blockMs / 60000) + '분 뒤에 다시 해줘' });
+    }
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
+
+  // 성공 → 실패 카운터 리셋. 조회까지 전부 서버 로그에 남겨서 유출에 흔적이 남게 한다.
+  rl.clearAdminFails(ip);
+  console.log('[admin] ' + req.method + ' ' + req.path + ' ip=' + ip);
   next();
 }
-router.use('/admin', guard);
+
+// guard 는 async 다 → 에러를 삼키지 않고 express 에러 핸들러로 넘긴다
+router.use('/admin', (req, res, next) => Promise.resolve(guard(req, res, next)).catch(next));
 
 // 여러 키의 entitlements 를 한 번에 붙여준다
 async function attachFeatures(shaped) {
@@ -395,3 +456,4 @@ router.post('/admin/sig-del', wrap(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports.passwordProblem = passwordProblem;

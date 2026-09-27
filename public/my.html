@@ -58,7 +58,14 @@
         관리자가 초기화해주면 새 기기에서 다시 활성화할 수 있어.</p>
       <p class="sub small" style="margin-bottom:10px">요청할 때 <b>키</b>와 <b>바꾼 이유</b>(기기 교체 / 초기화 / 수리)를
         같이 알려주면 빨라. 초기화 횟수는 기록에 남아서, 여러 기기를 돌려쓰는 용도로는 안 돼.</p>
-      <p class="tiny dim" id="adminContact" style="margin:0">관리자 연락처는 구매할 때 안내받은 곳으로 문의해줘.</p>
+      <p class="tiny dim" id="adminContact" style="margin:0 0 10px">관리자 연락처는 구매할 때 안내받은 곳으로 문의해줘.</p>
+      <!-- 실제로 요청을 보낼 수단 — 요청 문구를 만들어 복사해주고, 연락처가 있으면 바로 열어준다 -->
+      <div class="btn-row" id="resetActions">
+        <button type="button" class="btn sm" id="resetCopy">초기화 요청 문구 복사</button>
+        <a class="btn sm" href="/order">주문번호로 조회</a>
+      </div>
+      <p class="tiny dim" style="margin:10px 0 0" id="resetHint">복사한 문구를 관리자에게 그대로 보내줘.
+        키와 사유가 같이 들어가 있어서 바로 처리돼.</p>
     </div>
 
     <div class="note dim" style="margin-top:12px">

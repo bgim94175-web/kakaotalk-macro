@@ -292,6 +292,13 @@ public final class License {
                         saveVerify(app, k, p.o);
                         ok = true;
                         reason = "";
+                        // 인증되자마자 하트비트 알람을 잡는다. 매크로를 안 산 사용자(봇만 결제)도
+                        // 이게 없으면 lic_lastok 이 안 갱신돼서 3일 뒤 유예 초과로 통째로 잠긴다.
+                        try {
+                            Scheduler.ensureHeartbeat(app);
+                        } catch (Throwable t) {
+                            Log.add(app, "라이선스 자동확인 예약에 실패했어 — 가끔 앱을 열어줘: " + t);
+                        }
                         Log.add(app, "라이선스 인증 성공 · " + featSummary(app));
                     } else {
                         reason = p.fail;
@@ -369,13 +376,22 @@ public final class License {
                 String reason = "no_network";
                 try {
                     String nonce = Crypto.randomHex(16);
-                    String url = server(app) + "/entitlements"
-                            + "?key=" + enc(k)
-                            + "&device_id=" + enc(Device.deviceId(app))
-                            + "&nonce=" + enc(nonce)
-                            + "&app_sig=" + enc(Device.appSigSha256(app))
-                            + "&app_version=" + Device.appVersion(app);
-                    Resp r = http(app, "GET", url, null);
+                    // POST 를 먼저 쓴다 — GET 은 라이선스 키가 서버·프록시 접근로그에 평문으로 쌓인다.
+                    // 세션도 같이 보낸다: 서버는 저장값과 같을 때만 그 값을 그대로 되돌려준다(소유 증명).
+                    JSONObject body = common(app, k, nonce);
+                    String ses = nz(Prefs.getStr(app, K_SESSION, ""));
+                    if (ses.length() > 0) body.put("session", ses);
+                    Resp r = http(app, "POST", server(app) + "/entitlements", body);
+                    if (r.code == 404 || r.code == 405) {
+                        // POST 를 모르는 구버전 서버다 — 예전 GET 형식으로 한 번 더 시도한다
+                        String url = server(app) + "/entitlements"
+                                + "?key=" + enc(k)
+                                + "&device_id=" + enc(Device.deviceId(app))
+                                + "&nonce=" + enc(nonce)
+                                + "&app_sig=" + enc(Device.appSigSha256(app))
+                                + "&app_version=" + Device.appVersion(app);
+                        r = http(app, "GET", url, null);
+                    }
                     Parsed p = verify(app, r, nonce);
                     if (p.o != null) {
                         saveTick(app, p.o, false);
@@ -406,6 +422,13 @@ public final class License {
     public static void signOut(Context c) {
         if (c == null) return;
         Context app = appCtx(c);
+        // 알람부터 정리한다 — 설정키를 지운 뒤에 부르면 예정 시각을 저장한 설정을 못 읽는다.
+        // 발송 알람만 끄면 안 된다: 하트비트 알람이 남아 키 없는 기기에서 계속 깨어난다.
+        try {
+            Scheduler.cancelAll(app);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "알람 정리 실패", t);
+        }
         try {
             Prefs.secRemove(app, "settings");
         } catch (Throwable t) {
@@ -543,7 +566,10 @@ public final class License {
             if (old.length() > 0 && !isHard(old)) Prefs.putStr(c, K_REASON, "");
         }
 
-        // 설정키를 잃은 기기 복구용 — 응답에 config_key 가 실려오고 보관본이 없으면 다시 넣는다
+        // 설정키를 잃은 기기 복구용 — 응답에 config_key 가 실려오고 보관본이 없으면 다시 넣는다.
+        // ★ 없거나 null 이면 절대 손대지 않는다. /entitlements 는 세션 증명이 없어서 서버가
+        //    config_key 를 null 로 내리는데, 그걸 보관본에 덮어쓰면 사용자 설정 전체가 복호화 불가가 된다.
+        //    str() 이 ""/"null" 을 기본값으로 바꿔주니까 아래 length()>0 가드가 그 역할을 한다 — 빼지 마라.
         String ck = str(o, "config_key", "");
         if (ck.length() > 0) {
             String cur = null;

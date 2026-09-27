@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 const db = require('./lib/db');
+const rl = require('./lib/ratelimit');
 const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
 const purchaseRoutes = require('./routes/purchase');
@@ -26,39 +27,47 @@ app.disable('x-powered-by');
 // 본문 크기 제한 (설정 백업 blob 256KB + 여유)
 app.use(express.json({ limit: '512kb' }));
 
-// ── 아주 단순한 IP 기반 레이트리밋 (메모리). 분당 30회 초과 시 429.
-// 무료 플랜이라 Redis 같은 건 안 쓴다. 인스턴스가 하나니까 메모리로 충분하다.
-const RL_WINDOW = 60 * 1000;
-const RL_MAX = Number(process.env.RATE_LIMIT_PER_MIN) || 30;
-const rlBuckets = new Map();
-
-function limitedPath(req) {
+// ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
+// 사용자 API 는 분당 RATE_LIMIT_PER_MIN(기본 30)회, 관리자 API 는 분당 120회까지 허용한다.
+// 관리자 비밀번호 연속 실패 차단은 routes/admin.js 의 guard 가 기록하고, 여기서 막는다(기본 15분).
+function limitKind(req) {
   const p = req.path;
-  if (req.method === 'POST' && (p === '/verify' || p === '/api/order' || p === '/api/lookup')) return true;
-  if (req.method === 'GET' && p.indexOf('/api/order/') === 0) return true;
+  // 관리자 API 는 전부 제한 대상 — 비밀번호 무한 추측을 막는다
+  if (p === '/admin' || p.indexOf('/admin/') === 0) return 'admin';
+  if (req.method === 'POST' && (p === '/verify' || p === '/heartbeat' || p === '/entitlements' ||
+      p === '/config' || p === '/api/order' || p === '/api/lookup' || p === '/api/deposit-hook')) return 'api';
+  if (req.method === 'GET' && (p === '/entitlements' || p === '/config')) return 'api';
+  if (req.method === 'GET' && p.indexOf('/api/order/') === 0) return 'api';
   return false;
 }
 
 app.use((req, res, next) => {
-  if (!limitedPath(req)) return next();
-  const now = Date.now();
-  const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || 'unknown');
-  let b = rlBuckets.get(ip);
-  if (!b || now - b.at >= RL_WINDOW) { b = { at: now, n: 0 }; rlBuckets.set(ip, b); }
-  b.n++;
-  if (b.n > RL_MAX) {
-    res.set('Retry-After', String(Math.ceil((b.at + RL_WINDOW - now) / 1000)));
+  const kind = limitKind(req);
+  if (!kind) return next();
+  const ip = rl.ipOf(req);
+
+  // 비밀번호를 연달아 틀려서 차단된 IP 는 관리자 라우터에 닿기도 전에 돌려보낸다
+  if (kind === 'admin') {
+    const left = rl.adminBlockedMs(ip);
+    if (left > 0) {
+      const mins = Math.ceil(left / 60000);
+      res.set('Retry-After', String(Math.ceil(left / 1000)));
+      console.log('[rate] 관리자 인증 실패로 차단중 ' + ip + ' ' + req.method + ' ' + req.path +
+                  ' (' + mins + '분 남음)');
+      return res.status(429).json({ ok: false, reason: 'rate_limited',
+        error: '비밀번호를 너무 많이 틀렸어. ' + mins + '분 뒤에 다시 해줘' });
+    }
+  }
+
+  const max = kind === 'admin' ? rl.adminMax() : rl.apiMax();
+  const r = rl.hit(kind, ip, max);
+  if (!r.ok) {
+    res.set('Retry-After', String(r.retryAfter));
     console.log('[rate] 과다요청 차단 ' + ip + ' ' + req.method + ' ' + req.path);
     return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 많아. 잠깐 뒤에 다시 해줘' });
   }
   next();
 });
-
-// 오래된 버킷 정리 (5분마다)
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, b] of rlBuckets) if (now - b.at > RL_WINDOW * 5) rlBuckets.delete(ip);
-}, 5 * 60 * 1000).unref();
 
 // ── 정적 파일 (구매 웹사이트). index 는 아래에서 직접 다룬다.
 app.use(express.static(PUBLIC_DIR, { index: false, extensions: ['html'], maxAge: '1h' }));
@@ -140,7 +149,20 @@ process.on('uncaughtException', (e) => console.error('[uncaughtException]', e &&
 
 function warnEnv() {
   if (!process.env.DATABASE_URL) console.error('DATABASE_URL(=Neon 연결문자열) 환경변수가 필요해');
-  if (!process.env.ADMIN_PASSWORD) console.error('ADMIN_PASSWORD 가 없어 → 기본값(change-me-now)으로 돌아. 당장 설정해라');
+  const pwProblem = adminRoutes.passwordProblem ? adminRoutes.passwordProblem() : null;
+  if (pwProblem) {
+    console.error('');
+    console.error('################################################################');
+    console.error('#  관리자 API 전체를 503 으로 닫아뒀어 — ' + pwProblem);
+    console.error('#  Render 대시보드 > Environment 에서 ADMIN_PASSWORD 를 길고 무작위한');
+    console.error('#  값으로 채우고 다시 배포해라. 기본 비밀번호로 실서비스를 열면');
+    console.error('#  /admin/list 로 전 고객 정보가 새고 /admin/create 로 키가 무한 발급된다.');
+    console.error('################################################################');
+    console.error('');
+  } else if (String(process.env.ADMIN_PASSWORD).length < 12) {
+    console.error('ADMIN_PASSWORD 가 짧아 (' + String(process.env.ADMIN_PASSWORD).length +
+                  '자) → 20자 이상 무작위 값으로 바꿔라');
+  }
   if (!process.env.SIGNING_PRIVATE_KEY) console.error('SIGNING_PRIVATE_KEY 가 없어 → 재시작마다 서명키가 바뀐다. 로그의 키를 환경변수에 박아라');
   if (!String(process.env.ALLOWED_APP_SIGS || '').trim()) console.log('ALLOWED_APP_SIGS 비어있음 → 앱 서명 검사 건너뜀 (리패키징 방어 꺼짐)');
   if (!String(process.env.DEPOSIT_TOKEN || '').trim()) console.log('DEPOSIT_TOKEN 비어있음 → 자동 입금확인 웹훅 비활성');

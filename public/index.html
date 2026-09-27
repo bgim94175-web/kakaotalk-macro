@@ -40,7 +40,7 @@
       <a class="btn primary" href="#products">가격 보기</a>
       <a class="btn" href="/my">내 키 조회</a>
     </div>
-    <p class="hero-note">키 1개 = 기기 1대 · 무통장 입금 · 입금 확인 뒤 관리자가 키를 발급해</p>
+    <p class="hero-note">키 1개 = 기기 1대 · 무통장 입금 · 입금하면 보통 1~2분 안에 자동으로 키가 발급돼</p>
   </section>
 
   <!-- 상품 -->
@@ -52,7 +52,15 @@
     </div>
 
     <div id="planSeg" style="margin-bottom:14px"></div>
-    <div id="prods" class="grid"></div>
+    <div id="prods" class="grid g2"></div>
+
+    <!-- 아이폰 미지원 — 구매 버튼 바로 위. 환불 분쟁 방지용이니 절대 지우지 마라 -->
+    <div class="note alert" style="margin-top:14px" id="iosWarn">
+      <span class="ic" aria-hidden="true">!</span>
+      <span>이 앱은 <b>안드로이드 전용</b>이야. 아이폰에서는 카톡 알림을 다른 앱이 읽고 답장할 수 없어서(iOS 제약)
+        기술적으로 동작하지 않아. 구매 전에 꼭 확인해줘.</span>
+    </div>
+
     <div id="sum" class="sum"></div>
   </section>
 
@@ -65,7 +73,7 @@
     <div class="card">
       <ol class="steps">
         <li><b>기능을 골라 구매 신청</b> — 주문번호와 입금 계좌가 바로 떠. 금액 그대로 입금해줘.</li>
-        <li><b>키 발급</b> — 입금이 확인되면 관리자가 키를 발급해. 주문 상태 페이지에서 확인할 수 있어.</li>
+        <li><b>키 발급</b> — 금액이 정확하면 보통 1~2분 안에 자동으로 발급돼. 주문 상태 페이지가 알아서 갱신되니까 그냥 열어두면 돼.</li>
         <li><b>앱에 키 입력</b> — 앱을 열고 키를 넣으면 활성화돼. 이때 기기 1대에 고정돼.</li>
         <li><b>권한 허용하고 설정</b> — 알림 접근 권한을 켜면 발송이 시작돼. 이미지 발송은 접근성 권한도 필요해.</li>
       </ol>
@@ -73,7 +81,7 @@
   </section>
 
   <!-- 설치 안내 -->
-  <section class="wrap">
+  <section class="wrap" id="install">
     <div class="sec-head">
       <p class="eyebrow">다운로드 · 설치</p>
       <h2>앱 설치 안내</h2>
@@ -103,9 +111,19 @@
     </div>
 
     <details class="faq">
+      <summary>아이폰에서도 돼?</summary>
+      <div class="body"><p>안 돼. <b>안드로이드 전용</b>이야. 이 앱은 카톡 알림을 읽고 그 알림에 답장하는 방식으로 동작하는데,
+        iOS 는 다른 앱의 알림을 읽거나 대신 답장하는 걸 아예 막아놔서 방법이 없어.
+        아이폰만 쓰고 있으면 사지 마 — 환불도 어려워.</p></div>
+    </details>
+
+    <details class="faq">
       <summary>결제하면 바로 쓸 수 있어?</summary>
-      <div class="body"><p>무통장 입금이라 자동은 아니야. 입금이 확인되면 관리자가 키를 발급해.
-        주문 상태 페이지를 새로고침하면 발급됐는지 보여. 발급된 키를 앱에 넣으면 그 순간부터 기간이 시작돼.</p></div>
+      <div class="body"><p>거의 바로 돼. 주문할 때 알려준 <b>정확한 금액</b>(뒷자리까지)을 입금하면
+        그 금액으로 주문을 찾아서 <b>보통 1~2분 안에 자동으로</b> 키가 발급돼.
+        주문 상태 페이지를 열어두면 발급되는 순간 키가 화면에 떠(직접 새로고침 안 해도 돼).
+        금액이 다르거나 같은 금액의 대기 주문이 겹치면 자동 확인이 안 되고 관리자가 직접 확인해 —
+        그때는 몇 시간 걸릴 수 있어. 발급된 키를 앱에 넣으면 그 순간부터 기간이 시작돼.</p></div>
     </details>
 
     <details class="faq">
@@ -165,7 +183,9 @@
     <details class="faq">
       <summary>취소나 환불은?</summary>
       <div class="body"><p>키가 발급되기 전이면 주문번호를 알려주고 취소를 요청하면 돼.
-        발급된 뒤에는 기기에 고정되기 때문에 그냥은 어려워 — 관리자에게 상황을 말하고 상의해줘.</p></div>
+        발급된 뒤에는 기기에 고정되기 때문에 그냥은 어려워 — 관리자에게 상황을 말하고 상의해줘.</p>
+        <p>안드로이드 전용이라고 위에 크게 적어뒀으니까, <b>아이폰인데 샀다</b>는 사유는 환불이 안 돼.
+          구매 전에 기기를 꼭 확인해줘.</p></div>
     </details>
   </section>
 </main>
@@ -177,7 +197,7 @@
       <a href="/my">내 키 조회</a>
       <a href="#products">가격</a>
     </div>
-    <p style="margin:0" id="bankLine">입금은 무통장 계좌이체 · 입금 확인은 수동이야</p>
+    <p style="margin:0" id="bankLine">입금은 무통장 계좌이체 · 금액이 맞으면 자동으로 확인돼</p>
     <p style="margin:6px 0 0">카카오톡은 (주)카카오의 상표이고, 이 앱은 카카오와 아무 관계 없어.</p>
   </div>
 </footer>

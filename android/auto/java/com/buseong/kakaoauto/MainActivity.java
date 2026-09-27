@@ -52,6 +52,16 @@ public final class MainActivity extends Activity {
     private FrameLayout content;
     private View bar;
 
+    /** 지금 붙어 있는 셸이 인증 상태로 만들어진 것인가 (onResume 에서 통째 재빌드 여부를 가린다) */
+    private boolean shellBuilt = false;
+    private boolean shellLicensed = false;
+
+    /** 잠금화면에서 입력 중이던 키 (앱을 잠깐 벗어나도 날아가지 않게 들고 있는다) */
+    private String keyDraft = "";
+
+    /** 홈 상태 카드의 새로고침 버튼 라벨 */
+    private static final String HOME_REFRESH = "구매했는데 안 켜졌어 (새로고침)";
+
     // 홈 화면 갱신용
     private static WeakReference<MainActivity> HOME_ACT;
     private static WeakReference<LinearLayout> HOME_BODY;
@@ -73,14 +83,19 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         try {
-            renderShell();
-            maybeHeartbeat();
+            // 구매 페이지에서 돌아왔을 때 값이 안 바뀐 것처럼 보이면 안 된다 → 매번 다시 그린다.
+            // 단, 라이선스 셸(잠금화면 ↔ 탭)이 그대로면 제자리 갱신만 한다
+            // (통째로 다시 만들면 입력 중이던 키가 날아가고 스크롤이 맨 위로 튄다).
+            if (!shellBuilt || Nav.shellOk(this) != shellLicensed) renderShell();
+            else Nav.reload();
+            maybeHeartbeat();       // 서버 확인은 10분에 한 번만 (여기 쓰로틀은 그대로)
         } catch (Throwable t) {
             Log.add(this, "화면을 다시 그리다 오류가 났어: " + t);
         }
     }
 
     @Override protected void onDestroy() {
+        shellBuilt = false;
         Nav.detach();
         HOME_ACT = null;
         HOME_BODY = null;
@@ -111,6 +126,8 @@ public final class MainActivity extends Activity {
             s = null;
         }
         boolean ok = (s != null) && s.licensed && !s.locked;
+        shellBuilt = true;
+        shellLicensed = ok;
 
         root.removeAllViews();
         if (!ok) {
@@ -196,7 +213,15 @@ public final class MainActivity extends Activity {
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         keyField.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         String pre = (s == null) ? "" : s.key;
+        if (pre == null || pre.length() == 0) pre = keyDraft;    // 손으로 입력하던 값 복원
         if (pre != null && pre.length() > 0) keyField.setText(pre);
+        keyField.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a1, int b1, int c1) { }
+            @Override public void onTextChanged(CharSequence c, int a1, int b1, int c1) { }
+            @Override public void afterTextChanged(android.text.Editable e) {
+                keyDraft = (e == null) ? "" : e.toString();
+            }
+        });
         inRow.addView(keyField);
 
         TextView pasteBtn = Ui.btn(this, "붙여넣기", false);
@@ -300,6 +325,7 @@ public final class MainActivity extends Activity {
         } catch (Throwable t) {
             Log.add(this, "발송 예약을 되살리지 못했어: " + t);
         }
+        keyDraft = "";
         Ui.toast(this, "인증 완료");
         renderShell();
     }
@@ -401,6 +427,16 @@ public final class MainActivity extends Activity {
                     new Runnable() {
                         @Override public void run() { Gate.openBuy(a, Features.MACRO); }
                     }));
+            final TextView again = Ui.btn(a, HOME_REFRESH, false);
+            LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(MATCH, WRAP);
+            ap.topMargin = Theme.dp(a, 12);
+            again.setLayoutParams(ap);
+            again.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Nav.refreshFeature(a, again, Features.MACRO, HOME_REFRESH);
+                }
+            });
+            card.addView(again);
         } else {
             card.addView(Nav.wideBtn(a, "매크로 설정 열기", false, new Runnable() {
                 @Override public void run() { Nav.go(Nav.MACRO); }
@@ -604,7 +640,7 @@ public final class MainActivity extends Activity {
                 }
                 boolean nowOk = now2.licensed && !now2.locked;
                 if (nowOk != wasOk) renderShell();
-                else if (Nav.current() == Nav.HOME) refreshHome();
+                else Nav.reload();
             }
         });
     }

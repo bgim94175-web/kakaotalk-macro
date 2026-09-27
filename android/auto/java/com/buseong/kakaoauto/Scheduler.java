@@ -15,9 +15,18 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 주기 자동발송 스케줄러. AlarmManager 하나로 돌아간다.
+ * 주기 자동발송 스케줄러 + 라이선스 하트비트 스케줄러.
+ *
+ * 알람은 두 종류다. 서로 완전히 독립이다 (섞으면 안 된다).
+ *   1) 발송 알람   {@link #ACTION_FIRE}      — 매크로가 켜져 있고 macro 기능이 열렸을 때만 유지
+ *   2) 하트비트 알람 {@link #ACTION_HEARTBEAT} — 키가 저장돼 있으면 <b>언제나</b> 유지.
+ *      매크로를 안 샀거나 껐어도, 심지어 잠긴 상태여도 돈다. 이게 없으면 봇만 산 사용자는
+ *      3일 유예가 지난 순간 전부 잠기고 스스로 복구할 방법이 없다.
+ *      끄는 건 로그아웃({@link #cancelAll}) 한 곳뿐이다.
  *
  * 핵심 동작(v1.8 에서 그대로 가져온 것 — 절대 바꾸지 마라)
  *   "내가 마지막으로 보낸 뒤 그 방에 남의 새 메시지가 minMessages 개 이상 쌓였을 때만 보낸다."
@@ -36,8 +45,14 @@ public final class Scheduler {
     /** 알람 브로드캐스트 액션. AlarmReceiver 가 이걸 보고 runDue 로 보낸다. */
     public static final String ACTION_FIRE = "com.buseong.kakaoauto.ALARM_FIRE";
 
+    /** 라이선스 하트비트 알람 액션. 발송 알람과 완전히 별개다. */
+    public static final String ACTION_HEARTBEAT = "com.buseong.kakaoauto.ALARM_HEARTBEAT";
+
     /** PendingIntent requestCode (다른 PendingIntent 와 겹치지 않게 고정) */
     public static final int REQ_ALARM = 7311;
+
+    /** 하트비트 알람 requestCode — 발송 알람과 겹치면 서로를 덮어쓴다 */
+    public static final int REQ_HEARTBEAT = 7312;
 
     /** 다음 발송 예정 시각 (평문 Prefs — 시각 자체는 민감정보가 아니고, 설정키가 없어도 읽혀야 한다) */
     private static final String K_NEXT = "sched_next";
@@ -45,8 +60,26 @@ public final class Scheduler {
     /** 누적 발송 카운터. EVERY_N("N번째 발송마다") 이미지 첨부 판정에 쓴다. */
     private static final String K_SEQ = "sched_seq";
 
+    /** 다음 하트비트 예정 시각 (평문 Prefs — 설정키가 없어도 읽혀야 한다) */
+    private static final String K_HB_NEXT = "sched_hb_next";
+
+    /** 하트비트 기본 주기. 서버가 recheck_ms 를 주면 그 값을 쓴다. */
+    private static final long HB_DEFAULT_MS = 6 * 3600 * 1000L;
+
+    /** 서버가 너무 짧은 recheck_ms 를 줘도 이보다 잦게는 안 돈다 (배터리) */
+    private static final long HB_MIN_MS = 15 * 60 * 1000L;
+
+    /** 이미 때가 지났거나 실패했을 때 다시 시도하는 간격 */
+    private static final long HB_RETRY_MS = 30 * 60 * 1000L;
+
+    /** 하트비트 응답을 기다리는 최대 시간 (네트워크 타임아웃보다 넉넉히) */
+    private static final long HB_WAIT_MS = 25000L;
+
     /** WakeLock 은 runDue 도는 동안만, 최대 60초. */
     private static final long WAKE_TIMEOUT_MS = 60000L;
+
+    /** 하트비트는 네트워크 한 번이라 짧게 잡는다. */
+    private static final long HB_WAKE_MS = 30000L;
 
     /**
      * 한 번의 runDue 가 쓸 수 있는 시간. WakeLock 타임아웃(60초)보다 넉넉히 짧게 잡는다.
@@ -67,6 +100,12 @@ public final class Scheduler {
     /** "정확한 알람 권한 없음" 안내를 로그에 한 번만 남기려고 */
     private static boolean warnedInexact = false;
 
+    /** WakeLock 실패(권한 없음 등) 안내도 로그에 한 번만 남긴다 — 매 주기마다 쌓으면 링버퍼가 오염된다 */
+    private static boolean warnedWake = false;
+
+    /** 하트비트 알람 예약 실패 안내도 한 번만 */
+    private static boolean warnedHb = false;
+
     // ── 예약 ──────────────────────────────────────────────────────────────────
 
     /**
@@ -76,6 +115,10 @@ public final class Scheduler {
     public static void ensureScheduled(Context ctx) {
         Context c = app(ctx);
         if (c == null) return;
+
+        // 하트비트는 매크로와 무관하게 먼저 보장한다.
+        // 설정을 못 읽는 상황(설정키 없음)에서도, 매크로가 꺼져 있어도 하트비트는 살아 있어야 한다.
+        ensureHeartbeat(c);
 
         Settings.Macro m = macro(c);
         if (m == null) return;
@@ -103,7 +146,10 @@ public final class Scheduler {
         arm(c, next);
     }
 
-    /** 발송 알람을 끈다. 예정 시각도 지운다. */
+    /**
+     * 발송 알람만 끈다. 예정 시각도 지운다.
+     * 하트비트 알람은 <b>건드리지 않는다</b> — 매크로를 껐다고 라이선스 확인을 멈추면 3일 뒤 전부 잠긴다.
+     */
     public static void cancel(Context ctx) {
         Context c = app(ctx);
         if (c == null) return;
@@ -165,6 +211,128 @@ public final class Scheduler {
         arm(c, at);
     }
 
+    // ── 라이선스 하트비트 (매크로와 완전히 독립) ───────────────────────────────
+
+    /**
+     * 하트비트 알람이 걸려 있게 보장한다. 여러 번 불러도 안전하다.
+     *
+     * 조건은 하나뿐이다 — <b>키가 저장돼 있으면 예약한다.</b>
+     * 매크로 on/off, 어떤 기능을 샀는지, 유예가 지났는지 전부 상관없다.
+     * 봇만 산 사용자도 이 알람으로 lic_lastok 이 갱신돼서 3일 유예에 걸리지 않는다.
+     * 키가 없으면(로그아웃) 알람도 같이 정리한다.
+     */
+    public static void ensureHeartbeat(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return;
+
+        License.State st;
+        try {
+            st = License.state(c);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "라이선스 상태를 못 읽어서 하트비트 예약을 건너뛴다", t);
+            return;
+        }
+        if (st == null || st.key == null || st.key.length() == 0) {
+            cancelHeartbeat(c);
+            return;
+        }
+
+        long interval = st.recheckMs;
+        if (interval <= 0) interval = HB_DEFAULT_MS;
+        if (interval < HB_MIN_MS) interval = HB_MIN_MS;
+
+        long now = System.currentTimeMillis();
+        long stored = Prefs.getLong(c, K_HB_NEXT, 0L);
+
+        long at;
+        if (stored > now && stored <= now + interval) {
+            // 이미 잡혀 있는 예정 시각을 그대로 쓴다 (앱을 켤 때마다 뒤로 밀리면 안 된다)
+            at = stored;
+        } else {
+            long due = st.lastOk + interval;
+            at = (due <= now + HB_RETRY_MS) ? (now + HB_RETRY_MS) : due;
+        }
+
+        armHeartbeat(c, at, interval);
+    }
+
+    /**
+     * 하트비트 알람이 울렸을 때 호출된다. <b>백그라운드 스레드에서 불러라</b> —
+     * 서버 응답을 최대 {@link #HB_WAIT_MS} 까지 기다린다.
+     * 끝나면 어떤 경우에도 다음 하트비트를 다시 잡는다.
+     */
+    public static void runHeartbeat(Context ctx) {
+        final Context c = app(ctx);
+        if (c == null) return;
+
+        PowerManager.WakeLock wl = null;
+        try {
+            License.State st = License.state(c);
+            if (st == null || st.key == null || st.key.length() == 0) {
+                // 로그아웃된 기기다 — 알람만 정리하고 끝낸다
+                cancelHeartbeat(c);
+                return;
+            }
+            if (!License.shouldHeartbeat(c)) {
+                // 앱을 방금 열어서 이미 확인했거나(때가 아님), 잠긴 상태다 — 네트워크는 아끼고 알람만 다시 잡는다
+                return;
+            }
+
+            wl = acquire(c, "kakaoauto:heartbeat", HB_WAKE_MS);
+
+            final CountDownLatch latch = new CountDownLatch(1);
+            License.heartbeat(c, new License.Cb() {
+                @Override public void done(boolean ok, String reason) {
+                    latch.countDown();
+                }
+            });
+            try {
+                // 응답을 기다리는 동안 WakeLock 이 프로세스를 잡아준다 (권한이 없으면 그냥 기다린다)
+                latch.await(HB_WAIT_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+        } catch (Throwable t) {
+            Log.add(c, "라이선스 확인 중 오류가 났어: " + t);
+        } finally {
+            release(wl);
+            // 예정 시각을 지워서 갱신된 lic_lastok 기준으로 다시 계산되게 한다
+            Prefs.putLong(c, K_HB_NEXT, 0L);
+            try {
+                ensureHeartbeat(c);
+            } catch (Throwable t) {
+                Log.add(c, "다음 라이선스 확인 예약에 실패했어: " + t);
+            }
+        }
+    }
+
+    /**
+     * 하트비트 알람을 끈다. <b>로그아웃(License.signOut) 때만 부른다.</b>
+     * 매크로를 끄거나 기능이 만료됐다고 부르면 안 된다 — 그러면 스스로 되살아날 길이 없어진다.
+     */
+    private static void cancelHeartbeat(Context c) {
+        try {
+            AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+            PendingIntent pi = pendingHeartbeat(c);
+            if (am != null && pi != null) am.cancel(pi);
+            if (pi != null) pi.cancel();
+        } catch (Throwable t) {
+            Log.add(c, "라이선스 확인 알람을 끄지 못했어: " + t);
+        }
+        Prefs.putLong(c, K_HB_NEXT, 0L);
+    }
+
+    /**
+     * 발송 알람 + 하트비트 알람을 전부 끈다. 로그아웃 경로(License.signOut 주변)에서 부른다.
+     * 그 외에는 {@link #cancel(Context)} 만 써라.
+     */
+    public static void cancelAll(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return;
+        cancel(c);
+        cancelHeartbeat(c);
+    }
+
     // ── 발송 ──────────────────────────────────────────────────────────────────
 
     /**
@@ -186,7 +354,7 @@ public final class Scheduler {
 
         PowerManager.WakeLock wl = null;
         try {
-            wl = acquire(c);
+            wl = acquire(c, "kakaoauto:send", WAKE_TIMEOUT_MS);
             work(c);
         } catch (Throwable t) {
             Log.add(c, "자동발송 중 오류가 났어: " + t);
@@ -360,6 +528,57 @@ public final class Scheduler {
         }
     }
 
+    private static PendingIntent pendingHeartbeat(Context c) {
+        try {
+            Intent i = new Intent(c, AlarmReceiver.class);
+            i.setAction(ACTION_HEARTBEAT);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            return PendingIntent.getBroadcast(c, REQ_HEARTBEAT, i, flags);
+        } catch (Throwable t) {
+            Log.add(c, "라이선스 확인 알람 PendingIntent 를 못 만들었어: " + t);
+            return null;
+        }
+    }
+
+    /**
+     * 하트비트 알람을 건다. 6시간 주기라 정확할 필요가 전혀 없으니
+     * setInexactRepeating 으로 배터리를 아낀다(시스템이 다른 알람과 묶어서 깨운다).
+     * 그게 실패하면 setAndAllowWhileIdle 한 방으로 폴백하고, 어차피 runHeartbeat 가 매번 다시 잡는다.
+     */
+    private static boolean armHeartbeat(Context c, long at, long interval) {
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) {
+            if (!warnedHb) {
+                warnedHb = true;
+                Log.add(c, "알람 서비스를 못 가져와서 라이선스 자동확인을 예약하지 못했어");
+            }
+            return false;
+        }
+        PendingIntent pi = pendingHeartbeat(c);
+        if (pi == null) return false;
+
+        Prefs.putLong(c, K_HB_NEXT, at);
+
+        try {
+            am.setInexactRepeating(AlarmManager.RTC_WAKEUP, at, interval, pi);
+            return true;
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "하트비트 반복 알람 실패 — 한 방 예약으로 바꾼다", t);
+        }
+        try {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+            return true;
+        } catch (Throwable t) {
+            Prefs.putLong(c, K_HB_NEXT, 0L);
+            if (!warnedHb) {
+                warnedHb = true;
+                Log.add(c, "라이선스 자동확인 예약에 실패했어 — 가끔 앱을 열어줘: " + t);
+            }
+            return false;
+        }
+    }
+
     /**
      * at 시각에 알람을 건다. 도즈 모드에서도 깨어나게 ...AndAllowWhileIdle 를 쓴다.
      * API 31+ 에서 「알람 및 리마인더」 권한이 없으면 정확한 알람을 못 걸기 때문에
@@ -409,23 +628,36 @@ public final class Scheduler {
 
     // ── WakeLock ──────────────────────────────────────────────────────────────
 
-    private static PowerManager.WakeLock acquire(Context c) {
+    /**
+     * PARTIAL_WAKE_LOCK 을 잡는다. 매니페스트에 WAKE_LOCK 권한이 있어야 한다.
+     * 권한이 없거나(구버전 설치본) 제조사가 막으면 acquire 에서 터지는데,
+     * 그때도 발송·하트비트 자체는 계속 진행한다 — 안내는 로그에 한 번만 남긴다.
+     */
+    private static PowerManager.WakeLock acquire(Context c, String tag, long timeoutMs) {
+        PowerManager.WakeLock wl = null;
         try {
             PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
             if (pm == null) {
-                Log.add(c, "전원 관리자를 못 가져왔어 — 화면이 꺼진 동안 발송이 끊길 수 있어");
+                warnWake(c, "전원 관리자를 못 가져왔어");
                 return null;
             }
-            PowerManager.WakeLock wl =
-                    pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kakaoauto:send");
+            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag);
             wl.setReferenceCounted(false);
-            wl.acquire(WAKE_TIMEOUT_MS);
+            wl.acquire(timeoutMs);
             return wl;
         } catch (Throwable t) {
-            // WAKE_LOCK 권한이 없으면 여기서 터진다. 발송 자체는 계속 시도한다.
-            Log.add(c, "WakeLock 을 못 잡았어(" + t + ") — 화면이 꺼진 동안 발송이 끊길 수 있어");
+            // WAKE_LOCK 권한이 없으면 여기서 터진다. 일 자체는 계속한다.
+            warnWake(c, String.valueOf(t));
+            // 절반만 잡힌 상태로 새는 걸 막는다
+            release(wl);
             return null;
         }
+    }
+
+    private static void warnWake(Context c, String why) {
+        if (warnedWake) return;
+        warnedWake = true;
+        Log.add(c, "WakeLock 을 못 잡았어(" + why + ") — 화면이 꺼진 동안 작업이 끊길 수 있어");
     }
 
     private static void release(PowerManager.WakeLock wl) {

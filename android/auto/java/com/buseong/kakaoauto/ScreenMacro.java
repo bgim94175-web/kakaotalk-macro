@@ -43,8 +43,8 @@ public final class ScreenMacro {
     // ── 셸 ──────────────────────────────────────────────────────────────────
 
     public static View build(MainActivity a) {
-        // 게이트는 진입할 때 한 번만 (refresh 때마다 창을 띄우면 성가시다)
-        Gate.check(a, Features.MACRO);
+        // 화면을 보는 것만으로는 모달을 띄우지 않는다 — 잠금 카드(fillLocked)가 같은 안내를 한다.
+        // Gate.check 는 실제로 발송을 시도할 때만 부른다(sendNow · sendImagesNow · 토글).
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
@@ -89,15 +89,11 @@ public final class ScreenMacro {
         col.addView(autoCard(a, s));
 
         col.addView(Ui.sectionHeader(a, "무엇을 · 어디로", "발송 내용"));
-        col.addView(messageFold(a, s).card);
-        col.addView(roomsFold(a, s).card);
-        col.addView(cycleFold(a, s).card);
+        col.addView(Nav.foldGroup(a, messageFold(a, s), roomsFold(a, s), cycleFold(a, s)));
 
         col.addView(Ui.sectionHeader(a, "추가 기능", "사진 · 추적 · 자동응답"));
-        col.addView(imageFold(a, s).card);
-        col.addView(triggerFold(a, s).card);
-        col.addView(replyFold(a, s).card);
-        col.addView(limitFold(a, s).card);
+        col.addView(Nav.foldGroup(a, imageFold(a, s), triggerFold(a, s), replyFold(a, s),
+                limitFold(a, s)));
     }
 
     private static void fillLocked(final MainActivity a, LinearLayout col) {
@@ -113,11 +109,23 @@ public final class ScreenMacro {
         card.addView(Nav.wideBtn(a, "구매하기", true, new Runnable() {
             @Override public void run() { Gate.openBuy(a, Features.MACRO); }
         }));
-        card.addView(Nav.wideBtn(a, "구매했는데 안 켜졌어 (새로고침)", false, new Runnable() {
-            @Override public void run() { Nav.go(Nav.ACCOUNT); }
-        }));
+        // 이 버튼은 이름 그대로 동작해야 한다 — 바로 /entitlements 를 다시 조회한다.
+        // (탭 이동 금지. 결과는 이 자리에서 알려주고, 켜지면 잠금 카드가 사라진다)
+        final TextView again = Ui.btn(a, LOCK_REFRESH, false);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(MATCH, WRAP);
+        ap.topMargin = Theme.dp(a, 12);
+        again.setLayoutParams(ap);
+        again.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Nav.refreshFeature(a, again, Features.MACRO, LOCK_REFRESH);
+            }
+        });
+        card.addView(again);
         col.addView(card);
     }
+
+    /** 잠금 카드의 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
+    private static final String LOCK_REFRESH = "구매했는데 안 켜졌어 (새로고침)";
 
     // ── 1. 자동발송 ─────────────────────────────────────────────────────────
 
@@ -170,6 +178,42 @@ public final class ScreenMacro {
         final String msg = s.macro.message;
         if (msg == null || msg.trim().length() == 0) { Ui.toast(a, "보낼 메시지를 먼저 적어줘"); return; }
 
+        // 자동발송이 지키는 규칙(방해금지·하루 한도)을 수동 버튼도 확인한다.
+        // 무시하고 보낼 수는 있지만, 사용자가 의식적으로 넘기게 만든다.
+        String why = blockedWhy(a, s);
+        if (why != null) {
+            final String w = why;
+            Nav.confirm(a, "그래도 보낼까?", w + "\n자동발송은 이런 때 안 보내. 지금 보내면 한도에도 같이 올라가.",
+                    "그래도 보내기", new Runnable() {
+                        @Override public void run() {
+                            Log.add(a, "수동 발송 강행 (" + w + ")");
+                            doSendNow(a, s, btn, nextLine, msg);
+                        }
+                    });
+            return;
+        }
+        doSendNow(a, s, btn, nextLine, msg);
+    }
+
+    /** 지금 보내면 자동발송 규칙에 걸리는 이유. 안 걸리면 null. */
+    private static String blockedWhy(MainActivity a, Settings s) {
+        try {
+            if (s.macro.inQuiet(System.currentTimeMillis())) {
+                return "지금은 방해금지 시간이야 (" + quietKr(s) + ").";
+            }
+            int limit = s.macro.dailyLimit;
+            int sent = MainActivity.sentToday(a);
+            if (limit > 0 && sent >= limit) {
+                return "오늘 " + sent + "건 보내서 하루 한도(" + limit + "건)를 다 썼어.";
+            }
+        } catch (Throwable t) {
+            return null;
+        }
+        return null;
+    }
+
+    private static void doSendNow(final MainActivity a, final Settings s, final TextView btn,
+                                  final TextView nextLine, final String msg) {
         Nav.busy(btn, true, "보내는 중…", "지금 한 번 보내기");
         int ok = 0;
         StringBuilder failed = new StringBuilder();
@@ -347,7 +391,9 @@ public final class ScreenMacro {
         f.body.addView(Nav.thumbStrip(a, strip));
         paintThumbs(a, s, strip, f);
 
-        final TextView pick = Ui.btn(a, "사진 고르기", false);
+        int left = Math.max(0, Settings.MAX_IMAGES - s.macro.images.size());
+        final TextView pick = Ui.btn(a, (left > 0) ? ("사진 고르기 (" + left + "장 더 가능)")
+                : "사진 고르기 (자리 없음)", false);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(MATCH, WRAP);
         pp.topMargin = Theme.dp(a, 12);
         pick.setLayoutParams(pp);
@@ -358,7 +404,6 @@ public final class ScreenMacro {
                     Ui.toast(a, "이미 " + Settings.MAX_IMAGES + "장이야. 지우고 다시 골라줘");
                     return;
                 }
-                Ui.toast(a, "최대 " + Settings.MAX_IMAGES + "장까지 고를 수 있어");
                 try {
                     ImagePicker.pick(a, MainActivity.REQ_IMAGES);
                 } catch (Throwable t) {
@@ -403,7 +448,9 @@ public final class ScreenMacro {
             }));
         }
 
-        final TextView now = Ui.btn(a, "지금 사진만 보내기", false);
+        // 사진 수동 전송은 대상 방 목록의 "첫 번째 방" 한 곳으로만 간다 → 라벨에 방 이름을 박는다
+        final String imgRoom = s.macro.rooms.isEmpty() ? "" : s.macro.rooms.get(0);
+        final TextView now = Ui.btn(a, imgLabel(imgRoom), false);
         LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
         np.topMargin = Theme.dp(a, 12);
         now.setLayoutParams(np);
@@ -411,7 +458,17 @@ public final class ScreenMacro {
             @Override public void onClick(View v) { sendImagesNow(a, s, now); }
         });
         f.body.addView(now);
+        if (s.macro.rooms.size() > 1) {
+            f.body.addView(Ui.sub(a, "사진 수동 전송은 대상 방 중 첫 번째 방(「" + imgRoom
+                    + "」)에만 보낸다. 다른 방에 보내려면 방 순서를 바꿔줘."));
+        }
         return f;
+    }
+
+    /** 사진 수동 전송 버튼 라벨 (어느 방으로 가는지 보여준다) */
+    private static String imgLabel(String room) {
+        if (room == null || room.length() == 0) return "지금 사진만 보내기";
+        return "「" + Nav.preview(room, 12) + "」에 지금 사진만 보내기";
     }
 
     private static void paintThumbs(final MainActivity a, final Settings s,
@@ -425,13 +482,22 @@ public final class ScreenMacro {
         }
         for (int i = 0; i < s.macro.images.size(); i++) {
             final String uri = s.macro.images.get(i);
-            strip.addView(Nav.thumb(a, uri, new Runnable() {
+            final int no = i + 1;
+            strip.addView(Nav.thumb(a, uri, no, new Runnable() {
                 @Override public void run() {
-                    s.macro.images.remove(uri);
-                    try { ImagePicker.release(a, uri); } catch (Throwable t) { /* 권한 해제 실패는 무해 */ }
-                    apply(a, s);
-                    paintThumbs(a, s, strip, f);
-                    Log.add(a, "첨부 사진 1장을 지웠어");
+                    // URI 영속 권한까지 놓아주니까 되돌릴 수 없다 → 한 번 묻는다
+                    Nav.confirm(a, "사진 " + no + "번째를 지울까?", "첨부 목록에서 빼고 바로 저장해.",
+                            "지우기", new Runnable() {
+                                @Override public void run() {
+                                    s.macro.images.remove(uri);
+                                    try { ImagePicker.release(a, uri); }
+                                    catch (Throwable t) { /* 권한 해제 실패는 무해 */ }
+                                    Nav.clearThumbCache();
+                                    apply(a, s);
+                                    paintThumbs(a, s, strip, f);
+                                    Log.add(a, "첨부 사진 1장을 지웠어");
+                                }
+                            });
                 }
             }));
         }
@@ -477,18 +543,19 @@ public final class ScreenMacro {
         }
 
         final String room = s.macro.rooms.get(0);
+        final String idle = imgLabel(room);
         final List<String> uris = new ArrayList<String>(s.macro.images);
-        Nav.busy(btn, true, "보내는 중…", "지금 사진만 보내기");
+        Nav.busy(btn, true, "보내는 중…", idle);
         Log.add(a, "사진 " + uris.size() + "장을 「" + room + "」로 보내는 중");
         try {
             ImageSender.send(a, room, uris, new Runnable() {
                 @Override public void run() {
-                    Nav.busy(btn, false, "보내는 중…", "지금 사진만 보내기");
-                    Ui.toast(a, "사진 전송을 끝냈어. 카톡에서 확인해줘");
+                    Nav.busy(btn, false, "보내는 중…", idle);
+                    Ui.toast(a, "「" + room + "」에 사진 전송을 끝냈어. 카톡에서 확인해줘");
                 }
             });
         } catch (Throwable t) {
-            Nav.busy(btn, false, "보내는 중…", "지금 사진만 보내기");
+            Nav.busy(btn, false, "보내는 중…", idle);
             Log.add(a, "사진 전송을 시작하지 못했어: " + t);
             Ui.toast(a, "사진 전송을 시작하지 못했어");
         }
@@ -620,7 +687,7 @@ public final class ScreenMacro {
         });
         row.addView(left);
 
-        row.addView(Nav.toggle(a, t.enabled, new Ui.OnToggle() {
+        row.addView(Nav.toggle(a, t.title(), t.enabled, new Ui.OnToggle() {
             @Override public void on(boolean v) {
                 t.enabled = v;
                 apply(a, s);
@@ -1140,6 +1207,13 @@ public final class ScreenMacro {
      * 하트비트/부팅복구를 같은 알람에 태웠으면 그건 살려둬야 한다.
      */
     private static void apply(MainActivity a, Settings s) {
+        // Settings.save 는 설정키가 없으면 예외 없이 조용히 넘어간다 → 여기서 먼저 막고 알려준다
+        if (!Settings.canSave(a)) {
+            Log.add(a, "설정을 저장하지 못했어 (설정키 없음)");
+            Ui.toast(a, "설정을 저장하지 못했어 — 내정보 탭에서 라이선스 인증부터 해줘");
+            refresh();
+            return;
+        }
         try {
             s.save(a);
         } catch (Throwable t) {

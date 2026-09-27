@@ -28,6 +28,9 @@ public final class ScreenAccount {
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<LinearLayout> BODY;
 
+    /** 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
+    private static final String REFRESH_LABEL = "기능 새로고침";
+
     // ── 셸 ──────────────────────────────────────────────────────────────────
 
     public static View build(MainActivity a) {
@@ -62,14 +65,7 @@ public final class ScreenAccount {
         col.addView(licenseCard(a, st));
 
         col.addView(Ui.sectionHeader(a, "구독", "기능별 남은 기간"));
-        for (int i = 0; i < Features.ALL.length; i++) {
-            final String id = Features.ALL[i];
-            Ui.State fs = MainActivity.featState(a, id);
-            long exp = 0L;
-            License.Feat f = (st.features == null) ? null : st.features.get(id);
-            if (f != null) exp = f.expiresAt;
-            col.addView(featureRow(a, id, fs, exp));
-        }
+        col.addView(featuresCard(a, st));
 
         col.addView(Ui.sectionHeader(a, "기기", "이 기기 정보"));
         col.addView(deviceCard(a, st));
@@ -116,27 +112,14 @@ public final class ScreenAccount {
         });
         btns.addView(copy);
 
-        final TextView refresh = Ui.btn(a, "기능 새로고침", true);
+        final TextView refresh = Ui.btn(a, REFRESH_LABEL, true);
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(0, WRAP, 1.2f);
         rp.leftMargin = Theme.dp(a, 10);
         refresh.setLayoutParams(rp);
         refresh.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                Nav.busy(refresh, true, "확인 중…", "기능 새로고침");
-                License.refresh(a, new License.Cb() {
-                    @Override public void done(boolean okk, String reason) {
-                        Nav.busy(refresh, false, "확인 중…", "기능 새로고침");
-                        if (a.isFinishing()) return;
-                        if (!okk) {
-                            Ui.toast(a, License.reasonKr(reason));
-                            Log.add(a, "기능 새로고침 실패: " + License.reasonKr(reason));
-                            a.renderShell();
-                            return;
-                        }
-                        Ui.toast(a, "최신 상태로 맞췄어");
-                        a.renderShell();
-                    }
-                });
+                // 매크로·봇 화면의 [구매했는데 안 켜졌어] 와 같은 흐름을 쓴다
+                Nav.refreshFeature(a, refresh, null, REFRESH_LABEL);
             }
         });
         btns.addView(refresh);
@@ -174,12 +157,76 @@ public final class ScreenAccount {
 
     // ── 기능별 만료일 카드 ──────────────────────────────────────────────────
 
+    /**
+     * 기능 3개를 카드 하나에 3줄로 담는다. (같은 생김새의 큰 카드를 3개 쌓으면 화면이 과밀해진다)
+     * 줄마다 상태 칩 + 남은 기간 + [구매]/[연장] 버튼.
+     */
+    private static LinearLayout featuresCard(final MainActivity a, final License.State st) {
+        LinearLayout card = Ui.card(a);
+        for (int i = 0; i < Features.ALL.length; i++) {
+            final String id = Features.ALL[i];
+            Ui.State fs = MainActivity.featState(a, id);
+            long exp = 0L;
+            License.Feat f = (st.features == null) ? null : st.features.get(id);
+            if (f != null) exp = f.expiresAt;
+            if (i > 0) card.addView(Ui.divider(a));
+            card.addView(featureRow(a, id, fs, exp));
+        }
+        return card;
+    }
+
     private static LinearLayout featureRow(final MainActivity a, final String id,
                                            Ui.State fs, final long expiresAt) {
-        return Ui.featureCard(a, Features.label(id), expiryDesc(fs, expiresAt), fs, expiresAt,
-                new Runnable() {
-                    @Override public void run() { Gate.openBuy(a, id); }
-                }, null);
+        LinearLayout row = Ui.row(a);
+        row.setMinimumHeight(Theme.dp(a, 48));
+
+        LinearLayout left = new LinearLayout(a);
+        left.setOrientation(LinearLayout.VERTICAL);
+        left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+
+        LinearLayout head = Ui.row(a);
+        TextView nm = Ui.h2(a, Features.label(id));
+        nm.setLayoutParams(new LinearLayout.LayoutParams(WRAP, WRAP));
+        head.addView(nm);
+        TextView chip = Ui.chip(a, stateKr(fs), stateColor(fs));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        cp.leftMargin = Theme.dp(a, 8);
+        chip.setLayoutParams(cp);
+        head.addView(chip);
+        left.addView(head);
+
+        TextView desc = Ui.sub(a, expiryDesc(fs, expiresAt));
+        desc.setMaxLines(2);
+        desc.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        dp.topMargin = Theme.dp(a, 3);
+        desc.setLayoutParams(dp);
+        left.addView(desc);
+        row.addView(left);
+
+        TextView b = Ui.btn(a, (fs == Ui.State.OFF) ? "구매" : "연장", false);
+        b.setPadding(Theme.dp(a, 14), Theme.dp(a, 12), Theme.dp(a, 14), Theme.dp(a, 12));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        bp.leftMargin = Theme.dp(a, 12);
+        b.setLayoutParams(bp);
+        b.setContentDescription(Features.label(id) + " " + ((fs == Ui.State.OFF) ? "구매하기" : "연장하기"));
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Gate.openBuy(a, id); }
+        });
+        row.addView(b);
+        return row;
+    }
+
+    private static String stateKr(Ui.State fs) {
+        if (fs == Ui.State.ON) return "사용중";
+        if (fs == Ui.State.EXPIRING) return "만료 임박";
+        return "미구매";
+    }
+
+    private static int stateColor(Ui.State fs) {
+        if (fs == Ui.State.ON) return Theme.ACCENT;
+        if (fs == Ui.State.EXPIRING) return Theme.AMBER;
+        return Theme.DIM;
     }
 
     private static String expiryDesc(Ui.State fs, long expiresAt) {

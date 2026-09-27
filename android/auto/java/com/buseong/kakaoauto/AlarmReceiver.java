@@ -9,10 +9,15 @@ import android.os.Looper;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 알람 + 부팅 복구를 같이 받는 리시버. (매니페스트에 이 하나만 등록돼 있다)
+ * 우리 알람만 받는 리시버. 매니페스트에서 <b>exported="false" + intent-filter 없음</b> 이다.
  *
- *  - {@link Scheduler#ACTION_FIRE}  → 발송 판정/실행 (Scheduler.runDue)
- *  - BOOT_COMPLETED / QUICKBOOT_POWERON / MY_PACKAGE_REPLACED → 알람 다시 걸기 (Scheduler.ensureScheduled)
+ *  - {@link Scheduler#ACTION_FIRE}      → 발송 판정/실행 (Scheduler.runDue)
+ *  - {@link Scheduler#ACTION_HEARTBEAT} → 라이선스 하트비트 (Scheduler.runHeartbeat)
+ *
+ * 알람은 우리 앱이 명시적 PendingIntent 로 부르니까 exported 가 필요 없다. 열어두면 아무 앱이나
+ * 명시적 인텐트로 이 리시버를 때려서 발송을 강제로 반복 유발할 수 있다(하루 한도 소진 · 도배).
+ * 그래서 action 도 한 번 더 확인한다 — 우리 알람 action 이 아니면(빈 문자열 포함) 그냥 무시한다.
+ * 부팅 복구는 {@link BootReceiver} 가 따로 맡는다.
  *
  * onReceive 는 메인 스레드에서 돈다. 발송은 방 사이 1~3초를 쉬면서 최대 35초까지 걸리니까
  * 여기서 직접 하면 ANR 이다. 그래서 goAsync() 로 브로드캐스트를 붙잡고 별도 스레드로 넘긴다.
@@ -23,10 +28,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class AlarmReceiver extends BroadcastReceiver {
 
-    /** 일부 제조사(HTC 등)가 쓰는 빠른부팅 액션 */
-    public static final String ACTION_QUICKBOOT = "android.intent.action.QUICKBOOT_POWERON";
-    public static final String ACTION_QUICKBOOT_HTC = "com.htc.intent.action.QUICKBOOT_POWERON";
-
     /** 이 시간 안에 안 끝나면 브로드캐스트는 먼저 놓아준다 */
     private static final long HANDOFF_MS = 8000L;
 
@@ -36,7 +37,15 @@ public final class AlarmReceiver extends BroadcastReceiver {
         if (c == null) return;
 
         final String action = (intent == null || intent.getAction() == null) ? "" : intent.getAction();
-        final boolean boot = isBoot(action);
+        final boolean fire = Scheduler.ACTION_FIRE.equals(action);
+        final boolean beat = Scheduler.ACTION_HEARTBEAT.equals(action);
+
+        if (!fire && !beat) {
+            // 우리 알람이 아니다. 빈 action 도 여기서 막는다 — 예전엔 이게 발송으로 흘러들어갔다.
+            android.util.Log.w("KakaoAuto", "우리 알람이 아니라서 무시했어: "
+                    + (action.length() == 0 ? "(액션 없음)" : action));
+            return;
+        }
 
         final PendingResult pr;
         try {
@@ -44,7 +53,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
         } catch (Throwable t) {
             // goAsync 가 안 되면(이론상 없음) 그래도 일은 해야 한다 — 스레드만 띄우고 끝낸다
             Log.add(c, "알람을 비동기로 못 받았어: " + t);
-            spawn(c, action, boot, null);
+            spawn(c, beat, null);
             return;
         }
 
@@ -67,22 +76,18 @@ public final class AlarmReceiver extends BroadcastReceiver {
             android.util.Log.w("KakaoAuto", "브로드캐스트 타임아웃을 못 걸었어", t);
         }
 
-        spawn(c, action, boot, finish);
+        spawn(c, beat, finish);
     }
 
     /** 실제 일은 전부 이 스레드에서. 어떤 경우에도 finish 는 불린다. */
-    private static void spawn(final Context c, final String action,
-                              final boolean boot, final Runnable finish) {
+    private static void spawn(final Context c, final boolean beat, final Runnable finish) {
         Runnable body = new Runnable() {
             @Override public void run() {
                 try {
-                    if (boot) {
-                        Log.add(c, bootKr(action));
-                        Scheduler.ensureScheduled(c);
-                    } else if (Scheduler.ACTION_FIRE.equals(action) || action.length() == 0) {
-                        Scheduler.runDue(c);
+                    if (beat) {
+                        Scheduler.runHeartbeat(c);
                     } else {
-                        Log.add(c, "모르는 알람이 들어와서 무시했어: " + action);
+                        Scheduler.runDue(c);
                     }
                 } catch (Throwable t) {
                     Log.add(c, "알람 처리 중 오류가 났어: " + t);
@@ -95,7 +100,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
         };
 
         try {
-            Thread th = new Thread(body, boot ? "alarm-boot" : "alarm-fire");
+            Thread th = new Thread(body, beat ? "alarm-heartbeat" : "alarm-fire");
             th.setPriority(Thread.NORM_PRIORITY);
             th.start();
         } catch (Throwable t) {
@@ -105,20 +110,6 @@ public final class AlarmReceiver extends BroadcastReceiver {
                 try { finish.run(); } catch (Throwable ignore) { /* 무시 */ }
             }
         }
-    }
-
-    private static boolean isBoot(String action) {
-        return Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
-                || ACTION_QUICKBOOT.equals(action)
-                || ACTION_QUICKBOOT_HTC.equals(action);
-    }
-
-    private static String bootKr(String action) {
-        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
-            return "앱이 업데이트됐어 — 발송 예약을 되살릴게";
-        }
-        return "기기가 켜졌어 — 발송 예약을 되살릴게";
     }
 
     private static Context appCtx(Context c) {

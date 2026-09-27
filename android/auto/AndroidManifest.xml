@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 도즈 모드에서 안 끊기게 배터리 최적화 제외 요청 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 화면 꺼진 동안 한 주기 발송이 중간에 안 끊기게 (Scheduler 의 PARTIAL_WAKE_LOCK) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 상태 알림 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -84,19 +86,27 @@
                 android:resource="@xml/accessibility" />
         </service>
 
-        <!-- 주기 발송 알람 + 부팅 복구.
-             부팅 브로드캐스트는 시스템(다른 UID)이 보내므로 exported="false" 로는 안 들어온다.
-             그래서 exported="true" 로 두고 android:permission 으로 발신자를 제한한다.
-             별도 BootReceiver 클래스는 만들지 않는다 — 이 리시버가 알람과 부팅을 같이 받는다. -->
+        <!-- 주기 발송 알람 · 라이선스 하트비트 알람 전용.
+             알람은 우리 앱이 명시적 PendingIntent 로 부르니까 exported 가 필요 없다.
+             intent-filter 도 두지 않는다 — 열어두면 아무 앱이나 발송을 강제로 트리거할 수 있다. -->
         <receiver
             android:name=".AlarmReceiver"
+            android:exported="false"
+            android:directBootAware="false" />
+
+        <!-- 부팅·앱 업데이트 복구 전용.
+             부팅 브로드캐스트는 시스템(다른 UID)이 보내니까 exported="true" 여야 들어온다.
+             BOOT_COMPLETED · MY_PACKAGE_REPLACED 는 시스템 전용 보호 브로드캐스트라 서드파티가 못 보내고,
+             QUICKBOOT_POWERON 은 보호되지 않지만 이 리시버가 하는 일은 알람 재예약뿐이라 악용 여지가 없다. -->
+        <receiver
+            android:name=".BootReceiver"
             android:exported="true"
-            android:directBootAware="false"
-            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            android:directBootAware="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
     </application>

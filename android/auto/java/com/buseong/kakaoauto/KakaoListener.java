@@ -58,6 +58,29 @@ public final class KakaoListener extends NotificationListenerService {
 
     private static final String K_ROOMS = "K_ROOM_CACHE";
 
+    // ── 그룹 판정 근거의 세기 ─────────────────────────────────────────────────
+    // 숫자가 클수록 확실한 근거다. 약한 근거로 강한 근거를 덮어쓰지 않는다.
+
+    /** 아무 근거도 없다 (그냥 1:1 로 추정한 상태) */
+    private static final int RANK_NONE = 0;
+    /** 방 이름·본문 모양으로 추측했다 (휴리스틱) */
+    private static final int RANK_HEURISTIC = 1;
+    /** android.messages 의 발신자 정보로 판정했다 */
+    private static final int RANK_MESSAGES = 2;
+    /** 카톡이 android.isGroupConversation 으로 직접 알려줬다 */
+    private static final int RANK_EXTRA = 3;
+
+    /** "홍길동 : 안녕" 처럼 본문 앞에 붙는 발신자 이름의 최대 길이 */
+    private static final int NAME_MAX = 30;
+
+    /** 판정 근거 로그를 남길 최대 횟수 (알림마다 찍으면 로그 링버퍼가 쓸려나간다) */
+    private static final int WHY_LOG_MAX = 5;
+    /** 자동응답 방어선이 막았을 때 남길 최대 횟수 */
+    private static final int BLOCK_LOG_MAX = 3;
+
+    private static volatile int whyLogged = 0;
+    private static volatile int blockLogged = 0;
+
     // ── 방별 세션 ─────────────────────────────────────────────────────────────
 
     /** 방 하나에 대한 최근 알림 상태. 발송에 필요한 재료가 여기 다 있다. */
@@ -77,6 +100,12 @@ public final class KakaoListener extends NotificationListenerService {
         public volatile String lastSender = "";
         /** 그룹방인가 */
         public volatile boolean group;
+        /**
+         * 위 group 값을 만든 근거의 세기 (RANK_* 상수).
+         * 근거가 약한 알림 한 건 때문에 "단체방"이 "1:1" 로 뒤집히지 않게 막는 데 쓴다 —
+         * 단체방에 자동응답이 나가면 도배로 강퇴당하니까, 애매하면 그룹 쪽으로 기운다.
+         */
+        public volatile int groupRank;
         /** 내가 마지막으로 보낸 문장 (알림 메아리 걸러내기용) */
         public volatile String lastSentText = "";
         /** 중복 알림 판정용 지문 */
@@ -164,8 +193,17 @@ public final class KakaoListener extends NotificationListenerService {
         try {
             handle(sbn);
         } catch (Throwable t) {
-            Log.add(getApplicationContext(), "알림 처리 중 오류가 났어: " + t);
+            Log.add(ctxOrApp(), "알림 처리 중 오류가 났어: " + t);
         }
+    }
+
+    /** 앱 컨텍스트. getApplicationContext() 가 아직 null 이어도 죽지 않게 감싼다. */
+    private Context ctxOrApp() {
+        try {
+            Context c = getApplicationContext();
+            if (c != null) return c;
+        } catch (Throwable ignore) { /* 아래 폴백으로 간다 */ }
+        return appContext();
     }
 
     // ── 알림 처리 ─────────────────────────────────────────────────────────────
@@ -203,13 +241,28 @@ public final class KakaoListener extends NotificationListenerService {
             s.inputs = r.inputs;
         }
         s.lastAt = m.at;
-        s.group = m.group;
+
+        // ── 그룹 판정을 세션에 반영한다 (약한 근거로 강한 근거를 덮지 않는다) ──
+        // 이번 알림의 근거가 세션에 남은 근거보다 세거나 같으면 그대로 갱신한다.
+        // 더 약하면: 세션이 "단체방" 을 기억하고 있을 때 그 기억을 이긴다(애매하면 그룹).
+        if (m.groupRank >= s.groupRank) {
+            s.group = m.group;
+            s.groupRank = m.groupRank;
+        } else if (s.group) {
+            m.group = true;
+            m.why = m.why + "→세션기억(단체방)";
+        }
+        // (세션이 확실한 1:1 인데 이번 근거가 약하게 '그룹' 이라고 하면 m.group 은 그대로 둔다.
+        //  이 한 건만 조심하고, 세션 판정을 오염시키지는 않는다.)
+
         s.lastSender = m.sender;
 
-        // 내가 방금 보낸 문장이 알림으로 되돌아온 경우도 내 메시지로 본다
-        if (!m.fromMe && s.lastSentText.length() > 0
-                && m.at - s.lastMine < ECHO_MS
-                && s.lastSentText.equals(m.text)) {
+        // 내가 방금 보낸 문장이 알림으로 되돌아온 경우도 내 메시지로 본다.
+        // 단체방은 "내이름 : 보낸문장" 으로 되돌아오니까 접두사를 뗀 본문으로도 비교한다.
+        // (시각은 절대값으로 본다 — 알림의 time 이 내 발송 시각보다 앞서는 기기가 있다)
+        if (!m.fromMe && s.lastSentText.length() > 0 && s.lastMine > 0
+                && Math.abs(m.at - s.lastMine) < ECHO_MS
+                && (s.lastSentText.equals(m.text) || s.lastSentText.equals(m.body))) {
             m.fromMe = true;
         }
 
@@ -221,7 +274,7 @@ public final class KakaoListener extends NotificationListenerService {
 
         if (!m.fromMe) s.othersSinceMine = s.othersSinceMine + 1;
 
-        final Context ctx = getApplicationContext();
+        final Context ctx = ctxOrApp();
         // 무거운 건 전부 BG 로. 설정 복호화·정규식·Prefs 쓰기가 여기 들어있다.
         post(new Runnable() {
             @Override public void run() { dispatch(ctx, m); }
@@ -230,6 +283,9 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 트리거 / 자동응답 / 봇으로 넘긴다. BG 스레드에서만 호출된다. */
     private static void dispatch(Context ctx, Msg m) {
+        // 판정 근거 로그는 여기서 남긴다 (Log.add 가 Prefs 를 동기로 쓰니까 메인 스레드에서 안 부른다)
+        whyLog(ctx, m);
+
         // 매크로(트리거·자동응답)
         try {
             if (License.allowed(ctx, Features.MACRO)) {
@@ -238,7 +294,8 @@ public final class KakaoListener extends NotificationListenerService {
                 } catch (Throwable t) {
                     Log.add(ctx, "메시지추적 처리 중 오류: " + t);
                 }
-                if (!m.group && !m.fromMe) {
+                // 자동응답은 1:1 전용이다. 여기서 group==false 를 한 번 더 확인한다.
+                if (!m.group && !m.fromMe && safeForAutoReply(ctx, m)) {
                     try {
                         AutoReply.onDirectMessage(ctx, m.room, m.sender, m.text);
                     } catch (Throwable t) {
@@ -281,57 +338,121 @@ public final class KakaoListener extends NotificationListenerService {
         String room = "";
         String sender = "";
         String text = "";
+        /** 본문에서 "발신자 : " 접두사를 뗀 알맹이 (메아리 판정용). 접두사가 없으면 text 와 같다. */
+        String body = "";
         boolean group = false;
+        /** group 을 정한 근거의 세기 (RANK_*) */
+        int groupRank = RANK_NONE;
+        /** 판정 근거 한 줄 설명 (로그용) */
+        String why = "";
         boolean fromMe = false;
         long at = 0L;
         String key = "";
     }
 
+    /**
+     * 알림 extras 한 덩어리를 메시지 한 건으로 만든다.
+     *
+     * 순서가 중요하다 (결함 10): **그룹 판정을 먼저 확정하고 그 다음에 sender 폴백을 적용한다.**
+     * 예전에는 sender 가 비었을 때 방 이름을 먼저 집어넣어서, 뒤따르는 구버전 보정이
+     * `방이름 != 발신자` 를 검사할 때 이미 둘이 같아져 있었다 → 단체방이 영원히 1:1 로 잡혔고
+     * 오픈프로필 자동응답이 단체방에 나갔다.
+     */
     private static Msg parse(Bundle ex, long postTime) {
         Msg m = new Msg();
         m.at = (postTime > 0) ? postTime : System.currentTimeMillis();
 
-        String title = cs(ex.getCharSequence(Notification.EXTRA_TITLE));
-        String convo = cs(ex.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
+        String title = getCs(ex, Notification.EXTRA_TITLE);
+        String convo = getCs(ex, Notification.EXTRA_CONVERSATION_TITLE);
 
         // 방 이름: conversationTitle 이 있으면 그게 방 이름, 없으면 title
         m.room = (convo.length() > 0) ? convo : title;
-        m.group = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false);
 
         // 내 표시이름 (내 메시지 판정에 쓴다)
-        String me = cs(ex.getCharSequence(Notification.EXTRA_SELF_DISPLAY_NAME));
+        String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
         if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
-            me = personName(ex.getParcelable(Notification.EXTRA_MESSAGING_PERSON));
+            me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
         }
         if (me.length() > 0) selfName = me;
 
-        // android.messages 에서 마지막 한 건을 꺼낸다 (여기에 발신자가 들어있다)
-        Bundle last = lastMessage(ex);
+        // android.messages: 마지막 본문 + 서로 다른 발신자 수 (둘 다 그룹 판정 재료다).
+        // 발신자 수는 "나를 뺀" 사람 수다 — 내 이름까지 세면 1:1 도 2명으로 잡힌다.
+        String myName = (me.length() > 0) ? me : selfName();
+        Bundle[] msgs = messages(ex);
+        LinkedHashSet<String> others = senderNames(msgs, myName);
+        int senders = others.size();
+        // 나 말고 딱 한 명만 말했을 때 그 사람 이름 (1:1 판정에 쓴다)
+        String soleOther = only(others);
+        Bundle last = lastMessage(msgs);
+        String rawSender = "";
         if (last != null) {
-            m.text = cs(last.getCharSequence("text"));
-            String sender = personName(last.getParcelable("sender_person"));
-            if (sender.length() == 0) sender = cs(last.getCharSequence("sender"));
-            m.sender = sender;
-            long t = last.getLong("time", 0L);
+            m.text = getCs(last, "text");
+            rawSender = personName(getParcel(last, "sender_person"));
+            if (rawSender.length() == 0) rawSender = getCs(last, "sender");
+            long t = 0L;
+            try { t = last.getLong("time", 0L); } catch (Throwable ignore) { t = 0L; }
             if (t > 0) m.at = t;
         }
+        if (m.text.length() == 0) m.text = getCs(ex, Notification.EXTRA_TEXT);
 
-        if (m.text.length() == 0) m.text = cs(ex.getCharSequence(Notification.EXTRA_TEXT));
-        if (m.sender.length() == 0) {
-            // 1:1 은 방 이름 = 상대 이름. 그룹방은 title 이 방 이름이라 발신자를 모를 수 있다.
-            m.sender = m.group ? "" : m.room;
-        }
+        // 카톡 단체방 알림(MessagingStyle 이 아닌 구버전)은 본문을 "발신자 : 내용" 으로 준다.
+        // 여기서 발신자 이름을 되찾고, 알맹이는 body 에 따로 들고 있는다.
+        String prefixName = namePrefix(m.text);
+        int cut = m.text.indexOf(" : ");
+        m.body = (prefixName.length() > 0 && cut > 0) ? m.text.substring(cut + 3).trim() : m.text;
 
-        // 그룹여부 플래그가 없는(구버전) 알림 보정: 방 이름과 발신자가 다르면 그룹으로 본다
-        if (!ex.containsKey(Notification.EXTRA_IS_GROUP_CONVERSATION)
-                && convo.length() > 0 && m.sender.length() > 0
-                && !convo.equals(m.sender)) {
+        // ── 그룹 판정 (sender 폴백보다 먼저!) ─────────────────────────────────
+        if (has(ex, Notification.EXTRA_IS_GROUP_CONVERSATION)) {
+            // (1) 카톡이 직접 알려준 값이 제일 정확하다.
+            //     containsKey 로 확인해야 '없음' 과 'false' 가 구분된다 — 이게 핵심이다.
+            m.group = getBool(ex, Notification.EXTRA_IS_GROUP_CONVERSATION);
+            m.groupRank = RANK_EXTRA;
+            m.why = "isGroupConversation=" + m.group;
+            // 카톡이 false 라고 했는데 같은 알림에 발신자가 2명 이상이면 그건 단체방이다.
+            // 서로 어긋날 때는 그룹 쪽으로 기운다 (단체방 오발송이 훨씬 큰 사고다).
+            if (!m.group && senders >= 2) {
+                m.group = true;
+                m.why = m.why + "지만 발신자 " + senders + "명 → 단체방";
+            }
+        } else if (senders >= 2) {
+            // (2) 한 알림에 서로 다른 발신자가 2명 이상 = 단체방
             m.group = true;
+            m.groupRank = RANK_MESSAGES;
+            m.why = "messages 발신자 " + senders + "명";
+        } else if (soleOther.length() > 0) {
+            // (3) SPEC 8.4 휴리스틱: 나 말고 발신자 1명이고 방 이름 == 그 사람 이름이면 1:1,
+            //     다르면 단체방. (내가 마지막으로 말한 경우에도 상대 이름으로 판정해야 맞다)
+            m.group = !m.room.equals(soleOther);
+            m.groupRank = RANK_MESSAGES;
+            m.why = m.group ? "방이름≠발신자(messages)" : "방이름=발신자(messages)";
+        } else if (prefixName.length() > 0 && !prefixName.equals(m.room)) {
+            // (4) 본문이 "다른이름 : …" = 방 이름과 발신자가 다르다 → 단체방
+            m.group = true;
+            m.groupRank = RANK_HEURISTIC;
+            m.why = "본문 접두 발신자(" + prefixName + ")≠방이름";
+        } else if (convo.length() > 0 && title.length() > 0 && !convo.equals(title)) {
+            // (5) conversationTitle(방)과 title(발신자)이 다르면 단체방
+            m.group = true;
+            m.groupRank = RANK_HEURISTIC;
+            m.why = "conversationTitle≠title";
+        } else {
+            // (6) 근거가 하나도 없다 → 1:1 로 추정하되 근거 세기는 0 이다.
+            //     같은 방에서 전에 단체방 근거를 본 적이 있으면 handle() 이 그룹으로 되돌린다.
+            m.group = false;
+            m.groupRank = RANK_NONE;
+            m.why = "근거없음→1:1추정";
         }
+
+        // ── 그룹 판정이 끝난 뒤에 sender 폴백 ────────────────────────────────
+        m.sender = rawSender;
+        if (m.sender.length() == 0) m.sender = prefixName;
+        // 1:1 은 방 이름 = 상대 이름. 단체방은 발신자를 모르면 빈 값으로 둔다
+        // (방 이름을 발신자로 쓰면 {이름} 치환에 방 이름이 들어가고 판정도 또 망가진다).
+        if (m.sender.length() == 0 && !m.group) m.sender = m.room;
 
         // 내 메시지인가: 발신자 == 내 표시이름, 또는 내 답장 이력에 같은 문장이 있음
         if (m.sender.length() > 0 && me.length() > 0 && m.sender.equals(me)) m.fromMe = true;
-        if (!m.fromMe && inReplyHistory(ex, m.text)) m.fromMe = true;
+        if (!m.fromMe && (inReplyHistory(ex, m.text) || inReplyHistory(ex, m.body))) m.fromMe = true;
 
         m.room = m.room.trim();
         m.sender = m.sender.trim();
@@ -339,21 +460,140 @@ public final class KakaoListener extends NotificationListenerService {
         return m;
     }
 
-    /** android.messages 배열의 마지막 항목 */
-    private static Bundle lastMessage(Bundle ex) {
+    /**
+     * "홍길동 : 안녕하세요" 에서 앞의 발신자 이름을 뽑는다. 아니면 "".
+     * 구분자는 " : " 만 인정한다(카톡 단체방 알림이 쓰는 형태고, 이름에는 콜론을 못 쓴다).
+     */
+    private static String namePrefix(String text) {
+        if (text == null || text.length() == 0) return "";
+        int nl = text.indexOf('\n');
+        String head = (nl >= 0) ? text.substring(0, nl) : text;
+        int i = head.indexOf(" : ");
+        if (i <= 0) return "";
+        if (text.length() <= i + 3) return "";          // 알맹이가 남아야 접두사로 인정한다
+        String name = head.substring(0, i).trim();
+        if (name.length() == 0 || name.length() > NAME_MAX) return "";
+        if (name.indexOf(':') >= 0) return "";
+        return name;
+    }
+
+    /** android.messages 배열을 Bundle 목록으로 (없으면 null) */
+    private static Bundle[] messages(Bundle ex) {
         try {
             Parcelable[] arr = ex.getParcelableArray(Notification.EXTRA_MESSAGES);
             if (arr == null || arr.length == 0) return null;
-            for (int i = arr.length - 1; i >= 0; i--) {
-                if (arr[i] instanceof Bundle) {
-                    Bundle b = (Bundle) arr[i];
-                    if (cs(b.getCharSequence("text")).length() > 0) return b;
-                }
+            ArrayList<Bundle> out = new ArrayList<Bundle>(arr.length);
+            for (int i = 0; i < arr.length; i++) {
+                if (arr[i] instanceof Bundle) out.add((Bundle) arr[i]);
             }
+            if (out.isEmpty()) return null;
+            return out.toArray(new Bundle[out.size()]);
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "android.messages 파싱 실패", t);
+            return null;
+        }
+    }
+
+    /**
+     * 그 알림에 담긴 서로 다른 발신자 수. 2명 이상이면 단체방이다.
+     * 빈 이름(MessagingStyle 에서 sender 가 null 이면 '나')과 내 이름은 세지 않는다.
+     */
+    private static LinkedHashSet<String> senderNames(Bundle[] msgs, String myName) {
+        LinkedHashSet<String> names = new LinkedHashSet<String>();
+        if (msgs == null) return names;
+        String mine = (myName == null) ? "" : myName.trim();
+        for (int i = 0; i < msgs.length; i++) {
+            if (msgs[i] == null) continue;
+            String s = personName(getParcel(msgs[i], "sender_person"));
+            if (s.length() == 0) s = getCs(msgs[i], "sender");
+            if (s.length() == 0) continue;
+            if (mine.length() > 0 && s.equals(mine)) continue;
+            names.add(s);
+        }
+        return names;
+    }
+
+    /** 집합에 딱 한 명만 있으면 그 이름, 아니면 "" */
+    private static String only(LinkedHashSet<String> names) {
+        if (names == null || names.size() != 1) return "";
+        Iterator<String> it = names.iterator();
+        return it.hasNext() ? it.next() : "";
+    }
+
+    /** 본문이 들어있는 마지막 항목 */
+    private static Bundle lastMessage(Bundle[] msgs) {
+        if (msgs == null) return null;
+        for (int i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i] == null) continue;
+            if (getCs(msgs[i], "text").length() > 0) return msgs[i];
         }
         return null;
+    }
+
+    // Bundle 은 다른 앱이 만든 물건이라 언제든 읽다가 터질 수 있다 (BadParcelableException 등).
+    // 알림 한 건 때문에 리스너가 죽으면 그 뒤 모든 발송이 멈추니까 전부 감싸서 읽는다.
+
+    private static boolean has(Bundle b, String key) {
+        if (b == null) return false;
+        try { return b.containsKey(key); } catch (Throwable t) { return false; }
+    }
+
+    private static boolean getBool(Bundle b, String key) {
+        if (b == null) return false;
+        try { return b.getBoolean(key, false); } catch (Throwable t) { return false; }
+    }
+
+    private static String getCs(Bundle b, String key) {
+        if (b == null) return "";
+        try { return cs(b.getCharSequence(key)); } catch (Throwable t) { return ""; }
+    }
+
+    private static Parcelable getParcel(Bundle b, String key) {
+        if (b == null) return null;
+        try { return b.getParcelable(key); } catch (Throwable t) { return null; }
+    }
+
+    // ── 판정 근거 로그 (처음 몇 번만) ─────────────────────────────────────────
+
+    /**
+     * 그룹/1:1 판정 근거를 남긴다. 알림마다 찍으면 로그 링버퍼(200줄)가 쓸려나가니까
+     * 처음 WHY_LOG_MAX 번만 남긴다 — 사용자가 오작동을 신고할 때 원인을 알 수 있으면 충분하다.
+     */
+    private static void whyLog(Context ctx, Msg m) {
+        if (whyLogged >= WHY_LOG_MAX) return;
+        whyLogged = whyLogged + 1;
+        boolean last = (whyLogged >= WHY_LOG_MAX);
+        Log.add(ctx, "방 판정: 「" + m.room + "」 " + (m.group ? "단체방" : "1:1")
+                + " (근거: " + m.why + " / 발신자: "
+                + (m.sender.length() == 0 ? "모름" : m.sender) + ")"
+                + (last ? " — 판정 로그는 여기까지만 남길게" : ""));
+    }
+
+    /** 자동응답 방어선이 막았을 때 (드물고 중요한 일이라 남기되, 역시 몇 번만) */
+    private static void blockLog(Context ctx, String room, String why) {
+        if (blockLogged >= BLOCK_LOG_MAX) return;
+        blockLogged = blockLogged + 1;
+        Log.add(ctx, "자동응답 보류: 「" + room + "」 " + why + " — 단체방 오발송을 막았어");
+    }
+
+    /**
+     * 자동응답 직전 마지막 방어선. dispatch() 에서 group==false 를 한 번 더 확인하는 자리다.
+     * 단체방에 자동응답이 나가면 도배로 강퇴당한다 — 1:1 에 안 나가는 것보다 훨씬 큰 사고라서
+     * 조금이라도 수상하면 보내지 않는다.
+     */
+    private static boolean safeForAutoReply(Context ctx, Msg m) {
+        if (m.group) return false;
+        Session s = SESSIONS.get(m.room);
+        if (s != null && s.group) {
+            blockLog(ctx, m.room, "이 방을 단체방으로 기억하고 있어");
+            return false;
+        }
+        // SPEC 8.4: 1:1 이면 방 이름 == 상대 이름이다. 다르면 단체방일 가능성이 있으니 보내지 않는다.
+        if (m.sender.length() > 0 && !m.sender.equals(m.room)) {
+            blockLog(ctx, m.room, "발신자(" + m.sender + ")와 방 이름이 달라");
+            return false;
+        }
+        return true;
     }
 
     /** 내가 알림 답장창으로 보낸 이력에 이 문장이 있나 */

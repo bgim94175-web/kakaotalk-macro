@@ -32,18 +32,20 @@
   <section class="wrap" style="padding-top:26px">
     <p class="eyebrow">주문 상태</p>
     <h1 style="font-size:clamp(23px,6vw,31px)">주문 진행 상황</h1>
-    <p class="lead">입금이 확인되면 여기에 발급된 키가 떠.</p>
+    <p class="lead">입금하면 이 화면이 알아서 갱신돼. 발급된 키가 여기 바로 떠 —
+      직접 새로고침 안 해도 되니까 이 탭을 열어두면 돼.</p>
 
-    <div id="result"></div>
+    <div id="result" aria-live="polite"></div>
 
     <!-- 주문번호가 없거나 못 찾았을 때만 보임 -->
     <div id="findWrap" hidden style="margin-top:12px">
       <form id="findForm" class="card" novalidate>
         <div class="fld">
           <label for="oid">주문번호</label>
-          <input type="text" id="oid" name="oid" placeholder="접수할 때 받은 주문번호"
-                 autocomplete="off" spellcheck="false" maxlength="64">
-          <p class="hint">구매 신청 직후 화면이나 복사해둔 주문번호를 넣어줘.</p>
+          <input type="text" id="oid" name="oid" placeholder="ORD-260927-A3K9QZ"
+                 autocomplete="off" spellcheck="false" maxlength="64"
+                 autocapitalize="characters" aria-describedby="oid-hint">
+          <p class="hint" id="oid-hint">구매 신청 직후 화면이나 복사해둔 주문번호를 넣어줘.</p>
         </div>
         <div style="height:12px"></div>
         <button type="submit" class="btn primary wide">조회</button>
@@ -52,7 +54,8 @@
 
     <div class="note dim" style="margin-top:12px">
       <span class="ic" aria-hidden="true">i</span>
-      <span>입금 확인은 사람이 직접 해. 입금했는데 오래 그대로면 주문번호와 입금자명을 들고 관리자에게 문의해줘.</span>
+      <span>입금 확인은 <b>금액 매칭으로 자동</b>이야 — 알려준 금액을 뒷자리까지 정확히 보내면 보통 1~2분 안에 키가 나와.
+        금액이 다르거나 30분이 지나도 그대로면 주문번호와 입금자명을 들고 관리자에게 문의해줘.</span>
     </div>
   </section>
 </main>

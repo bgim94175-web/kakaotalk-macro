@@ -47,7 +47,8 @@ public final class ScreenBot {
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
-        gate(a, seg);
+        // 화면을 보는 것만으로는 구매 모달을 띄우지 않는다 — 잠금 카드로 그 자리에서 안내한다.
+        // Gate.check 는 실제 동작(토글 켜기 등)에서만 부른다.
         try {
             fill(a, col);
         } catch (Throwable t) {
@@ -70,10 +71,6 @@ public final class ScreenBot {
 
     private static String feature(int which) {
         return (which == SEG_GAME) ? Features.MINIGAME : Features.ROOMBOT;
-    }
-
-    private static void gate(MainActivity a, int which) {
-        Gate.check(a, feature(which));
     }
 
     private static void fill(final MainActivity a, LinearLayout col) {
@@ -107,11 +104,22 @@ public final class ScreenBot {
         card.addView(Nav.wideBtn(a, "구매하기", true, new Runnable() {
             @Override public void run() { Gate.openBuy(a, feat); }
         }));
-        card.addView(Nav.wideBtn(a, "구매했는데 안 켜졌어 (새로고침)", false, new Runnable() {
-            @Override public void run() { Nav.go(Nav.ACCOUNT); }
-        }));
+        // 이름 그대로 /entitlements 를 다시 조회한다 (탭 이동 금지 — 결과는 이 자리에서 알려준다)
+        final TextView again = Ui.btn(a, LOCK_REFRESH, false);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(MATCH, WRAP);
+        ap.topMargin = Theme.dp(a, 12);
+        again.setLayoutParams(ap);
+        again.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Nav.refreshFeature(a, again, feat, LOCK_REFRESH);
+            }
+        });
+        card.addView(again);
         col.addView(card);
     }
+
+    /** 잠금 카드의 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
+    private static final String LOCK_REFRESH = "구매했는데 안 켜졌어 (새로고침)";
 
     // ── 세그먼트 컨트롤 ──────────────────────────────────────────────────────
 
@@ -130,10 +138,14 @@ public final class ScreenBot {
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
             boolean on = (seg == i);
+            String fid = feature(i);
+            Ui.State fs = MainActivity.featState(a, fid);
             TextView t = new TextView(a);
-            t.setText(names[i]);
+            // 라벨 앞에 상태 글리프를 붙인다 — 어느 쪽이 잠겼는지 누르기 전에 알아야 한다
+            t.setText(segGlyph(fs) + " " + names[i]);
+            t.setContentDescription(names[i] + ", " + segStateKr(a, fid, fs));
             t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
-            t.setTextColor(on ? Theme.ON_ACCENT : Theme.SUB);
+            t.setTextColor(on ? Theme.ON_ACCENT : segColor(fs));
             t.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             t.setGravity(Gravity.CENTER);
             t.setIncludeFontPadding(false);
@@ -147,13 +159,32 @@ public final class ScreenBot {
                 @Override public void onClick(View v) {
                     if (seg == idx) return;
                     seg = idx;
-                    gate(a, seg);
                     refresh();
                 }
             });
             box.addView(t, new LinearLayout.LayoutParams(0, WRAP, 1f));
         }
         return box;
+    }
+
+    /** 세그먼트 상태 점: 켜짐 ● · 만료임박 ◐ · 미구매 ○ */
+    private static String segGlyph(Ui.State fs) {
+        if (fs == Ui.State.ON) return "●";
+        if (fs == Ui.State.EXPIRING) return "◐";
+        return "○";
+    }
+
+    private static int segColor(Ui.State fs) {
+        if (fs == Ui.State.ON) return Theme.ACCENT;
+        if (fs == Ui.State.EXPIRING) return Theme.AMBER;
+        return Theme.DIM;
+    }
+
+    private static String segStateKr(MainActivity a, String fid, Ui.State fs) {
+        if (fs == Ui.State.OFF) return "미구매";
+        long d = License.daysLeft(a, fid);
+        if (fs == Ui.State.EXPIRING) return "만료 임박 · " + d + "일 남음";
+        return (d > 0) ? ("사용중 · " + d + "일 남음") : "사용중";
     }
 
     // ── 방 관리봇 ───────────────────────────────────────────────────────────
@@ -590,14 +621,27 @@ public final class ScreenBot {
         int pv = Theme.dp(a, 7);
         r.setPadding(0, pv, 0, pv);
 
-        TextView c = new TextView(a);
+        final TextView c = new TextView(a);
         c.setText(cmd);
         c.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         c.setTextColor(on ? Theme.ACCENT : Theme.DIM);
         c.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         c.setIncludeFontPadding(false);
         c.setSingleLine(true);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(Theme.dp(a, 92), WRAP);
+        // 접두사가 길면 92dp 안에 안 들어간다 → 폭을 늘리고 말줄임표를 준다
+        c.setEllipsize(TextUtils.TruncateAt.END);
+        c.setMinimumHeight(Theme.dp(a, 48));
+        c.setGravity(Gravity.CENTER_VERTICAL);
+        c.setClickable(true);
+        c.setFocusable(true);
+        c.setContentDescription("명령어 " + cmd + ", 누르면 복사");
+        Ui.press(c);
+        final String cmdText = cmd;
+        c.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Nav.copy(a, "명령어", cmdText); }
+        });
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(Theme.dp(a, 116), WRAP);
+        cp.rightMargin = Theme.dp(a, 8);
         c.setLayoutParams(cp);
         r.addView(c);
 
@@ -612,6 +656,13 @@ public final class ScreenBot {
     // ── 공통 ────────────────────────────────────────────────────────────────
 
     private static void save(MainActivity a, Settings s) {
+        // Settings.save 는 설정키가 없으면 예외 없이 조용히 넘어간다 → 먼저 막고 알려준다
+        if (!Settings.canSave(a)) {
+            Log.add(a, "설정을 저장하지 못했어 (설정키 없음)");
+            Ui.toast(a, "설정을 저장하지 못했어 — 내정보 탭에서 라이선스 인증부터 해줘");
+            refresh();
+            return;
+        }
         try {
             s.save(a);
         } catch (Throwable t) {

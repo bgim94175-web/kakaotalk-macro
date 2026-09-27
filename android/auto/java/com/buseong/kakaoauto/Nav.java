@@ -301,6 +301,28 @@ public final class Nav {
         return f;
     }
 
+    /**
+     * 접힘 카드 여러 개를 카드 하나로 묶는다 (구분선으로 나눈다).
+     * SPEC 8.1 "한 화면에 카드 4~6개" 를 지키려고 같은 성격의 fold 는 묶어서 내보낸다.
+     */
+    public static LinearLayout foldGroup(Context c, Fold... folds) {
+        LinearLayout card = Ui.card(c);
+        boolean first = true;
+        if (folds != null) {
+            for (int i = 0; i < folds.length; i++) {
+                Fold f = folds[i];
+                if (f == null || f.card == null) continue;
+                List<View> kids = new ArrayList<View>();
+                for (int k = 0; k < f.card.getChildCount(); k++) kids.add(f.card.getChildAt(k));
+                f.card.removeAllViews();
+                if (!first) card.addView(Ui.divider(c));
+                for (int k = 0; k < kids.size(); k++) card.addView(kids.get(k));
+                first = false;
+            }
+        }
+        return card;
+    }
+
     // ── 자잘한 조립 ───────────────────────────────────────────────────────────
 
     /** 세로 컨테이너 (가로 꽉, 세로 내용만큼) */
@@ -404,10 +426,24 @@ public final class Nav {
 
     /** 스위치만 있는 작은 토글 (한 줄 안에서 오른쪽에 붙일 때) */
     public static LinearLayout toggle(Context c, boolean on, Ui.OnToggle cb) {
-        LinearLayout sw = Ui.switchRow(c, "", null, on, cb);
+        return toggle(c, null, on, cb);
+    }
+
+    /**
+     * 이름이 붙은 작은 토글. 글자는 안 보이지만 스크린리더는 name 을 읽는다
+     * (제목이 왼쪽 줄에 따로 있는 경우용 — 무명 컨트롤을 만들지 마라).
+     */
+    public static LinearLayout toggle(Context c, final String name, boolean on, final Ui.OnToggle cb) {
+        final String nm = (name == null) ? "" : name;
+        LinearLayout sw = Ui.switchRow(c, "", null, on, new Ui.OnToggle() {
+            @Override public void on(boolean v) {
+                if (cb != null) cb.on(v);
+            }
+        });
         sw.setMinimumHeight(Theme.dp(c, 48));
         sw.setPadding(0, Theme.dp(c, 6), 0, Theme.dp(c, 6));
         sw.setLayoutParams(new LinearLayout.LayoutParams(Theme.dp(c, 54), WRAP));
+        if (nm.length() > 0) sw.setContentDescription(nm + " 스위치");
         return sw;
     }
 
@@ -450,6 +486,140 @@ public final class Nav {
         b.setClickable(!on);
         b.setAlpha(on ? 0.55f : 1f);
         b.setText(on ? busyText : idleText);
+    }
+
+    // ── 기능 새로고침 (결제 직후) ─────────────────────────────────────────────
+
+    /** 같은 버튼이 여러 화면에 있어서, 진행 중인지는 한 곳에서 본다 */
+    private static boolean refreshing = false;
+
+    /**
+     * 결제 직후 기능 상태를 다시 받아온다 (/entitlements).
+     * 진행 중에는 버튼을 잠금 + "확인 중…" 으로 바꾸고, 끝나면 그 자리에서 결과를 알려준다.
+     * 탭은 옮기지 않는다 — 사용자가 있던 자리에서 해결되는 게 낫다.
+     *
+     * @param feature 켜졌는지 확인할 기능. null 이면 전체 상태만 맞춘다(내정보의 [기능 새로고침]).
+     * @param idleLabel 끝난 뒤 버튼에 되돌릴 라벨
+     */
+    public static void refreshFeature(final MainActivity a, final TextView btn,
+                                      final String feature, final String idleLabel) {
+        if (a == null || a.isFinishing()) return;
+        final String idle = (idleLabel == null || idleLabel.length() == 0) ? "다시 확인" : idleLabel;
+        if (refreshing) { Ui.toast(a, "이미 확인 중이야. 잠깐만 기다려줘"); return; }
+        refreshing = true;
+        busy(btn, true, "확인 중…", idle);
+
+        final boolean wasOn = (feature != null) && License.allowed(a, feature);
+        final boolean wasShellOk = shellOk(a);
+        // feature 가 null 인 경우(내정보의 전체 새로고침)에도 "무엇이 켜졌는지" 를 말해준다
+        final boolean[] before = new boolean[Features.ALL.length];
+        for (int i = 0; i < Features.ALL.length; i++) {
+            before[i] = License.allowed(a, Features.ALL[i]);
+        }
+
+        License.refresh(a, new License.Cb() {
+            @Override public void done(boolean ok, String reason) {
+                refreshing = false;
+                busy(btn, false, "확인 중…", idle);
+                if (a.isFinishing()) return;
+
+                if (!ok) {
+                    String why = License.reasonKr(reason);
+                    if (why == null || why.length() == 0) why = "확인하지 못했어";
+                    Log.add(a, "기능 새로고침 실패: " + why);
+                    Ui.toast(a, why);
+                    // 잠김·만료 같은 상태 변화는 바로 화면에 반영해야 한다
+                    redraw(a, wasShellOk);
+                    failDialog(a, btn, feature, idle, why);
+                    return;
+                }
+
+                boolean nowOn = (feature == null) || License.allowed(a, feature);
+                if (nowOn) {
+                    if (feature != null && !wasOn) {
+                        Ui.toast(a, Features.label(feature) + " 기능이 켜졌어!");
+                    } else {
+                        String fresh = newlyOn(a, before);
+                        Ui.toast(a, (fresh.length() > 0) ? (fresh + " 기능이 켜졌어!") : "최신 상태로 맞췄어");
+                    }
+                    redraw(a, wasShellOk);
+                    return;
+                }
+                // 서버 응답은 받았는데 아직 안 켜진 경우 — 입금 확인에서 발급까지 시간이 걸린다
+                redraw(a, wasShellOk);
+                notYetDialog(a, btn, feature, idle);
+            }
+        });
+    }
+
+    /** 새로고침 전에는 꺼져 있었는데 지금은 켜진 기능 이름들 ("매크로 · 방 관리봇"), 없으면 빈 문자열 */
+    private static String newlyOn(MainActivity a, boolean[] before) {
+        StringBuilder sb = new StringBuilder();
+        if (before == null) return "";
+        for (int i = 0; i < Features.ALL.length && i < before.length; i++) {
+            if (before[i]) continue;
+            if (!License.allowed(a, Features.ALL[i])) continue;
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(Features.label(Features.ALL[i]));
+        }
+        return sb.toString();
+    }
+
+    /** 라이선스 셸(잠금화면 ↔ 탭)이 바뀌었으면 통째로, 아니면 지금 화면만 제자리 갱신 */
+    static void redraw(MainActivity a, boolean wasShellOk) {
+        if (a == null || a.isFinishing()) return;
+        try {
+            if (shellOk(a) != wasShellOk) a.renderShell();
+            else reload();
+        } catch (Throwable t) {
+            Log.add(a, "화면을 다시 그리지 못했어: " + t);
+        }
+    }
+
+    /** 인증된 상태(탭 화면을 보여줄 수 있는가)인가 */
+    static boolean shellOk(MainActivity a) {
+        try {
+            License.State s = License.state(a);
+            return s != null && s.licensed && !s.locked;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void notYetDialog(final MainActivity a, final TextView btn,
+                                     final String feature, final String idle) {
+        final String buyFeat = (feature == null) ? Features.MACRO : feature;
+        String name = Features.label(buyFeat);
+        AlertDialog.Builder b = Ui.dialog(a, "아직 반영이 안 됐어");
+        b.setMessage(name + " 기능은 아직 꺼진 상태야.\n"
+                + "입금 확인 후 발급까지 조금 걸릴 수 있어. 1~2분 뒤에 [다시 확인]을 눌러줘.\n"
+                + "아직 결제를 안 했으면 구매 페이지에서 결제하면 바로 켜진다.");
+        b.setPositiveButton("다시 확인", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+                refreshFeature(a, btn, feature, idle);
+            }
+        });
+        b.setNeutralButton("구매 페이지 열기", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+                Gate.openBuy(a, buyFeat);
+            }
+        });
+        b.setNegativeButton("닫기", null);
+        Ui.showDark(b);
+        Log.add(a, Features.label(buyFeat) + " 새로고침 — 아직 안 켜졌어");
+    }
+
+    private static void failDialog(final MainActivity a, final TextView btn, final String feature,
+                                   final String idle, String why) {
+        AlertDialog.Builder b = Ui.dialog(a, "확인하지 못했어");
+        b.setMessage(why + "\n\n인터넷을 확인하고 [다시 확인]을 눌러줘.");
+        b.setPositiveButton("다시 확인", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+                refreshFeature(a, btn, feature, idle);
+            }
+        });
+        b.setNegativeButton("닫기", null);
+        Ui.showDark(b);
     }
 
     // ── 줄바꿈 되는 칩 묶음 ──────────────────────────────────────────────────
@@ -510,16 +680,19 @@ public final class Nav {
         return f;
     }
 
-    /** 누르면 지워지는 칩 (오른쪽에 ✕) */
+    /** 누르면 지워지는 칩 (오른쪽에 ✕). 터치영역은 권장 최소 48dp 를 지킨다. */
     public static TextView removableChip(Context c, String text, int color, final Runnable onRemove) {
-        TextView t = Ui.chip(c, ((text == null) ? "" : text) + "  ✕", color);
+        String label = (text == null) ? "" : text;
+        TextView t = Ui.chip(c, label + "  ✕", color);
         t.setMaxWidth(Theme.dp(c, 200));
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        t.setPadding(Theme.dp(c, 12), Theme.dp(c, 9), Theme.dp(c, 12), Theme.dp(c, 9));
-        t.setMinimumHeight(Theme.dp(c, 36));
+        t.setPadding(Theme.dp(c, 14), Theme.dp(c, 13), Theme.dp(c, 14), Theme.dp(c, 13));
+        t.setMinimumHeight(Theme.dp(c, 48));
+        t.setMinimumWidth(Theme.dp(c, 48));
         t.setClickable(true);
         t.setFocusable(true);
+        t.setContentDescription(label + ", 누르면 지울지 물어봐");
         Ui.press(t);
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (onRemove != null) onRemove.run(); }
@@ -558,12 +731,31 @@ public final class Nav {
     public static void chipEditor(final Flow flow, final List<String> items, final int color,
                                   final String emptyText, final Runnable onChange) {
         fillChips(flow, items, color, emptyText, new ChipTap() {
-            @Override public void tap(String v) {
-                items.remove(v);
-                if (onChange != null) onChange.run();
-                chipEditor(flow, items, color, emptyText, onChange);
+            @Override public void tap(final String v) {
+                final Runnable del = new Runnable() {
+                    @Override public void run() {
+                        items.remove(v);
+                        if (onChange != null) onChange.run();
+                        chipEditor(flow, items, color, emptyText, onChange);
+                    }
+                };
+                Activity a = activityOf(flow);
+                if (a == null) { del.run(); return; }
+                // 탭 한 번에 지워버리면 되돌릴 방법이 없다 → 한 번 묻는다
+                confirm(a, "「" + v + "」 지울까?", "목록에서 빼고 바로 저장해.", "지우기", del);
             }
         });
+    }
+
+    /** 뷰가 올라가 있는 Activity 를 찾는다 (없으면 null) */
+    private static Activity activityOf(View v) {
+        if (v == null) return null;
+        Context c = v.getContext();
+        while (c instanceof android.content.ContextWrapper) {
+            if (c instanceof Activity) return (Activity) c;
+            c = ((android.content.ContextWrapper) c).getBaseContext();
+        }
+        return null;
     }
 
     // ── 다이얼로그 ───────────────────────────────────────────────────────────
@@ -968,8 +1160,16 @@ public final class Nav {
         return h;
     }
 
-    /** 썸네일 한 칸. 누르면 onRemove. 못 읽는 URI 면 회색 칸에 "못 읽음". */
+    /** 썸네일 한 칸 (번호 없는 옛 호출부용) */
     public static View thumb(Context c, String uri, final Runnable onRemove) {
+        return thumb(c, uri, 0, onRemove);
+    }
+
+    /**
+     * 썸네일 한 칸. 지우기는 오른쪽 위 ✕ 만 받는다 (칸 전체를 누르면 실수로 지워진다).
+     * 못 읽는 URI 면 회색 칸에 "못 읽음".
+     */
+    public static View thumb(Context c, String uri, int no, final Runnable onRemove) {
         int side = Theme.dp(c, 72);
         FrameLayout box = new FrameLayout(c);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(side, side);
@@ -978,47 +1178,113 @@ public final class Nav {
         box.setBackground(Theme.round(Theme.CARD2, Theme.R_MD, Theme.LINE2, 1, c));
         box.setClipToOutline(true);
 
-        Bitmap bm = null;
-        try {
-            bm = ImagePicker.thumb(c, uri, ImagePicker.THUMB_PX);
-        } catch (Throwable t) {
-            bm = null;
-        }
-        if (bm != null) {
-            ImageView iv = new ImageView(c);
-            iv.setImageBitmap(bm);
-            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            box.addView(iv, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        final ImageView iv = new ImageView(c);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        box.addView(iv, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        final TextView state = new TextView(c);
+        state.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+        state.setGravity(Gravity.CENTER);
+        box.addView(state, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        Bitmap cached = cachedThumb(uri);
+        if (cached != null) {
+            iv.setImageBitmap(cached);
+            state.setVisibility(View.GONE);
         } else {
-            TextView t = new TextView(c);
-            t.setText("못 읽음");
-            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
-            t.setTextColor(Theme.RED);
-            t.setGravity(Gravity.CENTER);
-            box.addView(t, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            // 디코딩은 메인 스레드에서 하지 않는다 — 사진 5장이면 화면 조립이 눈에 보이게 멈춘다
+            state.setText("불러오는 중");
+            state.setTextColor(Theme.DIM);
+            loadThumb(c, uri, iv, state);
         }
+
+        final String label = (no > 0) ? ("첨부 사진 " + no + "번째") : "첨부 사진";
+        box.setContentDescription(label);
 
         TextView x = new TextView(c);
         x.setText("✕");
-        x.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+        x.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         x.setTextColor(Theme.TEXT);
         x.setGravity(Gravity.CENTER);
         x.setBackground(Theme.pill(Theme.fade(Theme.BG, 0.85f), Theme.LINE2, c));
-        FrameLayout.LayoutParams xp = new FrameLayout.LayoutParams(Theme.dp(c, 22), Theme.dp(c, 22));
+        x.setContentDescription(label + " 지우기");
+        FrameLayout.LayoutParams xp = new FrameLayout.LayoutParams(Theme.dp(c, 32), Theme.dp(c, 32));
         xp.gravity = Gravity.TOP | Gravity.END;
-        xp.topMargin = Theme.dp(c, 4);
-        xp.rightMargin = Theme.dp(c, 4);
+        xp.topMargin = Theme.dp(c, 2);
+        xp.rightMargin = Theme.dp(c, 2);
+        x.setClickable(true);
+        x.setFocusable(true);
+        Ui.press(x);
+        x.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (onRemove != null) onRemove.run(); }
+        });
         box.addView(x, xp);
 
+        // 칸 자체는 안 지운다 — 어디를 눌러야 지워지는지 알려주기만 한다
         box.setClickable(true);
         box.setFocusable(true);
         Ui.press(box);
         box.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { if (onRemove != null) onRemove.run(); }
+            @Override public void onClick(View v) { Ui.toast(v.getContext(), "오른쪽 위 ✕ 를 누르면 지워져"); }
         });
         return box;
+    }
+
+    /** 디코딩해둔 썸네일. 화면을 다시 그릴 때마다 또 읽지 않게 들고 있는다. */
+    private static final java.util.HashMap<String, Bitmap> THUMBS = new java.util.HashMap<String, Bitmap>();
+    private static final int THUMB_CACHE_MAX = 24;
+
+    private static Bitmap cachedThumb(String uri) {
+        if (uri == null) return null;
+        synchronized (THUMBS) { return THUMBS.get(uri); }
+    }
+
+    private static void cacheThumb(String uri, Bitmap bm) {
+        if (uri == null || bm == null) return;
+        synchronized (THUMBS) {
+            if (THUMBS.size() >= THUMB_CACHE_MAX) THUMBS.clear();   // 넘치면 통째로 비운다(단순하게)
+            THUMBS.put(uri, bm);
+        }
+    }
+
+    /** 사진 목록이 바뀌면 캐시도 버린다 (같은 URI 가 다른 사진이 되는 일은 없지만 메모리는 놓아준다) */
+    public static void clearThumbCache() {
+        synchronized (THUMBS) { THUMBS.clear(); }
+    }
+
+    private static void loadThumb(Context c, final String uri, final ImageView iv,
+                                  final TextView state) {
+        final Context app = (c == null) ? null : c.getApplicationContext();
+        if (app == null) return;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                Bitmap bm;
+                try {
+                    bm = ImagePicker.thumb(app, uri, ImagePicker.THUMB_PX);
+                } catch (Throwable t) {
+                    bm = null;
+                }
+                final Bitmap out = bm;
+                cacheThumb(uri, out);
+                try {
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                        @Override public void run() {
+                            if (out != null) {
+                                iv.setImageBitmap(out);
+                                state.setVisibility(View.GONE);
+                            } else {
+                                state.setText("못 읽음");
+                                state.setTextColor(Theme.RED);
+                            }
+                        }
+                    });
+                } catch (Throwable ignore) {
+                    // 화면이 이미 사라진 경우 — 무해
+                }
+            }
+        }, "thumb-decode").start();
     }
 
     // ── 잡동사니 ─────────────────────────────────────────────────────────────

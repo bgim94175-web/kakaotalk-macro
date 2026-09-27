@@ -2,6 +2,9 @@
 // 모든 사용자 응답은 Ed25519 서명된다.
 // ★ 하위호환: 성공 응답의 키 순서는 ok,key,plan,expires_at,device_id 로 시작해야 하고
 //   nonce,ts 는 맨 뒤여야 한다. v1.8 앱은 원문에서 sig 만 떼고 검증하니까 순서가 곧 계약이다.
+// ★ config_key 는 /verify 성공 응답과, 세션을 증명한 /heartbeat 에만 싣는다.
+//   세션 증명이 없는 /entitlements 에서는 session·config_key 를 둘 다 null 로 내린다
+//   (필드는 순서 때문에 남겨둔다). 설정 복호화 키를 아무에게나 주면 SPEC 6.1 전제가 깨진다.
 'use strict';
 
 const express = require('express');
@@ -17,6 +20,8 @@ const router = express.Router();
 const RECHECK_MS = Number(process.env.RECHECK_MS) || 6 * 3600 * 1000;    // 6시간
 const GRACE_MS   = Number(process.env.GRACE_MS)   || 3 * 86400 * 1000;   // 3일
 const MAX_BLOB   = 256 * 1024;                                          // 설정 백업 256KB
+// 만료 audit 은 키마다 이 간격으로 한 번만 남긴다 (기록 탭이 expired 로 덮이는 걸 막는다)
+const EXPIRED_AUDIT_MS = Number(process.env.EXPIRED_AUDIT_MS) || 6 * 3600 * 1000;
 
 // 에러를 삼키지 않는다. 스택을 서버 로그에 남기고 500 을 준다.
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
@@ -98,7 +103,12 @@ function failBody(reason, nonce, ts) {
 }
 
 // 성공 응답 만들기 (featMap 은 이미 계산된 것)
-function buildOk(req, key, deviceId, lic, featMap, session, nonce, now) {
+// opts.withConfigKey = true 인 경로에서만 config_key 를 실어준다.
+//   config_key 는 설정 복호화 키의 재료다(SPEC 6.1) → 세션 증명이 없는 경로에서는 절대 내리지 않는다.
+//   ★ 필드 자체는 빼지 않고 null 로 둔다 — 응답 키 순서가 하위호환 계약이라서.
+//   앱 License.str() 은 "null"/빈값을 기본값으로 바꿔주므로 보관본을 덮어쓰지 않는다.
+function buildOk(req, key, deviceId, lic, featMap, session, nonce, now, opts) {
+  const o = opts || {};
   return okBody({
     key: key,
     plan: features.bestPlan(featMap, lic ? lic.plan : null),
@@ -106,11 +116,34 @@ function buildOk(req, key, deviceId, lic, featMap, session, nonce, now) {
     device_id: deviceId,
     features: featMap,
     session: session || null,
-    config_key: signer.configKey(key, deviceId),
+    config_key: o.withConfigKey ? signer.configKey(key, deviceId) : null,
     purchase: features.purchaseBase(req) + '/buy',
     nonce: nonce,
     ts: now,
   });
+}
+
+// app_sig / MIN_APP_VERSION 검사.
+// 필드를 아예 안 보내면 건너뛴다(구버전 호환). 보냈으면 반드시 통과해야 한다 —
+// 쓰레기 서명을 달고 오면 /verify 든 /heartbeat 든 /entitlements 든 다 bad_app_sig 로 막힌다.
+async function appCheck(req, v, where) {
+  if (v.appSig && !(await sigOk(v.appSig))) {
+    await audit.record(req, 'bad_sig', { key: v.key, device_id: v.deviceId, device_name: v.deviceName,
+      detail: where + ' app_sig=' + v.appSig + ' ver=' + (v.appVer || '-') });
+    return 'bad_app_sig';
+  }
+  const minVer = Number(process.env.MIN_APP_VERSION) || 0;
+  if (minVer > 0 && v.appVer > 0 && v.appVer < minVer) return 'update_required';
+  return null;
+}
+
+// gate 가 돌려준 사유를 기록한다.
+// expired 는 만료 키가 하트비트/새로고침마다 밀어넣기 때문에 키별로 6시간에 한 번만 남긴다.
+function auditGate(req, v, g) {
+  if (!g.audit) return Promise.resolve();
+  const info = { key: v.key, device_id: v.deviceId, device_name: v.deviceName, detail: g.detail || null };
+  if (g.audit === 'expired') return audit.recordThrottled(req, 'expired', info, EXPIRED_AUDIT_MS);
+  return audit.record(req, g.audit, info);
 }
 
 // 공통 게이트: 키/기기 검사까지. 문제가 있으면 reason 을 돌려준다.
@@ -239,7 +272,9 @@ router.post('/verify', wrap(async (req, res) => {
       detail: '하드웨어 지문 변경 감지 (같은 android_id, 다른 기기 의심)' });
   }
 
-  res.json(buildOk(req, v.key, v.deviceId, out.lic, out.featMap, out.session, v.nonce, now));
+  // /verify 성공 응답에만 config_key 를 싣는다 (SPEC 3.1-9)
+  res.json(buildOk(req, v.key, v.deviceId, out.lic, out.featMap, out.session, v.nonce, now,
+                   { withConfigKey: true }));
 }));
 
 // ─────────────────────────────────────────────────────────────
@@ -252,21 +287,19 @@ router.post('/heartbeat', wrap(async (req, res) => {
 
   if (!v.key || !v.deviceId) return fail('bad_request');
 
-  // app_sig 를 보내온 경우에만 검사한다 (안 보내는 구버전 호출을 막지 않기 위해)
-  if (v.appSig && !(await sigOk(v.appSig))) {
-    await audit.record(req, 'bad_sig', { key: v.key, device_id: v.deviceId,
-      device_name: v.deviceName, detail: 'heartbeat app_sig=' + v.appSig });
-    return fail('bad_app_sig');
-  }
+  // app_sig·app_version 은 보내온 경우에만 검사한다 (안 보내는 구버전 호출을 막지 않기 위해).
+  // 보냈는데 허용목록에 없으면 반드시 거부된다.
+  const bad = await appCheck(req, v, 'heartbeat');
+  if (bad) return fail(bad);
 
   const g = await gate(req, v, { needSession: true });
   if (g.reason) {
-    if (g.audit) {
-      await audit.record(req, g.audit, { key: v.key, device_id: v.deviceId,
-        device_name: v.deviceName, detail: g.detail || null });
-    }
+    await auditGate(req, v, g);
     return fail(g.reason);
   }
+
+  // 요청이 들고 온 세션이 서버 값과 정말 같은가 = 세션 소유 증명
+  const proven = !!(g.lic.session_token && v.session && v.session === g.lic.session_token);
 
   // 세션은 유지한다(회전하지 않음). 서버에 세션이 없던 경우엔 새로 발급해 복구.
   let session = g.lic.session_token;
@@ -277,31 +310,43 @@ router.post('/heartbeat', wrap(async (req, res) => {
   await db.q('UPDATE licenses SET last_seen=$1::bigint, device_name=COALESCE($2,device_name) WHERE key=$3',
     [now, v.deviceName, v.key]);
 
-  res.json(buildOk(req, v.key, v.deviceId, g.lic, g.featMap, session, v.nonce, now));
+  // config_key 는 세션을 증명한 하트비트에만 실어준다 (세션 복구로 새로 발급한 경우는 제외)
+  res.json(buildOk(req, v.key, v.deviceId, g.lic, g.featMap, session, v.nonce, now,
+                   { withConfigKey: proven }));
 }));
 
 // ─────────────────────────────────────────────────────────────
-// GET /entitlements?key=&device_id=&nonce= — 기능 상태만 (구매 직후 새로고침)
-// 세션을 회전시키지 않는다. 응답 형태는 /heartbeat 성공과 같다.
+// /entitlements — 기능 상태만 (구매 직후 새로고침)
+// 세션을 회전시키지도, 발급하지도 않는다. 응답 형태는 /heartbeat 성공과 같다.
+// ★ 세션 소유 증명이 없는 경로다 →
+//   - 서버에 저장된 session_token 을 절대 응답에 싣지 않는다 (요청이 들고 온 값과 같을 때만 echo)
+//   - config_key 도 내리지 않는다 (설정 복호화 키의 재료)
+//   GET 은 하위호환용으로 남기고, 키가 접근로그에 남지 않는 POST 를 같이 받는다.
 // ─────────────────────────────────────────────────────────────
-router.get('/entitlements', wrap(async (req, res) => {
-  const v = readCommon(req.query || {});
+async function entitlements(req, res, src) {
+  const v = readCommon(src || {});
   const now = Date.now();
   const fail = (reason) => res.json(failBody(reason, v.nonce, now));
 
   if (!v.key || !v.deviceId) return fail('bad_request');
 
+  // /verify 와 같은 기준으로 앱 서명·버전을 본다 (필드가 없으면 건너뜀 — 구버전 호환)
+  const bad = await appCheck(req, v, 'entitlements');
+  if (bad) return fail(bad);
+
   const g = await gate(req, v, { needSession: false });
   if (g.reason) {
-    if (g.audit) {
-      await audit.record(req, g.audit, { key: v.key, device_id: v.deviceId, detail: g.detail || null });
-    }
+    await auditGate(req, v, g);
     return fail(g.reason);
   }
   await db.q('UPDATE licenses SET last_seen=$1::bigint WHERE key=$2', [now, v.key]);
 
-  res.json(buildOk(req, v.key, v.deviceId, g.lic, g.featMap, g.lic.session_token || null, v.nonce, now));
-}));
+  const echo = (v.session && g.lic.session_token && v.session === g.lic.session_token) ? v.session : null;
+  res.json(buildOk(req, v.key, v.deviceId, g.lic, g.featMap, echo, v.nonce, now));
+}
+
+router.get('/entitlements', wrap((req, res) => entitlements(req, res, req.query)));
+router.post('/entitlements', wrap((req, res) => entitlements(req, res, req.body)));
 
 // ─────────────────────────────────────────────────────────────
 // 설정 클라우드 백업 — 서버는 blob 내용을 해독할 수 없다 (키가 앱에만 있음)

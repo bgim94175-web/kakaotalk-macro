@@ -9,8 +9,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-# ── 서명 키 설정 (고정 키라야 사용자가 덮어쓰기 업데이트를 할 수 있다) ──────────
-KS_PASS="kakaomacro2026"
+# ── 서명 키 설정 ─────────────────────────────────────────────────────────────
+#  의도된 트레이드오프다. 고정 키라야 기존 사용자가 앱을 지우지 않고 덮어쓰기 업데이트를
+#  할 수 있으니 keystore/app.jks 를 레포에 두고 기본 비밀번호도 남겨뒀다.
+#  대신 비밀번호는 **환경변수 KS_PASS 를 먼저 본다.** 없을 때만 기본값으로 떨어지고,
+#  기본값을 쓰면 아래에서 눈에 띄게 경고한다.
+#    예) KS_PASS="진짜비번" ./build.sh all
+#    CI 는 레포 Settings → Secrets → Actions 의 KEYSTORE_B64 + KS_PASS 로 넘긴다.
+KS_PASS_DEFAULT="kakaomacro2026"
+KS_PASS="${KS_PASS:-$KS_PASS_DEFAULT}"
+if [ "$KS_PASS" = "$KS_PASS_DEFAULT" ]; then KS_PASS_IS_DEFAULT=1; else KS_PASS_IS_DEFAULT=0; fi
 KS_ALIAS="app"
 KS_CN="KakaoMacro"
 KS_VALIDITY_DAYS=10000
@@ -28,6 +36,18 @@ step() { printf '%s▸ %s%s\n' "$C_IN" "$*" "$C_0"; }
 ok()   { printf '%s✔ %s%s\n' "$C_OK" "$*" "$C_0"; }
 warn() { printf '%s! %s%s\n' "$C_WA" "$*" "$C_0"; }
 die()  { printf '%b✘ %b%b\n' "$C_ER" "$*" "$C_0" >&2; exit 1; }
+
+# ── 0. 기본 서명 비밀번호 경고 ───────────────────────────────────────────────
+if [ "$KS_PASS_IS_DEFAULT" = 1 ]; then
+  printf '%s\n' "$C_WA"
+  printf '  !! 기본 키스토어 비밀번호를 쓰고 있어.\n'
+  printf '     레포가 공개되면(또는 한 번이라도 유출되면) 누구나 정품과 똑같은 서명으로\n'
+  printf '     개조 APK 를 만들 수 있어서 서명 핀닝(ALLOWED_APP_SIGS)이 무력화돼.\n'
+  printf '     → 레포는 Private 으로 유지하고, 비번은 환경변수로 넘겨라:\n'
+  printf '         KS_PASS="<진짜 비번>" ./build.sh all\n'
+  printf '     → CI 는 GitHub Secret KEYSTORE_B64 + KS_PASS 를 쓴다 (docs/ANTI_ABUSE.md 2단)\n'
+  printf '%s\n' "$C_0"
+fi
 
 # ── 1. 안드로이드 SDK 찾기 ───────────────────────────────────────────────────
 SDK="${ANDROID_HOME:-}"
@@ -108,7 +128,10 @@ elif [ ! -f "$KS" ]; then
     -storepass "$KS_PASS" -keypass "$KS_PASS" \
     -dname "CN=$KS_CN, OU=KakaoMacro, O=KakaoMacro, L=Seoul, C=KR" >/dev/null
   ok "서명키 생성 완료 ($KS)"
-  warn "이 파일(keystore/app.jks)은 반드시 git 에 커밋해서 보관해라. 잃어버리면 기존 앱에 덮어쓰기 업데이트가 불가능해진다."
+  warn "이 파일(keystore/app.jks)을 잃어버리면 다음 버전을 덮어쓰기 업데이트할 수 없다(사용자가 앱을 지워야 한다).
+   지금 바로 레포 밖 안전한 곳에 백업해라 — 예: base64 -w0 keystore/app.jks 를 비밀 저장소에 보관.
+   레포에 커밋해서 보관하는 건 Private 레포 전제에서만 해라. 공개로 바꿀 거면 파일을 지우고
+   KEYSTORE_B64 + KS_PASS 를 GitHub Secret 으로 옮겨라."
 fi
 [ -f "$KS" ] || die "서명키($KS)를 준비하지 못했어."
 
@@ -201,9 +224,12 @@ build_module() {
   step "apksigner : 서명"
   local final="$OUT/${apkname}_v${vname}.apk"
   rm -f "$final"
+  #  비번은 pass: 대신 env: 로 넘긴다 — pass: 는 같은 기기의 다른 사용자가
+  #  ps 로 명령줄을 읽으면 그대로 보인다.
+  export KS_PASS_FOR_SIGN="$KS_PASS"
   "$APKSIGNER" sign \
     --ks "$KS" --ks-key-alias "$KS_ALIAS" \
-    --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" \
+    --ks-pass "env:KS_PASS_FOR_SIGN" --key-pass "env:KS_PASS_FOR_SIGN" \
     --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
     --out "$final" "$aligned" \
     || die "$mod 서명 실패"
@@ -227,11 +253,26 @@ print_sig() {
   printf '  %s\n' "$(basename "$apk")"
   printf '    콜론 있는 형식 : %s\n' "$colon"
   printf '    서버 등록용 hex: %s\n' "$plain"
+  SIG_HEXES+=("$plain")
+}
+
+# ── 7-1. docs/APP_SIGNATURE.txt 기록 ────────────────────────────────────────
+#  DEPLOY.md / android/README.md 가 이 파일을 "ALLOWED_APP_SIGS 에 넣을 값"으로 안내한다.
+#  그래서 빌드할 때마다 방금 서명한 APK 의 hex 로 갱신한다(중복 제거 · hex 한 줄씩).
+write_sig_file() {
+  local docs="$HERE/../docs"
+  local f="$docs/APP_SIGNATURE.txt"
+  [ -d "$docs" ] || return 0
+  [ "${#SIG_HEXES[@]}" -gt 0 ] || return 0
+  printf '%s\n' "${SIG_HEXES[@]}" | awk 'NF && !seen[$0]++' > "$f.tmp" || return 0
+  mv "$f.tmp" "$f"
+  ok "docs/APP_SIGNATURE.txt 갱신 ($(wc -l < "$f" | tr -d ' ')줄)"
 }
 
 # ── 8. 메인 ─────────────────────────────────────────────────────────────────
 TARGET="${1:-all}"
 APKS=()
+SIG_HEXES=()
 case "$TARGET" in
   auto)  build_module auto  com.buseong.kakaoauto  KakaoAuto ;;
   admin) build_module admin com.buseong.kakaoadmin KakaoAdmin ;;
@@ -244,6 +285,7 @@ esac
 
 printf '\n%s━━━ 서명 SHA-256 ━━━%s\n' "$C_IN" "$C_0"
 for a in "${APKS[@]}"; do print_sig "$a"; done
+write_sig_file
 cat <<'NOTE'
 
   ↑ 위의 "서버 등록용 hex" 값을 서버 환경변수 ALLOWED_APP_SIGS 에 넣어라.
@@ -251,6 +293,10 @@ cat <<'NOTE'
     또는 관리자앱 [설정] → 앱서명 허용목록 에서 추가해도 된다.
     이 값이 비어있으면 서버가 서명검사를 통과시켜 주지만(이관 유예),
     리패키징 방지를 위해 꼭 등록해라.
+
+  ⚠️ 기존 v1.8 / v1.4 사용자가 아직 남아있으면 새 hex "하나만" 넣지 마라 —
+     그 순간 구버전 사용자 전원이 bad_app_sig 로 잠긴다.
+     이관 단계별 설정은 DEPLOY.md 4-2 / android/README.md 5장 의 표를 봐라.
 
 NOTE
 printf '%s완료. 결과물: %s%s\n' "$C_OK" "$OUT" "$C_0"

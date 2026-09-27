@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check lib/db.js && node --check lib/sign.js && node --check lib/keys.js && node --check lib/features.js && node --check lib/pricing.js && node --check lib/audit.js && node --check routes/license.js && node --check routes/admin.js && node --check routes/purchase.js"
+    "check": "node --check server.js && node --check lib/db.js && node --check lib/sign.js && node --check lib/keys.js && node --check lib/features.js && node --check lib/pricing.js && node --check lib/audit.js && node --check lib/ratelimit.js && node --check routes/license.js && node --check routes/admin.js && node --check routes/purchase.js"
   },
   "dependencies": {
     "express": "^4.19.2",
