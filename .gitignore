@@ -1,0 +1,6 @@
+node_modules/
+android/out/
+android/gen/
+android/build/
+*.log
+.DS_Store
