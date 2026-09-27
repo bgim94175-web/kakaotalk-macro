@@ -216,9 +216,32 @@ public final class KakaoListener extends NotificationListenerService {
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         try {
-            handle(sbn);
+            handle(sbn, shortcutLabel(sbn));
         } catch (Throwable t) {
             Log.add(ctxOrApp(), "알림 처리 중 오류가 났어: " + t);
+        }
+    }
+
+    /**
+     * 대화 바로가기(conversation shortcut)에 붙은 라벨 = 카톡이 등록한 **방 이름**.
+     * 단체방 알림에서 conversationTitle 이 비어 있을 때 이게 제일 정확하다
+     * (title 은 방 이름이 아니라 "마지막으로 말한 사람" 인 경우가 많다 → 방 목록에 멤버 이름이 뜬다).
+     * API 30 미만이거나 못 읽으면 빈 문자열.
+     */
+    private String shortcutLabel(StatusBarNotification sbn) {
+        if (sbn == null || Build.VERSION.SDK_INT < 30) return "";
+        try {
+            NotificationListenerService.RankingMap rm = getCurrentRanking();
+            if (rm == null) return "";
+            NotificationListenerService.Ranking r = new NotificationListenerService.Ranking();
+            if (!rm.getRanking(sbn.getKey(), r)) return "";
+            android.content.pm.ShortcutInfo si = r.getConversationShortcutInfo();
+            if (si == null) return "";
+            CharSequence cs = si.getLongLabel();
+            if (cs == null || cs.length() == 0) cs = si.getShortLabel();
+            return (cs == null) ? "" : cs.toString().trim();
+        } catch (Throwable ignore) {
+            return "";   // 기종/버전에 따라 없을 수 있다. 없으면 다음 폴백으로 간다.
         }
     }
 
@@ -233,7 +256,7 @@ public final class KakaoListener extends NotificationListenerService {
 
     // ── 알림 처리 ─────────────────────────────────────────────────────────────
 
-    private void handle(StatusBarNotification sbn) {
+    private void handle(StatusBarNotification sbn, String shortcutLabel) {
         if (sbn == null) return;
         if (!KAKAO.equals(sbn.getPackageName())) return;
 
@@ -247,7 +270,7 @@ public final class KakaoListener extends NotificationListenerService {
         final Bundle ex = n.extras;
         if (ex == null) return;
 
-        final Msg m = parse(ex, sbn.getPostTime());
+        final Msg m = parse(ex, sbn.getPostTime(), shortcutLabel);
         if (m == null) return;
         if (m.room.length() == 0 || m.text.length() == 0) return;
 
@@ -357,7 +380,13 @@ public final class KakaoListener extends NotificationListenerService {
         // 방 이름 캐시는 **디스패치 뒤에** 넣는다.
         // 자동응답의 "모르는 사람만" 판정이 isKnownRoom() 을 쓰기 때문에,
         // 먼저 캐시하면 처음 온 사람도 이미 아는 방으로 잡혀서 판정이 항상 거짓이 된다.
-        remember(ctx, m.room);
+        // 방 목록(설정 화면의 방 선택)에는 **믿을 수 있는 방 이름만** 넣는다.
+        // 단체방인데 title 밖에 못 읽은 경우를 넣으면 목록에 멤버 이름이 쌓인다.
+        if (m.roomTrusted) {
+            remember(ctx, m.room);
+        } else {
+            roomSrcWarn(ctx, m);
+        }
     }
 
     // ── 파싱 ──────────────────────────────────────────────────────────────────
@@ -377,6 +406,13 @@ public final class KakaoListener extends NotificationListenerService {
         boolean group = false;
         /** group 을 정한 근거의 세기 (RANK_*) */
         int groupRank = RANK_NONE;
+        /** 방 이름을 어디서 읽었나 (로그용): conversationTitle / 대화 바로가기 / subText / title … */
+        String roomSrc = "";
+        /**
+         * 방 이름을 믿을 수 있나. 단체방인데 title 밖에 없으면 그건 방 이름이 아니라
+         * "마지막으로 말한 사람" 일 가능성이 높다 → 방 목록에 넣지 않는다.
+         */
+        boolean roomTrusted = false;
         /** 판정 근거 한 줄 설명 (로그용) */
         String why = "";
         /**
@@ -408,15 +444,38 @@ public final class KakaoListener extends NotificationListenerService {
      * `방이름 != 발신자` 를 검사할 때 이미 둘이 같아져 있었다 → 단체방이 영원히 1:1 로 잡혔고
      * 오픈프로필 자동응답이 단체방에 나갔다.
      */
-    private static Msg parse(Bundle ex, long postTime) {
+    private static Msg parse(Bundle ex, long postTime, String shortcutLabel) {
         Msg m = new Msg();
         m.at = (postTime > 0) ? postTime : System.currentTimeMillis();
 
         String title = getCs(ex, Notification.EXTRA_TITLE);
         String convo = getCs(ex, Notification.EXTRA_CONVERSATION_TITLE);
 
-        // 방 이름: conversationTitle 이 있으면 그게 방 이름, 없으면 title
-        m.room = (convo.length() > 0) ? convo : title;
+        // ── 방 이름 해석 ────────────────────────────────────────────────
+        // 카톡 단체방 알림은 title 에 **방 이름이 아니라 마지막으로 말한 사람**을 넣는 경우가 많다.
+        // 그래서 title 을 바로 방 이름으로 쓰면 방 목록에 멤버 이름이 뜬다.
+        // 방 이름이라고 믿을 수 있는 출처를 순서대로 뒤진다.
+        String roomSrc = "";
+        if (convo.length() > 0) { m.room = convo; roomSrc = "conversationTitle"; }
+        if (m.room.length() == 0) {
+            String hidden = getCs(ex, "android.hiddenConversationTitle");
+            if (hidden.length() > 0) { m.room = hidden; roomSrc = "hiddenConversationTitle"; }
+        }
+        if (m.room.length() == 0 && shortcutLabel != null && shortcutLabel.trim().length() > 0) {
+            m.room = shortcutLabel.trim(); roomSrc = "대화 바로가기";
+        }
+        if (m.room.length() == 0) {
+            // subText/summaryText 에 방 이름을 넣는 카톡 버전이 있다. 발신자와 같으면 방 이름이 아니다.
+            String sub = getCs(ex, Notification.EXTRA_SUB_TEXT);
+            if (sub.length() == 0) sub = getCs(ex, Notification.EXTRA_SUMMARY_TEXT);
+            if (sub.length() > 0 && !sub.equals(title)) { m.room = sub; roomSrc = "subText"; }
+        }
+        if (m.room.length() == 0) { m.room = title; roomSrc = "title"; }
+        // 믿을 수 있는 출처에서 나왔나. title 폴백은 1:1 일 때만 믿는다
+        // (1:1 은 방 == 상대방이라 title 이 곧 방 이름이 맞다). 단체방에서 title 만 있으면
+        // 그건 십중팔구 멤버 이름이라 **방 목록에 넣지 않는다** — 아래 handle() 에서 거른다.
+        m.roomSrc = roomSrc;
+        m.roomTrusted = !"title".equals(roomSrc);
 
         // 내 표시이름 (내 메시지 판정에 쓴다)
         String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
@@ -511,6 +570,10 @@ public final class KakaoListener extends NotificationListenerService {
         // 내 메시지인가: 발신자 == 내 표시이름, 또는 내 답장 이력에 같은 문장이 있음
         if (m.sender.length() > 0 && me.length() > 0 && m.sender.equals(me)) m.fromMe = true;
         if (!m.fromMe && (inReplyHistory(ex, m.text) || inReplyHistory(ex, m.body))) m.fromMe = true;
+
+        // 1:1 이면 방 == 상대방이라 title 이 곧 방 이름이다 → 믿어도 된다.
+        // 단체방인데 출처가 title 뿐이면 못 믿는다 (멤버 이름일 가능성이 높다).
+        if (!m.group) m.roomTrusted = true;
 
         m.room = m.room.trim();
         m.sender = m.sender.trim();
@@ -811,6 +874,47 @@ public final class KakaoListener extends NotificationListenerService {
      * 그 방의 알림 답장창으로 메시지를 보낸다.
      * 세션이 없으면(= 그 방 카톡 알림을 아직 못 봤으면) 보낼 방법이 없다 → false.
      */
+    /**
+     * 방 세션 찾기. 정확히 일치하는 게 없으면 조금 너그럽게 찾는다 —
+     * 사용자가 방 이름을 손으로 입력할 때 공백/대소문자/이모지 정도는 어긋나기 쉽고,
+     * 카톡이 방 이름을 안 알려줘서 사용자가 직접 적어 넣은 경우도 있다.
+     * 애매하게 여러 개 걸리면 **아무것도 고르지 않는다** (엉뚱한 방에 보내는 게 더 큰 사고다).
+     */
+    private static Session findSession(String room) {
+        Session exact = SESSIONS.get(room);
+        if (exact != null) return exact;
+
+        String want = normRoom(room);
+        if (want.length() == 0) return null;
+
+        Session hit = null;
+        // 1차: 정규화해서 완전히 같은 것
+        for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
+            if (want.equals(normRoom(e.getKey()))) {
+                if (hit != null) return null;      // 둘 이상 → 애매하니 포기
+                hit = e.getValue();
+            }
+        }
+        if (hit != null) return hit;
+
+        // 2차: 한쪽이 다른 쪽을 포함 (방 이름 뒤에 인원수 "(12)" 가 붙는 경우 등)
+        for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
+            String have = normRoom(e.getKey());
+            if (have.length() == 0) continue;
+            if (have.contains(want) || want.contains(have)) {
+                if (hit != null) return null;      // 둘 이상 → 애매하니 포기
+                hit = e.getValue();
+            }
+        }
+        return hit;
+    }
+
+    /** 방 이름 비교용 정규화: 공백 제거 + 소문자 */
+    private static String normRoom(String v) {
+        if (v == null) return "";
+        return v.replaceAll("\\s+", "").toLowerCase(java.util.Locale.KOREA);
+    }
+
     public static boolean sendTo(Context ctx, String room, String text) {
         String r = (room == null) ? "" : room.trim();
         if (r.length() == 0) {
@@ -821,7 +925,7 @@ public final class KakaoListener extends NotificationListenerService {
             Log.add(ctx, "발송 실패: 「" + r + "」 보낼 내용이 비어있어");
             return false;
         }
-        Session s = SESSIONS.get(r);
+        Session s = findSession(r);
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
             Log.add(ctx, "발송 실패: 「" + r + "」 방 세션이 없어(그 방 카톡 알림이 와야 발송 가능)");
             return false;
@@ -1002,6 +1106,19 @@ public final class KakaoListener extends NotificationListenerService {
             roomsLoaded = true;
         }
         Prefs.remove(c, K_ROOMS);
+    }
+
+    /** 방 이름을 못 믿는 알림을 만났을 때 방마다 한 번만 알려준다 (로그 도배 방지) */
+    private static final java.util.Set<String> ROOM_WARNED =
+            java.util.Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+
+    private static void roomSrcWarn(Context c, Msg m) {
+        if (m == null || m.room.length() == 0) return;
+        if (!ROOM_WARNED.add(m.room)) return;
+        if (ROOM_WARNED.size() > 200) ROOM_WARNED.clear();
+        Log.add(c, "「" + m.room + "」 은 단체방인데 카톡이 방 이름을 안 알려줘서 "
+                + "방 목록에 안 넣었어 (알림에 있는 건 말한 사람 이름이야). "
+                + "그 방에 직접 보내려면 방 이름을 손으로 입력해줘");
     }
 
     private static void remember(Context c, String room) {
