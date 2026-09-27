@@ -470,3 +470,106 @@ android/
   **같은 자리·같은 순서로 먼저** 오도록 JSON을 구성한다. (신규 필드는 뒤에 붙인다. v1.8은 원문에서 sig만 떼고 검증하므로 문제없음)
 - 기존 키는 자동으로 `macro` 기능 보유로 백필된다.
 - `MIN_APP_VERSION` 기본 0 → 강제 업데이트 끔. 새 APK 배포 뒤 값을 올려 구버전을 차단한다.
+
+---
+
+## 12. 자동 입금확인 (무인 키 발급) — 추가 명세
+
+PG 없이 **개인 계좌 + 폰 자동화**로 입금을 자동 확인해 키를 즉시 발급한다.
+폰의 자동화 앱이 은행 입금 알림/문자를 잡아서 서버로 POST 하고, 서버가 주문과 대조해 자동 승인한다.
+
+### 12.1 주문 금액에 고유 뒷자리 부여 (매칭의 핵심)
+
+주문 생성 시 `amount = base + suffix` (suffix 1~99원). suffix 는 **현재 `pending` 주문 중
+같은 총액이 없도록** 고른다(1..99 를 섞어서 순회, 전부 충돌하면 suffix=0 + `needs_review` 표시).
+
+→ 입금 금액이 곧 주문번호 역할을 하므로, 은행 알림 문자에서 **이름을 파싱하지 않아도** 주문을 특정할 수 있다.
+이름은 보조 확인용으로만 쓴다(은행마다 형식이 다르고 동명이인이 있다).
+
+구매 페이지에 **"정확히 39,047원"** 을 크게 띄우고 `뒷자리 47원은 주문 확인용이야. 금액이 다르면 자동 확인이 안 돼.` 를 붙인다.
+
+`orders` 테이블에 컬럼 추가:
+```sql
+base_amount   INT           -- 할인 적용된 원래 금액
+amount        INT           -- 실제 입금해야 하는 금액 (= base_amount + suffix)
+token         TEXT          -- 구매자가 주문/키를 조회할 때 쓰는 비밀값 (24 hex)
+needs_review  BOOLEAN DEFAULT FALSE
+```
+`orders.id` 형식: `ORD-YYMMDD-XXXXXX` (X = 대문자+숫자 6자).
+
+### 12.2 `deposits` 테이블
+```sql
+deposits (
+  id BIGSERIAL PRIMARY KEY,
+  at BIGINT NOT NULL,
+  amount INT,                  -- 파싱된 입금액 (매칭에 쓴 값)
+  name TEXT,                   -- 파싱된 입금자명 (없을 수 있음)
+  raw TEXT NOT NULL,           -- 알림 원문 (관리자가 눈으로 확인)
+  source TEXT,                 -- macrodroid | shortcuts | manual | 기타
+  raw_hash TEXT NOT NULL,      -- sha256(raw) — 중복 전송 방어
+  matched_order TEXT,          -- 매칭된 주문 id (없으면 NULL)
+  status TEXT NOT NULL         -- matched | unmatched | duplicate | ambiguous | ignored
+)
+CREATE UNIQUE INDEX IF NOT EXISTS deposits_dedupe ON deposits(raw_hash);
+```
+
+### 12.3 `POST /api/deposit-hook`
+
+인증: 헤더 `x-deposit-token` **또는** 쿼리 `?t=` (자동화 앱이 헤더를 못 넣는 경우 대비).
+`DEPOSIT_TOKEN` 환경변수와 **타이밍 안전 비교**(`crypto.timingSafeEqual`). 불일치 → 401 + audit(`bad_deposit_token`).
+`DEPOSIT_TOKEN` 이 설정되지 않으면 엔드포인트 자체를 **비활성**(503 + "DEPOSIT_TOKEN 미설정") — 토큰 없이 열어두면 누구나 입금을 위조할 수 있다.
+
+요청 (둘 중 아무 형식이나 받는다 — 자동화 앱이 보내기 쉬운 쪽으로):
+```json
+{ "text":"[카카오뱅크] 09/27 14:32 입금 39,047원 홍길동 잔액 1,234,567원",
+  "source":"macrodroid", "at":1759000000000 }
+```
+`text` 대신 `message` / `body` 키로 와도 받아준다. `Content-Type: text/plain` 본문도 그대로 `text` 로 취급.
+
+응답:
+```json
+{ "ok":true, "status":"matched", "order":"ORD-260927-A3K9QZ", "amount":39047, "key":"KAKA-..." }
+{ "ok":true, "status":"unmatched", "amount":39047 }     // 금액에 맞는 대기 주문 없음 — 기록만
+{ "ok":true, "status":"duplicate" }                      // 같은 원문 재전송
+{ "ok":true, "status":"ambiguous", "candidates":2 }      // 같은 금액 대기 주문이 2개 이상 → 관리자 확인 필요
+{ "ok":true, "status":"ignored", "why":"출금 알림" }
+```
+**항상 200 + ok:true 로 응답**한다(자동화 앱이 실패로 보고 재시도를 반복하면 중복이 쌓인다).
+실제 처리 결과는 `status` 로 알린다.
+
+처리 순서:
+1. `raw_hash = sha256(text)` 로 중복 확인 → 있으면 `duplicate`.
+2. 출금 판정: `출금`·`결제`·`승인취소`·`이체수수료` 를 포함하고 `입금` 을 포함하지 않으면 `ignored`.
+3. 금액 후보 추출: `/(\d{1,3}(?:,\d{3})+|\d{3,})/g` 로 전부 뽑고, 바로 앞에 `잔액|잔고|한도|누적` 이 붙은 건 제외.
+4. 후보 각각으로 `SELECT * FROM orders WHERE status='pending' AND amount=$1` 조회.
+   정확히 1건 → `matched`. 2건 이상 → `ambiguous`. 0건 → 다음 후보. 전부 0건 → `unmatched`.
+5. `matched` 면 **`/admin/order-approve` 와 동일한 로직**을 호출해 키 발급/연장
+   (`target_key` 가 있으면 그 키에 기능 추가·연장, 없으면 신규 발급).
+   `orders.status='done'`, `issued_key`, `handled_at` 기록. audit(`order`, detail=`자동입금 승인 <입금자명>`).
+6. `deposits` 에 결과 기록.
+7. 이름 검증: 파싱된 이름이 있고 `orders.depositor` 와 다르면 **거부하지 않고** audit 에 경고로 남긴다
+   (은행 표기가 다를 수 있다. 금액이 고유하므로 금액을 신뢰한다).
+
+### 12.4 구매자에게 키 전달 (무인)
+
+- 주문 생성 응답에 `{id, token, amount, ...}` 를 준다. 구매 페이지는 `/order/<id>?t=<token>` 으로 이동하고
+  그 링크를 `localStorage` 에 저장한다("내 주문" 목록).
+- `GET /api/order/:id` — `t` 없으면 `{status, amount, features, plan, created_at}` 만.
+  `t` 가 맞으면 `issued_key` 까지 포함.
+- `/order/:id` 페이지는 **5초마다 폴링**(그리고 창 포커스 시 즉시) → `status==='done'` 이면
+  키를 크게 + 복사 버튼 + "앱에 이 키를 입력해" 안내로 바꾼다. 최대 30분 폴링 후 중단하고 [새로고침] 버튼만 남긴다.
+
+### 12.5 관리자 API 추가
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/admin/deposits` | `?status=&limit=100` 입금 내역 (원문 포함) |
+| POST | `/admin/deposit-match` | `{deposit_id, order_id}` 수동 매칭 → 주문 승인까지 수행 |
+| POST | `/admin/deposit-ignore` | `{deposit_id}` 무시 처리 |
+
+관리자앱에 **[입금]** 탭 추가: 미매칭/모호 건을 위에, 원문을 접어서 보여주고 [수동 매칭](대기 주문 선택) / [무시].
+
+### 12.6 환경변수 추가
+| 변수 | 설명 |
+|---|---|
+| `DEPOSIT_TOKEN` | 입금 웹훅 인증 토큰(랜덤 32자 이상). **미설정 시 웹훅 비활성** |
+| `DEPOSIT_AUTO_APPROVE` | `1`(기본) 이면 금액 일치 시 자동 승인, `0` 이면 기록만 하고 관리자 승인 대기 |
