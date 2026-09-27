@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 카톡 오토 (사용자앱) · 라이브러리 의존성 0 · AndroidX 없음 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.buseong.kakaoauto"
+    android:versionCode="20"
+    android:versionName="2.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+
+    <!-- 라이선스 검증 · 하트비트 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 부팅 후 주기 발송 복구 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 정확한 시각 발송 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- 도즈 모드에서 안 끊기게 배터리 최적화 제외 요청 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 상태 알림 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 첨부 이미지 읽기 (33+ 는 READ_MEDIA_IMAGES, 32 이하는 READ_EXTERNAL_STORAGE) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 알림 읽기 권한 설정 화면으로 보내기 -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <!-- QUERY_ALL_PACKAGES 안 쓴다. 카톡만 조회한다. -->
+    <queries>
+        <package android:name="com.kakao.talk" />
+    </queries>
+
+    <application
+        android:name=".App"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:supportsRtl="false"
+        android:hardwareAccelerated="true"
+        android:extractNativeLibs="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 카톡 알림 파싱 + RemoteInput 발송 -->
+        <service
+            android:name=".KakaoListener"
+            android:exported="true"
+            android:label="@string/listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- 카톡 공유 UI 자동 조작 (이미지 전송) -->
+        <service
+            android:name=".KakaoAccessibility"
+            android:exported="true"
+            android:label="@string/acc_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility" />
+        </service>
+
+        <!-- 주기 발송 알람 + 부팅 복구.
+             부팅 브로드캐스트는 시스템(다른 UID)이 보내므로 exported="false" 로는 안 들어온다.
+             그래서 exported="true" 로 두고 android:permission 으로 발신자를 제한한다.
+             별도 BootReceiver 클래스는 만들지 않는다 — 이 리시버가 알람과 부팅을 같이 받는다. -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="true"
+            android:directBootAware="false"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

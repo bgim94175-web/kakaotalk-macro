@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 카톡 공유/첨부 UI 만 건드린다. 다른 앱은 읽지 않는다. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:packageNames="com.kakao.talk"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:description="@string/acc_desc" />

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 사용자에게 보이는 문자열은 전부 한국어 -->
+<resources>
+    <string name="app_name">카톡 오토 관리자</string>
+</resources>

@@ -5,10 +5,34 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
+      # ── 기존 3개 (절대 바꾸지 마라. SIGNING_PRIVATE_KEY 를 바꾸면 발급된 키 전부가 잠긴다)
       - key: DATABASE_URL
         sync: false      # Neon 연결 문자열
       - key: ADMIN_PASSWORD
         sync: false
       - key: SIGNING_PRIVATE_KEY
-        sync: false
+        sync: false      # Ed25519 PKCS8 PEM
+
+      # ── 무단사용 방지
+      - key: CONFIG_SECRET
+        sync: false      # 설정 암호화 키 유도용 HMAC 시크릿 (랜덤 64자 hex). 한 번 정하면 바꾸지 마라
+      - key: ALLOWED_APP_SIGS
+        sync: false      # 정품 APK 서명 SHA-256 (쉼표구분). 비어있으면 서명검사 건너뜀
+      - key: MIN_APP_VERSION
+        sync: false      # 정수 versionCode. 0 이면 강제 업데이트 끔
+
+      # ── 구매 웹사이트
+      - key: BANK_INFO
+        sync: false      # 예: 카카오뱅크 3333-00-0000000 김부성
+      - key: CONTACT_INFO
+        sync: false      # 예: 카톡ID mykakaoid
+      - key: PURCHASE_BASE
+        sync: false      # 비우면 서버 자기 주소(RENDER_EXTERNAL_URL)를 쓴다
+
+      # ── 자동 입금확인 웹훅
+      - key: DEPOSIT_TOKEN
+        sync: false      # 랜덤 32자 이상. 비어있으면 웹훅 자체가 비활성(503)
+      - key: DEPOSIT_AUTO_APPROVE
+        sync: false      # 1(기본)=금액 일치 시 자동 승인 / 0=기록만 하고 관리자 승인 대기

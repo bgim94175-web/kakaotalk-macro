@@ -1,6 +1,25 @@
+# 노드
 node_modules/
+npm-debug.log*
+.env
+.env.local
+
+# 안드로이드 빌드 산출물
 android/out/
 android/gen/
 android/build/
+*.apk.idsig
+
+# 로그 / OS 쓰레기
 *.log
 .DS_Store
+Thumbs.db
+
+# 에디터
+.idea/
+.vscode/
+*.iml
+
+# ⚠️ android/keystore/app.jks 는 일부러 커밋한다.
+#    서명키가 바뀌면 기존 사용자가 덮어쓰기 업데이트를 못 하고 "앱이 설치되지 않음" 오류가 난다.
+#    그래서 .gitignore 에 넣지 않는다. (여기 적지 마라)

@@ -184,6 +184,8 @@ router.get('/admin/stats', wrap(async (req, res) => {
   const pending = (await db.q("SELECT COUNT(*)::int AS n FROM orders WHERE status='pending'")).rows[0].n;
   const revoked = (await db.q('SELECT COUNT(*)::int AS n FROM licenses WHERE COALESCE(revoked,FALSE)=TRUE')).rows[0].n;
   const blocked = (await db.q('SELECT COUNT(*)::int AS n FROM licenses WHERE blocked_reason IS NOT NULL')).rows[0].n;
+  const deposits = (await db.q(
+    "SELECT COUNT(*)::int AS n FROM deposits WHERE status IN ('unmatched','ambiguous')")).rows[0].n;
 
   const by_feature = {};
   for (const f of features.ALL) by_feature[f] = 0;
@@ -191,7 +193,7 @@ router.get('/admin/stats', wrap(async (req, res) => {
 
   res.json({ ok: true, now: now, total: total, active: active, expiring_7d: expiring,
              by_feature: by_feature, pending_orders: pending,
-             revoked: revoked, blocked: blocked });
+             revoked: revoked, blocked: blocked, deposits_attention: deposits });
 }));
 
 // ─────────────────────────────────────────────────────────────
@@ -272,36 +274,9 @@ router.post('/admin/order-approve', wrap(async (req, res) => {
   const id = keys.normOrderId(b.id);
   if (!id) return res.json({ ok: false, error: 'id 가 필요해' });
   const askedKey = keys.normKey(b.key);
-  const now = Date.now();
 
-  const out = await db.tx(async (client) => {
-    const o = await db.one('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [id], client);
-    if (!o) return { error: '없는 주문이야' };
-    if (o.status === 'done') return { ok: true, key: o.issued_key, already: true };
-    if (o.status === 'canceled') return { error: '이미 취소된 주문이야' };
-
-    const feats = features.normList(String(o.features || '').split(','));
-    if (!feats.length) return { error: '주문의 기능 목록이 비었어' };
-    const plan = String(o.plan || 'month');
-    if (!keys.durationMs(plan, null)) return { error: '주문의 플랜이 잘못됐어: ' + plan };
-
-    let key = askedKey || keys.normKey(o.target_key);
-    let issued = false;
-    if (key) {
-      const g = await keys.grant(client, key, feats, plan, null);
-      if (!g) return { error: '연장할 키가 없어: ' + key };
-    } else {
-      const c = await keys.createLicenses(client, {
-        features: feats, plan: plan, count: 1,
-        note: '주문 ' + id, owner_name: o.buyer_name, owner_contact: o.contact,
-      });
-      key = c.keys[0];
-      issued = true;
-    }
-    await db.q('UPDATE orders SET status=$1, handled_at=$2::bigint, issued_key=$3 WHERE id=$4',
-      ['done', now, key, id], client);
-    return { ok: true, key: key, issued: issued, features: feats, plan: plan };
-  });
+  // 자동 입금확인(POST /api/deposit-hook)과 **같은 로직**을 쓴다
+  const out = await db.tx((client) => keys.approveOrder(client, id, askedKey));
 
   if (out.error) return res.json({ ok: false, error: out.error });
   if (!out.already) {
@@ -325,6 +300,59 @@ router.post('/admin/order-cancel', wrap(async (req, res) => {
       WHERE id=$3 AND status <> 'done'`, [now, memo, id]);
   if (r.rowCount > 0) await audit.record(req, 'order', { detail: '주문 취소 ' + id + (memo ? ' / ' + memo : '') });
   res.json({ ok: r.rowCount > 0, id: id });
+}));
+
+// ─────────────────────────────────────────────────────────────
+// 입금 내역 (자동 입금확인)
+// ─────────────────────────────────────────────────────────────
+router.get('/admin/deposits', wrap(async (req, res) => {
+  const status = String(req.query.status || '').trim().toLowerCase();
+  const limit = clamp(req.query.limit, 1, 500, 100);
+  const params = [];
+  let where = '';
+  if (status) { params.push(status); where = ' WHERE status=$1'; }
+  params.push(limit);
+  const r = await db.q(
+    'SELECT * FROM deposits' + where + ' ORDER BY at DESC, id DESC LIMIT $' + params.length, params);
+  const pend = await db.q(
+    "SELECT COUNT(*)::int AS n FROM deposits WHERE status IN ('unmatched','ambiguous')");
+  res.json({
+    ok: true, now: Date.now(),
+    hook_enabled: !!String(process.env.DEPOSIT_TOKEN || '').trim(),
+    auto_approve: String(process.env.DEPOSIT_AUTO_APPROVE || '1') !== '0',
+    needs_attention: pend.rows[0].n,
+    deposits: r.rows.map(db.shapeDeposit),
+  });
+}));
+
+// 수동 매칭 → 주문 승인까지 수행
+router.post('/admin/deposit-match', wrap(async (req, res) => {
+  const b = req.body || {};
+  const depositId = Math.floor(Number(b.deposit_id));
+  const orderId = keys.normOrderId(b.order_id);
+  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 가 필요해' });
+  if (!orderId) return res.json({ ok: false, error: 'order_id 가 필요해' });
+
+  const dep = await db.one('SELECT * FROM deposits WHERE id=$1', [depositId]);
+  if (!dep) return res.json({ ok: false, error: '없는 입금 기록이야' });
+
+  const out = await db.tx((client) => keys.approveOrder(client, orderId, null));
+  if (out.error) return res.json({ ok: false, error: out.error });
+
+  await db.q("UPDATE deposits SET status='matched', matched_order=$1 WHERE id=$2", [orderId, depositId]);
+  if (!out.already) {
+    await audit.record(req, 'order', { key: out.key,
+      detail: '수동 입금 매칭 승인 주문=' + orderId + ' 입금기록=' + depositId +
+              ' 입금자=' + (dep.name || '미상') });
+  }
+  res.json({ ok: true, deposit_id: depositId, order_id: orderId, key: out.key, already: !!out.already });
+}));
+
+router.post('/admin/deposit-ignore', wrap(async (req, res) => {
+  const depositId = Math.floor(Number((req.body || {}).deposit_id));
+  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 가 필요해' });
+  const r = await db.q("UPDATE deposits SET status='ignored' WHERE id=$1", [depositId]);
+  res.json({ ok: r.rowCount > 0, deposit_id: depositId });
 }));
 
 // ─────────────────────────────────────────────────────────────

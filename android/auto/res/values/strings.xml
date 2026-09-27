@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 사용자에게 보이는 문자열은 전부 한국어 -->
+<resources>
+    <string name="app_name">카톡 오토</string>
+
+    <!-- 알림 읽기 서비스 (설정 › 알림 접근 허용 목록에 이 이름으로 뜬다) -->
+    <string name="listener_label">카톡 오토 · 알림 읽기</string>
+
+    <!-- 접근성 서비스 (설정 › 접근성 › 설치된 앱 목록에 이 이름으로 뜬다) -->
+    <string name="acc_label">카톡 오토 · 자동 조작</string>
+    <string name="acc_desc">카톡 화면을 대신 눌러서 이미지를 보내주는 기능이야.\n\n켜면 이미지 첨부 발송(최대 5장)을 자동으로 처리해. 카카오톡 화면만 읽고, 읽은 내용은 기기 밖으로 나가지 않아. 텍스트만 보낼 거면 안 켜도 돼.</string>
+</resources>

@@ -73,6 +73,9 @@
   /* 서버 reason 코드 → 한국어 (SPEC 3.1 표 + 웹 전용 몇 개) */
   var REASON_KR = {
     bad_request:   '요청이 잘못됐어',
+    bad_feature:   '기능을 하나 이상 골라줘',
+    bad_plan:      '플랜을 골라줘 (1개월 / 3개월 / 1년)',
+    no_depositor:  '입금자명을 적어줘',
     invalid_key:   '없는 키야',
     not_found:     '찾을 수 없어',
     revoked:       '사용 중지된 키야',
@@ -224,6 +227,32 @@
     return planOf(p) ? p : '';
   }
 
+  /* 주문 상태 링크. 토큰이 있어야 발급된 키·입금자명을 볼 수 있다 (서버가 ?t= 로 확인) */
+  function orderUrl(id, token) {
+    return '/order/' + encodeURIComponent(id) + (token ? '?t=' + encodeURIComponent(token) : '');
+  }
+
+  /* 주문 토큰을 이 브라우저에만 저장해둔다 — 링크를 잃어버려도 주문번호로 다시 볼 수 있게.
+     저장이 막힌 브라우저(시크릿 등)에서도 죽지 않게 전부 try/catch. */
+  var TOK_STORE = 'kk_order_tokens';
+  function saveToken(id, token) {
+    if (!id || !token) return;
+    try {
+      var m = JSON.parse(localStorage.getItem(TOK_STORE) || '{}');
+      if (!m || typeof m !== 'object') m = {};
+      m[id] = token;
+      var ks = Object.keys(m);
+      while (ks.length > 20) { delete m[ks.shift()]; }   // 오래된 건 버린다
+      localStorage.setItem(TOK_STORE, JSON.stringify(m));
+    } catch (e) { /* 저장 못 해도 링크로는 볼 수 있다 */ }
+  }
+  function loadToken(id) {
+    try {
+      var m = JSON.parse(localStorage.getItem(TOK_STORE) || '{}');
+      return (m && typeof m === 'object' && str(m[id])) || '';
+    } catch (e) { return ''; }
+  }
+
   function buyUrl(ids, plan, key) {
     var p = [];
     if (ids && ids.length) p.push('feature=' + encodeURIComponent(ids.join(',')));
@@ -299,13 +328,16 @@
         var data = null;
         try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
         if (!res.ok || !data || data.ok === false) {
-          var msg = (data && str(data.message)) ||
-                    (data && errKr(pick(data, ['reason', 'error', 'code']))) ||
+          var code = data ? str(pick(data, ['reason', 'code'])) : '';
+          /* 서버는 error 에 한국어 문구를, reason 에 코드를 담는다 */
+          var human = data ? str(pick(data, ['message', 'error'])) : '';
+          if (human && /^[a-z0-9_.-]+$/i.test(human)) { if (!code) code = human; human = ''; }
+          var msg = human || errKr(code) ||
                     (res.status === 404 ? '찾을 수 없어' : '') ||
                     ('요청이 실패했어 (HTTP ' + res.status + ')');
           var e2 = new Error(msg);
           e2.status = res.status;
-          e2.code = data ? str(pick(data, ['reason', 'error', 'code'])) : '';
+          e2.code = code;
           e2.data = data;
           throw e2;
         }
@@ -371,12 +403,16 @@
     if (!raw || typeof raw !== 'object') throw new Error(MSG_PRICE_FAIL);
 
     var root = raw;
-    ['pricing', 'price', 'prices', 'data', 'result'].forEach(function (k) {
-      if (root === raw && raw[k] && typeof raw[k] === 'object' && !Array.isArray(raw[k])) {
-        // features 같은 알맹이가 안에 들어있으면 그걸 root 로 본다
-        if (pick(raw[k], ['features', 'items', 'products', 'macro', 'catalog'])) root = raw[k];
-      }
-    });
+    var hasTop = pick(raw, ['features', 'items', 'products', 'catalog']) !== undefined ||
+                 readEntry(raw, 'macro') !== null;
+    if (!hasTop) {
+      /* 최상위가 껍데기면 한 겹 안쪽에서 알맹이를 찾는다 */
+      ['pricing', 'price', 'prices', 'data', 'result'].forEach(function (k) {
+        if (root !== raw) return;
+        if (raw[k] && typeof raw[k] === 'object' && !Array.isArray(raw[k]) &&
+            pick(raw[k], ['features', 'items', 'products', 'macro', 'catalog'])) root = raw[k];
+      });
+    }
 
     var P = {
       rate: BUNDLE_RATE_DEFAULT, min: BUNDLE_MIN_DEFAULT,
@@ -410,12 +446,14 @@
     }
 
     var fsrc = pick(root, ['features', 'items', 'products', 'catalog', 'list']) || root;
+    var flat = pick(root, ['prices', 'price_table', 'priceTable']);
 
     var found = 0;
     FEATURES.forEach(function (f) {
       var entry = readEntry(fsrc, f.id);
       if (entry === null && fsrc !== root) entry = readEntry(root, f.id);
       var prices = entryPrices(entry, f.id, root);
+      if (!Object.keys(prices).length && flat) prices = entryPrices(readEntry(flat, f.id), f.id, root);
       var label = (entry && typeof entry === 'object')
         ? str(pick(entry, ['label', 'name', 'title', 'kr'])) : '';
       if (Object.keys(prices).length) found++;
@@ -631,8 +669,11 @@
           el('span', { cls: 'v', style: 'margin:0;color:var(--red)', text: MSG_PRICE_FAIL })
         ]));
       } else {
+        var who = self.ids.length === FEATURES.length
+          ? '전체 ' + FEATURES.length + '종'
+          : self.ids.map(featName).join(' · ');
         self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { text: self.ids.map(featName).join(' · ') + ' · ' + planName(self.plan) }),
+          el('span', { text: who + ' · ' + planName(self.plan) }),
           el('span', { cls: 'v mono', text: won(c.subtotal) })
         ]));
         if (c.bundled) {
@@ -813,17 +854,31 @@
       }).catch(function (e) {
         btn.disabled = false;
         btn.textContent = '주문 접수하기';
-        toast(e.message || '주문 접수가 안 됐어', 'bad');
-        var box = $('#submitErr');
-        if (box) { box.textContent = e.message || '주문 접수가 안 됐어'; box.hidden = false; }
+        var msg = e.message || '주문 접수가 안 됐어';
+        toast(msg, 'bad');
+        /* 어느 칸이 문제인지 서버 reason 으로 짚어준다 */
+        if (e.code === 'invalid_key') { setErr('key', msg); keyIn.focus(); }
+        else if (e.code === 'no_depositor') { setErr('depositor', msg); depIn.focus(); }
+        else if (e.code === 'bad_feature') { setErr('feature', msg); }
+        else {
+          var box = $('#submitErr');
+          if (box) { box.textContent = msg; box.hidden = false; }
+        }
       });
     });
 
     function showResult(res, ids, plan, key, c) {
-      var id = str(pick(res, ['id', 'order_id', 'orderId']));
-      var amt = amount(pick(res, ['amount', 'total']));
+      var id     = str(pick(res, ['id', 'order_id', 'orderId']));
+      var token  = str(pick(res, ['token', 't']));
+      var amt    = amount(pick(res, ['amount', 'total']));
       if (amt === null) amt = c.total;
-      var acct = str(pick(res, ['account', 'bank', 'bank_info', 'bankInfo'])) || (PRICE && PRICE.bank) || '';
+      var base   = amount(pick(res, ['base_amount', 'baseAmount']));
+      var suffix = num(pick(res, ['suffix']));
+      var review = !!pick(res, ['needs_review', 'needsReview']);
+      var acct   = str(pick(res, ['account', 'bank', 'bank_info', 'bankInfo'])) || (PRICE && PRICE.bank) || '';
+      var link   = id ? orderUrl(id, token) : '';
+      var full   = link ? (location.origin + link) : '';
+      if (id && token) saveToken(id, token);
 
       var wrapEl = $('#formWrap');
       var out = $('#result');
@@ -833,46 +888,75 @@
 
       out.appendChild(el('div', { cls: 'card' }, [
         el('div', { cls: 'chip ok', text: '주문 접수됨' }),
-        el('h2', { style: 'margin:12px 0 6px', text: '입금하면 관리자가 키를 발급해줄게' }),
+        el('h2', { style: 'margin:12px 0 6px', text: '입금하면 키가 발급돼' }),
         el('p', { cls: 'sub small', style: 'margin-bottom:16px',
-                  text: '아래 계좌로 금액을 그대로 입금하고, 입금자명은 반드시 아래 이름으로 해줘.' }),
+                  text: '아래 계좌로 금액을 그대로 보내줘. 입금자명도 적어준 이름 그대로 해줘.' }),
 
+        /* 주문번호 */
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '주문번호' }),
           el('div', { cls: 'v accent mono', text: id || '(응답에 주문번호가 없어)' }),
           el('div', { cls: 'btn-row' }, [
             id ? copyBtn(function () { return id; }, '주문번호') : null,
-            id ? el('a', { cls: 'btn sm', href: '/order/' + encodeURIComponent(id) }, '주문 상태 보기') : null
+            link ? el('a', { cls: 'btn sm', href: link }, '주문 상태 보기') : null
           ])
         ]),
         el('div', { style: 'height:10px' }),
+
+        /* 입금 금액 — 끝자리까지 정확히 (서버가 금액으로 주문을 찾는다) */
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '입금 금액' }),
-          el('div', { cls: 'v mono', text: won(amt) })
+          el('div', { cls: 'v accent mono', text: won(amt) }),
+          el('div', { cls: 'tiny', style: 'color:var(--amber);font-weight:700;line-height:1.5',
+                      text: '끝자리까지 정확히 이 금액으로 보내줘. 금액으로 주문을 찾아서 입금을 확인해.' }),
+          (base !== null && suffix !== null && suffix > 0)
+            ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(base) + ' + 주문 확인용 ' + suffix + '원' })
+            : null,
+          el('div', { cls: 'btn-row' }, [copyBtn(function () { return String(Math.round(amt)); }, '금액')])
         ]),
         el('div', { style: 'height:10px' }),
+
+        /* 계좌 */
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '입금 계좌' }),
           el('div', { cls: 'v sm', text: acct || '관리자에게 문의' }),
           acct ? el('div', { cls: 'btn-row' }, [copyBtn(function () { return acct; }, '계좌')]) : null
         ]),
 
+        review ? el('div', { style: 'height:12px' }) : null,
+        review ? el('div', { cls: 'note warn' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
+          el('span', { text: '지금 대기 주문이 많아서 금액만으로는 구분이 안 돼. 관리자가 직접 확인할게 — 입금하고 연락처로 알려주면 빨라.' })
+        ]) : null,
+
         el('div', { style: 'height:16px' }),
         el('dl', { cls: 'kv' }, [
           el('div', { cls: 'r' }, [el('dt', { text: '기능' }), el('dd', { text: ids.map(featName).join(' · ') })]),
           el('div', { cls: 'r' }, [el('dt', { text: '기간' }), el('dd', { text: planName(plan) + ' (' + planDays(plan) + '일)' })]),
           key ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: key })]) : null
-        ]),
-
-        el('div', { style: 'height:16px' }),
-        el('div', { cls: 'note warn' }, [
-          el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
-          el('span', null, [
-            el('b', { text: '주문번호는 꼭 남겨둬. ' }),
-            '이 번호로 /order 페이지에서 진행 상태를 볼 수 있어. 입금 확인은 수동이라 조금 걸릴 수 있어.'
-          ])
         ])
       ]));
+
+      /* 토큰이 든 링크를 잃어버리면 발급된 키를 웹에서 못 본다 → 크게 안내 */
+      if (link) {
+        out.appendChild(el('div', { cls: 'card' }, [
+          el('p', { cls: 'eyebrow', style: 'margin-bottom:6px', text: '이 링크를 저장해둬' }),
+          el('p', { cls: 'sub small', style: 'margin-bottom:10px' }, [
+            '발급된 키는 ', el('b', { text: '이 링크(주문번호 + 확인코드)' }),
+            '로 들어와야 보여. 카톡 나에게 보내기 같은 데 붙여놔줘.'
+          ]),
+          el('div', { cls: 'big' }, [
+            el('div', { cls: 'k', text: '주문 상태 링크' }),
+            el('div', { cls: 'v sm mono', style: 'font-size:13px;font-weight:600', text: full }),
+            el('div', { cls: 'btn-row' }, [
+              copyBtn(function () { return full; }, '링크'),
+              el('a', { cls: 'btn sm primary', href: link }, '열어보기' )
+            ])
+          ]),
+          el('p', { cls: 'tiny dim', style: 'margin:10px 0 0',
+                    text: '이 브라우저에는 확인코드가 저장돼서, 같은 브라우저면 주문번호만으로도 다시 볼 수 있어.' })
+        ]));
+      }
 
       window.scrollTo(0, 0);
       toast('주문 접수됐어', 'ok');
@@ -942,7 +1026,7 @@
 
   /* /api/lookup 응답 정규화 → 기능맵 */
   function pickFeatures(res) {
-    var src = pick(res, ['features', 'feature', 'entitlements', 'ents']);
+    var src = pick(res, ['feature_list', 'featureList', 'features', 'feature', 'entitlements', 'ents']);
     if (!src) {
       var lic = pick(res, ['license', 'lic', 'data']);
       if (lic) src = pick(lic, ['features', 'entitlements']);
@@ -961,7 +1045,8 @@
                 ? ts(pick(e, ['expires_at', 'expiresAt', 'expire_at'])) > Date.now()
                 : !!pick(e, ['on', 'active', 'enabled']),
           expiresAt: ts(pick(e, ['expires_at', 'expiresAt', 'expire_at'])),
-          plan: str(pick(e, ['plan', 'plan_id']))
+          plan: str(pick(e, ['plan', 'plan_id'])),
+          daysLeft: num(pick(e, ['days_left', 'daysLeft']))
         };
       });
       return map;
@@ -996,7 +1081,10 @@
     var devOn = !!devRaw && devRaw !== '0' && devRaw !== 'false';
     var devName = str(pick(res, ['device_name', 'deviceName']));
     var revoked = !!pick(res, ['revoked']);
-    var blocked = str(pick(res, ['blocked_reason', 'blockedReason', 'blocked']));
+    var blockedOn = !!pick(res, ['blocked', 'blocked_reason', 'blockedReason']);
+    /* 사유 문자열이 있으면 보여주고, boolean 이면 사유 없이 차단 표시만 */
+    var blockedWhy = str(pick(res, ['blocked_reason', 'blockedReason']));
+    if (blockedWhy === 'true' || blockedWhy === 'false') blockedWhy = '';
     var resets  = num(pick(res, ['reset_count', 'resetCount']));
 
     clear(out);
@@ -1006,13 +1094,15 @@
         el('span', { cls: 'chip info', text: '라이선스 키' }),
         devOn ? el('span', { cls: 'chip ok', text: '기기 등록됨' }) : el('span', { cls: 'chip', text: '기기 미등록' }),
         revoked ? el('span', { cls: 'chip bad', text: '사용 중지' }) : null,
-        blocked ? el('span', { cls: 'chip bad', text: '차단됨' }) : null
+        blockedOn ? el('span', { cls: 'chip bad', text: '차단됨' }) : null
       ]),
       el('div', { cls: 'v mono', style: 'font-size:clamp(17px,5vw,22px);font-weight:800;margin:11px 0 4px;word-break:break-all', text: key }),
       el('div', { cls: 'btn-row' }, [copyBtn(function () { return key; }, '키')]),
       devName ? el('p', { cls: 'tiny dim', style: 'margin:12px 0 0', text: '등록 기기 · ' + devName }) : null,
       (resets !== null && resets > 0) ? el('p', { cls: 'tiny dim', style: 'margin:4px 0 0', text: '기기 초기화 이력 ' + resets + '회' }) : null,
-      blocked ? el('p', { cls: 'err', style: 'margin:10px 0 0', text: '차단 사유 · ' + blocked }) : null
+      blockedWhy ? el('p', { cls: 'err', style: 'margin:10px 0 0', text: '차단 사유 · ' + blockedWhy })
+                 : (blockedOn ? el('p', { cls: 'err', style: 'margin:10px 0 0',
+                                          text: '관리자가 차단한 키야. 관리자에게 문의해줘.' }) : null)
     ]);
     out.appendChild(head);
 
@@ -1023,15 +1113,19 @@
 
     FEATURES.forEach(function (f) {
       var st = feats[f.id];
-      var left = daysLeft(st.expiresAt, now);
+      /* 서버가 days_left 를 주면 그걸 믿는다 (시계 차이로 하루 어긋나는 걸 막음) */
+      var left = (st.daysLeft === null || st.daysLeft === undefined) ? daysLeft(st.expiresAt, now) : st.daysLeft;
       var on = st.on && left > 0;
       var denom = planDays(st.plan) || Math.max(30, left);
       var pct = on ? clamp(Math.round(left / denom * 100), 3, 100) : 0;
+      if (!on && !st.expiresAt && st.plan) pct = 100;   // 활성화 대기: 기간 안 깎임
       var barCls = 'bar' + (!on ? ' off' : (left <= 3 ? ' bad' : (left <= 7 ? ' warn' : '')));
 
+      var notStarted = !on && !st.expiresAt && !!st.plan;   // 구매했지만 앱에서 아직 활성화 안 함
       var chip = on
         ? el('span', { cls: 'chip ' + (left <= 7 ? 'warn' : 'ok'), text: (left <= 7 ? '만료 임박 · ' : '사용중 · ') + 'D-' + left })
-        : el('span', { cls: 'chip', text: st.expiresAt ? '만료됨' : '미구매' });
+        : (notStarted ? el('span', { cls: 'chip info', text: '활성화 대기' })
+                      : el('span', { cls: 'chip', text: st.expiresAt ? '만료됨' : '미구매' }));
 
       var bar = el('div', {
         cls: barCls, role: 'progressbar', 'aria-label': f.name + ' 남은 기간',
@@ -1047,11 +1141,12 @@
         bar,
         el('div', { cls: 'meta' }, [
           el('span', { text: st.plan ? planName(st.plan) + ' 플랜' : (on ? '' : '아직 안 켜져 있어') }),
-          el('span', { cls: 'left', text: st.expiresAt ? '만료 ' + dateKr(st.expiresAt, true) : '' })
+          el('span', { cls: 'left', text: st.expiresAt ? '만료 ' + dateKr(st.expiresAt, true)
+                                                       : (notStarted ? '앱에 키 넣으면 기간 시작' : '') })
         ]),
         el('div', { cls: 'btn-row' }, [
-          el('a', { cls: 'btn sm' + (on ? '' : ' primary'), href: buyUrl([f.id], 'month', key) },
-             on ? '연장하기' : '구매하기')
+          el('a', { cls: 'btn sm' + (on || notStarted ? '' : ' primary'), href: buyUrl([f.id], 'month', key) },
+             (on || notStarted) ? '연장하기' : '구매하기')
         ])
       ]);
       list.appendChild(row);
@@ -1083,7 +1178,11 @@
       status: (str(pick(o, ['status', 'state'])) || 'pending').toLowerCase(),
       features: featIds(pick(o, ['features', 'feature', 'items'])),
       plan: str(pick(o, ['plan', 'plan_id'])),
+      planLabel: str(pick(o, ['plan_label', 'planLabel'])),
       amount: amount(pick(o, ['amount', 'total', 'price'])),
+      base: amount(pick(o, ['base_amount', 'baseAmount'])),
+      needsReview: !!pick(o, ['needs_review', 'needsReview']),
+      authed: pick(raw, ['authed']) === undefined ? null : !!raw.authed,
       created: ts(pick(o, ['created_at', 'createdAt', 'created'])),
       handled: ts(pick(o, ['handled_at', 'handledAt'])),
       issued: str(pick(o, ['issued_key', 'issuedKey'])),
@@ -1101,12 +1200,15 @@
 
     var m = location.pathname.match(/\/order\/([^\/?#]+)/);
     var id = (m ? decodeURIComponent(m[1]) : '') || str(qs().get('id'));
+    /* 확인코드(t)가 있어야 발급된 키를 볼 수 있다. URL에 없으면 이 브라우저에 저장된 걸 쓴다. */
+    var token = str(qs().get('t')) || (id ? loadToken(id) : '');
 
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      var v = str(idIn.value);
+      var v = str(idIn.value).toUpperCase().replace(/[^A-Z0-9-]/g, '');
       if (!v) { toast('주문번호를 적어줘', 'bad'); idIn.focus(); return; }
-      location.href = '/order/' + encodeURIComponent(v);
+      var t = loadToken(v);
+      location.href = '/order/' + encodeURIComponent(v) + (t ? '?t=' + encodeURIComponent(t) : '');
     });
 
     if (!id) {
@@ -1125,7 +1227,7 @@
       /* 계좌/이름표를 같이 쓰려고 가격표도 같이 받아둔다 (실패해도 진행) */
       var pricing = loadPrice().catch(function () { return null; });
 
-      api('/api/order/' + encodeURIComponent(oid)).then(function (res) {
+      api('/api/order/' + encodeURIComponent(oid) + (token ? '?t=' + encodeURIComponent(token) : '')).then(function (res) {
         return pricing.then(function () { render(normOrder(res), oid); });
       }).catch(function (e) {
         clear(out);
@@ -1161,7 +1263,13 @@
         pending ? el('div', { style: 'height:10px' }) : null,
         pending ? el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '입금 금액' }),
-          el('div', { cls: 'v mono', text: won(o.amount) })
+          el('div', { cls: 'v accent mono', text: won(o.amount) }),
+          el('div', { cls: 'tiny', style: 'color:var(--amber);font-weight:700;line-height:1.5',
+                      text: '끝자리까지 정확히 이 금액으로 보내줘. 금액으로 주문을 찾아서 입금을 확인해.' }),
+          (o.base !== null && o.amount !== null && o.amount > o.base)
+            ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(o.base) + ' + 주문 확인용 ' + (o.amount - o.base) + '원' })
+            : null,
+          el('div', { cls: 'btn-row' }, [copyBtn(function () { return String(Math.round(o.amount)); }, '금액')])
         ]) : null,
         pending ? el('div', { style: 'height:10px' }) : null,
         pending ? el('div', { cls: 'big' }, [
@@ -1185,7 +1293,7 @@
           el('div', { cls: 'r' }, [el('dt', { text: '기능' }),
             el('dd', { text: o.features.length ? o.features.map(featName).join(' · ') : '-' })]),
           el('div', { cls: 'r' }, [el('dt', { text: '기간' }),
-            el('dd', { text: o.plan ? planName(o.plan) + ' (' + planDays(o.plan) + '일)' : '-' })]),
+            el('dd', { text: o.plan ? (o.planLabel || planName(o.plan)) + ' (' + planDays(o.plan) + '일)' : '-' })]),
           !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono', text: won(o.amount) })]) : null,
           o.depositor ? el('div', { cls: 'r' }, [el('dt', { text: '입금자명' }), el('dd', { text: o.depositor })]) : null,
           o.target ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: o.target })]) : null,
@@ -1209,6 +1317,24 @@
         el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
         el('span', { text: tip })
       ]));
+
+      if (o.needsReview && pending) {
+        out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:10px' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
+          el('span', { text: '이 주문은 금액만으로 자동 구분이 안 돼서 관리자가 직접 확인해. 입금하고 연락처로 알려주면 빨라.' })
+        ]));
+      }
+
+      /* 확인코드(t) 없이 주문번호만으로 들어온 경우 — 발급된 키는 안 보인다 */
+      if (o.authed === false) {
+        out.appendChild(el('div', { cls: 'note', style: 'margin-top:10px' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
+          el('span', null, [
+            '발급된 키와 입금자 정보는 ', el('b', { text: '구매 직후 받은 링크(주문번호 + 확인코드)' }),
+            '로 들어와야 보여. 링크를 잃어버렸으면 관리자에게 주문번호를 알려줘.'
+          ])
+        ]));
+      }
     }
   }
 

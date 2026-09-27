@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>내 키 조회 · 카톡 매크로</title>
+<meta name="description" content="라이선스 키를 넣으면 기능별 남은 기간과 기기 등록 여부를 보여줘.">
+<meta name="theme-color" content="#0B0F14">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body data-page="my">
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/">
+      <img src="/favicon.svg" alt="" width="26" height="26">
+      <span>카톡 매크로<small>MACRO · BOT</small></span>
+    </a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a href="/buy" data-nav="buy">구매</a>
+      <a href="/my" data-nav="my">내 키</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="wrap" style="padding-top:26px">
+    <p class="eyebrow">내 키</p>
+    <h1 style="font-size:clamp(23px,6vw,31px)">키 상태 조회</h1>
+    <p class="lead">기능별 남은 기간과 기기 등록 여부를 보여줘.</p>
+
+    <form id="lookupForm" class="card" novalidate>
+      <div class="fld" id="fld-key">
+        <label for="key">라이선스 키</label>
+        <input type="text" id="key" name="key" class="keyin" inputmode="text"
+               placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19"
+               autocapitalize="characters" autocomplete="off" spellcheck="false"
+               aria-describedby="key-hint">
+        <p class="hint" id="key-hint">앱 [내정보] 화면이나 발급 안내에서 받은 키를 그대로 넣어줘.</p>
+        <p class="err" id="err-key" role="alert" hidden></p>
+      </div>
+      <div style="height:12px"></div>
+      <button type="submit" id="lookupBtn" class="btn primary wide">조회</button>
+    </form>
+
+    <div id="result" hidden style="margin-top:12px"></div>
+
+    <!-- 기기 교체 안내 -->
+    <div class="card" style="margin-top:12px">
+      <p class="eyebrow" style="margin-bottom:6px">기기를 바꿨다면</p>
+      <p class="sub small" style="margin-bottom:10px">이 키는 <b>기기 1대에 고정</b>돼.
+        휴대폰을 바꾸거나 초기화했으면 관리자에게 <b>기기 초기화</b>를 요청해줘.
+        관리자가 초기화해주면 새 기기에서 다시 활성화할 수 있어.</p>
+      <p class="sub small" style="margin-bottom:10px">요청할 때 <b>키</b>와 <b>바꾼 이유</b>(기기 교체 / 초기화 / 수리)를
+        같이 알려주면 빨라. 초기화 횟수는 기록에 남아서, 여러 기기를 돌려쓰는 용도로는 안 돼.</p>
+      <p class="tiny dim" id="adminContact" style="margin:0">관리자 연락처는 구매할 때 안내받은 곳으로 문의해줘.</p>
+    </div>
+
+    <div class="note dim" style="margin-top:12px">
+      <span class="ic" aria-hidden="true">i</span>
+      <span>이 페이지는 키만 넣으면 볼 수 있어서 <b>기능 · 만료일 · 기기 등록 여부</b>만 보여줘.
+        기기 ID나 세션 같은 값은 여기서 절대 안 보여줘.</span>
+    </div>
+  </section>
+</main>
+
+<footer class="bot">
+  <div class="wrap">
+    <div class="links">
+      <a href="/">처음으로</a>
+      <a href="/buy">구매 신청</a>
+    </div>
+    <p style="margin:0">키가 꺼진 기능은 [구매하기]를 누르면 그 기능만 골라진 신청 폼으로 넘어가</p>
+  </div>
+</footer>
+</body>
+</html>

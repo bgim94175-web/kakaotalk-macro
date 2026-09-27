@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>주문 상태 · 카톡 매크로</title>
+<meta name="description" content="주문번호로 입금 대기 · 발급 상태를 확인해.">
+<meta name="theme-color" content="#0B0F14">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body data-page="order">
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/">
+      <img src="/favicon.svg" alt="" width="26" height="26">
+      <span>카톡 매크로<small>MACRO · BOT</small></span>
+    </a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a href="/buy" data-nav="buy">구매</a>
+      <a href="/my" data-nav="my">내 키</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="wrap" style="padding-top:26px">
+    <p class="eyebrow">주문 상태</p>
+    <h1 style="font-size:clamp(23px,6vw,31px)">주문 진행 상황</h1>
+    <p class="lead">입금이 확인되면 여기에 발급된 키가 떠.</p>
+
+    <div id="result"></div>
+
+    <!-- 주문번호가 없거나 못 찾았을 때만 보임 -->
+    <div id="findWrap" hidden style="margin-top:12px">
+      <form id="findForm" class="card" novalidate>
+        <div class="fld">
+          <label for="oid">주문번호</label>
+          <input type="text" id="oid" name="oid" placeholder="접수할 때 받은 주문번호"
+                 autocomplete="off" spellcheck="false" maxlength="64">
+          <p class="hint">구매 신청 직후 화면이나 복사해둔 주문번호를 넣어줘.</p>
+        </div>
+        <div style="height:12px"></div>
+        <button type="submit" class="btn primary wide">조회</button>
+      </form>
+    </div>
+
+    <div class="note dim" style="margin-top:12px">
+      <span class="ic" aria-hidden="true">i</span>
+      <span>입금 확인은 사람이 직접 해. 입금했는데 오래 그대로면 주문번호와 입금자명을 들고 관리자에게 문의해줘.</span>
+    </div>
+  </section>
+</main>
+
+<footer class="bot">
+  <div class="wrap">
+    <div class="links">
+      <a href="/">처음으로</a>
+      <a href="/buy">구매 신청</a>
+      <a href="/my">내 키 조회</a>
+    </div>
+    <p style="margin:0">발급된 키는 앱에 넣으면 바로 활성화돼 · 키 1개 = 기기 1대</p>
+  </div>
+</footer>
+</body>
+</html>

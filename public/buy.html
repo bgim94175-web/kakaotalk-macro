@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>구매 신청 · 카톡 매크로</title>
+<meta name="description" content="기능을 골라 구매 신청하면 주문번호와 입금 계좌를 바로 알려줘.">
+<meta name="theme-color" content="#0B0F14">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body data-page="buy">
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/">
+      <img src="/favicon.svg" alt="" width="26" height="26">
+      <span>카톡 매크로<small>MACRO · BOT</small></span>
+    </a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a href="/buy" data-nav="buy">구매</a>
+      <a href="/my" data-nav="my">내 키</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="wrap" style="padding-top:26px">
+    <p class="eyebrow">구매 신청</p>
+    <h1 style="font-size:clamp(23px,6vw,31px)">필요한 기능 고르고<br>입금 정보만 남겨줘</h1>
+    <p class="lead" style="margin-bottom:22px">접수하면 주문번호와 입금 계좌를 바로 보여줄게.
+      입금이 확인되면 관리자가 키를 발급해.</p>
+
+    <!-- 접수 결과 (제출 성공하면 여기에 그려짐) -->
+    <div id="result" hidden></div>
+
+    <form id="orderForm" class="form" novalidate autocomplete="on">
+      <div id="formWrap" class="form">
+
+        <!-- 기능 -->
+        <fieldset id="fld-feature">
+          <legend class="lb" style="margin-bottom:8px">기능 선택 <span class="req" aria-hidden="true">*</span>
+            <span class="sr">필수, 하나 이상</span></legend>
+          <div id="featRows" class="grid" style="gap:9px"></div>
+          <p class="err" id="err-feature" role="alert" hidden></p>
+          <p class="hint" style="margin-top:8px">기능마다 만료일이 따로 돌아가. 3종 다 고르면 묶음 할인이 붙어.</p>
+        </fieldset>
+
+        <!-- 플랜 -->
+        <fieldset>
+          <legend class="lb" style="margin-bottom:8px">결제 기간 <span class="req" aria-hidden="true">*</span></legend>
+          <div id="planSeg"></div>
+          <p class="hint" style="margin-top:8px">기간은 앱에서 키를 <b>처음 활성화한 시점</b>부터 시작해.</p>
+        </fieldset>
+
+        <!-- 기존 키 (연장) -->
+        <div class="fld" id="fld-key">
+          <label for="key">기존 키 · 연장할 때만</label>
+          <input type="text" id="key" name="key" class="keyin" inputmode="text"
+                 placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19"
+                 autocapitalize="characters" autocomplete="off" spellcheck="false"
+                 aria-describedby="key-hint">
+          <p class="hint" id="key-hint">쓰고 있는 키의 기간을 늘리거나 기능을 추가할 거면 그 키를 적어줘.
+            새로 시작하는 거면 <b>비워두면 돼</b>.</p>
+          <p class="err" id="err-key" role="alert" hidden></p>
+        </div>
+
+        <!-- 입금자명 -->
+        <div class="fld" id="fld-depositor">
+          <label for="depositor">입금자명 <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="depositor" name="depositor" placeholder="홍길동"
+                 autocomplete="name" maxlength="40" aria-describedby="dep-hint">
+          <p class="hint" id="dep-hint">실제로 <b>입금할 때 찍히는 이름</b> 그대로 적어줘. 다르면 확인이 늦어져.</p>
+          <p class="err" id="err-depositor" role="alert" hidden></p>
+        </div>
+
+        <!-- 연락처 -->
+        <div class="fld" id="fld-contact">
+          <label for="contact">연락처 <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="contact" name="contact" placeholder="카톡 ID 또는 전화번호"
+                 autocomplete="tel" maxlength="60" aria-describedby="con-hint">
+          <p class="hint" id="con-hint">키를 전달하고 문제 생겼을 때 연락할 곳이야.</p>
+          <p class="err" id="err-contact" role="alert" hidden></p>
+        </div>
+
+        <!-- 메모 -->
+        <div class="fld" id="fld-memo">
+          <label for="memo">메모 · 선택</label>
+          <textarea id="memo" name="memo" maxlength="500"
+                    placeholder="요청사항이 있으면 적어줘 (예: 저녁에 연락 부탁)"></textarea>
+        </div>
+
+        <p class="hint" id="bankHint" style="margin:0"></p>
+        <p class="err" id="submitErr" role="alert" hidden></p>
+
+        <!-- 실시간 금액 + 제출 -->
+        <div id="sum" class="sum"></div>
+      </div>
+    </form>
+
+    <div class="note dim" style="margin-top:18px">
+      <span class="ic" aria-hidden="true">i</span>
+      <span>받은 정보는 키 발급과 입금 확인에만 써. 비밀번호나 카드번호는 절대 묻지 않아 —
+        그런 걸 요구하는 연락이 오면 무시해줘.</span>
+    </div>
+  </section>
+</main>
+
+<footer class="bot">
+  <div class="wrap">
+    <div class="links">
+      <a href="/">처음으로</a>
+      <a href="/my">내 키 조회</a>
+    </div>
+    <p style="margin:0">키 1개 = 기기 1대 · 무통장 입금 · 입금 확인은 수동이야</p>
+  </div>
+</footer>
+</body>
+</html>
