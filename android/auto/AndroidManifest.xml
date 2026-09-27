@@ -30,6 +30,12 @@
     <!-- 알림 읽기 권한 설정 화면으로 보내기 -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
+    <!-- 다른 앱 위에 표시. 사진 전송에 꼭 필요하다 —
+         안드로이드 10+ 는 앱이 화면에 없을 때 startActivity 를 조용히 막는데(백그라운드 액티비티 차단),
+         이 권한이 있으면 예외로 허용된다. 매크로는 백그라운드에서 도니까 이게 없으면
+         카톡 공유창이 아예 안 뜬다. 오버레이 창을 띄우는 용도로는 쓰지 않는다. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- QUERY_ALL_PACKAGES 안 쓴다. 카톡만 조회한다. -->
     <queries>
         <package android:name="com.kakao.talk" />

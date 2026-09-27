@@ -114,9 +114,16 @@ public final class ImageSender {
         }
 
         if (!accessibilityOn(c)) {
-            Log.add(c, "접근성 권한이 꺼져 있어서 이미지 전송을 못 했어");
+            Log.add(c, "접근성 권한이 꺼져 있어서 이미지 전송을 못 했어 — "
+                    + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 켜줘");
             fire(onDone);
             return;
+        }
+        if (!overlayOn(c)) {
+            // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
+            // 다만 예약 발송(백그라운드)에서는 100% 실패하므로 확실히 알려준다.
+            Log.add(c, "「다른 앱 위에 표시」 권한이 꺼져 있어 — 앱을 보고 있을 때는 될 수 있지만, "
+                    + "예약 발송(화면 꺼진 상태)에서는 카톡 공유창이 안 떠. 설정에서 켜줘");
         }
 
         final String room2 = r;
@@ -172,6 +179,43 @@ public final class ImageSender {
             Log.add(c, "접근성 권한 상태를 못 읽었어 — " + t.getClass().getSimpleName());
         }
         return false;
+    }
+
+    /**
+     * "다른 앱 위에 표시" 가 켜져 있나.
+     * 안드로이드 10+ 는 앱이 화면에 없을 때 startActivity 를 조용히 막는다(백그라운드 액티비티 차단).
+     * 이 권한이 있으면 예외로 허용되는데, 매크로는 백그라운드에서 도니까
+     * <b>이게 없으면 카톡 공유창이 아예 안 뜬다.</b> (오버레이를 그리는 데 쓰지는 않는다)
+     */
+    public static boolean overlayOn(Context c) {
+        if (c == null) return false;
+        try {
+            return android.provider.Settings.canDrawOverlays(c);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** "다른 앱 위에 표시" 설정 화면 인텐트 (이 앱 항목으로 바로) */
+    public static Intent overlaySettingsIntent(Context c) {
+        Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+        try {
+            if (c != null) i.setData(Uri.parse("package:" + c.getPackageName()));
+        } catch (Throwable ignore) { }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return i;
+    }
+
+    /** "다른 앱 위에 표시" 설정 열기 */
+    public static void openOverlaySettings(Context c) {
+        if (c == null) return;
+        try {
+            c.startActivity(overlaySettingsIntent(c));
+            Ui.toast(c, "「카톡 오토」 를 켜줘");
+        } catch (Throwable t) {
+            Log.add(c, "「다른 앱 위에 표시」 설정을 못 열었어 — 설정 › 애플리케이션 › 카톡 오토 에서 직접 켜줘");
+            Ui.toast(c, "설정 › 애플리케이션 › 카톡 오토 › 다른 앱 위에 표시");
+        }
     }
 
     /** 접근성 설정 화면으로 보내는 인텐트 */
@@ -255,6 +299,22 @@ public final class ImageSender {
 
         Log.add(j.app, "사진 " + list.size() + "장 공유창 열었어 — 방: " + j.room + " (최대 "
                 + (TIMEOUT_MS / 1000) + "초 기다릴게)");
+
+        // 6초 안에 카톡 화면을 한 번도 못 봤으면 공유창 자체가 안 뜬 거다 (백그라운드 차단이 대표 원인).
+        final long launchedAt = System.currentTimeMillis();
+        main().postDelayed(new Runnable() {
+            @Override public void run() {
+                if (current == null || current.id != j.id) return;
+                if (KakaoAccessibility.sawKakaoSince(launchedAt)) return;   // 떴다 — 계속 기다린다
+                KakaoAccessibility.disarm();
+                String why = overlayOn(j.app)
+                        ? "카톡이 공유 요청을 무시했어 — 카톡을 최신 버전으로 업데이트해봐"
+                        : "「다른 앱 위에 표시」 권한이 꺼져 있어서 안드로이드가 공유창을 막았어 — "
+                          + "설정 › 애플리케이션 › 카톡 오토 › 다른 앱 위에 표시 를 켜줘";
+                Log.add(j.app, "사진 전송 실패: 카톡 공유창이 안 떴어. " + why);
+                finish(j.id, false, "공유창이 안 뜸");
+            }
+        }, 6000L);
 
         main().postDelayed(new Runnable() {
             @Override public void run() {

@@ -92,6 +92,13 @@ public final class KakaoAccessibility extends AccessibilityService {
     // ── 예약(armed) 상태 — 서비스 인스턴스와 별개로 살아있어야 해서 static ────────
     private static volatile KakaoAccessibility INSTANCE = null;
     private static volatile boolean armed = false;
+    /** 카톡 화면을 마지막으로 본 시각 (0 = 한 번도 못 봄). 공유창이 떴는지 진단용. */
+    private static volatile long lastKakaoWindowAt = 0L;
+
+    /** since 이후로 카톡 화면을 본 적 있나 */
+    public static boolean sawKakaoSince(long since) {
+        return lastKakaoWindowAt >= since;
+    }
     private static volatile String targetRoom = null;
     private static volatile long armedUntil = 0L;
     private static volatile Result callback = null;
@@ -254,6 +261,10 @@ public final class KakaoAccessibility extends AccessibilityService {
         CharSequence pkg = null;
         try { pkg = e.getPackageName(); } catch (Throwable ignore) { }
         if (pkg == null || !KAKAO.contentEquals(pkg)) return;
+
+        // 카톡 화면을 실제로 봤다는 표시. 공유창이 아예 안 뜬 경우와
+        // 떴는데 방을 못 고른 경우를 구분하는 데 쓴다 (ImageSender 진단).
+        lastKakaoWindowAt = System.currentTimeMillis();
 
         int type;
         try { type = e.getEventType(); } catch (Throwable ignore) { return; }

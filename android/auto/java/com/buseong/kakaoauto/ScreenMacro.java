@@ -448,6 +448,16 @@ public final class ScreenMacro {
             }));
         }
 
+        boolean ovOn;
+        try { ovOn = ImageSender.overlayOn(a); } catch (Throwable t) { ovOn = false; }
+        if (!ovOn) {
+            f.body.addView(Nav.note(a, "「다른 앱 위에 표시」 가 꺼져 있어.\n"
+                    + "지금은 앱을 보고 있을 때만 사진이 나가고, 예약 발송(화면 꺼짐)에서는 못 보내.",
+                    Theme.AMBER, "다른 앱 위에 표시 켜기", new Runnable() {
+                @Override public void run() { ImageSender.openOverlaySettings(a); }
+            }));
+        }
+
         // 사진 수동 전송은 대상 방 목록의 "첫 번째 방" 한 곳으로만 간다 → 라벨에 방 이름을 박는다
         final String imgRoom = s.macro.rooms.isEmpty() ? "" : s.macro.rooms.get(0);
         final TextView now = Ui.btn(a, imgLabel(imgRoom), false);

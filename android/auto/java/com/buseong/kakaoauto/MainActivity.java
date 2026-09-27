@@ -454,8 +454,11 @@ public final class MainActivity extends Activity {
         boolean acc = false;
         try { acc = ImageSender.accessibilityOn(a); } catch (Throwable t) { acc = false; }
         final boolean accOn = acc;
+        boolean ov = false;
+        try { ov = ImageSender.overlayOn(a); } catch (Throwable t) { ov = false; }
+        final boolean ovOn = ov;
 
-        if (noti && batt && accOn) return null;
+        if (noti && batt && accOn && ovOn) return null;
 
         LinearLayout card = Ui.card(a);
         card.addView(permRow(a, "알림 접근", "카톡 알림을 읽어서 방을 찾고 답장으로 보낸다. 이게 없으면 아무것도 못 보내.",
@@ -475,6 +478,12 @@ public final class MainActivity extends Activity {
         card.addView(permRow(a, "접근성 (사진 전송)", "사진 첨부 발송에만 필요해. 텍스트만 보낼 거면 안 켜도 돼.",
                 accOn, new Runnable() {
                     @Override public void run() { ImageSender.openSettings(a); }
+                }));
+        card.addView(Ui.divider(a));
+        card.addView(permRow(a, "다른 앱 위에 표시 (사진 전송)",
+                "이게 없으면 화면이 꺼진 동안 카톡 공유창이 안 떠서 예약 발송 때 사진이 안 나가.",
+                ovOn, new Runnable() {
+                    @Override public void run() { ImageSender.openOverlaySettings(a); }
                 }));
         return card;
     }
