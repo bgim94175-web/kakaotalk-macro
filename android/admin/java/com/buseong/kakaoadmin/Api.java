@@ -83,15 +83,30 @@ public final class Api {
     public static final String[] PLAN_CODES  = { "month", "quarter", "year", "custom" };
     public static final String[] PLAN_LABELS = { "1개월", "3개월", "1년", "직접입력" };
 
-    /** 감사기록 종류 — 빈 문자열은 '전체' */
-    public static final String[] AUDIT_KINDS = {
+    /**
+     * 감사기록 종류 — 빈 문자열은 '전체'.
+     *
+     * 서버가 `/admin/audit` 응답에 `kinds` / `alert_kinds` 를 내려주면 {@link #learnAudit}
+     * 이 이 목록 뒤에 새 종류를 <b>덧붙인다</b>. 그래서 서버에 종류가 늘어도 앱을 안 고쳐도 되고,
+     * 앞쪽 순서(=화면 세그먼트 인덱스)는 그대로라 이미 그려진 필터도 안 깨진다.
+     * 아래 하드코딩은 서버가 안 내려줄 때의 폴백이다.
+     */
+    public static volatile String[] AUDIT_KINDS = {
         "", "activate", "mismatch", "takeover", "bad_sig", "tamper",
-        "reset", "order", "expired", "revoked", "bad_deposit_token"
+        "reset", "order", "expired", "revoked", "bad_deposit_token", "bad_admin_pw"
     };
-    public static final String[] AUDIT_KIND_LABELS = {
+    public static volatile String[] AUDIT_KIND_LABELS = {
         "전체", "활성화", "기기불일치", "지문변경", "서명위조", "변조탐지",
-        "기기초기화", "주문", "기간만료", "회수·차단", "입금토큰"
+        "기기초기화", "주문", "기간만료", "회수·차단", "입금토큰", "관리자 비번 실패"
     };
+
+    /** 눈에 띄는 색(RED)으로 보여줄 종류 — 폴백. 서버 `alert_kinds` 가 오면 그게 우선이다. */
+    private static final String[] ALERT_KINDS_FALLBACK = {
+        "mismatch", "takeover", "bad_sig", "tamper", "bad_deposit_token", "bad_admin_pw"
+    };
+
+    /** 서버가 내려준 alert_kinds (없으면 null → 폴백을 쓴다) */
+    private static volatile String[] alertKinds = null;
 
     /** 주문 상태 필터 */
     public static final String[] ORDER_STATUS        = { "pending", "done", "canceled", "" };
@@ -370,6 +385,88 @@ public final class Api {
         return (plan == null || plan.length() == 0) ? "-" : plan;
     }
 
+    /**
+     * 경보(RED)로 보여줄 종류인가. 서버가 내려준 `alert_kinds` 를 먼저 보고,
+     * 없으면 하드코딩 폴백을 쓴다 (Ui.auditColor 가 이걸로 색을 정한다).
+     */
+    public static boolean isAlertKind(String kind) {
+        if (kind == null || kind.length() == 0) return false;
+        String[] list = alertKinds;
+        if (list == null) list = ALERT_KINDS_FALLBACK;
+        for (int i = 0; i < list.length; i++) {
+            if (kind.equals(list[i])) return true;
+        }
+        return false;
+    }
+
+    /**
+     * `/admin/audit` 응답의 `kinds` / `alert_kinds` 를 반영한다.
+     * 백그라운드 스레드에서 불린다 — 그래서 대상 필드가 전부 volatile 이다.
+     *
+     * kinds 는 <b>덧붙이기만</b> 한다. 이미 화면에 그려진 세그먼트가 인덱스로 이 배열을 읽으니까
+     * 순서를 흔들면 "활성화" 를 눌렀는데 다른 종류가 조회되는 사고가 난다.
+     */
+    private static void learnAudit(JSONObject json) {
+        if (json == null) return;
+        try {
+            JSONArray al = json.optJSONArray("alert_kinds");
+            if (al != null) {
+                String[] next = new String[al.length()];
+                int n = 0;
+                for (int i = 0; i < al.length(); i++) {
+                    String k = al.optString(i, "");
+                    if (k != null && k.length() > 0) next[n++] = k;
+                }
+                if (n > 0) {
+                    String[] trimmed = new String[n];
+                    System.arraycopy(next, 0, trimmed, 0, n);
+                    alertKinds = trimmed;
+                }
+            }
+        } catch (Throwable ignore) { /* 못 읽으면 폴백으로 간다 */ }
+
+        try {
+            JSONArray ks = json.optJSONArray("kinds");
+            if (ks == null || ks.length() == 0) return;
+            String[] have = AUDIT_KINDS;
+            String[] haveLabels = AUDIT_KIND_LABELS;
+            java.util.ArrayList<String> add = new java.util.ArrayList<String>();
+            for (int i = 0; i < ks.length(); i++) {
+                String k = ks.optString(i, "");
+                if (k == null || k.length() == 0) continue;
+                if (contains(have, k) || add.contains(k)) continue;
+                add.add(k);
+            }
+            if (add.isEmpty()) return;
+
+            String[] kinds = new String[have.length + add.size()];
+            String[] labels = new String[have.length + add.size()];
+            System.arraycopy(have, 0, kinds, 0, have.length);
+            for (int i = 0; i < kinds.length; i++) {
+                if (i < haveLabels.length) labels[i] = haveLabels[i];
+            }
+            for (int i = 0; i < add.size(); i++) {
+                String k = add.get(i);
+                kinds[have.length + i] = k;
+                labels[have.length + i] = kindLabel(k);   // 모르는 종류면 원문 그대로
+            }
+            for (int i = 0; i < labels.length; i++) {
+                if (labels[i] == null) labels[i] = kindLabel(kinds[i]);
+            }
+            // 라벨을 먼저 갈아끼운다 — 화면이 kinds 를 먼저 읽고 labels 를 나중에 읽어도 길이가 맞다
+            AUDIT_KIND_LABELS = labels;
+            AUDIT_KINDS = kinds;
+        } catch (Throwable ignore) { /* 못 읽으면 지금 목록을 그대로 쓴다 */ }
+    }
+
+    private static boolean contains(String[] arr, String v) {
+        if (arr == null || v == null) return false;
+        for (int i = 0; i < arr.length; i++) {
+            if (v.equals(arr[i])) return true;
+        }
+        return false;
+    }
+
     public static String kindLabel(String kind) {
         if (kind == null) return "-";
         if (kind.equals("activate")) return "활성화";
@@ -382,6 +479,7 @@ public final class Api {
         if (kind.equals("reset")) return "기기초기화";
         if (kind.equals("order")) return "주문";
         if (kind.equals("bad_deposit_token")) return "입금토큰";
+        if (kind.equals("bad_admin_pw")) return "관리자 비번 실패";
         return kind;
     }
 
@@ -531,6 +629,8 @@ public final class Api {
             r.code = code;
             r.json = json;
             r.ok = json.optBoolean("ok", false);
+            // 서버가 audit 종류 목록을 같이 내려주면 그걸 쓴다 (하드코딩은 폴백)
+            if (r.ok) learnAudit(json);
             if (!r.ok) {
                 String e = json.optString("error", null);
                 if (e == null || e.length() == 0 || "null".equals(e)) e = "서버가 거절했어";

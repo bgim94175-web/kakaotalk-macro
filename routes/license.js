@@ -50,13 +50,40 @@ async function allowedSigs() {
   return list;
 }
 
-// 목록이 완전히 비어있으면 통과(초기 이관 유예). 값이 있으면 반드시 일치해야 한다.
-async function sigOk(appSig) {
-  const list = await allowedSigs();
-  if (!list.length) return true;
-  const s = String(appSig || '').trim().toLowerCase();
-  return s.length > 0 && list.indexOf(s) >= 0;
+// ── 서명 검사 강도. APP_SIG_MODE 환경변수로 정한다. 허용목록(env + DB)과 **분리**해야 한다.
+//    예전엔 "목록이 비어있으면 통과" 였는데, 그러면 관리자앱에서 서명 하나를 추가하는 순간
+//    app_sig 를 아예 안 보내는 구버전 앱(v1.8)이 전원 잠긴다. 그래서 강도를 따로 둔다.
+//      off     — 검사 안 함
+//      lenient — (기본) app_sig 를 보냈으면 목록과 대조, 안 보냈으면 통과 → 구버전과 공존 가능
+//      strict  — app_sig 필수 + 목록에 있어야 함 → 구버전은 막힌다(전원 업데이트 후에 켜라)
+function sigMode() {
+  const m = String(process.env.APP_SIG_MODE || '').trim().toLowerCase();
+  if (m === 'off' || m === 'strict' || m === 'lenient') return m;
+  return 'lenient';
 }
+
+// 통과면 null, 막아야 하면 'bad_app_sig'.
+async function sigProblem(appSig) {
+  const mode = sigMode();
+  if (mode === 'off') return null;
+  const list = await allowedSigs();
+  const s = String(appSig || '').trim().toLowerCase();
+
+  if (!list.length) {
+    // 목록이 비어 있으면 대조할 게 없다. strict 로 설정돼 있어도 전원을 잠그는 건 설정 실수가
+    // 분명하니 막지 않고 크게 경고만 한다 (잠긴 사용자를 되살리는 게 훨씬 비싸다).
+    if (mode === 'strict') {
+      console.error('[license] APP_SIG_MODE=strict 인데 허용목록이 비어 있다 → lenient 로 동작한다. '
+        + 'ALLOWED_APP_SIGS 에 정품 서명 SHA-256 을 넣어라 (docs/APP_SIGNATURE.txt)');
+    }
+    return null;
+  }
+  if (!s.length) return mode === 'strict' ? 'bad_app_sig' : null;  // 구버전은 lenient 에서만 통과
+  return list.indexOf(s) >= 0 ? null : 'bad_app_sig';
+}
+
+// 하위호환용 래퍼 (기존 호출부가 boolean 을 기대한다)
+async function sigOk(appSig) { return (await sigProblem(appSig)) === null; }
 
 // ── 요청 값 정리
 function pick(v, max) {
@@ -123,11 +150,11 @@ function buildOk(req, key, deviceId, lic, featMap, session, nonce, now, opts) {
   });
 }
 
-// app_sig / MIN_APP_VERSION 검사.
-// 필드를 아예 안 보내면 건너뛴다(구버전 호환). 보냈으면 반드시 통과해야 한다 —
-// 쓰레기 서명을 달고 오면 /verify 든 /heartbeat 든 /entitlements 든 다 bad_app_sig 로 막힌다.
+// app_sig / MIN_APP_VERSION 검사. 강도는 APP_SIG_MODE 가 정한다 (sigProblem 주석 참고).
+// lenient(기본) 에서는 필드를 아예 안 보내면 건너뛰고(구버전 호환), 보냈으면 반드시 목록에 있어야 한다.
+// strict 에서는 필드가 없어도 막힌다 — /verify · /heartbeat · /entitlements 전부 같은 규칙이다.
 async function appCheck(req, v, where) {
-  if (v.appSig && !(await sigOk(v.appSig))) {
+  if (await sigProblem(v.appSig)) {
     await audit.record(req, 'bad_sig', { key: v.key, device_id: v.deviceId, device_name: v.deviceName,
       detail: where + ' app_sig=' + v.appSig + ' ver=' + (v.appVer || '-') });
     return 'bad_app_sig';
@@ -406,3 +433,5 @@ module.exports = router;
 module.exports.bustSigCache = bustSigCache;
 module.exports.RECHECK_MS = RECHECK_MS;
 module.exports.GRACE_MS = GRACE_MS;
+// 테스트용 훅 (서명 검사 강도를 단독으로 검증한다)
+module.exports.__test = { sigProblem: sigProblem, sigMode: sigMode, allowedSigs: allowedSigs };

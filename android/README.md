@@ -9,7 +9,8 @@
 
 > ⚠️ **기존 v1.8 / v1.4 사용자에게 배포하기 전에 5장을 먼저 읽어라.**
 > 서명키가 달라서 **기존 앱을 삭제해야** v2.0 이 설치되고(설정이 날아간다),
-> `ALLOWED_APP_SIGS` 에 새 서명 하나만 넣으면 **구버전 사용자 전원이 즉시 잠긴다.**
+> `ALLOWED_APP_SIGS` 에 **값을 하나라도 넣으면 구버전 사용자 전원이 즉시 잠긴다.**
+> 이관 중에는 **비워두는 것**이 유일한 안전한 설정이다 (→ 5-2).
 
 Gradle 도 AndroidX 도 안 쓴다. `aapt2 → javac → d8 → zipalign → apksigner` 를 직접 부른다.
 외부 라이브러리 의존성은 **0개**다. (`org.json` 은 안드로이드 내장이라 그냥 쓴다)
@@ -111,9 +112,6 @@ base64 -w0 android/keystore/app.jks     # 맥은 base64 -i android/keystore/app.
 KEYSTORE_B64="$(base64 -w0 keystore/app.jks)" KS_PASS="<진짜 비번>" ./build.sh all
 ```
 
-공개 레포로 전환할 때 순서: Secret 두 개 등록 → `git rm --cached android/keystore/app.jks`
-→ `.gitignore` 에 `android/keystore/*.jks` 추가 → (히스토리에 남은 키 정리 또는 키 교체 여부 판단).
-
 ### 3-1. 🔐 `app.jks` 를 절대 잃어버리지 마라
 
 잃으면 **다음 버전에서 사용자 전원이 또 앱을 지우고 다시 깔아야 한다** (지금 v1.8→v2.0 에서 겪는 그 일).
@@ -131,8 +129,55 @@ base64 -w0 keystore/app.jks
 
 ```bash
 KEYSTORE_B64="$(cat 백업한_base64.txt)" KS_PASS="<비번>" ./build.sh auto
-# → 출력된 서명 hex 가 docs/APP_SIGNATURE.txt 값과 같으면 백업이 살아있는 것이다
+# → 출력된 서명 hex 가 docs/APP_SIGNATURE_HISTORY.md 의 v2.0 값과 같으면 백업이 살아있는 것이다
+#    (docs/APP_SIGNATURE.txt 와 비교하면 안 된다 — build.sh 가 방금 그 값으로 덮어써서 항상 같다)
 ```
+
+### 3-2. 키스토어를 레포에서 빼는 절차 (더 강하게 하려면)
+
+지금 상태(커밋된 키 + 소스에 박힌 기본 비번)는 **레포에 접근할 수 있는 사람에게는 서명 핀닝이 없는 것과 같다.**
+그걸 없애려면 키를 레포에서 빼고 **GitHub Secret 에만** 두면 된다. 대가는 "키 백업 책임이 전부 사람에게 온다" 는 것.
+`docs/ANTI_ABUSE.md` 2단의 트레이드오프를 먼저 읽고 판단해라.
+
+```bash
+cd /path/to/kakaotalk-macro
+
+# 1) 키를 base64 한 줄로 만든다 (개행이 섞이면 CI 에서 디코드가 깨진다)
+base64 -w0 android/keystore/app.jks > /tmp/ks.b64     # 맥: base64 -i android/keystore/app.jks > /tmp/ks.b64
+wc -c /tmp/ks.b64                                     # 길이가 0 이 아닌지만 확인
+
+# 2) GitHub Secret 2개 등록 (레포 → Settings → Secrets and variables → Actions → New repository secret)
+#      KEYSTORE_B64 = /tmp/ks.b64 내용 전체
+#      KS_PASS      = 키스토어 비밀번호 (기본값을 쓰고 있었다면 이 기회에 새 비번으로 바꿔라)
+#    gh CLI 가 있으면:
+gh secret set KEYSTORE_B64 < /tmp/ks.b64
+gh secret set KS_PASS                                 # 프롬프트에 비번 입력
+
+# 3) 로컬 백업을 먼저 확보한다 (레포에서 빼면 레포는 더 이상 백업이 아니다)
+cp android/keystore/app.jks ~/안전한곳/kakaomacro-app.jks
+#    권장 보관 위치: 암호 관리자(1Password·Bitwarden 등)의 파일 첨부 + 외장 디스크 1개.
+#    base64 텍스트도 같이 넣고 KS_PASS 를 같은 항목에 적어둬라. 둘이 떨어지면 못 쓴다.
+#    클라우드 드라이브에 평문으로 두지 마라 — 그건 레포에 두는 것과 위험이 같다.
+
+# 4) 레포에서 추적 제거 + 무시 등록
+git rm --cached android/keystore/app.jks
+printf '\nandroid/keystore/*.jks\n' >> .gitignore
+git add .gitignore && git commit -m "chore: 키스토어를 레포에서 빼고 Secret 으로 옮김"
+
+# 5) CI 가 Secret 으로 서명하는지 확인 (Actions → 최신 실행 로그)
+#    "KEYSTORE_B64 환경변수로 서명키를 복원한다" 가 찍히고
+#    "기본 키스토어 비밀번호를 쓰고 있어" 경고가 안 찍혀야 한다.
+#    빌드된 APK 의 서명 hex 가 docs/APP_SIGNATURE_HISTORY.md 의 v2.0 값과 같아야 한다.
+```
+
+- **4번 이후에도 git 히스토리에는 키가 남아있다.** 레포를 공개로 바꿀 거면 히스토리 정리
+  (`git filter-repo` 등)까지 하거나, 그냥 키가 유출된 것으로 보고 **키를 교체**해야 한다.
+  교체하면 **사용자 전원이 앱을 지우고 다시 깔아야 한다**(지금 v1.8→v2.0 에서 겪는 그 일) — DEPLOY.md 4장.
+- 로컬에서 빌드할 때도 `KEYSTORE_B64` + `KS_PASS` 를 주면 된다(3장 예시). 안 주면 파일이 없어서
+  `build.sh` 가 **새 키를 만들어버리고**, 그 APK 는 기존 사용자에게 덮어쓰기 설치가 안 된다. 주의해라.
+
+공개 레포로 전환할 때 순서 요약: Secret 두 개 등록 → 로컬 백업 확인 → `git rm --cached android/keystore/app.jks`
+→ `.gitignore` 에 `android/keystore/*.jks` 추가 → (히스토리에 남은 키 정리 또는 키 교체 여부 판단).
 
 ---
 
@@ -155,8 +200,15 @@ KEYSTORE_B64="$(cat 백업한_base64.txt)" KS_PASS="<비번>" ./build.sh auto
 ```
 
 "**서버 등록용 hex**" (콜론 없는 소문자) 가 서버에 넣을 값이다.
-같은 값이 `docs/APP_SIGNATURE.txt` 에도 자동으로 기록된다 — **빌드할 때마다 덮어쓰므로 손으로 고치지 마라.**
-(구버전 서명은 이 파일에 적지 말고 `ALLOWED_APP_SIGS` 에 직접 넣어라 → 5-2) 따로 확인하려면:
+같은 값이 `docs/APP_SIGNATURE.txt` 에도 자동으로 기록된다 — **빌드할 때마다 현재 빌드 hex 한 줄로
+덮어쓰므로(기계 판독용) 손으로 고치지 마라.**
+
+> 📒 **알려진 서명 전부는 `docs/APP_SIGNATURE_HISTORY.md` 에 있다.**
+> `APP_SIGNATURE.txt` 는 이력을 남기지 않으니(덮어쓴다) 구버전 서명·CN·versionCode 는 그 파일에서 봐라.
+> **빌드 검증도 히스토리 파일의 v2.0 행과 대조해라** — `APP_SIGNATURE.txt` 와 비교하는 건
+> build.sh 가 직전에 같은 값을 써넣기 때문에 **항상 통과하는 무의미한 검증이다.**
+
+따로 확인하려면:
 
 ```bash
 $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs out/KakaoAuto_v2.0.apk
@@ -167,14 +219,15 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs out/KakaoAuto_v2
 ### 4-2. 등록 — 방법 A: 환경변수 (권장)
 
 Render → 해당 웹서비스 → **Environment** → `ALLOWED_APP_SIGS` 에 넣고 저장 → 재배포.
-값이 여러 개면 쉼표로 이어 붙인다 (구버전 키와 신버전 키를 동시에 허용할 때).
+값이 여러 개면 쉼표로 이어 붙인다 (여러 세대의 v2.x 정품 서명을 동시에 허용할 때).
 
 ```
-ALLOWED_APP_SIGS=33ed6784cbea8bb3...,8a91bc...
+ALLOWED_APP_SIGS=33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730fa
 ```
 
-> ⚠️ **기존 v1.8 사용자가 남아있는 동안 새 hex 하나만 넣지 마라 — 그 순간 전원이 잠긴다.**
-> 단계별로 넣는 방법은 아래 5장 표를 봐라 (DEPLOY.md 4-2 와 같은 내용).
+> ⚠️ **기존 v1.8 사용자가 남아있는 동안에는 여기에 아무 값도 넣지 마라 — 넣는 순간 전원이 잠긴다.**
+> **구버전 서명을 같이 넣어도 안 풀린다.** v1.8 앱은 `app_sig` 를 아예 보내지 않아서
+> 대조할 값이 없고, 목록이 비어있지 않으면 서버가 `bad_app_sig` 로 거부한다. 자세한 건 아래 5-2.
 
 ### 4-3. 등록 — 방법 B: 관리자앱
 
@@ -188,6 +241,9 @@ ALLOWED_APP_SIGS=33ed6784cbea8bb3...,8a91bc...
 기본값은 `0` (강제 업데이트 끔) 이다.
 
 **전원이 v2.0 으로 넘어온 걸 확인한 뒤에 올려라.** 이관 중에 올리면 v1.8 사용자가 그대로 막힌다.
+막히는 정도는 `bad_app_sig` 와 같지만(기능 전체 잠금), 사용자가 보는 문구가
+**"앱을 최신 버전으로 업데이트해줘"** 라서 원인이 바로 보이고 `0` 으로 되돌리면 즉시 복구된다.
+그래서 **서명목록보다 이걸 먼저 올려서 구버전 잔존을 떠보는** 순서를 권한다(5-2).
 
 ---
 
@@ -232,25 +288,29 @@ ALLOWED_APP_SIGS=33ed6784cbea8bb3...,8a91bc...
 
 ### 5-2. 이관 단계별 서버 설정 (`ALLOWED_APP_SIGS` · `MIN_APP_VERSION`)
 
-**새 서명 하나만 넣으면 그 순간 기존 v1.8 사용자 전원이 `bad_app_sig` 로 잠긴다.**
-DEPLOY.md 가 이 변수를 "필수" 로 적어놨지만, **이관 기간에는 그대로 하면 위험하다.** 단계를 나눠라.
+> 🔴 **`ALLOWED_APP_SIGS` 에 값을 넣는 순간 v1.8 사용자 전원이 `bad_app_sig` 로 잠긴다.
+> 구버전 서명 hex 를 같이 넣어도 마찬가지다.**
+>
+> **v1.8 앱은 `app_sig` 필드를 아예 보내지 않는다.** 서버 `routes/license.js` 의 `/verify` 는
+> 목록이 비어있지 않으면 `sigOk(app_sig)` 를 통과해야 하고, `sigOk` 는
+> `s.length > 0 && 목록에 있음` 이라서 **빈 값을 무조건 거부한다.**
+> 즉 구버전 요청은 **대조 자체가 일어나지 않고** 바로 `bad_app_sig` 로 떨어진다.
+> 그래서 "세 값 다 넣기" 는 **동작하지 않는 설정이다.** 이관 중 안전한 값은 **빈 값 하나뿐이다.**
 
 | 단계 | 언제 | `ALLOWED_APP_SIGS` | `MIN_APP_VERSION` | 결과 |
 |---|---|---|---|---|
-| **1단계 — 이관 중** | v2.0 배포 시작 ~ 전원 전환 완료 전 | **비워둔다**(서명검사 꺼짐)<br>또는 **세 값을 쉼표로 다 넣는다** | `0` | 구버전·신버전 둘 다 정상 동작 |
-| **2단계 — 전환 완료 후** | 남은 구버전 사용자가 없는 걸 확인한 뒤 | **새 값 하나만** | `20` | 구버전은 `update_required`, 리패키징은 `bad_app_sig` |
+| **1단계 — 이관 중** | v2.0 배포 시작 ~ 전원 전환 완료 전 | **비워둔다** (빈 값 = 서명검사 건너뜀) | `0` | 구버전·신버전 둘 다 정상 동작 |
+| **2단계 — 전환 완료 후** | 아래 방법으로 구버전 잔존이 없는 걸 확인한 뒤 | **v2.0 hex 하나만** | `20` | 구버전은 `update_required`, 리패키징은 `bad_app_sig` |
 
-1단계 (둘 중 하나 — **아래쪽을 권한다**, 이관 중에도 방어가 조금 남는다):
+1단계 (이 값 그대로):
 
 ```
-# (a) 비워두기 — 아무 서명이나 통과한다(리패키징 포함)
 ALLOWED_APP_SIGS=
 MIN_APP_VERSION=0
-
-# (b) 세 값 다 넣기 — 이 세 개만 통과한다  ← 권장
-ALLOWED_APP_SIGS=33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730fa,5b938482fa1d6eaff6a0cbbb23977d71ae0f65b8acd95a19c790d99c7f282467,3f74e4ed37e9550737757cb62c4fde5e9195ad8f5e8dc3b61e3936a5c0d93f00
-MIN_APP_VERSION=0
 ```
+
+이 기간에는 리패키징 방어(2단)가 꺼져 있다. 대신 **1단(설정 암호화)과 5단(온라인 필수)** 이
+그대로 살아있어서 키 없이 앱을 쓰는 건 여전히 막힌다 — `docs/ANTI_ABUSE.md`.
 
 2단계 (전원 v2.0 확인 후):
 
@@ -259,8 +319,44 @@ ALLOWED_APP_SIGS=33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730f
 MIN_APP_VERSION=20
 ```
 
-성급하게 2단계로 올리면 남아있던 구버전 사용자는 앱이 잠긴 채 연락이 온다.
-관리자앱 [기록] 탭에서 구버전 서명으로 들어오는 요청이 끊긴 걸 확인한 다음에 올려라.
+#### 2단계로 넘어갈 시점 확인 — [기록] 탭으로는 못 한다
+
+[기록] 탭은 **사고만** 남긴다(`bad_sig`·`mismatch`·`tamper`·`expired`·`bad_admin_pw` 등).
+**성공한 인증은 audit 에 안 남고**, 구버전은 `app_sig` 를 보내지도 않으니
+"구버전 서명으로 들어오는 요청이 끊겼다" 를 볼 방법이 **애초에 없다.** 실제로 관측 가능한 건 이거다.
+
+**(A) 키마다 `app_sig` 가 채워졌는지 — 주 지표**
+
+`/verify` 성공 시 서버가 `licenses.app_sig` 를 `COALESCE(새값, 기존값)` 으로 갱신한다.
+v2.0 으로 한 번이라도 인증하면 채워지고, **v1.8 만 쓰는 키는 계속 비어 있다**(안 보내니까 덮이지도 않는다).
+
+- 관리자앱 **[키] 탭 → 키 상세**의 **"마지막 앱 서명"** 항목. 값이 없으면 그 줄이 안 뜬다
+  → 아직 v2.0 으로 안 붙은 키다. 값이 v2.0 hex 면 넘어온 것이다.
+- 한 번에 세는 방법은 `DEPLOY.md` 4-2 의 `curl /admin/list` 예시를 써라
+  (`app_sig` 가 `null` 인 키 + 그 키의 `last_seen` 을 같이 뽑아준다).
+
+**(B) `MIN_APP_VERSION` 을 먼저 올려서 떠보기 — 확인 사살 (무해하지는 않다)**
+
+`ALLOWED_APP_SIGS` 는 비워둔 채 `MIN_APP_VERSION=20` 만 먼저 올린다. 구버전이 남아있으면
+그 사용자는 `update_required` 를 받는다.
+
+**이것도 기능이 막히는 건 `bad_app_sig` 와 같다** — 앱은 서버 판정을 받으면 라이선스 상태를 꺼버리고
+`License.allowed()` 가 전부 거부한다. 차이는 두 개뿐이다.
+
+- 문구가 **"앱을 최신 버전으로 업데이트해줘"** 다(v2.0 앱 기준. 구버전 앱 문구는 v1.8 소스가 없어서
+  확인 못 한다 — 적어도 서버가 내리는 사유는 "위조된 앱" 이 아니라 업데이트 요구로 바뀐다)
+- `MIN_APP_VERSION=0` 으로 내리면 **다음 재검증에서 즉시 복구된다**
+
+그리고 올리자마자 전원이 막히지도 않는다. `/verify` 는 `app_version` 을 안 보낸 요청도 `0 < 20` 으로
+막지만, `/heartbeat`·`/entitlements` 는 **`app_version` 을 보낸 요청만** 검사한다
+(`routes/license.js` 의 `appCheck` → `v.appVer > 0`). 즉 그 필드를 안 보내는 구버전은 이미 인증된
+상태로는 계속 돌아가고 **다시 인증할 때(재설치·기기변경·세션 복구) 막힌다.**
+→ 즉시 스위치가 아니라 **서서히 드러나는 신호**다. (A)가 깨끗해진 뒤에 올리고, 며칠~몇 주
+문의가 없으면 그때 `ALLOWED_APP_SIGS` 에 v2.0 hex 를 넣어 2단계를 마무리한다.
+(`update_required` 도 서버 기록에는 안 남는다. 이건 사용자 문의로 확인하는 방법이다)
+
+성급하게 서명목록부터 채우면 남아있던 구버전 사용자는 **앱이 잠긴 채** 연락이 온다.
+순서는 **(A) 확인 → (B) `MIN_APP_VERSION` → 며칠 대기 → `ALLOWED_APP_SIGS`** 다.
 
 ### 5-3. 🔐 `keystore/app.jks` 를 다시는 잃지 마라
 
@@ -339,11 +435,15 @@ MIN_APP_VERSION=20
 | `javac 가 없어` | JDK 17 이상 설치 후 PATH 확인 |
 | `자바 소스가 없어` | `auto/java/...` 에 `.java` 파일이 있는지 확인 |
 | 설치할 때 `앱이 설치되지 않았습니다` | 서명키가 달라서다(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). 기존 앱을 먼저 지워라 — 5-1 |
-| 업데이트 뒤 구버전 사용자가 전부 잠김 | `ALLOWED_APP_SIGS` 에 새 서명만 넣었을 때 그렇게 된다. 이관 중엔 5-2 의 1단계 값으로 되돌려라 |
+| 업데이트 뒤 구버전 사용자가 전부 잠김 | `ALLOWED_APP_SIGS` 에 값이 들어있어서다(구버전 서명을 같이 넣었어도 마찬가지). **비워라** — 5-2 |
 | `기본 키스토어 비밀번호를 쓰고 있어` 경고 | `KS_PASS` 환경변수(또는 GitHub Secret)로 비번을 넘겨라 — 3장 |
+| 빌드한 서명 hex 가 `APP_SIGNATURE_HISTORY.md` 와 다름 | 키스토어가 바뀌었다(백업 복원 실패 · 새로 생성됨). **배포하지 마라** — 그대로 내면 사용자가 또 앱을 지워야 한다. 3-1 백업부터 확인 |
 | 앱은 켜지는데 메시지가 안 나감 | (1) 알림 접근 허용, (2) 카톡 알림 ON, (3) 라이선스 활성화 여부를 [내정보] 탭에서 확인 |
 | 화면 끄면 멈춤 | 배터리 최적화 제외 (위 6-(3)) |
-| `bad_app_sig` 로 거절당함 | 이 문서 4장대로 서명 SHA-256 을 `ALLOWED_APP_SIGS` 에 등록 |
+| 구버전 사용자만 `bad_app_sig` | `ALLOWED_APP_SIGS` 를 비워라(5-2 1단계). v1.8 은 `app_sig` 를 안 보내서 목록에 뭘 넣어도 통과 못 한다 |
+| v2.0 인데 `bad_app_sig` | 그 APK 서명이 허용목록과 다르다 = 다른 키로 서명된 빌드다. 4장대로 현재 hex 를 등록하거나 정품 APK 를 다시 배포해라 |
+| 관리자앱이 **503 `admin_disabled`** | 앱 문제가 아니다. **서버 `ADMIN_PASSWORD` 가 비어있거나 기본값(`change-me-now`)** 이라 `/admin/*` 전체가 닫힌 것 — `DEPLOY.md` 1장 |
+| 관리자앱 **401** / **429** | 401 = 비밀번호 불일치. 429 = 분당 실패 한도(`ADMIN_FAIL_PER_MIN`, 기본 10) 초과로 IP 차단(기본 15분) — `DEPLOY.md` 7-1 |
 
 ---
 

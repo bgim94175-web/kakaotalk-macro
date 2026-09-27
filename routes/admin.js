@@ -327,6 +327,7 @@ router.get('/admin/orders', wrap(async (req, res) => {
   params.push(limit);
   const r = await db.q(
     'SELECT * FROM orders' + where + ' ORDER BY created_at DESC LIMIT $' + params.length, params);
+  // shapeOrder 가 android_ok(아이폰 확인 체크 여부)까지 실어준다 → 관리자앱이 환불 분쟁 때 본다
   res.json({ ok: true, now: Date.now(), bank: pricing.bankInfo(), orders: r.rows.map(db.shapeOrder) });
 }));
 

@@ -65,6 +65,35 @@
 
   var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없어';
 
+  /* ── 자동 입금확인이 꺼져 있으면(DEPOSIT_AUTO_APPROVE=0 또는 DEPOSIT_TOKEN 미설정)
+        "자동으로 발급돼" 라고 약속한 문구를 전부 "관리자 확인 후 발급" 으로 바꾼다.
+        꺼둔 채로 자동 발급을 약속하면 입금한 구매자가 오지 않는 키를 기다린다.
+        서버는 /api/price · /api/order · /api/order/:id 응답에 auto_approve 를 실어준다. */
+  var AUTO_APPROVE = true;
+
+  function applyAutoCopy(on) {
+    if (on === undefined || on === null) return;   // 정보가 없으면 건드리지 않는다
+    AUTO_APPROVE = on !== false;
+    if (AUTO_APPROVE) return;
+    var els = document.querySelectorAll('[data-manual]');
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute('data-manual-applied')) continue;
+      els[i].innerHTML = els[i].getAttribute('data-manual');
+      els[i].setAttribute('data-manual-applied', '1');
+    }
+  }
+
+  /** 입금 후 안내 한 줄 — 자동/수동에 따라 갈린다 */
+  function issueMsg(review) {
+    if (review) return '입금하면 관리자가 확인할게';
+    return AUTO_APPROVE ? '입금하면 1~2분 안에 키가 자동으로 나와' : '입금하면 관리자가 확인하고 키를 발급할게';
+  }
+
+  /* 서버가 48시간 방치된 pending 주문을 자동 취소한다 (ORDER_PENDING_TTL_MS).
+     접수 결과 화면과 주문 상태 페이지에서 같은 문구를 쓴다. */
+  var TTL_MSG = '48시간 안에 입금하지 않으면 주문이 자동 취소돼. 취소돼도 입금하면 관리자가 확인해줄 수 있어.';
+  var TTL_CANCELED_MSG = '자동 취소됐어 (미입금 48시간). 이미 입금했으면 관리자에게 알려줘.';
+
   var STATUS = {
     pending:  { kr: '입금 대기 중',            cls: 'warn' },
     paid:     { kr: '입금 확인됨 · 발급 준비',  cls: 'info' },
@@ -521,6 +550,7 @@
     if (pricePromise) return pricePromise;
     pricePromise = api('/api/price').then(function (raw) {
       PRICE = normalizePrice(raw);
+      applyAutoCopy(raw && raw.auto_approve);    // 자동 발급이 꺼져 있으면 문구를 바꾼다
       return PRICE;
     }).catch(function (e) {
       pricePromise = null;                       // 다시 시도할 수 있게 캐시 비움
@@ -918,7 +948,10 @@
           buyer_name: dep,
           contact: con,
           memo: memo,
-          target_key: key || null
+          target_key: key || null,
+          /* 안드로이드 확인 체크 — 서버가 주문에 같이 저장한다 (환불 분쟁 증거).
+             위 검증에서 체크 안 된 주문은 여기까지 못 오니 항상 true 다. */
+          android_ok: true
         }
       }).then(function (res) {
         showResult(res, ids, plan, key, c);
@@ -939,6 +972,7 @@
     });
 
     function showResult(res, ids, plan, key, c) {
+      applyAutoCopy(res && res.auto_approve);    // 접수 직후 안내 문구도 자동/수동을 맞춘다
       var id     = str(pick(res, ['id', 'order_id', 'orderId']));
       var token  = str(pick(res, ['token', 't']));
       var amt    = amount(pick(res, ['amount', 'total']));
@@ -963,7 +997,7 @@
       out.appendChild(el('div', { cls: 'card' }, [
         el('div', { cls: 'chip ok', text: '주문 접수됨' }),
         el('h2', { style: 'margin:12px 0 6px',
-                   text: review ? '입금하면 관리자가 확인할게' : '입금하면 1~2분 안에 키가 자동으로 나와' }),
+                   text: issueMsg(review) }),
         el('p', { cls: 'sub small', style: 'margin-bottom:16px',
                   text: review
                     ? '아래 계좌로 금액을 그대로 보내줘. 이 주문은 금액만으로 구분이 안 돼서 관리자가 직접 확인해. 입금자명도 적어준 이름 그대로 해줘.'
@@ -989,6 +1023,13 @@
             id ? copyBtn(function () { return id; }, '주문번호') : null,
             link ? el('a', { cls: 'btn sm primary', href: link }, '주문 상태 보기 (자동 갱신)') : null
           ])
+        ]),
+
+        /* 48시간 미입금 자동취소 (서버 ORDER_PENDING_TTL_MS) — 접수 직후에 미리 알려준다 */
+        el('div', { style: 'height:12px' }),
+        el('div', { cls: 'note dim' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
+          el('span', { text: TTL_MSG })
         ]),
 
         review ? el('div', { style: 'height:12px' }) : null,
@@ -1271,6 +1312,10 @@
       amount: amount(pick(o, ['amount', 'total', 'price'])),
       base: amount(pick(o, ['base_amount', 'baseAmount'])),
       needsReview: !!pick(o, ['needs_review', 'needsReview']),
+      /* 서버가 48시간 미입금으로 자동 취소한 주문 (SPEC · ORDER_PENDING_TTL_MS).
+         사람이 취소한 것과 문구를 다르게 보여줘야 한다 — 뒤늦게 입금한 구매자를 안심시켜야 하니까. */
+      autoCanceled: !!(pick(o, ['auto_canceled', 'autoCanceled']) ||
+                       pick(raw, ['auto_canceled', 'autoCanceled'])),
       authed: pick(raw, ['authed']) === undefined ? null : !!raw.authed,
       created: ts(pick(o, ['created_at', 'createdAt', 'created'])),
       handled: ts(pick(o, ['handled_at', 'handledAt'])),
@@ -1313,22 +1358,27 @@
          · 5초마다 GET /api/order/:id?t=...
          · 탭이 숨으면 멈추고, 다시 보이면 즉시 한 번 확인한다
            (서버 레이트리밋 분당 30회 + Render 무료 자원 아끼려고)
-         · done / canceled 면 폴링 영구 중단
+         · done / canceled 면 폴링 영구 중단. pending 과 paid(입금 확인됨·발급 대기) 는 둘 다 계속 확인한다
          · 최대 30분 폴링하고 중단 → [상태 새로고침] 버튼만 남긴다
-         · 네트워크 실패는 조용히 다음 차례로 넘긴다 (연속 5회면 딱 한 번만 알린다) */
+         · 네트워크 실패는 조용히 다음 차례로 넘긴다 (연속 5회면 딱 한 번만 알린다)
+         · 첫 조회가 네트워크 오류로 실패해도 폴링을 시작한다. 지하철에서 페이지를 연 구매자한테
+           "이 탭 열어두면 돼" 라고 약속했으니, 연결이 돌아오면 알아서 이어져야 한다.
+           단 영구 실패(404 / not_found / bad_request)는 더 두드려도 소용없으니 끊는다 */
     var POLL_MS   = 5000;
     var POLL_MAX  = 30 * 60 * 1000;
     var FAIL_WARN = 5;
 
     var timer = null;          // 다음 폴링 타이머
     var inFlight = false;      // 요청 겹침 방지
-    var polling = false;       // pending 이라 계속 확인해야 하는 상태인가
+    var polling = false;       // pending/paid 라서 계속 확인해야 하는 상태인가 (실패 재시도 중에도 true)
     var startAt = Date.now();  // 폴링 시작 시각 (30분 기준점)
     var lastAt = 0;            // 마지막 요청 시각 (focus 중복 호출 방지)
     var fails = 0, failToasted = false;
     var timedOut = false;      // 30분 초과로 중단됨
     var lastSig = '';          // 응답이 그대로면 다시 안 그린다 (깜빡임·포커스 유실 방지)
     var lastOrder = null;
+    var lastError = null;      // 마지막 실패 { msg, gone } — 아직 한 번도 못 불러온 동안 화면을 유지한다
+    var everLoaded = false;    // 주문을 한 번이라도 받아왔나
     var waitBox = null;        // 살아있는 표시 (점 애니메이션)
 
     function orderPath(oid) {
@@ -1352,7 +1402,9 @@
     function giveUp() {
       timedOut = true;
       stopPoll();
-      if (lastOrder) { lastSig = ''; render(lastOrder, id); }
+      lastSig = '';
+      if (lastOrder) { render(lastOrder, id); }
+      else if (lastError) { renderError(); }   // 30분 내내 연결이 안 된 경우
     }
 
     function elapsedKr() {
@@ -1362,6 +1414,60 @@
     }
 
     function tickWait() { if (waitBox && waitBox.el) waitBox.el.textContent = elapsedKr(); }
+
+    /* 점 애니메이션 + 경과시간이 붙은 "살아있음" 표시. 폴링 중일 때만 만든다. */
+    function makeWait(txt) {
+      var elap = el('span', { cls: 'el', 'aria-hidden': 'true', text: elapsedKr() });
+      var box = el('div', { cls: 'wait', role: 'status', style: 'margin-top:12px' }, [
+        el('span', { cls: 'txt' }, [
+          txt,
+          el('span', { cls: 'dots', 'aria-hidden': 'true' }, [el('i'), el('i'), el('i')])
+        ]),
+        elap
+      ]);
+      waitBox = { box: box, el: elap };
+      return box;
+    }
+
+    /* 48시간 미입금 자동취소 안내 (서버 ORDER_PENDING_TTL_MS) — 입금 대기 중일 때만 */
+    function ttlNote() {
+      return el('div', { cls: 'note dim', style: 'margin-top:10px' }, [
+        el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
+        el('span', { text: TTL_MSG })
+      ]);
+    }
+
+    /* 불러오기 실패 화면. 영구 실패가 아니면 재시도 중이라는 걸 화면에 남긴다 —
+       "다시 시도" 를 안 눌러도 알아서 이어진다는 걸 구매자가 알아야 한다. */
+    function renderError() {
+      var e = lastError || {};
+      var retrying = polling && !timedOut && !e.gone;
+      clear(out);
+      waitBox = null;
+      out.hidden = false;
+      out.appendChild(el('div', { cls: 'card' }, [
+        el('div', { cls: 'state bad', text: e.msg || '주문을 불러올 수 없어' }),
+        el('div', { cls: 'center' }, [
+          el('button', { type: 'button', cls: 'btn sm', onclick: function () { fetchOrder(true); } }, '다시 시도')
+        ])
+      ]));
+      if (retrying) {
+        out.appendChild(makeWait('다시 연결을 시도하고 있어'));
+        out.appendChild(el('div', { cls: 'note', style: 'margin-top:10px' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
+          el('span', { text: '인터넷이 끊겼어도 이 탭을 열어두면 연결되는 대로 알아서 이어서 확인해. ' +
+                             '직접 새로고침 안 해도 돼.' })
+        ]));
+      } else if (!e.gone && timedOut) {
+        out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:12px' }, [
+          el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
+          el('span', { text: '30분 동안 연결이 안 돼서 자동 확인을 멈췄어. [다시 시도] 를 눌러줘. ' +
+                             '계속 안 되면 주문번호와 입금자명을 들고 관리자에게 문의해줘.' })
+        ]));
+      }
+      $('#findWrap').hidden = false;
+      schedule();
+    }
 
     /* loud=true  : 사람이 누른 조회 — 스피너와 에러 화면까지 보여준다
        loud=false : 폴링 — 바뀐 게 없으면 화면을 건드리지 않는다 */
@@ -1386,10 +1492,12 @@
       api(orderPath(id)).then(function (res) {
         return pricing.then(function () {
           fails = 0; failToasted = false;
+          lastError = null; everLoaded = true;
+          applyAutoCopy(res && res.auto_approve);  // 주문 조회 응답에도 실려온다
           var o = normOrder(res);
           lastOrder = o;
           var sig = [o.status, o.issued, o.amount, o.handled, o.needsReview ? 1 : 0,
-                     o.authed === false ? 0 : 1].join('|');
+                     o.autoCanceled ? 1 : 0, o.authed === false ? 0 : 1].join('|');
           if (!loud && sig === lastSig) { tickWait(); return; }   // 바뀐 게 없다
           lastSig = sig;
           render(o, id);
@@ -1398,18 +1506,19 @@
         fails++;
         var gone = e && (e.status === 404 || e.code === 'not_found' || e.code === 'bad_request');
         if (gone) stopPoll();                                     // 없는 주문은 더 두드려봐야 소용없다
-        if (loud || gone) {
-          clear(out);
-          waitBox = null;
-          out.hidden = false;
-          out.appendChild(el('div', { cls: 'card' }, [
-            el('div', { cls: 'state bad', text: (e && e.status === 404) || (e && e.code === 'not_found')
-                        ? '그 주문번호를 못 찾았어' : ((e && e.message) || '주문을 불러올 수 없어') }),
-            el('div', { cls: 'center' }, [
-              el('button', { type: 'button', cls: 'btn sm', onclick: function () { fetchOrder(true); } }, '다시 시도')
-            ])
-          ]));
-          $('#findWrap').hidden = false;
+        /* 첫 조회부터 실패해도 폴링을 켠다. 안 켜면 타이머가 아예 안 돌아서
+           "탭만 열어두면 갱신돼" 가 거짓말이 된다. 영구 실패(gone)는 위에서 끊었다. */
+        else if (!timedOut && !polling) polling = true;
+
+        lastError = { msg: (e && e.status === 404) || (e && e.code === 'not_found')
+                        ? '그 주문번호를 못 찾았어' : ((e && e.message) || '주문을 불러올 수 없어'),
+                      gone: !!gone };
+
+        if (loud || gone || !everLoaded) {
+          /* 폴링이 계속 실패하는 동안 같은 화면을 다시 그려서 깜빡이게 하지 않는다 */
+          var esig = ['ERR', lastError.msg, gone ? 1 : 0, timedOut ? 1 : 0, polling ? 1 : 0].join('|');
+          if (loud || esig !== lastSig) { lastSig = esig; renderError(); }
+          else tickWait();
         } else if (fails >= FAIL_WARN && !failToasted) {
           /* 폴링 실패로 토스트를 도배하지 않는다 — 연속 5회에 한 번만 */
           failToasted = true;
@@ -1442,14 +1551,24 @@
       var st = STATUS[o.status] || { kr: o.status || '알 수 없음', cls: '' };
       clear(out);
       waitBox = null;
+      out.hidden = false;
+      /* 실패 화면에서 열어줬던 주문번호 찾기 폼은 다시 접는다 (재연결 성공) */
+      var fw = $('#findWrap');
+      if (fw) fw.hidden = true;
 
       var showId = o.id || oid;
       var acct = o.account || (PRICE && PRICE.bank) || '';
       var pending = o.status === 'pending';
+      var paid = o.status === 'paid';
       var done = o.status === 'done';
+      var canceled = o.status === 'canceled' || o.status === 'cancelled';
+      /* SPEC 은 paid(입금 확인됨·발급 대기)도 정식 상태다. 화면은 "키 발급만 기다리면 돼" 라고
+         띄우는데 폴링이 끊겨 있으면 그 약속이 깨진다 → pending 과 paid 둘 다 계속 확인한다.
+         끝나는 건 done / canceled 뿐. (모르는 상태도 일단 지켜본다 — 30분 상한이 있다) */
+      var live = !(done || canceled);
+      var autoCanceled = canceled && o.autoCanceled;
 
-      /* pending 이면 계속 확인한다. 발급/취소됐으면 여기서 끝 */
-      if (pending && !timedOut) {
+      if (live && !timedOut) {
         if (!polling) { polling = true; }
       } else {
         stopPoll();
@@ -1457,7 +1576,7 @@
 
       out.appendChild(el('div', { cls: 'card' }, [
         el('div', { style: 'display:flex;align-items:center;gap:9px;flex-wrap:wrap' }, [
-          el('span', { cls: 'chip ' + st.cls, text: st.kr }),
+          el('span', { cls: 'chip ' + st.cls, text: autoCanceled ? '자동 취소됨 · 미입금' : st.kr }),
           o.created ? el('span', { cls: 'tiny dim', text: dateKr(o.created, true) + ' 접수' }) : null
         ]),
 
@@ -1511,43 +1630,54 @@
       ]));
 
       /* 살아있는 표시 — 폴링 중일 때만 */
-      if (pending && polling && !timedOut) {
-        var elap = el('span', { cls: 'el', 'aria-hidden': 'true', text: elapsedKr() });
-        var box = el('div', { cls: 'wait', role: 'status', style: 'margin-top:12px' }, [
-          el('span', { cls: 'txt' }, [
-            o.needsReview ? '관리자 확인을 기다리고 있어' : '입금 확인을 기다리고 있어',
-            el('span', { cls: 'dots', 'aria-hidden': 'true' }, [el('i'), el('i'), el('i')])
-          ]),
-          elap
-        ]);
-        waitBox = { box: box, el: elap };
-        out.appendChild(box);
+      if (live && polling && !timedOut) {
+        out.appendChild(makeWait(paid ? '키 발급을 기다리고 있어'
+                                      : (o.needsReview ? '관리자 확인을 기다리고 있어'
+                                                       : '입금 확인을 기다리고 있어')));
       }
 
       /* 30분 초과 — 자동 확인을 멈췄다고 분명히 알린다 */
-      if (pending && timedOut) {
+      if (live && timedOut) {
         out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:12px' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
-          el('span', { text: '30분 동안 입금 확인이 안 돼서 자동 확인을 멈췄어. ' +
-                             '[상태 새로고침] 을 눌러 다시 확인해줘. 금액을 정확히 보냈는데도 이러면 ' +
-                             '주문번호와 입금자명을 들고 관리자에게 문의해줘.' })
+          el('span', { text: paid
+            ? '30분 동안 키가 발급되지 않아서 자동 확인을 멈췄어. [상태 새로고침] 을 눌러 다시 확인해줘. ' +
+              '그대로면 주문번호를 들고 관리자에게 문의해줘.'
+            : '30분 동안 입금 확인이 안 돼서 자동 확인을 멈췄어. ' +
+              '[상태 새로고침] 을 눌러 다시 확인해줘. 금액을 정확히 보냈는데도 이러면 ' +
+              '주문번호와 입금자명을 들고 관리자에게 문의해줘.' })
         ]));
       }
 
-      var tip = pending
-        ? (timedOut
-            ? '자동 확인은 멈췄어. [상태 새로고침] 을 누르면 다시 확인해.'
-            : (o.needsReview
-                ? '이 주문은 금액만으로 자동 구분이 안 돼서 관리자가 직접 확인할게 (최대 몇 시간). 이 화면은 계속 확인하고 있어.'
-                : '입금하면 보통 1~2분 안에 자동으로 키가 발급돼. 이 화면이 5초마다 알아서 확인하니까 그냥 열어두면 돼.'))
-        : (done
-            ? '발급된 키를 앱에 입력하면 바로 쓸 수 있어. 키 1개는 기기 1대에만 등록돼.'
-            : (o.status === 'paid' ? '입금 확인됐어. 키 발급만 기다리면 돼.'
-                                   : '취소된 주문이야. 다시 신청하려면 구매 페이지로 가줘.'));
-      out.appendChild(el('div', { cls: 'note' + (pending ? ' warn' : '') , style: 'margin-top:12px' }, [
-        el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
+      var tip;
+      if (pending) {
+        tip = timedOut
+          ? '자동 확인은 멈췄어. [상태 새로고침] 을 누르면 다시 확인해.'
+          : (o.needsReview
+              ? '이 주문은 금액만으로 자동 구분이 안 돼서 관리자가 직접 확인할게 (최대 몇 시간). 이 화면은 계속 확인하고 있어.'
+              : (AUTO_APPROVE
+                  ? '입금하면 보통 1~2분 안에 자동으로 키가 발급돼. 이 화면이 5초마다 알아서 확인하니까 그냥 열어두면 돼.'
+                  : '입금하면 관리자가 확인하고 키를 발급할게. 이 화면이 알아서 갱신되니까 그냥 열어두면 돼.'));
+      } else if (paid) {
+        tip = timedOut
+          ? '입금은 확인됐어. 자동 확인만 멈췄으니 [상태 새로고침] 을 눌러줘.'
+          : '입금 확인됐어. 키 발급만 기다리면 돼 — 이 화면이 알아서 갱신되니까 그냥 열어두면 돼.';
+      } else if (done) {
+        tip = '발급된 키를 앱에 입력하면 바로 쓸 수 있어. 키 1개는 기기 1대에만 등록돼.';
+      } else if (autoCanceled) {
+        tip = TTL_CANCELED_MSG;
+      } else if (canceled) {
+        tip = '취소된 주문이야. 다시 신청하려면 구매 페이지로 가줘.';
+      } else {
+        tip = '상태를 계속 확인하고 있어. 오래 그대로면 관리자에게 문의해줘.';
+      }
+      out.appendChild(el('div', { cls: 'note' + (pending || autoCanceled ? ' warn' : '') , style: 'margin-top:12px' }, [
+        el('span', { cls: 'ic', 'aria-hidden': 'true', text: autoCanceled ? '!' : 'i' }),
         el('span', { text: tip })
       ]));
+
+      /* 48시간 미입금 자동취소를 미리 알려준다 (입금 대기 중일 때만) */
+      if (pending) out.appendChild(ttlNote());
 
       /* 발급 완료 — 앱 받는 법까지 이어서 안내한다 */
       if (done && o.issued) {

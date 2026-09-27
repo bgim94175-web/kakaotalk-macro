@@ -131,7 +131,9 @@ elif [ ! -f "$KS" ]; then
   warn "이 파일(keystore/app.jks)을 잃어버리면 다음 버전을 덮어쓰기 업데이트할 수 없다(사용자가 앱을 지워야 한다).
    지금 바로 레포 밖 안전한 곳에 백업해라 — 예: base64 -w0 keystore/app.jks 를 비밀 저장소에 보관.
    레포에 커밋해서 보관하는 건 Private 레포 전제에서만 해라. 공개로 바꿀 거면 파일을 지우고
-   KEYSTORE_B64 + KS_PASS 를 GitHub Secret 으로 옮겨라."
+   KEYSTORE_B64 + KS_PASS 를 GitHub Secret 으로 옮겨라 (절차: android/README.md 3-2).
+   ★ 새로 만든 키는 서명 hex 가 이전과 다르다 → docs/APP_SIGNATURE_HISTORY.md 에 행을 추가하고,
+     기존 사용자가 있으면 ALLOWED_APP_SIGS 이관 단계를 처음부터 다시 밟아야 한다 (DEPLOY.md 4-2)."
 fi
 [ -f "$KS" ] || die "서명키($KS)를 준비하지 못했어."
 
@@ -257,8 +259,10 @@ print_sig() {
 }
 
 # ── 7-1. docs/APP_SIGNATURE.txt 기록 ────────────────────────────────────────
-#  DEPLOY.md / android/README.md 가 이 파일을 "ALLOWED_APP_SIGS 에 넣을 값"으로 안내한다.
-#  그래서 빌드할 때마다 방금 서명한 APK 의 hex 로 갱신한다(중복 제거 · hex 한 줄씩).
+#  이 파일은 "방금 빌드한 APK 의 hex" 만 들고 있는 기계 판독용 파일이다.
+#  빌드마다 덮어쓰므로 이력이 남지 않는다 → 알려진 서명 전부는 docs/APP_SIGNATURE_HISTORY.md 에 있다.
+#  그래서 "출력 hex 와 APP_SIGNATURE.txt 가 같은지" 확인하는 건 의미가 없다(항상 같다).
+#  검증은 아래 check_sig_history() 가 히스토리 파일과 대조해서 해준다.
 write_sig_file() {
   local docs="$HERE/../docs"
   local f="$docs/APP_SIGNATURE.txt"
@@ -266,7 +270,33 @@ write_sig_file() {
   [ "${#SIG_HEXES[@]}" -gt 0 ] || return 0
   printf '%s\n' "${SIG_HEXES[@]}" | awk 'NF && !seen[$0]++' > "$f.tmp" || return 0
   mv "$f.tmp" "$f"
-  ok "docs/APP_SIGNATURE.txt 갱신 ($(wc -l < "$f" | tr -d ' ')줄)"
+  ok "docs/APP_SIGNATURE.txt 갱신 ($(wc -l < "$f" | tr -d ' ')줄 · 현재 빌드 값)"
+}
+
+# ── 7-2. 히스토리 파일과 대조 (서명키가 바뀌었는지 확인) ────────────────────
+#  docs/APP_SIGNATURE_HISTORY.md 에 적힌 알려진 hex 중에 방금 값이 있는지 본다.
+#  없으면 키스토어가 바뀐 것 → 그대로 배포하면 사용자 전원이 앱을 지워야 한다.
+check_sig_history() {
+  local hist="$HERE/../docs/APP_SIGNATURE_HISTORY.md"
+  [ -f "$hist" ] || return 0
+  [ "${#SIG_HEXES[@]}" -gt 0 ] || return 0
+  local unknown=0 h
+  for h in "${SIG_HEXES[@]}"; do
+    if grep -qi -- "$h" "$hist"; then
+      ok "서명 hex 가 docs/APP_SIGNATURE_HISTORY.md 에 있는 값이야 (키스토어 그대로)"
+    else
+      unknown=1
+      printf '%s\n' "$C_ER"
+      printf '  !! 이 서명 hex 는 docs/APP_SIGNATURE_HISTORY.md 에 없는 값이야:\n'
+      printf '       %s\n' "$h"
+      printf '     = 서명키(keystore/app.jks)가 바뀌었다는 뜻이다.\n'
+      printf '     이대로 배포하면 기존 사용자가 앱을 지우고 다시 깔아야 한다.\n'
+      printf '     → 배포를 멈추고 키 백업을 먼저 확인해라 (android/README.md 3-1).\n'
+      printf '     → 키를 일부러 바꾼 거면 히스토리 파일에 행을 추가하고 이관 단계를 다시 밟아라.\n'
+      printf '%s\n' "$C_0"
+    fi
+  done
+  [ "$unknown" = 0 ] || warn "알 수 없는 서명이 있다 (위 경고 참고)"
 }
 
 # ── 8. 메인 ─────────────────────────────────────────────────────────────────
@@ -286,17 +316,23 @@ esac
 printf '\n%s━━━ 서명 SHA-256 ━━━%s\n' "$C_IN" "$C_0"
 for a in "${APKS[@]}"; do print_sig "$a"; done
 write_sig_file
+check_sig_history
 cat <<'NOTE'
 
-  ↑ 위의 "서버 등록용 hex" 값을 서버 환경변수 ALLOWED_APP_SIGS 에 넣어라.
-    (여러 개면 쉼표로 구분. Render → 서비스 → Environment 에서 추가하고 재배포)
-    또는 관리자앱 [설정] → 앱서명 허용목록 에서 추가해도 된다.
-    이 값이 비어있으면 서버가 서명검사를 통과시켜 주지만(이관 유예),
-    리패키징 방지를 위해 꼭 등록해라.
+  ↑ 위의 "서버 등록용 hex" 가 이 빌드의 앱 서명이다.
+    docs/APP_SIGNATURE.txt 에도 같은 값을 써뒀다(기계 판독용 · 빌드마다 덮어씀).
+    알려진 서명 전부(구버전 포함)는 docs/APP_SIGNATURE_HISTORY.md 에 있다.
+    ※ 출력값을 APP_SIGNATURE.txt 와 비교하는 건 의미가 없다 — 방금 그 파일을 덮어썼으니 항상 같다.
+      대조는 히스토리 파일과 해라 (위에서 자동으로 한 번 확인했다).
 
-  ⚠️ 기존 v1.8 / v1.4 사용자가 아직 남아있으면 새 hex "하나만" 넣지 마라 —
-     그 순간 구버전 사용자 전원이 bad_app_sig 로 잠긴다.
-     이관 단계별 설정은 DEPLOY.md 4-2 / android/README.md 5장 의 표를 봐라.
+  ℹ️ 위 hex 를 Render ALLOWED_APP_SIGS 에 넣어라 — 지금 넣어도 구버전은 안 잠긴다.
+     서명 검사 강도는 APP_SIG_MODE 가 따로 정한다 (안 넣으면 lenient):
+       lenient(기본) : app_sig 를 보냈으면 대조, 안 보냈으면 통과 → v1.8 과 공존 가능
+       strict        : app_sig 필수 → v1.8 은 전원 차단된다 (전원 v2.0 전환 후에만 켜라)
+     → 이관 중        : APP_SIG_MODE 비워두기 + MIN_APP_VERSION=0
+     → 전환 완료 후   : APP_SIG_MODE=strict + MIN_APP_VERSION=20
+     (Render → Environment, 또는 관리자앱 [설정] → 앱서명 허용목록)
+     단계별 확인 방법은 DEPLOY.md 4-2 / android/README.md 5-2 의 표를 봐라.
 
 NOTE
 printf '%s완료. 결과물: %s%s\n' "$C_OK" "$OUT" "$C_0"

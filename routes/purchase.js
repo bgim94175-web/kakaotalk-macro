@@ -24,6 +24,15 @@ function cut(v, n) {
   return s.length > n ? s.slice(0, n) : s;
 }
 
+// 체크박스는 true / "true" / "1" / "on" / 1 등 제각각으로 온다 → 느슨하게 받아준다
+function truthy(v) {
+  if (v === true) return true;
+  if (v === false || v === null || v === undefined) return false;
+  if (typeof v === 'number') return v === 1;
+  const t = String(v).trim().toLowerCase();
+  return t === 'true' || t === '1' || t === 'on' || t === 'yes' || t === 'y';
+}
+
 // 같은 길이일 때만 비교 성립 → 길이 다르면 바로 false
 function tsEqual(a, b) {
   const x = Buffer.from(String(a === null || a === undefined ? '' : a), 'utf8');
@@ -44,10 +53,21 @@ function maskKey(k) {
 // GET /api/price — 가격표 (lib/pricing.js 단일 소스)
 // ?features=macro,roombot&plan=month 를 주면 quote 도 같이 계산해준다
 // ─────────────────────────────────────────────────────────────
+// 자동 입금확인이 켜져 있나. 웹 문구가 "자동으로 발급돼" / "관리자가 확인 후 발급" 으로 갈린다 —
+// 꺼둔 채로 "1~2분 안에 자동 발급" 이라고 약속하면 입금한 구매자가 오지 않는 키를 기다린다.
+function autoApproveOn() {
+  return String(process.env.DEPOSIT_AUTO_APPROVE || '1') !== '0';
+}
+// 입금 웹훅 자체가 살아있나 (DEPOSIT_TOKEN 이 없으면 폰 자동화가 아예 붙지 못한다)
+function depositHookOn() {
+  return String(process.env.DEPOSIT_TOKEN || '').trim().length > 0;
+}
+
 router.get('/api/price', wrap(async (req, res) => {
   const body = pricing.table();
   const out = Object.assign({ ok: true }, body);
   out.purchase_base = features.purchaseBase(req);
+  out.auto_approve = autoApproveOn() && depositHookOn();
   const wantFeats = features.normList(req.query.features);
   if (wantFeats.length && req.query.plan) {
     out.quote = pricing.quote(wantFeats, String(req.query.plan));
@@ -74,6 +94,11 @@ router.post('/api/order', wrap(async (req, res) => {
   const depositor = cut(b.depositor, 60);
   if (!depositor) return res.json({ ok: false, reason: 'no_depositor', error: '입금자명을 적어줘' });
 
+  // 아이폰 확인 체크박스 — 값이 false 라도 주문을 거부하지 않는다.
+  // 웹 UI 가 이미 막고 있고, 서버가 막으면 나중에 다른 경로(앱 딥링크·관리자 대행)로
+  // 주문받을 때 걸린다. 기록만 남겨서 환불 분쟁 때 증거로 쓴다.
+  const androidOk = truthy(b.android_ok);
+
   const targetKeyRaw = keys.normKey(b.target_key);
   let targetKey = null;
   if (targetKeyRaw) {
@@ -89,17 +114,19 @@ router.post('/api/order', wrap(async (req, res) => {
     const id = await keys.uniqueOrderId(client);
     await db.q(
       `INSERT INTO orders (id, created_at, status, features, plan, amount, base_amount,
-                           buyer_name, contact, depositor, memo, target_key, token, needs_review)
-       VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+                           buyer_name, contact, depositor, memo, target_key, token, needs_review,
+                           android_ok)
+       VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [id, now, feats.join(','), plan, pick.amount, q.amount,
        cut(b.buyer_name, 60), cut(b.contact, 120), depositor, cut(b.memo, 500), targetKey,
-       token, pick.needs_review], client);
+       token, pick.needs_review, androidOk], client);
     return { id: id, amount: pick.amount, suffix: pick.suffix, needs_review: pick.needs_review };
   });
 
   await audit.record(req, 'order', { key: targetKey || null,
     detail: '주문 접수 ' + made.id + ' / 기능=' + feats.join(',') + ' / 플랜=' + plan +
-            ' / ' + made.amount + '원 / 입금자=' + depositor });
+            ' / ' + made.amount + '원 / 입금자=' + depositor +
+            ' / 안드로이드확인=' + (androidOk ? '예' : '아니오') });
 
   res.json({
     ok: true,
@@ -110,6 +137,7 @@ router.post('/api/order', wrap(async (req, res) => {
     base_amount: q.amount,
     suffix: made.suffix,
     needs_review: made.needs_review,
+    android_ok: androidOk,
     features: feats,
     plan: plan,
     plan_label: q.plan_label,
@@ -120,6 +148,7 @@ router.post('/api/order', wrap(async (req, res) => {
     account: pricing.bankInfo(),
     bank: pricing.bankInfo(),
     contact_info: pricing.contactInfo(),
+    auto_approve: autoApproveOn() && depositHookOn(),
     created_at: now,
     status: 'pending',
   });
@@ -157,11 +186,13 @@ router.get('/api/order/:id', wrap(async (req, res) => {
     view.buyer_name = o.buyer_name;
     view.memo = o.memo;
     view.target_key = o.target_key ? maskKey(o.target_key) : null;
+    view.android_ok = o.android_ok;
   }
 
   res.json(Object.assign({ ok: true, now: Date.now(), authed: authed,
     account: pricing.bankInfo(), bank: pricing.bankInfo(),
-    contact_info: pricing.contactInfo(), order: view }, view));
+    contact_info: pricing.contactInfo(),
+    auto_approve: autoApproveOn() && depositHookOn(), order: view }, view));
 }));
 
 // ─────────────────────────────────────────────────────────────

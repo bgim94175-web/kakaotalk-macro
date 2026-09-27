@@ -7,19 +7,30 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      # ── 기존 3개 (절대 바꾸지 마라. SIGNING_PRIVATE_KEY 를 바꾸면 발급된 키 전부가 잠긴다)
+      # ── 기존 3개 (값을 바꾸지 마라. SIGNING_PRIVATE_KEY 를 바꾸면 발급된 키 전부가 잠긴다)
       - key: DATABASE_URL
         sync: false      # Neon 연결 문자열
+      # ★ ADMIN_PASSWORD 는 반드시 채워라 (12자 이상 무작위).
+      #   비어 있거나 공개 기본값 'change-me-now' 면 서버가 /admin/* 전체를 503(admin_disabled)으로
+      #   닫아버린다 → 관리자앱이 로그인도 목록 조회도 못 하고 키 발급·주문 승인이 전부 막힌다.
+      #   sync: false 는 "여기 안 적고 대시보드에서 넣는다"는 뜻일 뿐, 자동으로 채워지지 않는다.
+      #     node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
       - key: ADMIN_PASSWORD
-        sync: false
+        sync: false      # 필수 · 12자 이상. 비면 관리자앱이 아예 안 붙는다 (503 admin_disabled)
       - key: SIGNING_PRIVATE_KEY
         sync: false      # Ed25519 PKCS8 PEM
 
       # ── 무단사용 방지
       - key: CONFIG_SECRET
         sync: false      # 설정 암호화 키 유도용 HMAC 시크릿 (랜덤 64자 hex). 한 번 정하면 바꾸지 마라
+      # ★ 이관 중(v1.8 사용자가 남아있는 동안)에는 ALLOWED_APP_SIGS 를 반드시 "비워둬라".
+      #   v1.8 앱은 app_sig 를 아예 안 보내기 때문에, 목록에 값이 하나라도 있으면
+      #   (구버전 서명을 같이 넣어도) 구버전 사용자 전원이 bad_app_sig 로 잠긴다.
+      #   전원 v2.0 전환 후에 v2.0 hex 하나만 넣고 MIN_APP_VERSION=20 을 같이 올린다 → DEPLOY.md 4-2
+      - key: APP_SIG_MODE
+        sync: false      # off / lenient(기본) / strict. strict 는 구버전 v1.8 을 전원 차단한다 — DEPLOY.md 4-2 먼저 읽어라
       - key: ALLOWED_APP_SIGS
-        sync: false      # 정품 APK 서명 SHA-256 (쉼표구분). 비어있으면 서명검사 건너뜀
+        sync: false      # 이관 중엔 빈 값. 비어있으면 서명검사 건너뜀 (= 리패키징 방어 꺼짐)
       - key: MIN_APP_VERSION
         sync: false      # 정수 versionCode. 0 이면 강제 업데이트 끔
 
@@ -36,3 +47,25 @@ services:
         sync: false      # 랜덤 32자 이상. 비어있으면 웹훅 자체가 비활성(503)
       - key: DEPOSIT_AUTO_APPROVE
         sync: false      # 1(기본)=금액 일치 시 자동 승인 / 0=기록만 하고 관리자 승인 대기
+
+      # ── 선택 (아래는 하나도 안 넣어도 기본값으로 동작한다. 문제가 생겼을 때만 추가해라)
+      #   설명과 전체 목록은 DEPLOY.md 1-1 참고. 기본값은 코드에 박힌 실제 값이다.
+      #
+      #   레이트리밋 (IP당 분당 · lib/ratelimit.js 의 KIND_LIMITS)
+      #     RATE_LIMIT_PER_MIN        30    /verify /heartbeat /entitlements /config
+      #     RATE_ORDER_READ_PER_MIN   180   GET /api/order/:id (주문 페이지 5초 폴링)
+      #     RATE_ORDER_WRITE_PER_MIN  20    POST /api/order, /api/lookup
+      #     RATE_DEPOSIT_PER_MIN      60    POST /api/deposit-hook
+      #     ADMIN_RATE_LIMIT_PER_MIN  120   /admin/* 전체
+      #   관리자 비밀번호 추측 차단
+      #     ADMIN_FAIL_PER_MIN        10    분당 이 횟수 틀리면 그 IP 차단
+      #     ADMIN_BLOCK_MS            900000    차단 유지 15분
+      #   동작 타이밍
+      #     ORDER_PENDING_TTL_MS      172800000 미입금 주문 자동취소 48시간 (DEPLOY.md 7-2)
+      #     RECHECK_MS                21600000  앱 재검증 간격 6시간
+      #     GRACE_MS                  259200000 오프라인 유예 3일
+      #     EXPIRED_AUDIT_MS          21600000  expired 기록을 키당 6시간에 한 번만
+      #     PING_INTERVAL_MS          600000    셀프핑 10분
+      #   프록시
+      #     TRUST_PROXY_HOPS          1     x-forwarded-for 뒤에서 N번째를 클라이언트 IP 로 쓴다.
+      #                                     Render 기본 구성이면 1 이 맞다. 모르면 넣지 마라.

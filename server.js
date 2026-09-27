@@ -20,25 +20,24 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const app = express();
 
-// Render는 프록시 뒤에 있다 → req.ip / req.protocol 이 실제 값이 되게
-app.set('trust proxy', true);
+// Render는 프록시 뒤에 있다 → req.protocol 이 실제 값이 되게.
+// 다만 true(=전부 신뢰)로 두면 Express 가 XFF 맨 앞 토큰을 req.ip 로 쓴다 → 클라이언트가 위조 가능.
+// 신뢰 홉 수만 준다(TRUST_PROXY_HOPS, 기본 1). 레이트리밋은 req.ip 를 쓰지 않고 rl.ipOf() 를 쓴다.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
 app.disable('x-powered-by');
 
 // 본문 크기 제한 (설정 백업 blob 256KB + 여유)
 app.use(express.json({ limit: '512kb' }));
 
 // ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
-// 사용자 API 는 분당 RATE_LIMIT_PER_MIN(기본 30)회, 관리자 API 는 분당 120회까지 허용한다.
+// 버킷은 종류별로 나뉘어 있다(verify 30 / order-read 180 / order-write 20 / deposit 60 / admin 120,
+// 전부 분당·환경변수로 덮어쓰기 가능 — lib/ratelimit.js 의 KIND_LIMITS 참고).
+// NAT(사무실) 뒤에서 여러 명이 같이 써도 폴링이 결제 대기자끼리 서로를 막지 않게 하려는 분리다.
+// IP 는 rl.ipOf() 로만 뽑는다 — req.ip 는 Express 의 해석이라 우리 의도(XFF 맨 뒤)와 달라질 수 있다.
 // 관리자 비밀번호 연속 실패 차단은 routes/admin.js 의 guard 가 기록하고, 여기서 막는다(기본 15분).
+// 경로 판정은 rl.kindOf() 가 대소문자·끝슬래시를 정규화해서 본다 (/ADMIN/list/ 로 우회 못 하게).
 function limitKind(req) {
-  const p = req.path;
-  // 관리자 API 는 전부 제한 대상 — 비밀번호 무한 추측을 막는다
-  if (p === '/admin' || p.indexOf('/admin/') === 0) return 'admin';
-  if (req.method === 'POST' && (p === '/verify' || p === '/heartbeat' || p === '/entitlements' ||
-      p === '/config' || p === '/api/order' || p === '/api/lookup' || p === '/api/deposit-hook')) return 'api';
-  if (req.method === 'GET' && (p === '/entitlements' || p === '/config')) return 'api';
-  if (req.method === 'GET' && p.indexOf('/api/order/') === 0) return 'api';
-  return false;
+  return rl.kindOf(req);
 }
 
 app.use((req, res, next) => {
@@ -59,11 +58,10 @@ app.use((req, res, next) => {
     }
   }
 
-  const max = kind === 'admin' ? rl.adminMax() : rl.apiMax();
-  const r = rl.hit(kind, ip, max);
+  const r = rl.hit(kind, ip, rl.maxFor(kind));
   if (!r.ok) {
     res.set('Retry-After', String(r.retryAfter));
-    console.log('[rate] 과다요청 차단 ' + ip + ' ' + req.method + ' ' + req.path);
+    console.log('[rate] 과다요청 차단 ' + ip + ' ' + req.method + ' ' + req.path + ' (버킷=' + kind + ')');
     return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 많아. 잠깐 뒤에 다시 해줘' });
   }
   next();
@@ -167,6 +165,10 @@ function warnEnv() {
   if (!String(process.env.ALLOWED_APP_SIGS || '').trim()) console.log('ALLOWED_APP_SIGS 비어있음 → 앱 서명 검사 건너뜀 (리패키징 방어 꺼짐)');
   if (!String(process.env.DEPOSIT_TOKEN || '').trim()) console.log('DEPOSIT_TOKEN 비어있음 → 자동 입금확인 웹훅 비활성');
   if (!fs.existsSync(PUBLIC_DIR)) console.log('public/ 폴더가 없어 → 구매 웹사이트는 아직 안 올라간 상태야 (API는 정상)');
+  // 레이트리밋 설정을 부팅 로그에 남긴다 (429 신고가 들어왔을 때 이 줄부터 본다)
+  const lim = rl.limits();
+  console.log('[rate] 신뢰 프록시 홉=' + rl.trustProxyHops() + ' (TRUST_PROXY_HOPS) / 분당 한도 ' +
+              Object.keys(lim).map((k) => k + '=' + lim[k]).join(' '));
 }
 
 warnEnv();

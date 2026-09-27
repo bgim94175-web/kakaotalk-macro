@@ -69,13 +69,17 @@ public final class Gate {
         String title = everBought ? (name + " 기간이 끝났어") : (name + " 기능은 별도 구매가 필요해");
         String msg = Features.descLong(feature) + "\n\n"
                 + (everBought
-                    ? "연장하면 바로 다시 켜져. 결제 뒤엔 내정보 탭에서 [새로고침]을 눌러줘."
-                    : "이 기능만 따로 살 수 있어. 결제 뒤엔 내정보 탭에서 [새로고침]을 눌러줘.");
+                    ? "연장하면 바로 다시 켜져.\n"
+                    : "이 기능만 따로 살 수 있어.\n")
+                + "결제하면 아래 [지금 확인] 만 누르면 바로 켜져 — 다른 탭으로 갈 필요 없어.";
 
         AlertDialog.Builder b = Ui.dialog(a, title);
         b.setMessage(msg);
         b.setPositiveButton(everBought ? "연장하기" : "구매하기", new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface d, int w) { openBuy(a, feature); }
+        });
+        b.setNeutralButton("지금 확인", new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface d, int w) { refreshNow(a, feature); }
         });
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
@@ -108,7 +112,8 @@ public final class Gate {
             try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = null; }
         }
         String msg = ((why == null || why.length() == 0) ? "이 기기는 잠겼어." : why)
-                + "\n\n키 1개는 기기 1대에서만 쓸 수 있어. 기기를 바꾸거나 초기화했으면 관리자에게 기기 초기화를 요청해줘.";
+                + "\n\n키 1개는 기기 1대에서만 쓸 수 있어. 기기를 바꾸거나 초기화했으면 관리자에게 기기 초기화를 요청해줘."
+                + "\n초기화를 받은 뒤엔 내정보 탭에서 키를 다시 등록하면 풀려 (새로고침으로는 안 풀린다).";
 
         AlertDialog.Builder b = Ui.dialog(a, "이 기기는 잠겼어");
         b.setMessage(msg);
@@ -118,6 +123,50 @@ public final class Gate {
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
         Log.add(a, "기기가 잠겨서 실행을 막았어");
+    }
+
+    /**
+     * 다이얼로그 안에서 제자리 새로고침 (/entitlements). 결제하고 돌아온 사람을
+     * 다른 탭으로 보내지 않는다 — 안내문도 이 흐름으로 맞춰뒀다.
+     *
+     * 콜백은 메인 스레드로 온다(License.post).
+     * 끝나면 (1) 하트비트 주기를 다시 잡고 (잠긴 동안은 12시간 주기였다)
+     * (2) 화면을 그 자리에서 다시 그린다 — 기능이 켜지면 카드·탭이 바로 바뀌어야 한다.
+     */
+    private static void refreshNow(final Activity a, final String feature) {
+        if (a == null) return;
+        final MainActivity main = (a instanceof MainActivity) ? (MainActivity) a : null;
+        final boolean wasShellOk = (main != null) && Nav.shellOk(main);
+
+        Ui.toast(a, "결제·기능 상태를 확인하는 중이야…");
+        License.refresh(a, new License.Cb() {
+            @Override public void done(boolean ok, String reason) {
+                // 잠금이 풀렸을 수 있다 → 잠금용 긴 주기를 정상 주기로 되돌린다
+                try { Scheduler.ensureHeartbeat(a); } catch (Throwable t) {
+                    Log.add(a, "라이선스 확인 주기를 다시 잡지 못했어: " + t);
+                }
+
+                if (!ok) {
+                    String why = null;
+                    try { why = License.reasonKr(reason); } catch (Throwable t) { why = null; }
+                    Ui.toast(a, "확인 못 했어" + ((why == null || why.length() == 0) ? "" : " — " + why));
+                } else {
+                    boolean on = true;
+                    if (feature != null) {
+                        try { on = License.allowed(a, feature); } catch (Throwable t) { on = false; }
+                    }
+                    if (feature == null) {
+                        Ui.toast(a, "상태를 새로 받았어");
+                    } else if (on) {
+                        Ui.toast(a, Features.label(feature) + " 켜졌어! 다시 눌러봐");
+                    } else {
+                        Ui.toast(a, "아직 안 켜졌어. 입금 확인까지 1~2분 걸릴 수 있어 (조금 뒤에 다시 눌러봐)");
+                    }
+                }
+
+                if (main != null) Nav.redraw(main, wasShellOk);
+            }
+        });
     }
 
     private static void openUrl(Context c, String url, String what) {

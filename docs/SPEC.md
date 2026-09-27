@@ -17,7 +17,9 @@
 
 환경변수: `DATABASE_URL`, `ADMIN_PASSWORD`, `SIGNING_PRIVATE_KEY`(Ed25519 PKCS8 PEM),
 `CONFIG_SECRET`(설정 암호화 키 유도용 HMAC 시크릿 · 없으면 SIGNING_PRIVATE_KEY에서 유도),
-`ALLOWED_APP_SIGS`(쉼표구분 SHA-256 hex · 비어있으면 서명검사 통과 처리 = 마이그레이션 유예),
+`ALLOWED_APP_SIGS`(쉼표구분 SHA-256 hex · 관리자앱에서 넣은 `app_signatures` 행과 합집합),
+`APP_SIG_MODE`(`off`/`lenient`(기본)/`strict` — 검사 강도. 허용목록과 **분리**되어 있다.
+ `lenient` 는 `app_sig` 를 보냈을 때만 대조하므로 필드를 안 보내는 v1.8 과 공존한다),
 `MIN_APP_VERSION`(정수 versionCode · 0이면 미적용), `PURCHASE_BASE`(기본 = 서버 자기 주소).
 
 ---
@@ -93,7 +95,9 @@ orders (
   plan TEXT NOT NULL, amount INT NOT NULL,
   buyer_name TEXT, contact TEXT, depositor TEXT, memo TEXT,
   target_key TEXT,                  -- 기존 키에 붙이는 경우
-  issued_key TEXT, handled_at BIGINT
+  issued_key TEXT, handled_at BIGINT,
+  auto_canceled BOOLEAN DEFAULT FALSE, -- 48시간 미입금으로 서버가 자동 취소함 (승인 시 되살아난다)
+  android_ok BOOLEAN DEFAULT FALSE     -- 구매 폼의 "안드로이드 기기 확인" 체크 (환불 분쟁 증거용)
 )
 
 configs (key TEXT PRIMARY KEY, blob TEXT, rev BIGINT, updated_at BIGINT)  -- 앱 설정 클라우드 백업(암호문)
@@ -153,7 +157,11 @@ configs (key TEXT PRIMARY KEY, blob TEXT, rev BIGINT, updated_at BIGINT)  -- 앱
 6. `device_fp` 가 저장된 값과 다르면 audit(`takeover`) 기록하되 통과 (하드웨어 지문은 OS 업데이트로 바뀔 수 있음).
 7. 유효한 기능이 하나도 없으면(`all expired`) → `expired`, entitlement 자체가 0건이면 `no_entitlement`.
 8. `session` 새로 발급 + 저장(기존 세션 무효화), `last_seen` 갱신.
-9. `config_key` = base64( HMAC-SHA256(CONFIG_SECRET, key + "|" + device_id) ) — **성공 응답에만 포함**.
+9. `config_key` = base64( HMAC-SHA256(CONFIG_SECRET, key + "|" + device_id) ).
+   **세션을 증명한 경로에만 포함**한다: `/verify` 성공 응답, 그리고 요청 `session` 이 서버 값과 일치하는
+   `/heartbeat`. `/entitlements` 는 세션 증명이 없으므로 `config_key: null`, `session` 도 요청값이
+   서버 값과 같을 때만 echo 하고 아니면 `null` 이다 (밀려난 기기가 유효 세션을 얻지 못하게).
+   필드 자체는 `null` 로 남겨 응답 키 순서(하위호환 계약)를 깨지 않는다.
 
 ### 3.2 `POST /heartbeat` — 세션 유지 / 탈취 감지 / 만료 감지
 요청: `{ "key":..., "device_id":..., "session":..., "nonce":... }`
@@ -566,7 +574,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS deposits_dedupe ON deposits(raw_hash);
 | POST | `/admin/deposit-match` | `{deposit_id, order_id}` 수동 매칭 → 주문 승인까지 수행 |
 | POST | `/admin/deposit-ignore` | `{deposit_id}` 무시 처리 |
 
-관리자앱에 **[입금]** 탭 추가: 미매칭/모호 건을 위에, 원문을 접어서 보여주고 [수동 매칭](대기 주문 선택) / [무시].
+관리자앱 **[주문] 탭에 [입금] 세그먼트 추가**: 미매칭/모호 건을 위에, 원문을 접어서 보여주고 [수동 매칭](대기 주문 선택) / [무시].
 
 ### 12.6 환경변수 추가
 | 변수 | 설명 |

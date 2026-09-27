@@ -58,28 +58,42 @@ public final class KakaoListener extends NotificationListenerService {
 
     private static final String K_ROOMS = "K_ROOM_CACHE";
 
-    // ── 그룹 판정 근거의 세기 ─────────────────────────────────────────────────
+    // ── 그룹 판정 근거의 세기 (= 신호 우선순위) ───────────────────────────────
     // 숫자가 클수록 확실한 근거다. 약한 근거로 강한 근거를 덮어쓰지 않는다.
+    // 우선순위: isGroupConversation > android.messages 발신자 > conversationTitle > 본문 접두 이름
+    //
+    // 본문 접두 이름(namePrefix)이 제일 약한 이유 —
+    // 1:1 상대가 "시간 : 3시" 라고만 보내도 모양만 보면 "발신자 : 내용" 과 똑같다.
+    // 그래서 이 신호는 마지막에 보고, namePrefix 자체도 이름처럼 생긴 것만 인정한다.
 
     /** 아무 근거도 없다 (그냥 1:1 로 추정한 상태) */
     private static final int RANK_NONE = 0;
-    /** 방 이름·본문 모양으로 추측했다 (휴리스틱) */
+    /** 본문 앞 "이름 : " 접두사로 추측했다 (제일 약한 근거) */
     private static final int RANK_HEURISTIC = 1;
+    /** conversationTitle(방) 과 title(발신자) 이 달랐다 */
+    private static final int RANK_TITLE = 2;
     /** android.messages 의 발신자 정보로 판정했다 */
-    private static final int RANK_MESSAGES = 2;
-    /** 카톡이 android.isGroupConversation 으로 직접 알려줬다 */
-    private static final int RANK_EXTRA = 3;
+    private static final int RANK_MESSAGES = 3;
+    /** 카톡이 android.isGroupConversation 으로 직접 알려줬다 (제일 확실) */
+    private static final int RANK_EXTRA = 4;
 
-    /** "홍길동 : 안녕" 처럼 본문 앞에 붙는 발신자 이름의 최대 길이 */
-    private static final int NAME_MAX = 30;
+    /** "홍길동 : 안녕" 처럼 본문 앞에 붙는 발신자 이름의 최대 길이 (이보다 길면 문장이다) */
+    private static final int NAME_MAX = 12;
 
-    /** 판정 근거 로그를 남길 최대 횟수 (알림마다 찍으면 로그 링버퍼가 쓸려나간다) */
-    private static final int WHY_LOG_MAX = 5;
-    /** 자동응답 방어선이 막았을 때 남길 최대 횟수 */
-    private static final int BLOCK_LOG_MAX = 3;
+    /** 이름에 들어갈 수 없는 문자들. 하나라도 섞이면 발신자 이름으로 안 본다. */
+    private static final String NAME_BAD_CHARS = ":@/\\#$%^&*=+<>[]{}|~";
 
-    private static volatile int whyLogged = 0;
-    private static volatile int blockLogged = 0;
+    /**
+     * "시간 : 3시" 처럼 사람들이 본문에 자주 쓰는 라벨 단어.
+     * 이런 말은 절대 발신자 이름으로 보지 않는다 — 이것 때문에 1:1 이 단체방으로 오판됐다.
+     */
+    private static final String[] LABEL_WORDS = {
+        "시간", "주소", "이름", "날짜", "가격", "금액", "번호",
+        "전화", "링크", "위치", "메모", "내용", "제목"
+    };
+
+    /** 방마다 기억해두는 "최근에 실제로 본 발신자" 개수 (namePrefix 인정 기준으로 쓴다) */
+    private static final int MAX_SENDERS = 12;
 
     // ── 방별 세션 ─────────────────────────────────────────────────────────────
 
@@ -98,6 +112,13 @@ public final class KakaoListener extends NotificationListenerService {
         public volatile long lastAt;
         /** 마지막으로 본 발신자 */
         public volatile String lastSender = "";
+        /**
+         * 이 방에서 카톡이 실제로 알려준 발신자 이름들 (최근 {@link #MAX_SENDERS} 명).
+         * 본문 접두 "이름 : " 을 발신자로 인정할지 판단하는 데 쓴다 —
+         * 아는 이름이 아니면 그냥 본문의 일부로 본다.
+         * 접근은 전부 synchronized(recentSenders).
+         */
+        public final LinkedHashSet<String> recentSenders = new LinkedHashSet<String>();
         /** 그룹방인가 */
         public volatile boolean group;
         /**
@@ -111,6 +132,10 @@ public final class KakaoListener extends NotificationListenerService {
         /** 중복 알림 판정용 지문 */
         volatile String lastKey = "";
         volatile long lastKeyAt;
+        /** 판정 근거 로그를 이 방에서 이미 남겼나 (방마다 처음 1회만 — 도배 금지) */
+        volatile boolean whyLogged = false;
+        /** 자동응답 보류 로그를 이 방에서 이미 남겼나 */
+        volatile boolean blockLogged = false;
 
         Session(String room) { this.room = room; }
     }
@@ -257,6 +282,10 @@ public final class KakaoListener extends NotificationListenerService {
 
         s.lastSender = m.sender;
 
+        // 이 방에서 본 발신자를 기억해둔다 — 다음 알림의 "이름 : 내용" 접두사 판정 근거다
+        Iterator<String> seenIt = m.seenSenders.iterator();
+        while (seenIt.hasNext()) rememberSender(s, seenIt.next());
+
         // 내가 방금 보낸 문장이 알림으로 되돌아온 경우도 내 메시지로 본다.
         // 단체방은 "내이름 : 보낸문장" 으로 되돌아오니까 접두사를 뗀 본문으로도 비교한다.
         // (시각은 절대값으로 본다 — 알림의 time 이 내 발송 시각보다 앞서는 기기가 있다)
@@ -340,11 +369,22 @@ public final class KakaoListener extends NotificationListenerService {
         String text = "";
         /** 본문에서 "발신자 : " 접두사를 뗀 알맹이 (메아리 판정용). 접두사가 없으면 text 와 같다. */
         String body = "";
+        /**
+         * 이 알림에서 카톡이 실제로 알려준 발신자 이름들 (나 제외, 폴백 전).
+         * 방별 "아는 발신자" 목록에 쌓아서 다음 알림의 namePrefix 판정에 쓴다.
+         */
+        final LinkedHashSet<String> seenSenders = new LinkedHashSet<String>();
         boolean group = false;
         /** group 을 정한 근거의 세기 (RANK_*) */
         int groupRank = RANK_NONE;
         /** 판정 근거 한 줄 설명 (로그용) */
         String why = "";
+        /**
+         * 본문 앞이 이름처럼 생겼는데 "아는 이름" 은 아니었다 (그래서 그룹 판정엔 안 썼다).
+         * 구버전 카톡 단체방 알림이 이 모양이라, 근거가 약할 때는 이 한 건만 자동응답을 보류한다.
+         * 세션 판정은 건드리지 않는다 — 그래야 1:1 이 영구히 죽지 않는다.
+         */
+        String oddPrefix = "";
         boolean fromMe = false;
         long at = 0L;
         String key = "";
@@ -352,6 +392,16 @@ public final class KakaoListener extends NotificationListenerService {
 
     /**
      * 알림 extras 한 덩어리를 메시지 한 건으로 만든다.
+     *
+     * 신호 우선순위는 하나뿐이고 아래 if 사슬 순서가 곧 그 우선순위다:
+     *   (1) extras 의 android.isGroupConversation — <b>containsKey 로 있는지 확인</b>해야
+     *       '없음' 과 'false' 가 구분된다. 있으면 이 값이 최우선이다.
+     *   (2) android.messages 의 서로 다른 발신자 수 (나 제외 2명 이상 → 단체방)
+     *   (3) android.messages 에 나 말고 한 명뿐 → 방 이름 == 그 사람이면 1:1
+     *   (4) conversationTitle(방) ≠ title(발신자) → 단체방
+     *   (5) 조여진 본문 접두 이름 (제일 약한 신호, {@link #knownName} 을 통과해야 쓴다)
+     * 신호가 모두 1:1 을 가리키면 자동응답이 실제로 나가야 한다 —
+     * 그래서 {@link #safeForAutoReply} 의 모양 검사는 근거가 약할 때만 적용한다.
      *
      * 순서가 중요하다 (결함 10): **그룹 판정을 먼저 확정하고 그 다음에 sender 폴백을 적용한다.**
      * 예전에는 sender 가 비었을 때 방 이름을 먼저 집어넣어서, 뒤따르는 구버전 보정이
@@ -395,11 +445,18 @@ public final class KakaoListener extends NotificationListenerService {
         }
         if (m.text.length() == 0) m.text = getCs(ex, Notification.EXTRA_TEXT);
 
+        // 카톡이 이름을 알려준 발신자만 모은다 (폴백으로 만든 이름은 넣지 않는다 — 오염된다)
+        m.seenSenders.addAll(others);
+        if (rawSender.trim().length() > 0) m.seenSenders.add(rawSender.trim());
+
         // 카톡 단체방 알림(MessagingStyle 이 아닌 구버전)은 본문을 "발신자 : 내용" 으로 준다.
-        // 여기서 발신자 이름을 되찾고, 알맹이는 body 에 따로 들고 있는다.
-        String prefixName = namePrefix(m.text);
+        // 알맹이(body)는 메아리 판정에만 쓰니까 "이름처럼 생겼으면" 떼고,
+        // 그룹 판정에 쓰는 prefixName 은 한 단계 더 조여서 "아는 이름" 일 때만 인정한다.
+        String headName = nameLike(m.text);
         int cut = m.text.indexOf(" : ");
-        m.body = (prefixName.length() > 0 && cut > 0) ? m.text.substring(cut + 3).trim() : m.text;
+        m.body = (headName.length() > 0 && cut > 0) ? m.text.substring(cut + 3).trim() : m.text;
+        String prefixName = knownName(headName, title, convo, m.room);
+        if (headName.length() > 0 && prefixName.length() == 0) m.oddPrefix = headName;
 
         // ── 그룹 판정 (sender 폴백보다 먼저!) ─────────────────────────────────
         if (has(ex, Notification.EXTRA_IS_GROUP_CONVERSATION)) {
@@ -425,16 +482,17 @@ public final class KakaoListener extends NotificationListenerService {
             m.group = !m.room.equals(soleOther);
             m.groupRank = RANK_MESSAGES;
             m.why = m.group ? "방이름≠발신자(messages)" : "방이름=발신자(messages)";
+        } else if (convo.length() > 0 && title.length() > 0 && !convo.equals(title)) {
+            // (4) conversationTitle(방)과 title(발신자)이 다르면 단체방
+            m.group = true;
+            m.groupRank = RANK_TITLE;
+            m.why = "conversationTitle≠title";
         } else if (prefixName.length() > 0 && !prefixName.equals(m.room)) {
-            // (4) 본문이 "다른이름 : …" = 방 이름과 발신자가 다르다 → 단체방
+            // (5) 마지막 신호 — 본문이 "아는 다른 이름 : …" 이면 단체방.
+            //     namePrefix 를 조여놨으니 "시간 : 3시" 같은 1:1 본문은 여기 안 걸린다.
             m.group = true;
             m.groupRank = RANK_HEURISTIC;
             m.why = "본문 접두 발신자(" + prefixName + ")≠방이름";
-        } else if (convo.length() > 0 && title.length() > 0 && !convo.equals(title)) {
-            // (5) conversationTitle(방)과 title(발신자)이 다르면 단체방
-            m.group = true;
-            m.groupRank = RANK_HEURISTIC;
-            m.why = "conversationTitle≠title";
         } else {
             // (6) 근거가 하나도 없다 → 1:1 로 추정하되 근거 세기는 0 이다.
             //     같은 방에서 전에 단체방 근거를 본 적이 있으면 handle() 이 그룹으로 되돌린다.
@@ -461,10 +519,13 @@ public final class KakaoListener extends NotificationListenerService {
     }
 
     /**
-     * "홍길동 : 안녕하세요" 에서 앞의 발신자 이름을 뽑는다. 아니면 "".
+     * "홍길동 : 안녕하세요" 의 앞부분이 <b>이름처럼 생겼으면</b> 그 이름, 아니면 "".
      * 구분자는 " : " 만 인정한다(카톡 단체방 알림이 쓰는 형태고, 이름에는 콜론을 못 쓴다).
+     *
+     * 여기까지는 "모양 검사" 뿐이다 — 메아리 판정용으로 본문 접두사를 뗄 때 쓴다.
+     * 그룹/1:1 판정에 쓰려면 {@link #knownName} 을 한 번 더 통과해야 한다.
      */
-    private static String namePrefix(String text) {
+    private static String nameLike(String text) {
         if (text == null || text.length() == 0) return "";
         int nl = text.indexOf('\n');
         String head = (nl >= 0) ? text.substring(0, nl) : text;
@@ -472,9 +533,77 @@ public final class KakaoListener extends NotificationListenerService {
         if (i <= 0) return "";
         if (text.length() <= i + 3) return "";          // 알맹이가 남아야 접두사로 인정한다
         String name = head.substring(0, i).trim();
-        if (name.length() == 0 || name.length() > NAME_MAX) return "";
-        if (name.indexOf(':') >= 0) return "";
-        return name;
+        return looksLikeName(name) ? name : "";
+    }
+
+    /**
+     * 이름처럼 생겼나. 여기가 조여지기 전에는 " : " 만 있으면 앞부분을 전부 발신자로 인정했고,
+     * 그래서 1:1 상대가 "시간 : 3시" / "주소 : 서울" 이라고 보내면 단체방으로 오판돼서
+     * 오픈프로필 자동응답이 그 방에서 영구히 죽었다.
+     *
+     * 규칙:
+     *   - 길이 1~{@link #NAME_MAX}자
+     *   - 숫자나 {@link #NAME_BAD_CHARS} 의 특수문자가 섞이면 이름이 아니다
+     *   - 내부 공백은 최대 1개 (이름에 문장이 들어오는 걸 막는다)
+     *   - {@link #LABEL_WORDS} 의 흔한 라벨 단어는 이름으로 보지 않는다
+     */
+    private static boolean looksLikeName(String name) {
+        if (name == null) return false;
+        int n = name.length();
+        if (n == 0 || n > NAME_MAX) return false;
+
+        int spaces = 0;
+        for (int i = 0; i < n; i++) {
+            char ch = name.charAt(i);
+            if (ch == ' ') { spaces++; continue; }
+            if (Character.isWhitespace(ch)) return false;       // 줄바꿈·탭은 이름이 아니다
+            if (ch >= '0' && ch <= '9') return false;           // 숫자가 섞이면 이름이 아니다
+            if (Character.isDigit(ch)) return false;            // 전각 숫자 등
+            if (NAME_BAD_CHARS.indexOf(ch) >= 0) return false;  // 특수문자가 섞이면 이름이 아니다
+        }
+        if (spaces > 1) return false;
+
+        for (int i = 0; i < LABEL_WORDS.length; i++) {
+            if (name.equals(LABEL_WORDS[i])) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 모양이 이름 같아도 <b>아는 이름</b>일 때만 발신자로 인정한다.
+     * 아는 이름 = 알림 title 또는 conversationTitle 과 같거나, 그 방에서 최근에 본 발신자.
+     * (그래야 "사과 : 맛있어" 같은 평범한 1:1 문장이 단체방 근거로 쓰이지 않는다)
+     */
+    private static String knownName(String name, String title, String convo, String room) {
+        if (name == null || name.length() == 0) return "";
+        if (title != null && name.equals(title.trim())) return name;
+        if (convo != null && name.equals(convo.trim())) return name;
+        return seenSender(room, name) ? name : "";
+    }
+
+    /** 그 방에서 최근에 카톡이 알려준 발신자인가 */
+    private static boolean seenSender(String room, String name) {
+        if (room == null || room.length() == 0 || name == null || name.length() == 0) return false;
+        Session s = SESSIONS.get(room);
+        if (s == null) return false;
+        synchronized (s.recentSenders) {
+            return s.recentSenders.contains(name);
+        }
+    }
+
+    /** 방별 "아는 발신자" 목록에 넣는다 (최근 MAX_SENDERS 명만 들고 있는다) */
+    private static void rememberSender(Session s, String name) {
+        if (s == null || name == null || name.length() == 0) return;
+        synchronized (s.recentSenders) {
+            s.recentSenders.remove(name);       // 다시 넣어서 최신으로 올린다
+            s.recentSenders.add(name);
+            while (s.recentSenders.size() > MAX_SENDERS) {
+                Iterator<String> it = s.recentSenders.iterator();
+                if (!it.hasNext()) break;
+                it.next();
+                it.remove();
+            }
+        }
     }
 
     /** android.messages 배열을 Bundle 목록으로 (없으면 null) */
@@ -557,22 +686,26 @@ public final class KakaoListener extends NotificationListenerService {
 
     /**
      * 그룹/1:1 판정 근거를 남긴다. 알림마다 찍으면 로그 링버퍼(200줄)가 쓸려나가니까
-     * 처음 WHY_LOG_MAX 번만 남긴다 — 사용자가 오작동을 신고할 때 원인을 알 수 있으면 충분하다.
+     * <b>방마다 처음 1회만</b> 남긴다 — 사용자가 오작동을 신고할 때 그 방의 근거만 있으면 충분하다.
      */
     private static void whyLog(Context ctx, Msg m) {
-        if (whyLogged >= WHY_LOG_MAX) return;
-        whyLogged = whyLogged + 1;
-        boolean last = (whyLogged >= WHY_LOG_MAX);
+        Session s = SESSIONS.get(m.room);
+        if (s != null) {
+            if (s.whyLogged) return;
+            s.whyLogged = true;
+        }
         Log.add(ctx, "방 판정: 「" + m.room + "」 " + (m.group ? "단체방" : "1:1")
                 + " (근거: " + m.why + " / 발신자: "
-                + (m.sender.length() == 0 ? "모름" : m.sender) + ")"
-                + (last ? " — 판정 로그는 여기까지만 남길게" : ""));
+                + (m.sender.length() == 0 ? "모름" : m.sender) + ")");
     }
 
-    /** 자동응답 방어선이 막았을 때 (드물고 중요한 일이라 남기되, 역시 몇 번만) */
+    /** 자동응답 방어선이 막았을 때 (드물고 중요한 일이라 남기되, 방마다 처음 1회만) */
     private static void blockLog(Context ctx, String room, String why) {
-        if (blockLogged >= BLOCK_LOG_MAX) return;
-        blockLogged = blockLogged + 1;
+        Session s = SESSIONS.get(room);
+        if (s != null) {
+            if (s.blockLogged) return;
+            s.blockLogged = true;
+        }
         Log.add(ctx, "자동응답 보류: 「" + room + "」 " + why + " — 단체방 오발송을 막았어");
     }
 
@@ -588,12 +721,28 @@ public final class KakaoListener extends NotificationListenerService {
             blockLog(ctx, m.room, "이 방을 단체방으로 기억하고 있어");
             return false;
         }
-        // SPEC 8.4: 1:1 이면 방 이름 == 상대 이름이다. 다르면 단체방일 가능성이 있으니 보내지 않는다.
-        if (m.sender.length() > 0 && !m.sender.equals(m.room)) {
-            blockLog(ctx, m.room, "발신자(" + m.sender + ")와 방 이름이 달라");
-            return false;
-        }
-        return true;
+        // 카톡이 직접 알려줬거나(isGroupConversation=false) android.messages 로 1:1 이 확정된 방은
+        // 여기서 더 막지 않는다. 예전엔 방 이름 == 발신자 검사를 무조건 걸어서,
+        // 상대 닉네임과 방 이름이 다른 평범한 1:1 에도 자동응답이 안 나갔다.
+        if (m.groupRank >= RANK_MESSAGES) return true;
+
+        // ── 여기부터는 근거가 약한 알림이다. 자동응답은 "확실한 1:1" 에만 보낸다. ──
+        //
+        // 왜 이렇게 빡세게 막나:
+        //   구버전 카톡 단체방 알림은 android.messages 도 isGroupConversation 도 없이
+        //   본문만 "발신자 : 내용" 으로 온다. 그 발신자 닉네임에 숫자가 섞여 있거나
+        //   길면(예: "민수123", "행복한하루보내세요") 이름으로 인정되지 않아서
+        //   prefixName·oddPrefix 가 둘 다 비고, sender 는 방 이름으로 폴백된다.
+        //   그러면 아래 모양 검사(sender==room)를 통과해 **단체방에 자동응답이 나간다.**
+        //   단체방 도배는 강퇴 사유라서, 1:1 에 안 나가는 것보다 훨씬 큰 사고다.
+        //
+        // 그래서 근거가 RANK_MESSAGES 미만이면 무조건 보류한다.
+        // 요즘 카톡은 MessagingStyle(android.messages)과 isGroupConversation 을 둘 다 넣어주므로
+        // 실제 사용자는 위 return true 로 빠지고, 여기까지 오는 건 아주 오래된 카톡뿐이다.
+        blockLog(ctx, m.room,
+                "1:1 인지 확실하지 않아서 자동응답을 보류했어 (카톡이 알림에 대화 정보를 안 넣어줬어). "
+                        + "카톡을 최신 버전으로 업데이트하면 해결돼");
+        return false;
     }
 
     /** 내가 알림 답장창으로 보낸 이력에 이 문장이 있나 */

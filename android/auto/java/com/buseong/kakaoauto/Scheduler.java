@@ -72,6 +72,16 @@ public final class Scheduler {
     /** 이미 때가 지났거나 실패했을 때 다시 시도하는 간격 */
     private static final long HB_RETRY_MS = 30 * 60 * 1000L;
 
+    /**
+     * 잠긴 기기(License.state().locked)의 하트비트 주기.
+     *
+     * 잠긴 상태에서는 {@link License#shouldHeartbeat} 가 false 라서 네트워크를 안 쓴다 —
+     * 그런데도 30분마다 알람이 울려서 기기를 깨우기만 했다(배터리만 먹는 완전한 헛수고).
+     * 잠금은 사용자가 재인증(활성화/새로고침)해야 풀리는 상태고, 그때는 그 경로가
+     * {@link #ensureHeartbeat} 를 다시 불러서 정상 주기로 되돌린다. 그래서 여기선 넉넉히 12시간.
+     */
+    private static final long HB_LOCKED_MS = 12 * 3600 * 1000L;
+
     /** 하트비트 응답을 기다리는 최대 시간 (네트워크 타임아웃보다 넉넉히) */
     private static final long HB_WAIT_MS = 25000L;
 
@@ -241,16 +251,26 @@ public final class Scheduler {
         if (interval <= 0) interval = HB_DEFAULT_MS;
         if (interval < HB_MIN_MS) interval = HB_MIN_MS;
 
+        // 잠긴 기기는 하트비트가 아무 일도 안 한다 → 주기를 12시간 이상으로 늘린다.
+        // (알람을 아예 끄지는 않는다. 끄면 스스로 되살아날 길이 없어진다 — cancelHeartbeat 주석 참고)
+        long retry = HB_RETRY_MS;
+        boolean locked = st.locked;
+        if (locked) {
+            if (interval < HB_LOCKED_MS) interval = HB_LOCKED_MS;
+            retry = HB_LOCKED_MS;
+        }
+
         long now = System.currentTimeMillis();
         long stored = Prefs.getLong(c, K_HB_NEXT, 0L);
 
         long at;
-        if (stored > now && stored <= now + interval) {
+        // 잠긴 상태면 예전에 잡아둔 "30분 뒤" 같은 가까운 예정 시각은 버리고 멀리 밀어버린다.
+        if (stored > now && stored <= now + interval && (!locked || stored >= now + retry)) {
             // 이미 잡혀 있는 예정 시각을 그대로 쓴다 (앱을 켤 때마다 뒤로 밀리면 안 된다)
             at = stored;
         } else {
             long due = st.lastOk + interval;
-            at = (due <= now + HB_RETRY_MS) ? (now + HB_RETRY_MS) : due;
+            at = (due <= now + retry) ? (now + retry) : due;
         }
 
         armHeartbeat(c, at, interval);
@@ -259,7 +279,8 @@ public final class Scheduler {
     /**
      * 하트비트 알람이 울렸을 때 호출된다. <b>백그라운드 스레드에서 불러라</b> —
      * 서버 응답을 최대 {@link #HB_WAIT_MS} 까지 기다린다.
-     * 끝나면 어떤 경우에도 다음 하트비트를 다시 잡는다.
+     * 끝나면 어떤 경우에도 다음 하트비트를 다시 잡는다
+     * (잠긴 기기는 {@link #HB_LOCKED_MS} 간격으로 — 아무 일도 안 하면서 30분마다 깨면 안 된다).
      */
     public static void runHeartbeat(Context ctx) {
         final Context c = app(ctx);
@@ -274,7 +295,12 @@ public final class Scheduler {
                 return;
             }
             if (!License.shouldHeartbeat(c)) {
-                // 앱을 방금 열어서 이미 확인했거나(때가 아님), 잠긴 상태다 — 네트워크는 아끼고 알람만 다시 잡는다
+                // 앱을 방금 열어서 이미 확인했거나(때가 아님), 잠긴 상태다 — 네트워크는 아낀다.
+                // 잠긴 상태면 finally 의 ensureHeartbeat 가 12시간 뒤로 잡아준다(30분마다 깨지 않게).
+                if (st.locked) {
+                    Log.add(c, "기기가 잠겨 있어서 라이선스 확인을 건너뛸게 —"
+                            + " 다시 인증하면 바로 정상으로 돌아와 (다음 확인은 12시간 뒤)");
+                }
                 return;
             }
 

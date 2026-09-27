@@ -734,11 +734,17 @@ public final class Ui {
         return l;
     }
 
-    /** 감사기록 종류 색 — mismatch/takeover/bad_sig/tamper = RED, activate = ACCENT, reset/order = AMBER, 나머지 SUB */
+    /**
+     * 감사기록 종류 색 — 경보 종류(Api.isAlertKind: mismatch/takeover/bad_sig/tamper/
+     * bad_deposit_token/bad_admin_pw · 서버 alert_kinds 우선) = RED,
+     * activate = ACCENT, reset/order = AMBER, 나머지 SUB.
+     */
     public static int auditColor(String kind) {
         String k = (kind == null) ? "" : kind;
-        if (k.equals("mismatch") || k.equals("takeover") || k.equals("bad_sig")
-                || k.equals("tamper") || k.equals("bad_deposit_token")) return Theme.RED;
+        // 경보 목록은 Api 한 곳에서만 정한다 — 서버가 내려준 alert_kinds 가 있으면 그게 우선이고
+        // (그래서 bad_admin_pw 처럼 새로 생긴 종류도 앱을 안 고쳐도 붉게 뜬다),
+        // 없으면 Api 의 하드코딩 폴백을 쓴다.
+        if (Api.isAlertKind(k)) return Theme.RED;
         if (k.equals("activate")) return Theme.ACCENT;
         if (k.equals("reset") || k.equals("order")) return Theme.AMBER;
         return Theme.SUB;
