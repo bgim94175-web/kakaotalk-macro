@@ -282,7 +282,8 @@ public final class MacroDetail {
                 try { ovOn = ImageSender.overlayOn(a); } catch (Throwable t) { ovOn = false; }
                 if (!ovOn) {
                     col.addView(Nav.note(a, "「다른 앱 위에 표시」 권한이 비활성 상태입니다."
-                            + " 앱이 화면에 표시된 상태에서만 이미지 전송이 가능하며, 예약 발송 시에는 전송되지 않습니다.",
+                            + " 예약 발송에서 시스템이 공유창 실행을 차단할 수 있습니다."
+                            + " 앱이 화면에 표시된 상태에서는 이 권한 없이도 동작할 수 있습니다.",
                             Theme.AMBER, "권한 설정", new Runnable() {
                                 @Override public void run() { ImageSender.openOverlaySettings(a); }
                             }));
