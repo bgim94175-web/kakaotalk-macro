@@ -1040,13 +1040,14 @@ public final class Ui {
         return root;
     }
 
-    /** checkRow 의 체크박스. 켜짐=ACCENT 채움+체크, 꺼짐=LINE2 보더. 직접 그린다(위젯 의존 없음). */
+    /** checkRow 의 체크박스. 켜짐=만들 때의 Theme.accent() 채움+체크, 꺼짐=LINE2 보더. 직접 그린다(위젯 의존 없음). */
     public static final class Check extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path tick = new Path();
         private final float radius;
         private final float border;
         private final float stroke;
+        private final int color = Theme.accent();
         private boolean on;
 
         Check(Context c, boolean on) {
@@ -1071,7 +1072,7 @@ public final class Ui {
             if (w <= 0 || h <= 0) return;
             if (on) {
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(Theme.ACCENT);
+                paint.setColor(color);
                 cv.drawRoundRect(0f, 0f, w, h, radius, radius, paint);
 
                 tick.rewind();
@@ -1127,7 +1128,7 @@ public final class Ui {
         s.addView(t);
 
         if (action != null && action.length() > 0) {
-            TextView b = base(c, action, 13f, Theme.ACCENT, true);
+            TextView b = base(c, action, 13f, Theme.accent(), true);
             b.setGravity(Gravity.CENTER);
             b.setMinimumHeight(Theme.dp(c, 48));
             b.setMinimumWidth(Theme.dp(c, 48));
@@ -1212,7 +1213,8 @@ public final class Ui {
     public static AlertDialog.Builder dialog(Context c, String titleTxt) {
         AlertDialog.Builder b = new AlertDialog.Builder(c, android.R.style.Theme_Material_Dialog_Alert);
         if (titleTxt != null && titleTxt.length() > 0) {
-            TextView t = base(c, titleTxt, 18f, Theme.TEXT, true);
+            TextView t = base(c, titleTxt, 19f, Theme.TEXT, true);
+            t.setTypeface(Theme.serif());
             t.setLetterSpacing(-0.01f);
             int ph = Theme.dp(c, 22);
             t.setPadding(ph, Theme.dp(c, 22), ph, Theme.dp(c, 6));
@@ -1238,7 +1240,7 @@ public final class Ui {
             Context c = d.getContext();
             Window w = d.getWindow();
             if (w != null) {
-                w.setBackgroundDrawable(Theme.round(Theme.CARD, Theme.R_LG, Theme.LINE2, 1, c));
+                w.setBackgroundDrawable(Theme.sheen(Theme.CARD2, Theme.CARD, Theme.R_XL, Theme.fade(Theme.accent(), 0.30f), c));
             }
             View mv = d.findViewById(android.R.id.message);
             if (mv instanceof TextView) {
@@ -1247,7 +1249,7 @@ public final class Ui {
                 m.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
                 m.setLineSpacing(0, 1.45f);
             }
-            styleDialogBtn(d.getButton(AlertDialog.BUTTON_POSITIVE), Theme.ACCENT, true);
+            styleDialogBtn(d.getButton(AlertDialog.BUTTON_POSITIVE), Theme.accent(), true);
             styleDialogBtn(d.getButton(AlertDialog.BUTTON_NEGATIVE), Theme.SUB, false);
             styleDialogBtn(d.getButton(AlertDialog.BUTTON_NEUTRAL), Theme.SUB, false);
         } catch (Throwable t) {

@@ -68,10 +68,18 @@ public final class Features {
 
     /** 기능별 대표색 (칩·아이콘 색을 통일하려고) */
     public static int color(String id) {
-        if (MACRO.equals(id)) return Theme.ACCENT;
-        if (ROOMBOT.equals(id)) return Theme.ACCENT2;
-        if (MINIGAME.equals(id)) return Theme.VIOLET;
+        if (MACRO.equals(id)) return Theme.F_MACRO;
+        if (ROOMBOT.equals(id)) return Theme.F_ROOMBOT;
+        if (MINIGAME.equals(id)) return Theme.F_MINIGAME;
         return Theme.SUB;
+    }
+
+    /** 기능별 아이콘 (Icon 글리프) */
+    public static int icon(String id) {
+        if (MACRO.equals(id)) return Icon.SEND;
+        if (ROOMBOT.equals(id)) return Icon.SHIELD;
+        if (MINIGAME.equals(id)) return Icon.DICE;
+        return Icon.SPARK;
     }
 
     /** 구매 웹 기본주소. 끝의 "/" 와 "/buy" 는 떼서 돌려준다. */
