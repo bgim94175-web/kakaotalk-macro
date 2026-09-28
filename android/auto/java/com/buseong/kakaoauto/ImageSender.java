@@ -911,8 +911,10 @@ public final class ImageSender {
             return false;
         }
 
-        // 채팅방 열기. 백그라운드에서는 이 단계도 시스템이 막을 수 있다 —
-        // 막히면 예외가 아니라 "카톡 창이 안 뜸" 으로만 나타나므로 워치독으로 판정한다.
+        // 채팅방 열기. 이미 그 방이 열려 있어도 그냥 던진다 — 같은 방을 앞으로 가져오는 것뿐이라
+        // 부작용이 없고, "열려 있나" 를 우리가 알 방법이 없어서 조건을 걸면 그 판정이 새 실패 지점이 된다.
+        // 백그라운드에서는 이 단계도 시스템이 막을 수 있는데, 막히면 예외가 아니라
+        // "카톡 창이 안 뜸" 으로만 나타나므로 워치독으로 판정한다.
         try {
             open.send(j.app, 0, null, null, null, null, attachOptions());
         } catch (android.app.PendingIntent.CanceledException e) {
