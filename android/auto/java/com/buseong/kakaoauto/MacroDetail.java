@@ -267,6 +267,21 @@ public final class MacroDetail {
                                         : "알림 답장 이미지 전송을 미사용으로 변경했습니다.");
                             }
                         }));
+                // 채팅방 첨부 경로는 카카오톡 화면을 실제로 조작한다(채팅방이 열리고 시트가 떴다 닫힌다).
+                // 화면이 움직이는 것을 원하지 않는 사용자는 끌 수 있어야 한다.
+                boolean attachImg;
+                try { attachImg = ImageSender.attachEnabled(a); } catch (Throwable t) { attachImg = false; }
+                g.addView(Ui.navRowSwitch(a, "채팅방 첨부 전송",
+                        "대화방을 열어 사진을 첨부합니다. 카카오톡 화면이 일시적으로 전환됩니다.",
+                        attachImg, new Ui.OnToggle() {
+                            @Override public void on(boolean v) {
+                                try {
+                                    ImageSender.setAttachEnabled(a, v);
+                                } catch (Throwable t) {
+                                    Log.add(a, "채팅방 첨부 전송 설정을 저장하지 못했습니다: " + t);
+                                }
+                            }
+                        }));
                 col.addView(g);
 
                 boolean accOn;

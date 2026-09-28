@@ -24,11 +24,25 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 카톡 공유 화면 자동 조작.
+ * 카톡 화면 자동 조작. <b>전송 흐름이 두 개</b>이고, 둘은 완전히 분리돼 있다.
  *
- * 알림 RemoteInput 으로는 사진을 못 보낸다. 그래서 {@link ImageSender} 가
- * ACTION_SEND_MULTIPLE 로 카톡 공유창을 띄우고, 이 서비스가 그 창에서
- * "방 고르기 → (체크됐으면) 전송 버튼" 을 대신 눌러준다.
+ * <h3>흐름 1 — 공유창 ({@link #arm})</h3>
+ * {@link ImageSender} 가 ACTION_SEND_MULTIPLE 로 카톡 공유창을 띄우고, 이 서비스가 그 창에서
+ * "방 고르기 → (체크됐으면) 전송 버튼" 을 눌러준다.
+ * <b>실기기에서 이 화면은 한 번도 관측되지 않았다</b>(안드로이드 16 + 백그라운드 실행 제한으로 추정).
+ * 구버전에서 유일하게 동작했던 경로라 남겨둔다.
+ *
+ * <h3>흐름 2 — 채팅방 내부 첨부 시트 ({@link #armAttach})</h3>
+ * 이미 열려 있는 채팅방의 첨부(+) 시트를 조작한다:
+ * {@code design_bottom_sheet} 확인 → {@code rv_media} 에서 desc(촬영 시각)로 사진 지목 →
+ * {@code tv_select_order} 로 선택 검증 → {@code btn_send} 의 enabled 대기 → 전송.
+ * 여기 쓰는 셀렉터는 전부 <b>실기기 뷰 트리 문서</b>
+ * (docs/field/kakao-attach-sheet-26.8.2.md) 에 실측으로 적혀 있는 것뿐이다.
+ * <b>문서에 없는 id 는 만들지 않는다</b> — 추측 셀렉터는 지금까지 전부 실패했다.
+ * 아직 미확보인 것(채팅방 하단 + 버튼 id 등)은 지어내는 대신 대체 탐색을 시도하고,
+ * 실패하면 화면을 덤프로 남긴다.
+ *
+ * 진단에는 <b>어느 흐름을 탔는지</b>를 항상 박는다 — 두 흐름의 원인과 조치가 전혀 다르다.
  *
  * 규칙 하나만 지킨다 — <b>armed 아닐 때는 아무것도 안 한다.</b>
  * 사용자가 평소에 카톡 쓰는 걸 방해하면 안 되니까, 이미지 전송을 예약한
@@ -170,6 +184,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     static final String[] ATTACH_MENU_PHOTO_S = squashAll(ATTACH_MENU_PHOTO);
     static final String[] ATTACH_DESC_S = squashAll(ATTACH_DESC);
+    static final String PHOTO_PREFIX_S = squash(PHOTO_PREFIX);
 
     // ── 위 라벨들을 미리 정규화해둔다 ────────────────────────────────────────────
     //  노드마다 squash(SEND[i]) 를 다시 도는 건 순수 낭비다 (노드 2500개 × 라벨 30개).
@@ -367,6 +382,12 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static volatile String[] wantDescsS = new String[0];
     /** 후보별 선택 완료 여부 (wantDescs 와 같은 순서) */
     private static volatile boolean[] gotDescs = new boolean[0];
+    /**
+     * 호출 측이 넘긴 후보 중 <b>서로 같은 desc</b> 였던 건수.
+     * 같은 분에 찍은 사진 두 장은 desc 가 같아서 1:1 로 지목할 수 없다 —
+     * 조용히 한 장만 보내고 "2장 전송" 이라고 보고하면 그게 거짓말이다.
+     */
+    private static volatile int dupWant = 0;
     /** 선택에 성공한 장수 */
     private static volatile int pickedCount = 0;
     /** 첨부 시트(design_bottom_sheet 또는 rv_media)를 한 번이라도 본 적 있나 */
@@ -377,6 +398,8 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static volatile boolean menuPhotoTapped = false;
     /** rv_media 가로 스크롤 횟수 */
     private static volatile int mediaScrolls = 0;
+    /** 직전 스크롤 시점의 누적 사진 개수 — 늘지 않으면 끝까지 본 것이다 */
+    private static volatile int mediaSeenBefore = 0;
     /** 더 스크롤해도 새 사진이 안 나온다 */
     private static volatile boolean mediaScrollDone = false;
     /** 지금 선택 검증을 기다리는 후보 index (-1 = 없음) */
@@ -525,8 +548,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 sb.append(a11yBlock(ctx));
                 sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
                 sb.append("대상 대화방: \"").append(name).append("\"\n");
-                sb.append(wantDescBlock());
-                sb.append("첨부 시트: 확인 불가(화면을 읽지 못했습니다)\n");
+                sb.append(attachBlock());
                 sb.append(env(ctx));
                 sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
                 sb.append("=== 끝 ===\n");
@@ -546,16 +568,19 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static void setWantDescs(String[] in) {
         ArrayList<String> raw = new ArrayList<String>(8);
         ArrayList<String> sq = new ArrayList<String>(8);
+        int dup = 0;
         if (in != null) {
             for (int i = 0; i < in.length; i++) {
                 String d = norm(in[i]);
                 if (d.length() == 0) continue;
                 String s = squash(d);
-                if (s.length() == 0 || sq.contains(s)) continue;   // 같은 사진을 두 번 세지 않는다
+                if (s.length() == 0) continue;
+                if (sq.contains(s)) { dup++; continue; }   // 같은 desc 로는 1:1 지목이 불가능하다
                 raw.add(d);
                 sq.add(s);
             }
         }
+        dupWant = dup;
         wantDescs = raw.toArray(new String[0]);
         wantDescsS = sq.toArray(new String[0]);
         gotDescs = new boolean[wantDescs.length];
@@ -622,9 +647,11 @@ public final class KakaoAccessibility extends AccessibilityService {
         attachOpens = 0;
         menuPhotoTapped = false;
         mediaScrolls = 0;
+        mediaSeenBefore = 0;
         mediaScrollDone = false;
         verifyIdx = -1;
         verifyTries = 0;
+        dupWant = 0;
         sendWaits = 0;
         sendState = "미확인";
         menuSeen = "";
@@ -1378,6 +1405,870 @@ public final class KakaoAccessibility extends AccessibilityService {
         retry();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  채팅방 내부 첨부 시트 흐름 (M_ATTACH)
+    //  근거: docs/field/kakao-attach-sheet-26.8.2.md — 실기기 뷰 트리
+    //  여기서 쓰는 id 는 전부 그 문서에 실측으로 적혀 있는 것뿐이다. 추측 셀렉터 금지.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** 첨부 시트의 사진 썸네일 한 개 (문서 3장) */
+    private static final class Photo {
+        AccessibilityNodeInfo node;
+        /** 정규화한 desc 원본 (진단 표시용) */
+        String desc = "";
+        /** 공백 제거·소문자 — 비교는 이것만 쓴다 */
+        String descS = "";
+        String cls = "";
+        /** tv_select_order 의 텍스트. 비어 있지 않으면 <b>선택된 상태</b>다 (문서 3장) */
+        String order = "";
+        boolean inMedia = false;
+
+        boolean selected() {
+            return order.length() > 0;
+        }
+    }
+
+    /** 첨부 시트 한 번 훑어서 알아낸 것 전부 */
+    private final class AScan {
+        /** design_bottom_sheet — 있으면 시트가 열려 있다 */
+        AccessibilityNodeInfo sheet = null;
+        /** rv_media (가로 RecyclerView) */
+        AccessibilityNodeInfo media = null;
+        /** rv_chat_tool (첨부 메뉴 목록) */
+        AccessibilityNodeInfo chatTool = null;
+        /** btn_send */
+        AccessibilityNodeInfo btnSend = null;
+        /** 첨부 메뉴의 「사진」 항목 (문서 5장) */
+        AccessibilityNodeInfo menuPhoto = null;
+        /** desc 가 첨부/추가/더보기 인 clickable 노드 (문서 8장 — id 는 미확보) */
+        AccessibilityNodeInfo plusByDesc = null;
+        final ArrayList<Photo> photos = new ArrayList<Photo>(16);
+        /** 첨부 메뉴에서 본 라벨 (진단용) */
+        final ArrayList<String> menuLabels = new ArrayList<String>(8);
+        /** 입력창 근처에서 + 를 찾을 때 볼 clickable 후보 */
+        final ArrayList<AccessibilityNodeInfo> nearCands = new ArrayList<AccessibilityNodeInfo>(16);
+        /** 메시지 입력창 위치 (CHATROOM_IDS 로 찾은 것) */
+        Rect inputRect = null;
+        /** id 는 못 맞췄지만 편집 가능한 노드 — 입력창 대체 후보 */
+        Rect editRect = null;
+        boolean chatInput = false;
+        boolean sendEnabled = false;
+        boolean sendClickable = false;
+        /** 화면에서 선택 상태인 사진 개수 (대상 여부 무관) */
+        int selectedTotal = 0;
+        /** rv_media 밖에 있어 대상에서 제외한 「사진, …」 노드 수 (대화 내용의 사진 말풍선 등) */
+        int outsideMedia = 0;
+        /** 대상 대화방 이름을 화면 글자에서 봤나 (검증이 아니라 <b>확인용</b> 표시다) */
+        boolean roomNameSeen = false;
+        int nodes = 0;
+        boolean truncated = false;
+        String sig = "";
+
+        boolean sheetOpen() {
+            return sheet != null || media != null;
+        }
+
+        /** descS 가 완전히 같은 사진. 없으면 null. (부분 일치는 절대 하지 않는다) */
+        Photo exact(String descS) {
+            if (descS == null || descS.length() == 0) return null;
+            for (int i = 0; i < photos.size(); i++) {
+                Photo p = photos.get(i);
+                if (p.descS.equals(descS)) return p;
+            }
+            return null;
+        }
+
+        /**
+         * descS 가 완전히 같은 사진이 <b>몇 개</b> 있나.
+         * desc 의 시각은 분 단위라서 같은 분에 찍은 사진 두 장이 같은 desc 를 가질 수 있다.
+         * 그때 아무거나 고르면 엉뚱한 사진이 나간다 — 호출부가 이 값으로 중단을 판단한다.
+         */
+        int count(String descS) {
+            if (descS == null || descS.length() == 0) return 0;
+            int n = 0;
+            for (int i = 0; i < photos.size(); i++) {
+                if (photos.get(i).descS.equals(descS)) n++;
+            }
+            return n;
+        }
+    }
+
+    /**
+     * 첨부 시트 화면을 한 번 훑는다.
+     *
+     * rv_media 안인지, 어느 사진 썸네일 안인지는 <b>DFS 깊이</b>로 판정한다 —
+     * 사진 desc 와 tv_select_order 를 한 번의 순회로 짝지으려면 이게 제일 싸다
+     * (getParent() 를 다시 부르면 반납할 노드가 수천 개로 늘어난다).
+     */
+    private AScan ascan(List<AccessibilityNodeInfo> rs) {
+        final AScan a = new AScan();
+        final String roomS = squash((targetRoom == null) ? "" : targetRoom);
+        final StringBuilder sig = new StringBuilder(256);
+        final int halfH = screenH() / 2;
+        final int smallPx = Theme.dp(this, 160);
+
+        for (int ri = 0; ri < rs.size(); ri++) {
+            final int[] mediaDepth = new int[] { -1 };
+            final int[] toolDepth = new int[] { -1 };
+            final int[] photoDepth = new int[] { -1 };
+            final Photo[] curPhoto = new Photo[] { null };
+            Walk w = new Walk();
+            walk(rs.get(ri), 0, MAX_NODES, w, new Eye() {
+                @Override public boolean at(AccessibilityNodeInfo n, int depth, int clickUp) {
+                    // 컨테이너를 벗어났으면 표시를 내린다 (DFS 라 depth 가 되돌아온다)
+                    if (mediaDepth[0] >= 0 && depth <= mediaDepth[0]) mediaDepth[0] = -1;
+                    if (toolDepth[0] >= 0 && depth <= toolDepth[0]) toolDepth[0] = -1;
+                    if (photoDepth[0] >= 0 && depth <= photoDepth[0]) {
+                        photoDepth[0] = -1;
+                        curPhoto[0] = null;
+                    }
+
+                    boolean keep = false;
+                    String id = viewId(n);
+                    String sid = shortId(id);
+                    String tx = norm(textOnly(n));
+                    String ds = norm(desc(n));
+                    String cls = className(n);
+                    boolean vis = visible(n);
+                    boolean clickable = flag(n, 1);
+                    boolean editable = isEditable(n);
+
+                    // ── 실측 id (문서 2장) ──
+                    if (sid.equals(AID_SHEET)) {
+                        if (a.sheet == null) { a.sheet = n; keep = true; }
+                    } else if (sid.equals(AID_MEDIA)) {
+                        if (a.media == null) { a.media = n; keep = true; }
+                        mediaDepth[0] = depth;
+                    } else if (sid.equals(AID_CHAT_TOOL)) {
+                        if (a.chatTool == null) { a.chatTool = n; keep = true; }
+                        toolDepth[0] = depth;
+                    } else if (sid.equals(AID_BTN_SEND)) {
+                        if (a.btnSend == null) {
+                            a.btnSend = n;
+                            a.sendEnabled = flag(n, 5);
+                            a.sendClickable = clickable;
+                            keep = true;
+                        }
+                    } else if (sid.equals(AID_SELECT_ORDER)) {
+                        // 순번 배지. 지금 들어와 있는 사진 썸네일의 것이다 (문서 3장 구조).
+                        if (curPhoto[0] != null && tx.length() > 0) curPhoto[0].order = tx;
+                    }
+
+                    // ── 사진 썸네일 (문서 3장) ──
+                    //  desc 가 "사진," 으로 시작하는 것만 대상. "카메라" 는 사진이 아니라 건너뛴다.
+                    //  클래스는 Button 이 정답이지만, 커스텀 뷰가 다른 클래스로 보고되는 경우까지
+                    //  놓치지 않게 clickable 도 인정한다 (무엇을 잡았는지는 덤프에 클래스로 남긴다).
+                    //  desc 완전일치만 선택하니 이 완화로 엉뚱한 사진이 선택될 수는 없다.
+                    //  화면 밖(재활용 대기) 항목은 대상에서 뺀다 — 좌표 탭이 엉뚱한 곳을 누를 수 있다.
+                    //  화면 밖 사진은 rv_media 를 가로 스크롤해서 보이게 만든 뒤 고른다.
+                    String dsS = squash(ds);
+                    if (vis && dsS.startsWith(PHOTO_PREFIX_S) && !descHead(ds).equals(PHOTO_SKIP)
+                            && (cls.contains("Button") || clickable)) {
+                        Photo p = new Photo();
+                        p.node = n;
+                        p.desc = ds;
+                        p.descS = dsS;
+                        p.cls = shortCls(cls);
+                        p.inMedia = mediaDepth[0] >= 0;
+                        a.photos.add(p);
+                        photoDepth[0] = depth;
+                        curPhoto[0] = p;
+                        seeMedia(ds);
+                        keep = true;
+                    }
+
+                    // ── 첨부 메뉴 항목 (문서 5장: 라벨은 「사진」 이다) ──
+                    if ((toolDepth[0] >= 0 || sid.equals(AID_TV_LABEL))
+                            && !dsS.startsWith(PHOTO_PREFIX_S)) {
+                        String lbl = (tx.length() > 0) ? tx : descHead(ds);
+                        if (lbl.length() > 0 && lbl.length() <= 12) {
+                            if (a.menuLabels.size() < 10 && !a.menuLabels.contains(lbl)) {
+                                a.menuLabels.add(lbl);
+                            }
+                            String lblS = squash(lbl);
+                            for (int k = 0; k < ATTACH_MENU_PHOTO_S.length; k++) {
+                                if (!lblS.equals(ATTACH_MENU_PHOTO_S[k])) continue;
+                                if (a.menuPhoto == null) { a.menuPhoto = n; keep = true; }
+                                break;
+                            }
+                        }
+                    }
+
+                    // ── 채팅방 입력창 / 첨부(+) 버튼 후보 (문서 8장 — id 미확보) ──
+                    if (idIn(id, CHATROOM_IDS)) {
+                        a.chatInput = true;
+                        if (a.inputRect == null) a.inputRect = boundsOf(n);
+                    } else if (editable && vis && a.editRect == null) {
+                        a.editRect = boundsOf(n);
+                    }
+                    if (vis && clickable && !editable && a.nearCands.size() < 60) {
+                        Rect r = boundsOf(n);
+                        if (r.bottom > halfH && r.width() <= smallPx && r.height() <= smallPx) {
+                            a.nearCands.add(n);
+                            keep = true;
+                        }
+                    }
+                    if (vis && clickable && a.plusByDesc == null) {
+                        String head = squash(descHead(ds));
+                        for (int k = 0; k < ATTACH_DESC_S.length; k++) {
+                            if (head.length() > 0 && head.equals(ATTACH_DESC_S[k])) {
+                                a.plusByDesc = n;
+                                keep = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 대상 대화방 이름이 화면에 보이나 — 이 흐름은 방을 검증하지 않으므로
+                    // 진단에 "확인됨/확인되지 않음" 만 남긴다 (대화방 제목 id 는 미확보 — 문서 8장).
+                    if (vis && !a.roomNameSeen && roomS.length() >= 2 && tx.length() > 0) {
+                        String txS = squash(tx);
+                        if (txS.equals(roomS) || (txS.length() >= 4 && roomS.startsWith(txS))) {
+                            a.roomNameSeen = true;
+                        }
+                    }
+
+                    if (vis && sig.length() < 700 && (tx.length() > 0 || sid.length() > 0)) {
+                        sig.append(cut(tx, 10)).append(':').append(sid).append('|');
+                    }
+                    return keep;
+                }
+            });
+            a.nodes += w.visited;
+            if (w.truncated) a.truncated = true;
+        }
+
+        // 대상은 <b>rv_media 안의 사진</b>이다(문서 3장). rv_media 안에서 하나라도 찾았으면
+        // 밖에서 본 것(대화 내용의 사진 말풍선 등)은 전부 버린다 — 그걸 누르면 사진 뷰어가 열린다.
+        // rv_media 가 아예 없을 때만(「사진」 메뉴로 전체 갤러리에 들어간 경우) 밖의 것을 쓴다.
+        boolean anyInMedia = false;
+        for (int i = 0; i < a.photos.size(); i++) {
+            if (a.photos.get(i).inMedia) { anyInMedia = true; break; }
+        }
+        // rv_media 밖의 사진은 「사진」 메뉴로 전체 갤러리에 들어간 경우에만 인정한다.
+        // 그 외에는 대화 내용의 사진 말풍선일 수 있고, 그걸 누르면 사진 뷰어가 열린다.
+        if (anyInMedia || !menuPhotoTapped) {
+            for (int i = a.photos.size() - 1; i >= 0; i--) {
+                if (!a.photos.get(i).inMedia) {
+                    a.outsideMedia++;
+                    a.photos.remove(i);
+                }
+            }
+        }
+        for (int i = 0; i < a.photos.size(); i++) {
+            if (a.photos.get(i).selected()) a.selectedTotal++;
+        }
+        a.sig = String.valueOf(sig.toString().hashCode()) + "/" + a.nodes
+                + "/" + a.photos.size() + "/" + a.selectedTotal
+                + "/" + (a.sheetOpen() ? 1 : 0) + "/" + (a.btnSend == null ? 0 : (a.sendEnabled ? 2 : 1));
+        rememberAttach(a);
+        return a;
+    }
+
+    /** 시트가 닫힌 뒤에도 "그때 뭐가 있었는지" 를 말할 수 있게 요약을 남긴다 */
+    private void rememberAttach(AScan a) {
+        if (a.btnSend != null) sendState = a.sendEnabled ? "enabled=Y" : "enabled=N";
+        else if (sendState.equals("미확인")) sendState = "미확인(btn_send 를 화면에서 찾지 못했습니다)";
+        sheetShape = (a.sheet != null ? "design_bottom_sheet 있음" : "design_bottom_sheet 없음")
+                + " · rv_media " + (a.media != null ? "있음" : "없음")
+                + " · rv_chat_tool " + (a.chatTool != null ? "있음" : "없음")
+                + " · btn_send " + (a.btnSend == null ? "없음" : sendState)
+                + " · 사진항목 " + a.photos.size() + "개(선택 " + a.selectedTotal + ")"
+                + " · 입력창 " + (a.chatInput ? "있음" : "없음")
+                + " · 대화방 이름 화면 확인 " + (a.roomNameSeen ? "있음" : "없음")
+                + (a.outsideMedia > 0 ? (" · rv_media 밖 사진 " + a.outsideMedia + "개 제외") : "")
+                + " · 노드 " + a.nodes;
+        if (a.menuLabels.size() > 0) {
+            StringBuilder sb = new StringBuilder(64);
+            for (int i = 0; i < a.menuLabels.size(); i++) {
+                if (i > 0) sb.append(" · ");
+                sb.append('「').append(a.menuLabels.get(i)).append('」');
+            }
+            menuSeen = sb.toString();
+        }
+        seenAt = System.currentTimeMillis();
+    }
+
+    // ── A단계 1: 첨부 시트 열기 ────────────────────────────────────────────────
+
+    private void doSheet(AScan a) {
+        // 재료 검사는 아무것도 누르기 전에 끝낸다 — 시트를 열어놓고 실패하면 사용자만 번거로워진다.
+        if (wantDescs.length == 0) {
+            dumpAndFail("전송할 사진 정보가 비어 있습니다. 이미지를 다시 선택한 후 시도하십시오.");
+            return;
+        }
+        if (dupWant > 0) {
+            dumpAndFail("전송할 사진의 촬영 시각 표기가 동일하여 사진을 개별로 지목할 수 없습니다"
+                    + " (중복 " + dupWant + "건 · 지목 가능 " + wantDescs.length + "장)."
+                    + " 오발송을 방지하기 위해 중단했습니다. 해당 이미지는 카카오톡에서 직접 첨부하십시오.");
+            return;
+        }
+        if (a.sheetOpen()) {
+            if (!sawSheet) {
+                note("첨부 시트를 확인했습니다 ("
+                        + (a.sheet != null ? AID_SHEET : AID_MEDIA) + " 확인 · 사진항목 "
+                        + a.photos.size() + "개).");
+            }
+            sawSheet = true;
+            phase = A_PICK;
+            phaseAt = System.currentTimeMillis();
+            sameSig = 0;
+            lastSig = "";
+            kick(200L);
+            return;
+        }
+
+        if (attachOpens >= MAX_ATTACH_OPEN) {
+            dumpAndFail("첨부 버튼을 " + attachOpens + "회 입력했으나 첨부 시트가 열리지 않았습니다."
+                    + attachOpenTail(a));
+            return;
+        }
+        if (openAttach(a)) {
+            attachOpens++;
+            sameSig = 0;
+            lastSig = "";
+            kick(900L);
+            return;
+        }
+        // + 를 못 찾았다. 화면을 덤프로 남기고 끝낸다 — 덤프가 있으면 다음 버전에서 정확히 고친다.
+        if (sameSig >= STUCK_ROUNDS) {
+            dumpAndFail("첨부 버튼을 찾지 못했습니다." + attachOpenTail(a));
+            return;
+        }
+        retry();
+    }
+
+    /** 첨부 버튼 실패 메시지 꼬리 — 사용자가 확인할 것과 다음 조치를 같이 준다 */
+    private String attachOpenTail(AScan a) {
+        return (a.chatInput
+                    ? " 채팅방 입력창은 확인되었으나 첨부(+) 버튼을 특정하지 못했습니다."
+                    : " 채팅방 화면(메시지 입력창)이 확인되지 않았습니다. 대상 채팅방이 열려 있는지 확인하십시오.")
+                + " 카카오톡에서 채팅방 하단 + 를 직접 눌러 첨부 시트를 열어 둔 상태로 다시 시도하십시오."
+                + " 화면 진단을 전달하면 해당 버튼을 다음 버전에 반영할 수 있습니다."
+                + a11yTail();
+    }
+
+    /**
+     * 첨부(+) 버튼을 눌러 시트를 연다. 순서는 문서 8장의 지시대로다.
+     *  1) desc 가 첨부/추가/더보기 인 clickable 노드
+     *  2) 메시지 입력창 근처의 <b>왼쪽 끝</b> clickable 노드
+     * <b>없는 id 는 지어내지 않는다.</b> 둘 다 실패하면 false 를 돌려주고 호출부가 덤프를 남긴다.
+     */
+    private boolean openAttach(AScan a) {
+        if (a.plusByDesc != null && clickExact(a.plusByDesc, "첨부 버튼(desc)")) {
+            note("첨부 버튼을 입력했습니다 (desc 후보 " + cut(norm(desc(a.plusByDesc)), 12) + ").");
+            return true;
+        }
+        AccessibilityNodeInfo left = leftOfInput(a);
+        if (left != null && clickExact(left, "첨부 버튼(입력창 왼쪽)")) {
+            note("입력창 왼쪽 끝 항목을 첨부 버튼으로 보고 입력했습니다 " + boundsStr(left)
+                    + " — 이 버튼의 id 는 아직 미확보 상태입니다.");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 메시지 입력창과 같은 줄에 있는 clickable 노드 중 <b>가장 왼쪽</b> 것.
+     * 입력창 id 를 못 찾았으면 편집 가능한 노드 위치로 대체한다. 둘 다 없으면 null.
+     */
+    private AccessibilityNodeInfo leftOfInput(AScan a) {
+        Rect ref = (a.inputRect != null) ? a.inputRect : a.editRect;
+        if (ref == null) return null;
+        int pad = Theme.dp(this, 28);
+        AccessibilityNodeInfo best = null;
+        int bestLeft = Integer.MAX_VALUE;
+        for (int i = 0; i < a.nearCands.size(); i++) {
+            AccessibilityNodeInfo n = a.nearCands.get(i);
+            Rect r = boundsOf(n);
+            if (r.width() <= 0 || r.height() <= 0) continue;
+            int cy = r.centerY();
+            if (cy < ref.top - pad || cy > ref.bottom + pad) continue;   // 입력창과 같은 줄만
+            if (r.right > ref.left + pad) continue;                      // 입력창 왼쪽에 있는 것만
+            if (r.left < bestLeft) { bestLeft = r.left; best = n; }
+        }
+        return best;
+    }
+
+    // ── A단계 2: 사진 고르기 ──────────────────────────────────────────────────
+
+    private void doPickPhoto(AScan a) {
+        long now = System.currentTimeMillis();
+
+        if (wantDescs.length == 0) {
+            dumpAndFail("전송할 사진 정보가 비어 있습니다. 이미지를 다시 선택한 후 시도하십시오.");
+            return;
+        }
+
+        // 시트가 닫혔다 (사용자가 뒤로가기를 눌렀거나 우리가 엉뚱한 곳을 눌렀다)
+        if (!a.sheetOpen() && a.photos.isEmpty()) {
+            if (attachOpens < MAX_ATTACH_OPEN) {
+                note("첨부 시트가 닫혔습니다. 다시 엽니다.");
+                phase = A_SHEET;
+                phaseAt = now;
+                sameSig = 0;
+                lastSig = "";
+                kick(400L);
+                return;
+            }
+            dumpAndFail("첨부 시트가 닫혀 사진을 선택할 수 없습니다. 선택 " + pickedCount + "장 완료 상태입니다."
+                    + " 카카오톡에서 채팅방 하단 + 를 눌러 첨부 시트를 열어 둔 상태로 다시 시도하십시오.");
+            return;
+        }
+
+        // desc 가 겹치는 사진이 둘 이상 보이면 아무것도 고르지 않는다 (같은 분에 찍은 두 장).
+        // 엉뚱한 사진을 보내는 것이 안 보내는 것보다 나쁘다 — 공유창 흐름의 동명 대화방 규칙과 같다.
+        String dup = dupDesc(a);
+        if (dup.length() > 0) {
+            dumpAndFail("촬영 시각이 같은 사진이 여러 장 있어 대상을 특정하지 못했습니다(" + dup + ")."
+                    + " 오발송을 방지하기 위해 선택하지 않았습니다."
+                    + " 해당 사진은 카카오톡에서 직접 첨부하십시오.");
+            return;
+        }
+
+        applySelection(a);
+
+        // 대상 목록에 없는 사진이 선택돼 있으면 여기서 멈춘다.
+        // 그대로 전송하면 사용자가 의도하지 않은 사진이 함께 나간다 — 안 보내는 것보다 나쁘다.
+        String extra = extraSelected(a);
+        if (extra.length() > 0) {
+            dumpAndFail("전송 대상이 아닌 사진이 선택된 상태입니다(" + extra + ")."
+                    + " 의도하지 않은 사진이 함께 전송되는 것을 방지하기 위해 중단했습니다."
+                    + " 카카오톡 첨부 시트에서 선택을 모두 해제한 후 다시 시도하십시오.");
+            return;
+        }
+
+        // 방금 탭한 사진의 선택 검증 (tv_select_order 에 순번이 생겼나 — 문서 3장)
+        if (verifyIdx >= 0) {
+            if (verifyIdx < gotDescs.length && gotDescs[verifyIdx]) {
+                verifyIdx = -1;
+                verifyTries = 0;
+            } else {
+                verifyTries++;
+                if (verifyTries >= MAX_SEL_VERIFY) {
+                    String want = (verifyIdx < wantDescs.length) ? wantDescs[verifyIdx] : "";
+                    int idx = verifyIdx;
+                    verifyIdx = -1;
+                    dumpAndFail("사진 「" + cut(want, 24) + "」 을 탭했으나 선택 순번(" + AID_SELECT_ORDER
+                            + ")이 표시되지 않았습니다. 선택이 처리되지 않았습니다."
+                            + " (대상 " + (idx + 1) + "/" + wantDescs.length + "장 · 선택 완료 "
+                            + pickedCount + "장)" + a11yTail());
+                    return;
+                }
+                kick(400L);
+                return;
+            }
+        }
+
+        if (allSelected()) {
+            note("사진 " + pickedCount + "장의 선택 순번을 확인했습니다. 전송 버튼을 확인합니다.");
+            phase = A_SEND;
+            phaseAt = now;
+            sendWaits = 0;
+            sameSig = 0;
+            lastSig = "";
+            kick(250L);
+            return;
+        }
+
+        // 화면에 보이는 대상 사진 중 아직 선택되지 않은 것 하나를 탭한다.
+        // (이미 선택된 항목은 건너뛴다 — 다시 누르면 선택이 풀린다)
+        int idx = nextTapIndex(a);
+        if (idx >= 0) {
+            Photo p = a.exact(wantDescsS[idx]);
+            if (p != null && clickExact(p.node, "사진 선택")) {
+                verifyIdx = idx;
+                verifyTries = 0;
+                note("사진을 탭했습니다 — 「" + cut(wantDescs[idx], 24) + "」 (" + p.cls + ")");
+                kick(450L);
+                return;
+            }
+            if (sameSig >= STUCK_ROUNDS) {
+                dumpAndFail("사진 「" + cut(wantDescs[idx], 24) + "」 을 찾았으나 선택 입력이 처리되지 않았습니다"
+                        + (p == null ? "" : " (" + p.cls + " " + boundsStr(p.node) + ")") + "."
+                        + a11yTail());
+                return;
+            }
+            retry();
+            return;
+        }
+
+        // 화면 밖에 있다 → rv_media 를 가로로 스크롤하며 다시 찾는다 (문서 2장)
+        if (!mediaScrollDone && scrollMedia(a)) {
+            kick(450L);
+            return;
+        }
+
+        if (mediaScrollDone || sameSig >= STUCK_ROUNDS) {
+            dumpAndFail(photoNotFound());
+            return;
+        }
+        retry();
+    }
+
+    /**
+     * 화면의 선택 상태를 후보 목록에 반영한다.
+     * 한 번 선택된 것은 다시 내리지 않는다 — 스크롤로 화면 밖에 나가면 노드가 사라지기 때문이다.
+     */
+    private void applySelection(AScan a) {
+        boolean[] got = gotDescs;
+        int n = 0;
+        for (int i = 0; i < wantDescsS.length && i < got.length; i++) {
+            if (!got[i]) {
+                Photo p = a.exact(wantDescsS[i]);
+                if (p != null && p.selected()) {
+                    got[i] = true;
+                    note("사진 선택을 확인했습니다 — 「" + cut(wantDescs[i], 24) + "」 (순번 " + p.order + ")");
+                }
+            }
+            if (got[i]) n++;
+        }
+        pickedCount = n;
+    }
+
+    /** 후보 중 화면에 <b>둘 이상</b> 같은 desc 로 보이는 것. 없으면 "". */
+    private String dupDesc(AScan a) {
+        for (int i = 0; i < wantDescsS.length && i < gotDescs.length; i++) {
+            if (gotDescs[i]) continue;
+            if (a.count(wantDescsS[i]) > 1) {
+                return "「" + cut(wantDescs[i], 24) + "」 " + a.count(wantDescsS[i]) + "장";
+            }
+        }
+        return "";
+    }
+
+    /** 아직 선택 안 됐고 지금 화면에 보이는 후보의 index. 없으면 -1. */
+    private int nextTapIndex(AScan a) {
+        for (int i = 0; i < wantDescsS.length && i < gotDescs.length; i++) {
+            if (gotDescs[i]) continue;
+            Photo p = a.exact(wantDescsS[i]);
+            if (p != null && !p.selected()) return i;
+        }
+        return -1;
+    }
+
+    private boolean allSelected() {
+        if (gotDescs.length == 0) return false;
+        for (int i = 0; i < gotDescs.length; i++) {
+            if (!gotDescs[i]) return false;
+        }
+        return true;
+    }
+
+    /** 선택돼 있는데 우리 대상 목록에는 없는 사진들 (최대 3개까지 이름을 낸다) */
+    private String extraSelected(AScan a) {
+        StringBuilder sb = new StringBuilder(64);
+        int n = 0;
+        for (int i = 0; i < a.photos.size(); i++) {
+            Photo p = a.photos.get(i);
+            if (!p.selected()) continue;
+            boolean ours = false;
+            for (int k = 0; k < wantDescsS.length; k++) {
+                if (p.descS.equals(wantDescsS[k])) { ours = true; break; }
+            }
+            if (ours) continue;
+            if (n < 3) {
+                if (n > 0) sb.append(", ");
+                sb.append('「').append(cut(p.desc, 24)).append('」');
+            }
+            n++;
+        }
+        if (n > 3) sb.append(" 외 ").append(n - 3).append("장");
+        return sb.toString();
+    }
+
+    /**
+     * rv_media 를 한 칸 가로 스크롤한다. 더 나올 게 없으면 {@link #mediaScrollDone} 을 세우고 false.
+     * performAction 의 반환값만 믿지 않는다 — 끝에서도 true 를 주는 뷰가 있어서
+     * <b>새 사진이 실제로 늘었는지</b>까지 본다.
+     */
+    private boolean scrollMedia(AScan a) {
+        if (a.media == null) {
+            // rv_media 가 아예 없다. 첨부 메뉴의 「사진」 을 한 번 눌러 목록을 띄워본다 (문서 5장).
+            if (!menuPhotoTapped && a.menuPhoto != null && clickExact(a.menuPhoto, "첨부 메뉴 사진")) {
+                menuPhotoTapped = true;
+                note("첨부 메뉴 「사진」 을 입력했습니다. 이후 전체 갤러리 화면 구조는 미확보 상태입니다(문서 8장).");
+                return true;
+            }
+            mediaScrollDone = true;
+            return false;
+        }
+        if (mediaScrolls >= MAX_MEDIA_SCROLL) {
+            mediaScrollDone = true;
+            note("rv_media 를 " + mediaScrolls + "회 스크롤했으나 대상 사진이 표시되지 않았습니다.");
+            return false;
+        }
+        int seen = mediaSeenCount();
+        if (mediaScrolls > 0 && seen == mediaSeenBefore) {
+            mediaScrollDone = true;
+            note("rv_media 스크롤에서 새 사진이 표시되지 않았습니다 (" + mediaScrolls
+                    + "회 · 누적 " + seen + "장).");
+            return false;
+        }
+        mediaSeenBefore = seen;
+        boolean ok = false;
+        try {
+            ok = a.media.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+        } catch (Throwable ignore) { }
+        if (!ok) {
+            mediaScrollDone = true;
+            note("rv_media 를 더 스크롤할 수 없습니다 (" + mediaScrolls + "회 · 누적 "
+                    + mediaSeenCount() + "장).");
+            return false;
+        }
+        mediaScrolls++;
+        return true;
+    }
+
+    /** 사진을 못 찾았다 — 찾으려던 desc 와 화면에 있던 desc 를 나란히 보여준다 */
+    private String photoNotFound() {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("첨부 시트의 최근 사진 목록에서 대상 사진을 찾지 못했습니다 (선택 완료 ")
+                .append(pickedCount).append('/').append(wantDescs.length).append("장).");
+        sb.append(" 찾으려던 항목: ").append(wantList(3));
+        sb.append(" · 화면에서 확인된 항목: ").append(seenList(3)).append('.');
+        sb.append(" 대상 이미지가 카카오톡의 최근 사진 목록에 없거나(다운로드 폴더 등),");
+        sb.append(" 촬영 시각 표기가 달라 대조에 실패했습니다.");
+        sb.append(" 화면 진단의 두 목록을 대조하십시오.");
+        return sb.toString();
+    }
+
+    /** 찾으려던 desc 목록 (한 줄) */
+    private static String wantList(int max) {
+        String[] w = wantDescs;
+        if (w.length == 0) return "없음";
+        StringBuilder sb = new StringBuilder(96);
+        for (int i = 0; i < w.length && i < max; i++) {
+            if (i > 0) sb.append(" · ");
+            sb.append('「').append(cut(w[i], 24)).append('」');
+        }
+        if (w.length > max) sb.append(" 외 ").append(w.length - max).append("건");
+        return sb.toString();
+    }
+
+    /** 화면(rv_media)에서 본 사진 desc 목록 (한 줄) */
+    private static String seenList(int max) {
+        ArrayList<String> seen = mediaSeenList();
+        if (seen.isEmpty()) return "없음";
+        StringBuilder sb = new StringBuilder(96);
+        for (int i = 0; i < seen.size() && i < max; i++) {
+            if (i > 0) sb.append(" · ");
+            sb.append('「').append(cut(seen.get(i), 24)).append('」');
+        }
+        if (seen.size() > max) sb.append(" 외 ").append(seen.size() - max).append("건");
+        return sb.toString();
+    }
+
+    // ── A단계 3: 전송 ────────────────────────────────────────────────────────
+
+    private void doSendAttach(AScan a) {
+        if (a.btnSend == null) {
+            if (sendTry > 0) {
+                finish(true, targetRoom + " · 사진 " + pickedCount + "장을 전송했습니다."
+                        + " 카카오톡에서 확인하십시오.");
+                return;
+            }
+            if (sameSig >= STUCK_ROUNDS) {
+                dumpAndFail("전송 버튼(" + AID_BTN_SEND + ")을 찾지 못했습니다. 첨부 시트 구성이 변경되었습니다."
+                        + " (선택 완료 " + pickedCount + "장 · " + sheetShape + ")" + a11yTail());
+                return;
+            }
+            retry();
+            return;
+        }
+
+        // 문서 4장 — enabled 가 선택 여부를 그대로 반영한다. Y 가 된 뒤에만 누른다.
+        if (!a.sendEnabled) {
+            sendWaits++;
+            if (sendWaits >= MAX_SEND_WAIT) {
+                dumpAndFail("선택된 이미지가 없어 전송 버튼이 활성화되지 않았습니다."
+                        + " (선택 완료 " + pickedCount + "/" + wantDescs.length + "장 · "
+                        + AID_BTN_SEND + " enabled=N · " + sendWaits + "회 대기)"
+                        + " 카카오톡 첨부 시트에서 사진이 선택되는지 직접 확인하십시오." + a11yTail());
+                return;
+            }
+            kick(RETRY_MS);
+            return;
+        }
+
+        if (sendTry >= MAX_SEND_TRY) {
+            dumpAndFail("전송 버튼을 " + sendTry + "회 입력했으나 첨부 시트가 닫히지 않았습니다."
+                    + " 전송 여부를 확인할 수 없습니다. 카카오톡에서 전송 결과를 먼저 확인하십시오."
+                    + " 이미 전송된 경우 재전송하지 마십시오.");
+            return;
+        }
+        if (clickExact(a.btnSend, "전송 버튼")) {
+            sendTry++;
+            lastSendLabel = AID_BTN_SEND;
+            note("전송 버튼을 입력했습니다 (" + AID_BTN_SEND + " · enabled=Y · 선택 "
+                    + pickedCount + "장 · " + sendTry + "회).");
+            phase = A_VERIFY;
+            phaseAt = System.currentTimeMillis();
+            sameSig = 0;
+            lastSig = "";
+            kick(1200L);
+            return;
+        }
+        if (sameSig >= STUCK_ROUNDS) {
+            dumpAndFail("전송 버튼(" + AID_BTN_SEND + ") 입력이 처리되지 않았습니다"
+                    + " (clickable=" + bool(a.sendClickable) + " · 좌표 탭 가능="
+                    + (canGesture() ? "Y" : "N") + ")." + a11yTail());
+            return;
+        }
+        retry();
+    }
+
+    // ── A단계 4: 전송 확인 ───────────────────────────────────────────────────
+
+    private void doVerifyAttach(AScan a) {
+        // 시트가 닫혔다 = 전송이 진행됐다 (전송을 누른 적이 있을 때만 이 단계로 들어온다)
+        if (!a.sheetOpen() && a.btnSend == null) {
+            note("전송 후 첨부 시트가 닫혔습니다.");
+            finish(true, targetRoom + " · 사진 " + pickedCount + "장을 전송했습니다. 카카오톡에서 확인하십시오.");
+            return;
+        }
+        // 시트는 남았지만 선택이 전부 풀리고 전송 버튼이 비활성으로 돌아갔다 = 선택분이 전송됐다
+        if (a.btnSend != null && !a.sendEnabled && a.selectedTotal == 0 && pickedCount > 0) {
+            note("전송 후 선택이 해제되고 전송 버튼이 비활성으로 돌아갔습니다.");
+            finish(true, targetRoom + " · 사진 " + pickedCount + "장을 전송했습니다. 카카오톡에서 확인하십시오.");
+            return;
+        }
+        if (sameSig >= STUCK_ROUNDS) {
+            if (sendTry < MAX_SEND_TRY) {
+                phase = A_SEND;
+                sameSig = 0;
+                lastSig = "";
+                kick(400L);
+                return;
+            }
+            dumpAndFail("전송 버튼 입력 후 첨부 시트가 닫히지 않았습니다. 전송 여부를 확인할 수 없습니다."
+                    + " 카카오톡에서 전송 결과를 먼저 확인하십시오. 이미 전송된 경우 재전송하지 마십시오.");
+            return;
+        }
+        retry();
+    }
+
+    // ── 첨부 흐름 공용 도구 ───────────────────────────────────────────────────
+
+    /**
+     * 이 노드를 누른다 — <b>자기 자신 → 가장 가까운 clickable 조상 → 좌표 탭</b> 순서.
+     *
+     * {@link #clickNode} 와 달리 "행처럼 큰 조상" 을 먼저 고르지 않는다. 첨부 시트에서 큰 조상을
+     * 누르면 시트 배경을 눌러 시트가 그대로 닫힌다. 여기서는 <b>가장 가까운</b> clickable 만 쓴다.
+     * 성공을 여기서 단정하지 않는다 — tv_select_order / btn_send 상태로 다음 단계에서 확인한다.
+     */
+    private boolean clickExact(AccessibilityNodeInfo n, String what) {
+        if (n == null) return false;
+        try { n.refresh(); } catch (Throwable ignore) { }
+
+        boolean clickable = false, enabled = true;
+        try { clickable = n.isClickable(); } catch (Throwable ignore) { }
+        try { enabled = n.isEnabled(); } catch (Throwable ignore) { }
+        if (clickable && enabled) {
+            try {
+                if (n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            } catch (Throwable ignore) { }
+        }
+
+        // getParent() 로 받은 노드는 전부 우리 것이라 다 쓰고 반납한다.
+        ArrayList<AccessibilityNodeInfo> got = new ArrayList<AccessibilityNodeInfo>(6);
+        try {
+            AccessibilityNodeInfo cur = n;
+            for (int up = 0; up < 5; up++) {
+                AccessibilityNodeInfo p = null;
+                try { p = cur.getParent(); } catch (Throwable ignore) { }
+                if (p == null) break;
+                got.add(p);
+                cur = p;
+                boolean c = false, e = true;
+                try { c = p.isClickable(); } catch (Throwable ignore) { }
+                try { e = p.isEnabled(); } catch (Throwable ignore) { }
+                if (!c || !e) continue;
+                try {
+                    if (p.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        note(what + " — 조상 노드로 입력했습니다 (" + up + "칸 위).");
+                        return true;
+                    }
+                } catch (Throwable ignore) { }
+            }
+        } finally {
+            recycleAll(got);
+        }
+        // 마지막 수단: 좌표 탭 (문서 기준 canPerformGestures=Y 로 확인됐다)
+        return tapNode(n, what);
+    }
+
+    /** "카메라, 버튼" → "카메라". 카톡 desc 에는 역할 설명이 쉼표로 붙는다 (문서 2장 handle_container) */
+    private static String descHead(String s) {
+        String t = (s == null) ? "" : s;
+        int i = t.indexOf(',');
+        return ((i < 0) ? t : t.substring(0, i)).trim();
+    }
+
+    private static void seeMedia(String descText) {
+        if (descText == null || descText.length() == 0) return;
+        synchronized (MEDIA_SEEN) {
+            if (MEDIA_SEEN.contains(descText)) return;
+            if (MEDIA_SEEN.size() < MEDIA_DESC_MAX) MEDIA_SEEN.add(descText);
+        }
+    }
+
+    private static int mediaSeenCount() {
+        synchronized (MEDIA_SEEN) { return MEDIA_SEEN.size(); }
+    }
+
+    private static ArrayList<String> mediaSeenList() {
+        synchronized (MEDIA_SEEN) { return new ArrayList<String>(MEDIA_SEEN); }
+    }
+
+    /**
+     * 첨부 흐름 전용 진단 블록.
+     * <b>찾으려던 것과 화면에 있던 것을 나란히</b> 놓는다 — 사용자가 둘을 대조할 수 있어야
+     * "촬영 시각 표기가 다르다" 를 스스로 알아챈다. 떨어뜨려 놓으면 아무도 비교하지 않는다.
+     */
+    private static String attachBlock() {
+        StringBuilder sb = new StringBuilder(1024);
+        String[] w = wantDescs;
+        boolean[] g = gotDescs;
+        sb.append("첨부 시트: ").append(sawSheet ? "확인됨" : "확인되지 않음")
+                .append(sheetShape.length() == 0 ? "" : (" · " + sheetShape)).append('\n');
+        sb.append("※ 이 흐름은 열려 있는 채팅방이 대상 대화방인지 검증하지 않습니다")
+                .append(" (대화방 제목 view id 미확보 — 문서 8장). 대상 채팅방을 여는 것은 호출 측 책임입니다.\n");
+        sb.append("첨부 메뉴 항목: ").append(menuSeen.length() == 0 ? "확인되지 않음" : menuSeen)
+                .append(menuPhotoTapped ? " · 「사진」 입력함" : "").append('\n');
+        sb.append("찾으려던 사진 desc ").append(w.length).append("개")
+                .append(dupWant > 0 ? (" · 중복으로 제외된 지목 " + dupWant + "건") : "").append(":\n");
+        if (w.length == 0) {
+            sb.append("  (없음 — 호출 측이 사진 desc 후보를 넘기지 않았습니다)\n");
+        }
+        for (int i = 0; i < w.length && i < SHOW_DESCS; i++) {
+            sb.append("  ").append(i + 1).append(". \"").append(w[i]).append('"')
+                    .append(" → ").append((i < g.length && g[i]) ? "선택 성공" : "선택되지 않음")
+                    .append('\n');
+        }
+        if (w.length > SHOW_DESCS) {
+            sb.append("  … 외 ").append(w.length - SHOW_DESCS).append("개\n");
+        }
+        ArrayList<String> seen = mediaSeenList();
+        sb.append("화면(").append(AID_MEDIA).append(")에서 확인된 사진 desc ").append(seen.size())
+                .append("개").append(seen.size() > SHOW_DESCS ? (" · 앞 " + SHOW_DESCS + "개만 표시") : "")
+                .append(":\n");
+        if (seen.isEmpty()) {
+            sb.append("  (없음 — 사진 항목을 한 개도 보지 못했습니다)\n");
+        }
+        for (int i = 0; i < seen.size() && i < SHOW_DESCS; i++) {
+            sb.append("  ").append(i + 1).append(". \"").append(seen.get(i)).append("\"\n");
+        }
+        sb.append("  ↑ 위 두 목록을 대조하십시오. 공백을 제외한 문자가 완전히 일치해야 선택됩니다.\n");
+        sb.append("선택 성공: ").append(pickedCount).append('/').append(w.length).append("장")
+                .append(" · rv_media 스크롤 ").append(mediaScrolls).append("회")
+                .append(" · 첨부 버튼 입력 ").append(attachOpens).append("회\n");
+        sb.append("전송 버튼(").append(AID_BTN_SEND).append("): ").append(sendState)
+                .append(" · 입력 ").append(sendTry).append("회")
+                .append(" · 활성 대기 ").append(sendWaits).append("회\n");
+        return sb.toString();
+    }
+
     // ── 검색창 ───────────────────────────────────────────────────────────────
 
     /** 검색창을 찾아 방 이름을 넣어본다. 넣었으면 true. */
@@ -1674,14 +2565,20 @@ public final class KakaoAccessibility extends AccessibilityService {
                 .append(" · 전송 흐름: ").append(flowName()).append('\n');
         sb.append(a11yBlock(this));
         sb.append("실패: ").append(where).append('\n');
-        sb.append("찾으려던 이름: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
-        sb.append("화면에서 확인된 이름: ").append(seenNames.length() == 0 ? "없음" : seenNames).append('\n');
+        sb.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        if (mode == M_ATTACH) {
+            // 첨부 흐름은 대화방 이름이 아니라 사진 desc 대조가 핵심이다
+            sb.append(attachBlock());
+            sb.append("단계: ").append(whereNow()).append('\n');
+        } else {
+            sb.append("화면에서 확인된 이름: ").append(seenNames.length() == 0 ? "없음" : seenNames).append('\n');
+            sb.append("단계: ").append(whereNow())
+                    .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
+                    .append(" · 전송 입력 ").append(sendTry).append("회")
+                    .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
+        }
         sb.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
         sb.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
-        sb.append("단계: ").append(whereNow())
-                .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
-                .append(" · 전송 입력 ").append(sendTry).append("회")
-                .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
         sb.append(env(this));
         sb.append("마지막으로 본 화면: ")
                 .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : seenShape).append('\n');
@@ -1739,7 +2636,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 boolean ok = false;
                 try { ok = performGlobalAction(GLOBAL_ACTION_BACK); } catch (Throwable ignore) { }
                 android.util.Log.i("KakaoAuto",
-                        "공유창 닫기 뒤로가기 " + backTries + " ok=" + ok + " ime=" + ime);
+                        "카카오톡 화면 닫기 뒤로가기 " + backTries + " ok=" + ok + " ime=" + ime);
                 if (ime && backTries < MAX_BACK) h.postDelayed(this, BACK_MS);
             }
         }, 250L);
@@ -1807,6 +2704,21 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 지금 어느 단계에서 뭘 하고 있었나 (한 줄) */
     private static String whereNow() {
         int p = phase;
+        if (mode == M_ATTACH) {
+            if (p == A_SHEET) {
+                return "첨부 시트 열기 중 · 첨부 버튼 입력 " + attachOpens + "회"
+                        + " · 시트 " + (sawSheet ? "확인" : "미확인");
+            }
+            if (p == A_PICK) {
+                return "사진 선택 중 · 선택 " + pickedCount + "/" + wantDescs.length + "장"
+                        + " · rv_media 스크롤 " + mediaScrolls + "회";
+            }
+            if (p == A_SEND) {
+                return "전송 버튼 확인 중 · 선택 " + pickedCount + "장 · btn_send " + sendState
+                        + " · 활성 대기 " + sendWaits + "회";
+            }
+            return "전송 버튼 입력 후 확인 중 · 선택 " + pickedCount + "장";
+        }
         if (p == P_PICK) return "대화방 선택 중 · 스크롤 " + scrolls + "회 · 검색 " + searchTry + "회";
         if (p == P_AFTER) return "대화방 선택 직후 반응 확인 중";
         if (p == P_SEND) return "전송 버튼 찾는 중";
@@ -1816,6 +2728,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static String timeoutWhere() {
         int p = phase;
         String room = (targetRoom == null) ? "" : targetRoom;
+        if (mode == M_ATTACH) return attachTimeoutWhere();
         if (p == P_PICK) {
             if (!sawShareList) {
                 return "시간이 초과되었으나 공유창(대화방 선택 목록)이 확인되지 않았습니다. 대화방 이름 문제가 아닙니다."
@@ -1847,8 +2760,36 @@ public final class KakaoAccessibility extends AccessibilityService {
      * "눌렀는데 아무 일도 안 일어났어" 로 끝내면 사용자는 뭘 해야 할지 모른다.
      */
     private static String nextStep() {
+        if (mode == M_ATTACH) {
+            return " 카카오톡 첨부 시트가 열린 상태일 수 있습니다. 뒤로가기로 자동 종료를 시도합니다."
+                    + " 종료되지 않으면 뒤로가기로 직접 닫은 후 다시 시도하십시오.";
+        }
         return " 카카오톡 공유창이 열린 상태일 수 있습니다. 뒤로가기로 자동 종료를 시도합니다."
                 + " 종료되지 않으면 뒤로가기로 직접 닫고, 카카오톡을 채팅 목록 화면으로 둔 후 다시 시도하십시오.";
+    }
+
+    /** 첨부 시트 흐름에서 시간이 초과됐을 때의 단계별 원인 */
+    private static String attachTimeoutWhere() {
+        int p = phase;
+        if (p == A_SHEET) {
+            return "첨부 시트를 열지 못한 상태로 시간이 초과되었습니다"
+                    + (sawSheet ? "" : " (design_bottom_sheet 를 한 번도 확인하지 못했습니다)")
+                    + ". 대상 채팅방이 화면에 열려 있는지 확인하고, 채팅방 하단 + 를 눌러"
+                    + " 첨부 시트를 열어 둔 상태로 다시 시도하십시오." + nextStep();
+        }
+        if (p == A_PICK) {
+            return "대상 사진을 선택하지 못한 상태로 시간이 초과되었습니다 (선택 "
+                    + pickedCount + "/" + wantDescs.length + "장)."
+                    + " 찾으려던 항목: " + wantList(3)
+                    + " · 화면에서 확인된 항목: " + seenList(3) + "." + nextStep();
+        }
+        if (p == A_SEND) {
+            return "전송 버튼이 활성화되지 않은 상태로 시간이 초과되었습니다 (선택 "
+                    + pickedCount + "장 · " + AID_BTN_SEND + " " + sendState + ")." + nextStep();
+        }
+        return "전송 버튼 입력 후 첨부 시트가 닫히지 않은 상태로 시간이 초과되었습니다."
+                + " 전송 여부를 확인할 수 없습니다. 카카오톡에서 먼저 확인하십시오."
+                + " 이미 전송된 경우 재전송하지 마십시오.";
     }
 
     /**
@@ -1945,11 +2886,12 @@ public final class KakaoAccessibility extends AccessibilityService {
         }
     }
 
-    /** 이번 시도에서 카톡 창 이벤트를 받았나 — "공유창 미표시" 와 "표시됐으나 실패" 를 가른다 */
+    /** 이번 시도에서 카톡 창 이벤트를 받았나 — "화면 미표시" 와 "표시됐으나 실패" 를 가른다 */
     private static String eventState() {
-        return kakaoEvents == 0
-                ? "0건 (카카오톡 화면 이벤트를 한 건도 수신하지 못했습니다 = 공유창 미표시로 판단)"
-                : (kakaoEvents + "건 (카카오톡 화면은 표시되었습니다)");
+        if (kakaoEvents != 0) return kakaoEvents + "건 (카카오톡 화면은 표시되었습니다)";
+        return mode == M_ATTACH
+                ? "0건 (카카오톡 화면 이벤트를 한 건도 수신하지 못했습니다 = 카카오톡이 전면에 없는 것으로 판단)"
+                : "0건 (카카오톡 화면 이벤트를 한 건도 수신하지 못했습니다 = 공유창 미표시로 판단)";
     }
 
     /** 기기/OS/화면/앱 정보 — bounds 숫자를 해석하려면 해상도가 필요하다 */
@@ -2618,18 +3560,11 @@ public final class KakaoAccessibility extends AccessibilityService {
      * 검색창 id, 확정 버튼 라벨이 한 번에 정해진다.
      */
     private String buildDump(String where) {
+        if (mode == M_ATTACH) return buildAttachDump(where);
         final StringBuilder out = new StringBuilder(4096);
         final String room = (targetRoom == null) ? "" : targetRoom;
-        String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
 
-        out.append("=== 카카오톡 화면 진단 ").append(now).append(" ===\n");
-        out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
-        out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
-        out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
-        out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(flowName()).append('\n');
-        // 타사 접근성 앱은 화면 조작 실패에서 가장 먼저 봐야 하는 항목이다 → 맨 위에 둔다
-        out.append(a11yBlock(this));
-        out.append("실패: ").append((where == null || where.length() == 0) ? "(수동 수집)" : where).append('\n');
+        dumpHead(out, where);
         out.append("찾으려던 이름: \"").append(room).append("\"\n");
         out.append("  (정규화: \"").append(norm(room))
                 .append("\" / 공백무시: \"").append(squash(room))
@@ -2653,29 +3588,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
 
         ArrayList<AccessibilityNodeInfo> rs = roots();
-        out.append("카카오톡 창 개수: ").append(rs.size()).append('\n');
-        try {
-            List<AccessibilityWindowInfo> ws = getWindows();
-            if (ws != null) {
-                for (int i = 0; i < ws.size() && i < 8; i++) {
-                    AccessibilityWindowInfo w = ws.get(i);
-                    if (w == null) continue;
-                    AccessibilityNodeInfo r = null;
-                    try { r = w.getRoot(); } catch (Throwable ignore) { }
-                    out.append("  창#").append(i).append(" type=").append(winType(w))
-                            .append(" active=").append(bool(w.isActive()))
-                            .append(" focus=").append(bool(w.isFocused()))
-                            .append(" layer=").append(layerOf(w))
-                            .append(" pkg=").append((r == null) ? "?" : String.valueOf(pkgOf(r)))
-                            .append(" 루트클래스=").append((r == null) ? "없음" : className(r))
-                            .append(" 크기=").append((r == null) ? "?" : boundsStr(r))
-                            .append('\n');
-                    if (r != null) { try { r.recycle(); } catch (Throwable ignore) { } }
-                }
-            }
-        } catch (Throwable t) {
-            out.append("  (창 목록을 읽지 못했습니다 — ").append(t.getClass().getSimpleName()).append(")\n");
-        }
+        appendWindows(out, rs.size());
 
         if (rs.isEmpty()) {
             out.append("\n현재 화면에 카카오톡 창이 없습니다. 공유창이 이미 닫혔거나 다른 앱이 전면에 있습니다.\n");
@@ -2741,6 +3654,60 @@ public final class KakaoAccessibility extends AccessibilityService {
         }
         out.append('\n');
 
+        appendNodeList(out, rs);
+        out.append('\n').append(notesBlock());
+        out.append("=== 끝 ===\n");
+
+        recycleAll(rs);
+        String s = out.toString();
+        if (s.length() > DUMP_MAX_CHARS) s = s.substring(0, DUMP_MAX_CHARS) + "\n…(이하 생략)";
+        return s;
+    }
+
+    // ── 덤프 공용 조각 (공유창 · 첨부 시트 둘 다 쓴다) ──────────────────────────
+
+    /** 덤프 머리 — 시각 · 시도 id · 흐름 이름 · 타사 접근성 앱 · 실패 사유 */
+    private void dumpHead(StringBuilder out, String where) {
+        String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
+        out.append("=== 카카오톡 화면 진단 ").append(now).append(" ===\n");
+        out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
+        out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
+        out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
+        out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(flowName()).append('\n');
+        // 타사 접근성 앱은 화면 조작 실패에서 가장 먼저 봐야 하는 항목이다 → 맨 위에 둔다
+        out.append(a11yBlock(this));
+        out.append("실패: ").append((where == null || where.length() == 0) ? "(수동 수집)" : where).append('\n');
+    }
+
+    /** 창 목록 (바텀시트가 별도 창인지 같은 창인지 여기서 갈린다 — 문서 6장) */
+    private void appendWindows(StringBuilder out, int rootCount) {
+        out.append("카카오톡 창 개수: ").append(rootCount).append('\n');
+        try {
+            List<AccessibilityWindowInfo> ws = getWindows();
+            if (ws != null) {
+                for (int i = 0; i < ws.size() && i < 8; i++) {
+                    AccessibilityWindowInfo w = ws.get(i);
+                    if (w == null) continue;
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Throwable ignore) { }
+                    out.append("  창#").append(i).append(" type=").append(winType(w))
+                            .append(" active=").append(bool(w.isActive()))
+                            .append(" focus=").append(bool(w.isFocused()))
+                            .append(" layer=").append(layerOf(w))
+                            .append(" pkg=").append((r == null) ? "?" : String.valueOf(pkgOf(r)))
+                            .append(" 루트클래스=").append((r == null) ? "없음" : className(r))
+                            .append(" 크기=").append((r == null) ? "?" : boundsStr(r))
+                            .append('\n');
+                    if (r != null) { try { r.recycle(); } catch (Throwable ignore) { } }
+                }
+            }
+        } catch (Throwable t) {
+            out.append("  (창 목록을 읽지 못했습니다 — ").append(t.getClass().getSimpleName()).append(")\n");
+        }
+    }
+
+    /** 노드 목록 (셀렉터를 고칠 근거는 결국 이것이다) */
+    private void appendNodeList(StringBuilder out, ArrayList<AccessibilityNodeInfo> rs) {
         // ── 전체 노드 ──
         out.append("\n--- 노드 목록 (최대 ").append(DUMP_MAX_LINES).append("줄) ---\n");
         final int[] lines = new int[] { 0 };
@@ -2781,6 +3748,90 @@ public final class KakaoAccessibility extends AccessibilityService {
             if (w.truncated) out.append("  …트리가 ").append(DUMP_MAX_NODES).append("노드에서 생략되었습니다\n");
         }
         if (skipped[0] > 0) out.append("… 외 ").append(skipped[0]).append("개 생략\n");
+    }
+
+    /**
+     * 첨부 시트 흐름 전용 진단.
+     * 공유창 덤프와 섞지 않는다 — 봐야 하는 값이 (방 이름 vs 사진 desc) 완전히 다르다.
+     */
+    private String buildAttachDump(String where) {
+        final StringBuilder out = new StringBuilder(4096);
+        dumpHead(out, where);
+        out.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        String key = (targetKey == null) ? "" : targetKey;
+        if (!key.equals((targetRoom == null) ? "" : targetRoom)) {
+            out.append("  설정 저장값: \"").append(vis(key))
+                    .append("\"  (계정키·구분자는 화면 매칭에서 쓰지 않습니다)\n");
+        }
+        out.append("단계: ").append(whereNow()).append('\n');
+        out.append(attachBlock());
+        out.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
+        out.append(env(this));
+        out.append("카카오톡 버전: ").append(kakaoVersion()).append('\n');
+        out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
+        out.append("마지막 액티비티/다이얼로그: ")
+                .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
+
+        ArrayList<AccessibilityNodeInfo> rs = roots();
+        appendWindows(out, rs.size());
+
+        if (rs.isEmpty()) {
+            out.append("\n현재 화면에 카카오톡 창이 없습니다. 카카오톡이 전면에 없거나 화면이 꺼졌습니다.\n");
+            out.append("마지막으로 본 첨부 시트: ")
+                    .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : sheetShape).append('\n');
+            out.append(notesBlock());
+            out.append("=== 끝 ===\n");
+            return out.toString();
+        }
+
+        AScan a;
+        try {
+            a = ascan(rs);
+        } catch (Throwable t) {
+            out.append("\n화면 수집에 실패했습니다 — ").append(t.getClass().getSimpleName()).append('\n');
+            out.append(notesBlock()).append("=== 끝 ===\n");
+            recycleAll(rs);
+            return out.toString();
+        }
+
+        out.append("\n--- 지금 화면의 첨부 시트 ---\n");
+        out.append("노드 ").append(a.nodes).append("개")
+                .append(a.truncated ? " (한도 초과로 일부 생략)" : "").append('\n');
+        out.append(AID_SHEET).append(": ").append(a.sheet == null ? "없음" : boundsStr(a.sheet)).append('\n');
+        out.append(AID_MEDIA).append(": ").append(a.media == null ? "없음"
+                : (boundsStr(a.media) + " 자식 " + childCount(a.media) + "개")).append('\n');
+        out.append(AID_CHAT_TOOL).append(": ").append(a.chatTool == null ? "없음"
+                : (boundsStr(a.chatTool) + " 자식 " + childCount(a.chatTool) + "개")).append('\n');
+        out.append(AID_BTN_SEND).append(": ").append(a.btnSend == null ? "없음"
+                : ("enabled=" + bool(a.sendEnabled) + " clickable=" + bool(a.sendClickable)
+                   + " " + boundsStr(a.btnSend))).append('\n');
+        out.append("첨부 메뉴 「사진」 항목: ").append(a.menuPhoto == null ? "없음"
+                : boundsStr(a.menuPhoto)).append('\n');
+        out.append("메시지 입력창(").append(joinIds(CHATROOM_IDS)).append("): ")
+                .append(a.inputRect == null
+                        ? (a.editRect == null ? "없음" : ("id 불일치 · 편집 가능 노드 " + rectStr(a.editRect)))
+                        : rectStr(a.inputRect)).append('\n');
+        out.append("첨부(+) 버튼 후보: desc(").append(joinLabels(ATTACH_DESC)).append(") ")
+                .append(a.plusByDesc == null ? "없음" : boundsStr(a.plusByDesc));
+        AccessibilityNodeInfo left = leftOfInput(a);
+        out.append(" · 입력창 왼쪽 끝 ").append(left == null ? "없음"
+                : (shortId(viewId(left)).length() == 0 ? "id 없음" : shortId(viewId(left)))
+                  + " " + boundsStr(left)).append('\n');
+        out.append("사진 항목 ").append(a.photos.size()).append("개 (선택 ")
+                .append(a.selectedTotal).append("개):\n");
+        for (int i = 0; i < a.photos.size() && i < SHOW_DESCS; i++) {
+            Photo ph = a.photos.get(i);
+            out.append("  ").append(i + 1).append(". desc=\"").append(privacyCut(ph.desc))
+                    .append("\" [").append(ph.cls).append(']')
+                    .append(" 순번=").append(ph.order.length() == 0 ? "-" : ph.order)
+                    .append(ph.inMedia ? "" : " (rv_media 밖)")
+                    .append(' ').append(boundsStr(ph.node)).append('\n');
+        }
+        if (a.photos.size() > SHOW_DESCS) {
+            out.append("  … 외 ").append(a.photos.size() - SHOW_DESCS).append("개\n");
+        }
+
+        appendNodeList(out, rs);
         out.append('\n').append(notesBlock());
         out.append("=== 끝 ===\n");
 
@@ -2788,6 +3839,34 @@ public final class KakaoAccessibility extends AccessibilityService {
         String s = out.toString();
         if (s.length() > DUMP_MAX_CHARS) s = s.substring(0, DUMP_MAX_CHARS) + "\n…(이하 생략)";
         return s;
+    }
+
+    private static int childCount(AccessibilityNodeInfo n) {
+        if (n == null) return 0;
+        try { return n.getChildCount(); } catch (Throwable t) { return 0; }
+    }
+
+    private static String rectStr(Rect r) {
+        return (r == null) ? "?" : ("(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + ")");
+    }
+
+    /** id 후보 배열을 shortId 로 한 줄에 (덤프에서 "무엇을 찾았는지" 를 밝힌다) */
+    private static String joinIds(String[] ids) {
+        StringBuilder sb = new StringBuilder(64);
+        for (int i = 0; i < ids.length; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(shortId(ids[i]));
+        }
+        return sb.toString();
+    }
+
+    private static String joinLabels(String[] labels) {
+        StringBuilder sb = new StringBuilder(48);
+        for (int i = 0; i < labels.length; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(labels[i]);
+        }
+        return sb.toString();
     }
 
     private String kakaoVersion() {

@@ -110,6 +110,13 @@ public final class ImageSender {
     private static final long ATTACH_OPEN_MS = 6000L;
 
     /**
+     * 첨부 경로에서 사진 시각 후보를 최대 몇 개까지 바꿔가며 시도하나.
+     * 카카오톡이 표시하는 시각이 우리가 읽은 값과 1분 차이날 수 있어서 한 번으로 끝내면 안 되고,
+     * 그렇다고 무한정 늘리면 한 건이 전송 대기열을 오래 잡는다.
+     */
+    private static final int ATTACH_TRIES = 3;
+
+    /**
      * {@link WakeActivity} 가 화면에 뜨는 데 주는 시간.
      * 이 시간 안에 우리 액티비티조차 안 떴으면 <b>시스템이 액티비티 실행을 차단</b>한 것이다.
      * 백그라운드 액티비티 차단은 예외를 던지지 않으므로 이게 유일한 구별 신호다.
@@ -205,16 +212,20 @@ public final class ImageSender {
         final ArrayList<String> routes = new ArrayList<String>(4);
 
         // ── 채팅방 첨부 경로 상태 ──
-        /** 사진별 후보 문자열 ({@link ImagePicker#kakaoDescList}). 순서는 attachUris 와 같다. */
-        final ArrayList<List<String>> descs = new ArrayList<List<String>>(MAX);
-        /** 첨부 경로로 지목할 수 있는 URI (시각을 읽은 것만) */
-        final ArrayList<String> attachUris = new ArrayList<String>(MAX);
+        /**
+         * 사진별 후보 문자열 ({@link ImagePicker#kakaoDescList}). 시각을 읽은 사진만 들어간다.
+         * <b>대기열에 넣기 전에(= 호출자 스레드에서) 미리 만들어 둔다</b> — MediaStore 조회와 EXIF
+         * 읽기는 파일 I/O 라서 메인 루퍼에서 하면 ANR 위험이 있다.
+         */
+        final ArrayList<List<String>> descs;
         /** 시각을 못 읽어서 첨부 경로에서 제외한 장수 */
-        int noTime = 0;
+        final int noTime;
         /** 채팅방 열기 인텐트를 던진 시각 (0 = 아직) */
         volatile long attachAt = 0L;
         /** 첨부 경로를 실제로 시도했나 (진단에 "안 해봤다" 와 "해보고 실패" 를 구별해 적는다) */
         volatile boolean attachTried = false;
+        /** 지금 쓰고 있는 사진 시각 후보 번호 (0 = 가장 유력한 값) */
+        int attachVariant = 0;
 
         // ── 공유창 경로 상태 ──
         Share share = null;
@@ -251,12 +262,15 @@ public final class ImageSender {
         /** 마지막으로 등록한 깨우기 감시자 id (0 = 없음). 끝날 때 반드시 해제한다. */
         volatile long wakeId = 0L;
 
-        Job(long id, Context app, RoomRef ref, String label, ArrayList<String> uris, Done onDone) {
+        Job(long id, Context app, RoomRef ref, String label, ArrayList<String> uris,
+            ArrayList<List<String>> descs, int noTime, Done onDone) {
             this.id = id;
             this.app = app;
             this.ref = ref;
             this.label = label;
             this.uris = uris;
+            this.descs = descs;
+            this.noTime = noTime;
             this.onDone = onDone;
         }
     }
@@ -354,7 +368,26 @@ public final class ImageSender {
             }
         }
 
+        // 채팅방 첨부 경로가 쓸 "사진 지목 문자열" 을 여기서 미리 만든다.
+        //  ★ 반드시 여기서 만든다 — MediaStore 조회와 EXIF 읽기는 파일 I/O 이고,
+        //    대기열 처리는 메인 루퍼에서 돌기 때문에 거기서 하면 사진 5장에 ANR 위험이 생긴다.
+        //    (여기는 호출자 스레드다: 예약 발송은 백그라운드, 수동 발송은 UI 스레드이며
+        //     UI 스레드에서는 바로 위 alive() 검사도 이미 같은 수준의 I/O 를 한다.)
+        final ArrayList<List<String>> descs = new ArrayList<List<String>>(MAX);
+        int missing = 0;
+        for (int i = 0; i < ok.size(); i++) {
+            List<String> cand = ImagePicker.kakaoDescList(c, ok.get(i));
+            if (cand == null || cand.isEmpty()) {
+                missing++;
+                Log.add(c, "이미지의 촬영·저장 시각을 읽지 못했습니다 — " + ImagePicker.shortUri(ok.get(i))
+                        + ". 채팅방 첨부 경로로는 이 사진을 지목할 수 없습니다.");
+                continue;
+            }
+            descs.add(cand);
+        }
+
         final ArrayList<String> list = ok;
+        final int noTime = missing;
         main().post(new Runnable() {
             @Override public void run() {
                 if (QUEUE.size() >= MAX_QUEUE) {
@@ -364,7 +397,7 @@ public final class ImageSender {
                     return;
                 }
                 seq++;
-                QUEUE.add(new Job(seq, c, ref, label, list, onDone));
+                QUEUE.add(new Job(seq, c, ref, label, list, descs, noTime, onDone));
                 pump();
             }
         });
@@ -520,6 +553,19 @@ public final class ImageSender {
         return true;
     }
 
+    /**
+     * 위와 같지만 <b>채팅방 첨부 경로까지</b> 따진다. 첨부 경로는 공유창과 무관하게 동작하므로
+     * "공유창 불가 확정" 이 이 경로를 막는 근거가 되지 않는다 — 막아버리면 실제로 되는 경로를
+     * 스스로 닫는 셈이다. 예약 발송({@link Scheduler})은 반드시 이 버전을 쓴다.
+     *
+     * @param uris 보낼 이미지. 사진의 촬영·저장 시각을 읽을 수 있어야 첨부 경로로 지목할 수 있다.
+     */
+    public static boolean blockedInBackground(Context c, RoomRef ref, List<String> uris) {
+        if (!blockedInBackground(c, ref)) return false;
+        if (attachReady(c, ref, uris)) return false;
+        return true;
+    }
+
     /** 백그라운드 전송 불가 확정을 해제한다 (사용자가 권한을 고치고 다시 시도할 때). */
     public static void clearBackgroundBlocked(Context c) {
         if (c == null) return;
@@ -581,13 +627,18 @@ public final class ImageSender {
 
         // 경로 A — 되면 화면이 아예 안 움직인다.
         if (replyImageReady(j.app, j.ref)) {
-            route(j, R_ATTACH, "시도하지 않음(알림 답장 경로가 사용 가능)");
-            route(j, R_SHARE, "시도하지 않음(알림 답장 경로가 사용 가능)");
             sendByReply(j, 0, 0);
             return;
         }
         route(j, R_REPLY, replyWhy(j.app, j.ref));
+        afterReply(j);
+    }
 
+    /**
+     * 알림 답장 경로를 못 쓰거나(또는 첫 장부터 실패해서) 화면 조작 경로로 내려왔다.
+     * 채팅방 첨부 → 공유창 순서로 시도한다.
+     */
+    private static void afterReply(final Job j) {
         // 경로 B — 채팅방 첨부. 현장에서 구조가 전부 확인된 유일한 화면이다.
         if (startAttach(j)) return;
 
@@ -648,7 +699,9 @@ public final class ImageSender {
     private static void failAllRoutes(final Job j) {
         String why = "이미지 전송 가능한 경로가 없습니다. " + routeText(j)
                 + (j.fg ? "" : " 예약 발송(백그라운드)에서는 이미지를 생략하고 텍스트만 발송됩니다.");
-        diag(j, "전송 경로 없음 — 알림 답장·채팅방 첨부·공유창 모두 사용 불가", 0L, why);
+        // since 에 첨부 시도 시각을 넘긴다 — 접근성이 그 뒤에 더 자세한 화면 덤프를 남겼으면
+        // 이 요약으로 덮지 않는다(덮으면 진단이 후퇴한다).
+        diag(j, "전송 경로 없음 — 알림 답장·채팅방 첨부·공유창 모두 사용 불가", j.attachAt, why);
         Log.add(j.app, "이미지 전송 실패: " + why);
         if (!j.fg) j.bgMiss = true;
         finish(j.id, false, why);
@@ -709,6 +762,7 @@ public final class ImageSender {
         if (current == null || current.id != j.id) return;   // 이미 끝난 건
 
         if (idx >= j.uris.size()) {
+            route(j, R_REPLY, "성공(" + sent + "장)");
             Log.add(j.app, "이미지 " + sent + "장을 알림 답장으로 전송했습니다. 대화방: " + j.label
                     + " · 화면 조작은 발생하지 않았습니다. 카카오톡에서 실제 업로드 여부를 확인하십시오.");
             finish(j.id, true, "알림 답장으로 " + sent + "장을 전송했습니다(화면 조작 없음). 카카오톡에서 업로드 여부를 확인하십시오.");
@@ -721,11 +775,13 @@ public final class ImageSender {
         boolean ok = (u != null) && KakaoListener.sendImageTo(j.app, j.ref, u);
         if (!ok) {
             if (sent == 0) {
-                Log.add(j.app, "알림 답장 경로로 이미지를 전송하지 못했습니다. 공유창 경로로 전환합니다"
-                        + "(화면이 일시적으로 전환됩니다).");
-                startShare(j);
+                route(j, R_REPLY, "실패(첫 장부터 카카오톡이 받지 않음)");
+                Log.add(j.app, "알림 답장 경로로 이미지를 전송하지 못했습니다. 화면 조작 경로로 전환합니다"
+                        + "(카카오톡 화면이 일시적으로 전환됩니다).");
+                afterReply(j);
                 return;
             }
+            route(j, R_REPLY, "부분 성공(" + sent + "/" + j.uris.size() + "장)");
             Log.add(j.app, "알림 답장으로 " + sent + "/" + j.uris.size() + "장만 전송했습니다. 대화방: " + j.label
                     + ". 남은 " + (j.uris.size() - sent) + "장은 직접 전송하십시오"
                     + "(중복 발송 방지를 위해 공유창 경로로 재시도하지 않습니다).");
@@ -740,13 +796,309 @@ public final class ImageSender {
         }, REPLY_GAP_MS);
     }
 
-    // ── 경로 B: 공유창 + 접근성 조작 ──────────────────────────────────────────
+    // ── 경로 B: 채팅방 내부 첨부 시트 ─────────────────────────────────────────
+    //
+    //  근거: docs/field/kakao-attach-sheet-26.8.2.md (실기기 뷰 트리, 카카오톡 26.8.2)
+    //   · 첨부 메뉴 목록 rv_chat_tool · 항목 이름은 `앨범` 이 아니라 `사진`
+    //   · 최근 사진 스트립 rv_media · 썸네일 desc="사진, 9월 28일 오전 8:20"
+    //   · 전송 버튼 btn_send 의 enabled 가 선택 여부를 그대로 반영한다
+    //  화면 조작은 KakaoAccessibility.armAttach 가 한다. 여기서는 재료(사진 지목 문자열)를
+    //  만들고 채팅방을 열어주는 일까지만 한다.
+
+    /** 채팅방 첨부 경로를 사용자가 껐나 (Prefs 평문 키) */
+    private static final String K_ATTACH_OFF = "attach_img_off";
+
+    /** 채팅방 첨부 경로가 켜져 있나 (기본 켜짐) */
+    public static boolean attachEnabled(Context c) {
+        return !Prefs.getBool(c, K_ATTACH_OFF, false);
+    }
+
+    /**
+     * 채팅방 첨부 경로를 켜고 끈다.
+     * 이 경로는 카카오톡 화면을 실제로 조작하므로(채팅방이 열리고 시트가 떴다 닫힌다),
+     * 화면이 움직이는 걸 원하지 않는 사용자는 끌 수 있어야 한다.
+     */
+    public static void setAttachEnabled(Context c, boolean on) {
+        Prefs.putBool(c, K_ATTACH_OFF, !on);
+        Log.add(c, on ? "이미지를 채팅방 첨부로 발송 — 활성화 (채팅방이 열리고 화면이 조작됩니다)"
+                      : "이미지를 채팅방 첨부로 발송 — 비활성화 (공유창을 통해 발송합니다)");
+    }
+
+    /**
+     * 이 방으로 채팅방 첨부 경로를 쓸 수 있나 (재료가 다 있나).
+     * 세 가지가 전부 필요하다 — 접근성 권한 · 채팅방을 여는 알림 인텐트 · 사진을 지목할 시각.
+     */
+    public static boolean attachReady(Context c, RoomRef ref, List<String> uris) {
+        if (c == null || ref == null || !ref.valid()) return false;
+        if (!attachEnabled(c)) return false;
+        if (!accessibilityOn(c)) return false;
+        try {
+            if (KakaoListener.openIntentFor(ref) == null) return false;
+        } catch (Throwable t) {
+            return false;
+        }
+        if (uris == null) return false;
+        for (int i = 0; i < uris.size(); i++) {
+            if (ImagePicker.kakaoDesc(c, uris.get(i)) != null) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 채팅방 첨부 경로를 시작한다 (재료 확인 + 첫 후보로 첫 시도).
+     *
+     * @return true 면 이 경로가 건을 가져갔다(결과는 콜백으로 온다). false 면 <b>시도조차 못 했고</b>
+     *         이유를 {@code j.routes} 에 적었으니 호출부가 다음 경로로 내려가야 한다.
+     */
+    private static boolean startAttach(final Job j) {
+        if (!attachEnabled(j.app)) {
+            route(j, R_ATTACH, "건너뜀(설정에서 비활성)");
+            return false;
+        }
+        if (!accessibilityOn(j.app)) {
+            route(j, R_ATTACH, "사용 불가(접근성 권한 비활성)");
+            return false;
+        }
+
+        // 1) 사진을 시각으로 지목할 수 있나 (후보는 대기열에 넣기 전에 이미 만들어져 있다).
+        //    시각을 못 읽은 사진은 이 경로로 지목할 수 없다.
+        if (j.descs.isEmpty()) {
+            route(j, R_ATTACH, "사용 불가(첨부 이미지 " + j.uris.size()
+                    + "장 전부 촬영·저장 시각을 읽지 못해 사진을 지목할 수 없음)");
+            return false;
+        }
+        if (j.noTime > 0) {
+            Log.add(j.app, "첨부 이미지 " + j.noTime + "장은 촬영·저장 시각을 읽지 못해 채팅방 첨부 경로에서 제외합니다. "
+                    + j.descs.size() + "장만 전송합니다.");
+        }
+
+        // 2) 채팅방을 여는 수단이 있나. 알림 contentIntent 가 유일한 직행 수단이다.
+        if (openIntent(j) == null) {
+            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 없음 — 해당 대화방의 카카오톡 알림이 "
+                    + "1회 이상 수신되어야 생성됨)");
+            return false;
+        }
+
+        j.attachVariant = 0;
+        return attachAttempt(j);
+    }
+
+    /** 대화방을 여는 알림 인텐트 (없으면 null) */
+    private static android.app.PendingIntent openIntent(Job j) {
+        try { return KakaoListener.openIntentFor(j.ref); } catch (Throwable t) { return null; }
+    }
+
+    /**
+     * 첨부 경로 한 번 시도 — {@code j.attachVariant} 번째 후보로 예약하고 채팅방을 연다.
+     *
+     * @return true 면 시도했다(결과는 콜백 또는 워치독으로 온다). false 면 시도하지 못했다.
+     */
+    private static boolean attachAttempt(final Job j) {
+        android.app.PendingIntent open = openIntent(j);
+        if (open == null) {
+            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 만료 — 카카오톡이 해당 알림을 정리함)");
+            return false;
+        }
+
+        // 접근성에 "채팅방 첨부 시트에서 이 사진들을 골라 보내라" 예약. 방을 여는 건 우리 몫이다.
+        j.session++;
+        final long sess = j.session;
+        final int variant = j.attachVariant;
+        j.attachTried = true;
+        if (armAttach(j, sess, variant) == 0L) {
+            j.attachTried = false;
+            route(j, R_ATTACH, "사용 불가(접근성 첨부 흐름 예약 실패)");
+            return false;
+        }
+
+        // 채팅방 열기. 백그라운드에서는 이 단계도 시스템이 막을 수 있다 —
+        // 막히면 예외가 아니라 "카톡 창이 안 뜸" 으로만 나타나므로 워치독으로 판정한다.
+        try {
+            open.send(j.app, 0, null, null, null, null, attachOptions());
+        } catch (android.app.PendingIntent.CanceledException e) {
+            KakaoAccessibility.disarm();
+            j.attachTried = false;
+            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 만료 — 카카오톡이 해당 알림을 정리함)");
+            return false;
+        } catch (Throwable t) {
+            KakaoAccessibility.disarm();
+            j.attachTried = false;
+            route(j, R_ATTACH, "사용 불가(대화방 열기 실패 " + t.getClass().getSimpleName() + ")");
+            return false;
+        }
+        j.attachAt = System.currentTimeMillis();
+
+        Log.add(j.app, "채팅방 첨부 경로로 이미지 " + j.descs.size() + "장을 전송합니다. 대화방: " + j.label
+                + " · 앱 상태: " + fgText(j.fg)
+                + " · 사진 지목: \"" + descsFor(j, variant)[0] + "\""
+                + (variant == 0 ? "" : " (후보 " + (variant + 1) + "번)"));
+
+        // 채팅방이 뜨는지 본다. 안 뜨면 백그라운드 액티비티 차단이다 → 공유창 폴백으로.
+        final long at = j.attachAt;
+        main().postDelayed(new Runnable() {
+            @Override public void run() {
+                if (current == null || current.id != j.id || j.session != sess) return;
+                // 채팅방이 이미 열려 있었으면 새 창 이벤트가 안 날 수도 있다. 그때는 접근성이
+                // 이번 시도에서 카톡 이벤트를 몇 건이라도 받았는지로 판정한다 —
+                // 진행 중인 시도를 6초에 끊어버리면 되는 경로를 우리가 망치는 셈이다.
+                if (KakaoAccessibility.sawKakaoSince(at)) return;   // 떴다 — 계속 기다린다
+                if (KakaoAccessibility.kakaoEventCount() > 0) return;
+                attachGiveUp(j, sess, "카카오톡 채팅방이 " + (ATTACH_OPEN_MS / 1000)
+                        + "초 내에 표시되지 않았습니다"
+                        + (j.fg ? "" : " (시스템이 백그라운드 상태의 화면 실행을 차단한 것으로 판단됩니다)"), false);
+            }
+        }, ATTACH_OPEN_MS);
+
+        // 접근성이 아무 신호도 안 주는 경우의 최후 방어선
+        main().postDelayed(new Runnable() {
+            @Override public void run() {
+                if (current == null || current.id != j.id || j.session != sess) return;
+                // 후보를 바꿔도 같은 자리에서 또 40초를 버린다. 접근성이 응답하지 않는 상태이므로
+                // 재시도하지 않고 바로 다음 경로로 내려간다.
+                attachGiveUp(j, sess, "시간 초과(" + (TIMEOUT_MS / 1000)
+                        + "초) — 접근성 서비스가 첨부 결과를 전달하지 않았습니다", false);
+            }
+        }, TIMEOUT_MS);
+        return true;
+    }
+
+    /**
+     * 백그라운드에서도 알림 인텐트가 액티비티를 띄울 수 있게 옵션을 붙인다 (API 34+).
+     * 없으면 null 을 돌려주고 그냥 던진다 — 옵션이 없어서 막히는 것과 예외는 다른 문제다.
+     */
+    private static android.os.Bundle attachOptions() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 34) return null;
+            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+            o.setPendingIntentBackgroundActivityStartMode(
+                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+            return o.toBundle();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 첨부 경로 한 시도가 실패했다.
+     *
+     * 카카오톡 창이 떴다면(= 채팅방까지는 갔다) 실패 원인은 사진 지목 쪽일 수 있으므로
+     * <b>다음 후보(±1분·다른 시각 출처)로 한 번 더</b> 시도한다. 창이 아예 안 떴으면 후보를 바꿔도
+     * 같은 결과라서 바로 공유창 폴백으로 내려간다.
+     */
+    private static void attachGiveUp(final Job j, final long sess, String why, boolean retryable) {
+        if (current == null || current.id != j.id || j.session != sess) return;
+        j.session++;   // 이 경로의 워치독을 전부 무효화한다
+
+        // ★ disarm() 보다 먼저 읽는다. disarm 이 이번 시도의 이벤트 카운터를 비운다.
+        boolean sawRoom = (j.attachAt > 0L)
+                && (KakaoAccessibility.sawKakaoSince(j.attachAt) || KakaoAccessibility.kakaoEventCount() > 0);
+        KakaoAccessibility.disarm();
+        route(j, R_ATTACH, "후보 " + (j.attachVariant + 1) + "번 실패(" + why + ")");
+
+        if (retryable && sawRoom && j.attachVariant + 1 < variantCount(j)) {
+            j.attachVariant++;
+            String next = descsFor(j, j.attachVariant)[0];
+            Log.add(j.app, "채팅방 첨부 경로 실패: " + why + ". 사진 시각 후보를 \"" + next
+                    + "\" 로 바꿔 재시도합니다(표시 시각이 1분 차이날 수 있습니다).");
+            if (attachAttempt(j)) return;
+        }
+        Log.add(j.app, "채팅방 첨부 경로 실패: " + why + ". 공유창 경로로 전환합니다.");
+
+        if (!j.fg && backgroundBlockedAt(j.app) > 0L) {
+            route(j, R_SHARE, "시도하지 않음(백그라운드 공유창 불가로 확정된 상태)");
+            failAllRoutes(j);
+            return;
+        }
+        startShare(j);
+    }
+
+    /** 접근성이 첨부 경로의 결과를 알려왔다 */
+    private static void attachDone(final Job j, final long sess, boolean ok, String detail) {
+        if (current == null || current.id != j.id || j.session != sess) return;
+
+        if (ok) {
+            j.session++;   // 워치독 무효화
+            route(j, R_ATTACH, "성공(" + j.descs.size() + "장)");
+            String head = "이미지 " + j.descs.size() + "장을 채팅방 첨부로 전송했습니다.";
+            Log.add(j.app, head + " 대화방: " + j.label
+                    + (j.noTime > 0 ? (" · 시각 확인 불가 " + j.noTime + "장 제외") : "")
+                    + " · " + routeText(j));
+            if (j.noTime == 0) {
+                finish(j.id, true, head);
+            } else {
+                // 일부만 나갔다. 성공으로 보고하면 사용자는 전부 갔다고 믿는다 — 그게 실패보다 나쁘다.
+                finish(j.id, false, "이미지 " + j.descs.size() + "/" + j.uris.size()
+                        + "장만 전송했습니다. 나머지 " + j.noTime
+                        + "장은 촬영·저장 시각을 읽지 못해 카카오톡 첨부 화면에서 지목할 수 없었습니다. "
+                        + "해당 이미지를 다시 선택하십시오.");
+            }
+            return;
+        }
+        attachGiveUp(j, sess, (detail == null || detail.length() == 0) ? "원인 확인 불가" : detail, true);
+    }
+
+    // ── KakaoAccessibility.armAttach 연결부 ───────────────────────────────────
+
+    /**
+     * 첨부 시트 흐름을 예약한다.
+     *
+     * {@code armAttach} 의 계약은 <b>사진 1장 = desc 1개</b>다 (접근성 쪽이 배열 길이를 대상 장수로 읽고,
+     * 화면에서 못 찾은 desc 가 하나라도 있으면 실패로 끝낸다). 그래서 ±1분 후보를 한 번에 같이 넘기면
+     * 있지도 않은 사진을 찾다가 반드시 실패한다 — 후보는 <b>시도를 나눠서</b> 쓴다
+     * ({@link #attachGiveUp} 이 다음 후보로 한 번 더 예약한다).
+     *
+     * @param variant 후보 번호. 0 이 가장 유력한 값이고, 그 뒤가 ±1분·다른 시각 출처다.
+     * @return 예약 id (0 이면 예약 실패)
+     */
+    private static long armAttach(final Job j, final long sess, int variant) {
+        String[] want = descsFor(j, variant);
+        if (want.length == 0) return 0L;
+        try {
+            return KakaoAccessibility.armAttach(j.ref, want, TIMEOUT_MS,
+                    new KakaoAccessibility.Result() {
+                        @Override public void done(final boolean ok, final String detail) {
+                            main().post(new Runnable() {
+                                @Override public void run() { attachDone(j, sess, ok, detail); }
+                            });
+                        }
+                    }, j.app);
+        } catch (Throwable t) {
+            Log.add(j.app, "채팅방 첨부 예약에 실패했습니다 — " + t.getClass().getSimpleName());
+            return 0L;
+        }
+    }
+
+    /**
+     * variant 번째 후보로 사진별 desc 하나씩 (= 접근성에 넘길 배열).
+     * 그 사진에 후보가 그만큼 없으면 가장 유력한 첫 후보를 쓴다.
+     */
+    private static String[] descsFor(Job j, int variant) {
+        String[] out = new String[j.descs.size()];
+        for (int i = 0; i < j.descs.size(); i++) {
+            List<String> c = j.descs.get(i);
+            out[i] = c.get((variant < c.size()) ? variant : 0);
+        }
+        return out;
+    }
+
+    /** 사진 지목 후보가 가장 많은 사진의 후보 개수 (= 시도해볼 수 있는 variant 수) */
+    private static int variantCount(Job j) {
+        int n = 0;
+        for (int i = 0; i < j.descs.size(); i++) {
+            int c = j.descs.get(i).size();
+            if (c > n) n = c;
+        }
+        return (n > ATTACH_TRIES) ? ATTACH_TRIES : n;
+    }
+
+    // ── 경로 C: 공유창 + 접근성 조작 (폴백) ────────────────────────────────────
 
     private static void startShare(final Job j) {
         // 여기까지 왔으면 접근성이 반드시 필요하다.
         // (대기열에 들어갈 때는 알림 답장 경로가 살아있어서 접근성 검사를 안 했을 수 있고,
         //  그 사이 세션이 죽어서 이리로 떨어지기도 한다. 그때 40초를 통째로 버리면 안 된다.)
         if (!accessibilityOn(j.app)) {
+            route(j, R_SHARE, "사용 불가(접근성 권한 비활성)");
             diag(j, "공유창 경로가 필요하나 접근성 권한이 비활성 상태", 0L,
                     "알림 답장 경로도 사용할 수 없는 상태입니다. 두 경로 모두 차단되어 전송이 불가합니다.");
             Log.add(j.app, "이미지 전송 실패: 공유창 경로가 필요하나 접근성 권한이 비활성 상태입니다. "
@@ -765,6 +1117,7 @@ public final class ImageSender {
             // 조회가 안 됐을 뿐이다. 이걸 "없음" 으로 읽고 포기하면 보낼 수 있는 건도 못 보낸다.
             Log.add(j.app, "카카오톡 공유 수신 대상을 조회하지 못했습니다. 조회 없이 전송을 시도합니다.");
         } else if (sh.none()) {
+            route(j, R_SHARE, "사용 불가(카카오톡에 이미지 공유 수신 대상 없음)");
             diag(j, "카카오톡에 이미지 공유를 받을 대상이 없습니다", 0L,
                     "queryIntentActivities 결과가 비어 있습니다. 카카오톡 버전이 이미지 공유를 지원하지 않거나 "
                     + "설치가 손상되었습니다. 카카오톡을 최신 버전으로 업데이트하십시오.");
@@ -830,8 +1183,8 @@ public final class ImageSender {
             }
         }, j.app);
 
-        Log.add(j.app, "이미지 " + j.batch.size() + "장의 공유창을 실행합니다. 대화방: " + j.label
-                + " · 앱 상태: " + (fg ? "화면 표시 중(수동 발송)" : "백그라운드(예약 발송)")
+        Log.add(j.app, "이미지 " + j.batch.size() + "장의 공유창을 실행합니다(폴백 경로). 대화방: " + j.label
+                + " · 앱 상태: " + fgText(fg)
                 + " · 화면: " + (ready ? "사용 가능" : screenState(j.app))
                 + " · 수신 대상: " + sh(j).text());
 
@@ -1001,6 +1354,7 @@ public final class ImageSender {
             why = why + " 예약 발송(백그라운드)에서 발생했습니다.";
         }
 
+        route(j, R_SHARE, "실패(실행 경로 " + j.paths.length + "개 전부 실패 · " + trailText(j) + ")");
         diag(j, "공유창 실행 실패 — 시도한 경로 " + j.paths.length + "개 전부 실패", j.launchedAt, why);
         KakaoAccessibility.disarm();
 
@@ -1025,6 +1379,8 @@ public final class ImageSender {
                     ? ("이미지 " + j.sentByShare + "/" + j.uris.size() + "장만 전송되었습니다. ")
                     : "";
             String trail = trailText(j);
+            route(j, R_SHARE, "실패(공유창 표시 후 " + ((detail == null || detail.length() == 0)
+                    ? "원인 확인 불가" : detail) + ")");
             Log.add(j.app, "이미지 전송 실패: " + head
                     + ((detail == null || detail.length() == 0) ? "원인 확인 불가" : detail)
                     + (trail.length() == 0 ? "" : (" · 시도한 경로: " + trail)));
@@ -1033,6 +1389,9 @@ public final class ImageSender {
         }
 
         j.sentByShare += j.batch.size();
+        if (!j.single || j.cursor + 1 >= j.uris.size()) {
+            route(j, R_SHARE, "성공(" + j.sentByShare + "장 · " + j.usedPath + ")");
+        }
         Log.add(j.app, "이미지 " + j.batch.size() + "장을 공유창 경로로 전송했습니다. 대화방: " + j.label
                 + " · 성공 경로: " + (j.usedPath.length() == 0 ? "확인 불가" : j.usedPath)
                 + (j.trail.isEmpty() ? "" : (" (앞서 실패한 경로: " + trailText(j) + ")")));
@@ -1211,8 +1570,8 @@ public final class ImageSender {
         StringBuilder b = new StringBuilder(1536);
         String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
         b.append("=== 이미지 전송 진단 ").append(now).append(" ===\n");
-        b.append("※ 공유창 표시 전(또는 접근성 서비스가 응답하지 않은 상태)에 실패했습니다.\n");
-        b.append("   화면 뷰 트리 기록이 없으므로 아래 항목으로 원인을 판단합니다.\n");
+        b.append("※ 카카오톡 화면에 도달하기 전에 실패했거나 접근성 서비스가 응답하지 않은 상태입니다.\n");
+        b.append("   화면 뷰 트리 기록이 없으므로 아래 항목(특히 「전송 경로」)으로 원인을 판단합니다.\n");
         b.append("단계: ").append(step).append('\n');
         if (extra != null && extra.length() > 0) b.append("힌트: ").append(extra).append('\n');
         // 이름과 계정을 절대 한 문자열로 합치지 않는다 (합쳐 쓰다 화면 매칭이 깨진 적이 있다)
@@ -1222,7 +1581,11 @@ public final class ImageSender {
         if (j.single) b.append(" · 단건 모드(ACTION_SEND) ").append(j.cursor + 1).append("번째");
         if (j.sentByShare > 0) b.append(" · 전송 완료 ").append(j.sentByShare).append("장");
         b.append('\n');
-        b.append("앱 상태: ").append(j.fg ? "화면 표시 중(수동 발송)" : "백그라운드(예약 발송)").append('\n');
+        // 어느 경로를 탔고 어디서 막혔나 — 경로가 3개라 이 줄이 없으면 원인 분석이 불가하다
+        b.append("전송 경로: ").append(routeText(j)).append('\n');
+        b.append(attachBlock(j));
+        b.append("앱 상태: ").append(fgText(j.fg))
+                .append(" ← ActivityManager 프로세스 중요도 판정").append('\n');
         b.append("화면: ").append(screenState(j.app))
                 .append(" · 절전 해제: ").append(j.woke ? "시도함(WakeActivity)" : "불필요(화면 켜짐 상태)")
                 .append('\n');
@@ -1276,6 +1639,42 @@ public final class ImageSender {
                 .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
         b.append("활성 상태인 타사 접근성 앱: ").append(otherAccessibility(j.app)).append('\n');
         b.append("\n위 내용을 그대로 복사하여 전달하십시오 (매크로 › 이미지 첨부 › 화면 진단 보기).\n");
+        return b.toString();
+    }
+
+    /**
+     * 채팅방 첨부 경로의 재료 상태. 이 경로가 왜 안 됐는지는 여기 세 줄로 다 나온다 —
+     * 대화방 열기 인텐트 · 사진 지목 문자열 · 접근성 첨부 흐름 탑재 여부.
+     */
+    private static String attachBlock(Job j) {
+        StringBuilder b = new StringBuilder(320);
+        b.append("채팅방 첨부 경로: ").append(attachEnabled(j.app) ? "활성" : "비활성(설정)")
+                .append(" · 시도 ").append(yn(j.attachTried))
+                .append(j.attachTried ? (" · 사진 시각 후보 " + (j.attachVariant + 1) + "번까지 시도") : "")
+                .append('\n');
+        b.append("대화방 열기 인텐트(알림 contentIntent): ");
+        try {
+            b.append(KakaoListener.openIntentFor(j.ref) != null ? "보유"
+                    : "없음(해당 대화방 알림 미수신 — 채팅방을 열 수단이 없습니다)");
+        } catch (Throwable t) {
+            b.append("확인 실패(").append(t.getClass().getSimpleName()).append(')');
+        }
+        b.append('\n');
+        b.append("사진 지목(촬영·저장 시각): ");
+        if (j.descs.isEmpty() && j.noTime == 0) {
+            b.append("미확인(이 경로를 시도하지 않았습니다)");
+        } else {
+            b.append("지목 가능 ").append(j.descs.size()).append("장");
+            if (j.noTime > 0) b.append(" · 시각 확인 불가 ").append(j.noTime).append("장(제외)");
+            if (!j.descs.isEmpty()) b.append(" · 첫 후보 \"").append(j.descs.get(0).get(0)).append('"');
+        }
+        b.append('\n');
+        if (j.attachAt > 0L) {
+            b.append("채팅방 열기 시각: ")
+                    .append(new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(j.attachAt)))
+                    .append(" · 이후 카카오톡 창 감지: ").append(yn(KakaoAccessibility.sawKakaoSince(j.attachAt)))
+                    .append('\n');
+        }
         return b.toString();
     }
 

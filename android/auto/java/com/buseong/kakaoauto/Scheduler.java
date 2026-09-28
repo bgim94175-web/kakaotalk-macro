@@ -67,8 +67,8 @@ public final class Scheduler {
     private static final String K_IMG_FAIL_AT = "img_fail_at";
     private static final String K_IMG_FAIL_ROOM = "img_fail_room";
     private static final String K_IMG_FAIL_WHY = "img_fail_why";
-    /** 이미 "이미지 생략" 을 알린 회차 (= ImageSender.backgroundBlockedAt 값). 중복 안내 방지. */
-    private static final String K_IMG_SKIP_NOTED = "img_skip_noted_at";
+    /** "이미지 생략" 을 마지막으로 알린 날 ({@link #dayOf}). 하루 1회만 남기기 위한 값이다. */
+    private static final String K_IMG_SKIP_NOTED = "img_skip_noted_day";
 
     /** 사유 문구가 아무리 길어도 이만큼만 보관한다 (경고 줄 한 줄에 들어갈 만큼) */
     private static final int IMG_FAIL_WHY_MAX = 300;
@@ -542,9 +542,11 @@ public final class Scheduler {
                 final String imgLabel = label;
                 final boolean wantImages = m.imagesThisTime(seq);
                 try {
-                    if (wantImages && ImageSender.blockedInBackground(c, imgRoom)) {
-                        // 백그라운드에서는 공유창이 반복적으로 뜨지 않는 것으로 확정된 상태다.
-                        // 매 주기 같은 실패를 되풀이하는 대신 텍스트만 보내고 이 사실을 한 번만 알린다.
+                    if (wantImages && ImageSender.blockedInBackground(c, imgRoom, m.images)) {
+                        // 공유창도 안 뜨고 채팅방 첨부 경로의 재료도 없는 백그라운드 상태다.
+                        // 매 주기 같은 실패를 되풀이하는 대신 텍스트만 보내고 이 사실을 하루 1회만 알린다.
+                        // (images 를 같이 넘기는 이유: 채팅방 첨부 경로는 공유창과 무관하게 동작하므로
+                        //  "공유창 불가 확정" 만으로 이미지를 포기하면 실제로 되는 경로를 스스로 닫는다.)
                         noteImageSkipped(c, imgLabel);
                     } else if (wantImages) {
                         // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
@@ -621,29 +623,48 @@ public final class Scheduler {
     }
 
     /**
-     * "백그라운드에서는 이미지를 보낼 수 없어서 텍스트만 보냈다" 를 <b>한 번만</b> 알린다.
+     * "백그라운드에서는 이미지를 보낼 수 없어서 텍스트만 보냈다" 를 <b>하루 1회만</b> 알린다.
      *
-     * 왜 한 번만인가 — 예약 발송은 20~40분마다 돌고, 같은 원인의 실패 줄이 매 주기 쌓이면
-     * 정작 읽어야 하는 로그가 묻힌다. 그래서 {@link ImageSender#backgroundBlockedAt} 값
-     * (= 불가로 확정된 시각)을 기준으로 이미 알린 회차인지 판단한다.
-     * 사용자가 권한을 고쳐 전송이 한 번 성공하면 그 값이 지워지므로, 다음에 다시 막히면 다시 알린다.
+     * 왜 하루 1회인가 — 예약 발송은 20~40분마다 돌고, 같은 원인의 같은 줄이 매 주기 쌓이면
+     * 활동 로그(200줄 링버퍼)가 이 줄로만 가득 차서 정작 읽어야 하는 실패가 밀려난다.
+     * 그래서 마지막으로 알린 <b>날짜</b>를 기록하고 날이 바뀌기 전에는 다시 적지 않는다.
+     * (예전에는 {@link ImageSender#backgroundBlockedAt} 값으로만 판단했는데, 전송이 한 번 성공해
+     *  그 값이 지워졌다가 다시 확정될 때마다 새 회차로 취급되어 같은 날에도 여러 번 쌓였다.)
+     *
+     * 실패 기록({@link #noteImageFail})은 항상 갱신한다 — 그건 누적되지 않고 마지막 한 건만 남는
+     * 상태 표시라서, 하루 1회로 묶으면 화면이 오래된 내용을 보여준다.
      */
     private static void noteImageSkipped(Context c, String label) {
-        long at = ImageSender.backgroundBlockedAt(c);
-        if (at <= 0L) return;
-        try {
-            if (Prefs.getLong(c, K_IMG_SKIP_NOTED, 0L) == at) return;   // 이미 알렸다
-            Prefs.putLong(c, K_IMG_SKIP_NOTED, at);
-        } catch (Throwable ignore) { }
+        if (ImageSender.backgroundBlockedAt(c) <= 0L) return;
 
-        Log.add(c, "이미지 전송을 생략하고 텍스트만 발송합니다. 백그라운드 상태에서 카카오톡 공유창이 "
+        String why = "이미지를 생략하고 텍스트만 발송했습니다. "
+                + "이 기기의 예약 발송에서는 카카오톡 화면이 표시되지 않아 이미지를 첨부할 수 없습니다(원인 미확정). "
+                + "매크로 › 이미지 첨부 › 즉시 발송 으로 1회 전송하면 다시 시도합니다.";
+        noteImageFail(c, label, why);
+
+        boolean first;
+        long today = dayOf(System.currentTimeMillis());
+        try {
+            first = Prefs.getLong(c, K_IMG_SKIP_NOTED, 0L) != today;
+            if (first) Prefs.putLong(c, K_IMG_SKIP_NOTED, today);
+        } catch (Throwable t) {
+            first = true;   // 못 읽었으면 한 번은 알리는 쪽이 낫다
+        }
+        if (!first) return;
+
+        Log.add(c, "이미지 전송을 생략하고 텍스트만 발송합니다. 백그라운드 상태에서 카카오톡 화면이 "
                 + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다. "
-                + "이 기기의 예약 발송에서는 공유창 표시가 확인되지 않았습니다(원인 미확정). "
-                + "매크로 › 이미지 첨부 › 즉시 발송 으로 전송하십시오. "
-                + "1회 성공하면 예약 발송이 이미지 첨부를 다시 시도합니다.");
-        noteImageFail(c, label, "이미지를 생략하고 텍스트만 발송했습니다. "
-                + "이 기기의 예약 발송에서는 카카오톡 공유창 표시가 확인되지 않았습니다(원인 미확정). "
-                + "매크로 › 이미지 첨부 › 즉시 발송 으로 1회 전송하면 다시 시도합니다.");
+                + "채팅방 첨부 경로도 사용할 수 없는 상태입니다(대상 대화방 알림 미수신 또는 이미지 시각 확인 불가). "
+                + "이미지는 매크로 › 이미지 첨부 › 즉시 발송 으로 전송하십시오. "
+                + "1회 성공하면 예약 발송이 이미지 첨부를 다시 시도합니다. "
+                + "이 안내는 하루 1회만 기록됩니다.");
+    }
+
+    /** 그 시각이 며칠째인가 (기기 시간대 기준 일 번호). 하루 1회 안내 판정에 쓴다. */
+    private static long dayOf(long ms) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.setTimeInMillis(ms);
+        return cal.get(java.util.Calendar.YEAR) * 1000L + cal.get(java.util.Calendar.DAY_OF_YEAR);
     }
 
     /**
