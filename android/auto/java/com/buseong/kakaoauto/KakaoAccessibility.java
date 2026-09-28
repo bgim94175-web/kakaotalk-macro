@@ -835,7 +835,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             dumpAndFail("이름이 유사한 대화방이 다수 검색되어 전송을 중단했습니다(" + names + ")."
                     + " 오발송을 방지하기 위해 선택하지 않았습니다."
                     + wantVsSeen(roomLike(sc))
-                    + " . 설정의 대화방 이름을 화면에 표시된 그대로 전체 입력하십시오." + nextStep());
+                    + " 설정의 대화방 이름을 화면에 표시된 그대로 전체 입력하십시오." + nextStep());
             return;
         }
 
@@ -929,9 +929,9 @@ public final class KakaoAccessibility extends AccessibilityService {
         return "대화방 목록에서 「" + cut(room, NAME_MAX) + "」 을 찾지 못했습니다."
                 + wantVsSeen(names)
                 + (names.length() > 0
-                    ? " . 두 이름의 문자가 다른 경우(이모지·괄호·띄어쓰기) 설정의 대화방 이름을"
+                    ? " 두 이름의 문자가 다른 경우(이모지·괄호·띄어쓰기) 설정의 대화방 이름을"
                       + " 화면에 표시된 그대로 수정하십시오."
-                    : " . 카카오톡 공유창이 목록을 아직 표시하지 않은 상태일 수 있습니다."
+                    : " 카카오톡 공유창이 목록을 아직 표시하지 않은 상태일 수 있습니다."
                       + " 카카오톡을 실행한 후 다시 시도하십시오.")
                 + tail;
     }
@@ -1563,7 +1563,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             return "대화방 목록에서 「" + cut(room, NAME_MAX) + "」 을 찾지 못한 상태로 시간이 초과되었습니다."
                     + wantVsSeen(seenNames)
                     + (seenNames.length() > 0
-                        ? " . 설정의 대화방 이름을 화면에 표시된 그대로 수정하십시오." : "")
+                        ? " 설정의 대화방 이름을 화면에 표시된 그대로 수정하십시오." : "")
                     + nextStep();
         }
         if (p == P_AFTER) {
@@ -1659,8 +1659,9 @@ public final class KakaoAccessibility extends AccessibilityService {
      */
     private static String wantVsSeen(String seen) {
         String want = (targetRoom == null) ? "" : targetRoom;
-        return " · 찾으려던 이름: 「" + cut(want, NAME_MAX) + "」"
-                + " · 화면에서 확인된 이름: " + (seen == null || seen.length() == 0 ? "없음" : seen);
+        return " 찾으려던 이름: 「" + cut(want, NAME_MAX) + "」"
+                + " · 화면에서 확인된 이름: "
+                + (seen == null || seen.length() == 0 ? "없음" : seen) + ".";
     }
 
     /**

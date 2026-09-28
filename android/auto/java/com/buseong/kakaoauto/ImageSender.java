@@ -95,8 +95,8 @@ public final class ImageSender {
 
     // ── 실행 경로 이름 (로그·진단에 그대로 찍힌다) ─────────────────────────────
     private static final String P_DIRECT = "직접 실행";
-    private static final String P_WAKE = "화면 활성화 액티비티 경유";
-    private static final String P_COMPONENT = "직접 실행(컴포넌트 지정)";
+    private static final String P_WAKE = "화면 활성화 후 실행";
+    private static final String P_COMPONENT = "직접 실행(대상 지정)";
 
     /** 화면이 꺼지고 잠겨 있어서 못 보낸 경우의 안내 (전용 폰이면 잠금을 없애는 게 정답이다) */
     private static final String LOCK_HELP =
@@ -144,13 +144,13 @@ public final class ImageSender {
         boolean none() { return multi == null && single == null; }
 
         String text() {
-            if (queryFailed) return "조회 실패 (수신 액티비티 존재 여부 미확인)";
-            return "ACTION_SEND_MULTIPLE " + one(multi, multiExported)
-                    + " · ACTION_SEND " + one(single, singleExported);
+            if (queryFailed) return "조회 실패 (수신 대상 존재 여부 미확인)";
+            return "여러 장(ACTION_SEND_MULTIPLE) " + one(multi, multiExported)
+                    + " · 한 장(ACTION_SEND) " + one(single, singleExported);
         }
 
         private static String one(ComponentName cn, boolean exported) {
-            if (cn == null) return "수신 액티비티 없음";
+            if (cn == null) return "없음";
             return cn.getClassName() + (exported ? "" : " (exported=false · 외부 실행 불가)");
         }
     }
@@ -632,12 +632,12 @@ public final class ImageSender {
         j.share = sh;
         if (sh.queryFailed) {
             // 조회가 안 됐을 뿐이다. 이걸 "없음" 으로 읽고 포기하면 보낼 수 있는 건도 못 보낸다.
-            Log.add(j.app, "카카오톡 공유 수신 액티비티를 조회하지 못했습니다. 조회 없이 전송을 시도합니다.");
+            Log.add(j.app, "카카오톡 공유 수신 대상을 조회하지 못했습니다. 조회 없이 전송을 시도합니다.");
         } else if (sh.none()) {
-            diag(j, "카카오톡에 이미지 공유를 받을 액티비티가 없습니다", 0L,
+            diag(j, "카카오톡에 이미지 공유를 받을 대상이 없습니다", 0L,
                     "queryIntentActivities 결과가 비어 있습니다. 카카오톡 버전이 이미지 공유를 지원하지 않거나 "
                     + "설치가 손상되었습니다. 카카오톡을 최신 버전으로 업데이트하십시오.");
-            Log.add(j.app, "이미지 전송 실패: 카카오톡에 이미지 공유 수신 액티비티가 없습니다 ("
+            Log.add(j.app, "이미지 전송 실패: 카카오톡에 이미지 공유 수신 대상이 없습니다 ("
                     + kakaoInfo(j.app) + "). 카카오톡을 최신 버전으로 업데이트하십시오.");
             finish(j.id, false, "카카오톡이 이미지 공유를 받을 수 없는 상태입니다. 카카오톡을 최신 버전으로 업데이트하십시오.");
             return;
@@ -689,9 +689,9 @@ public final class ImageSender {
         //  ★ ctx(j.app)를 반드시 같이 넘긴다. 접근성 설정은 켜져 있는데 서비스가 실제로는
         //    안 붙어 있는 상태(업데이트 직후·시스템이 죽인 뒤)가 현장에서 제일 흔한 실패인데,
         //    ctx 없이 부르면 arm 쪽 안내 로그가 Log.add(null) 로 사라지고 그 시점 덤프도 안 남는다.
-        //  ★ 넘기는 값은 ref.name 이다. 저장 키(RoomRef.key())를 넘기면 계정 구분자가 붙어
-        //    카톡 화면의 어떤 텍스트와도 일치하지 않는다.
-        KakaoAccessibility.arm(j.ref.name, TIMEOUT_MS, new KakaoAccessibility.Result() {
+        //  ★ RoomRef 를 그대로 넘기는 오버로드를 쓴다. 이름과 계정을 한 문자열로 합치지 않는 게
+        //    핵심이다 — 화면에서 찾는 것은 ref.name, 계정까지 필요한 조회는 ref.key() 다.
+        KakaoAccessibility.arm(j.ref, TIMEOUT_MS, new KakaoAccessibility.Result() {
             @Override public void done(final boolean ok, final String detail) {
                 main().post(new Runnable() {
                     @Override public void run() { shareDone(j, sess, ok, detail); }
@@ -702,7 +702,7 @@ public final class ImageSender {
         Log.add(j.app, "이미지 " + j.batch.size() + "장의 공유창을 실행합니다. 대화방: " + j.label
                 + " · 앱 상태: " + (fg ? "화면 표시 중(수동 발송)" : "백그라운드(예약 발송)")
                 + " · 화면: " + (ready ? "사용 가능" : screenState(j.app))
-                + " · 수신 액티비티: " + sh(j).text());
+                + " · 수신 대상: " + sh(j).text());
 
         tryPath(j, sess);
 
@@ -723,6 +723,20 @@ public final class ImageSender {
 
     private static Share sh(Job j) {
         return (j.share == null) ? new Share() : j.share;
+    }
+
+    /**
+     * 로그·진단에 쓸 경로 이름.
+     * 컴포넌트 조회에 실패했으면 세 번째 경로는 "컴포넌트 지정" 이 아니라 그냥 재시도다 —
+     * 하지 않은 일을 했다고 적으면 진단이 거짓말을 한다.
+     */
+    private static String pathLabel(Job j, String id) {
+        if (!P_COMPONENT.equals(id)) return id;
+        Share s = sh(j);
+        boolean have = j.single
+                ? (s.single != null && s.singleExported)
+                : (s.multi != null && s.multiExported);
+        return have ? P_COMPONENT : "직접 실행(재시도 · 대상 조회 실패)";
     }
 
     /** 이번 세션의 pathIdx 번째 경로로 공유 인텐트를 던진다 */
@@ -766,7 +780,7 @@ public final class ImageSender {
                 return;
             }
             j.launchedAt = System.currentTimeMillis();
-            j.usedPath = path;
+            j.usedPath = pathLabel(j, path);
 
             // 우리 액티비티조차 안 떴으면 시스템이 액티비티 실행을 차단한 것이다.
             // 차단은 예외를 던지지 않으므로 이 신호 말고는 구별할 방법이 없다.
@@ -775,8 +789,8 @@ public final class ImageSender {
                     if (current == null || current.id != j.id || j.session != sess) return;
                     if (j.pathIdx != pi) return;
                     if (j.wakeShown) return;
-                    nextPath(j, sess, pi, "화면 활성화 액티비티가 실행되지 않았습니다"
-                            + " (시스템이 백그라운드 액티비티 실행을 차단한 상태로 판단됩니다)");
+                    nextPath(j, sess, pi, "화면 활성화 단계가 실행되지 않았습니다"
+                            + " (시스템이 백그라운드 상태의 화면 실행을 차단한 것으로 판단됩니다)");
                 }
             }, WAKE_SHOW_MS);
         } else {
@@ -787,7 +801,7 @@ public final class ImageSender {
                 return;
             }
             j.launchedAt = System.currentTimeMillis();
-            j.usedPath = path;
+            j.usedPath = pathLabel(j, path);
         }
 
         final long launchedAt = j.launchedAt;
@@ -809,12 +823,12 @@ public final class ImageSender {
         if (current == null || current.id != j.id || j.session != sess) return;
         if (j.pathIdx != pi) return;   // 이미 넘어갔다 (워치독 두 개가 겹칠 수 있다)
 
-        j.trail.add(j.paths[pi] + " → " + why);
+        j.trail.add(pathLabel(j, j.paths[pi]) + " → " + why);
         j.pathIdx = pi + 1;
 
         if (j.pathIdx < j.paths.length) {
-            Log.add(j.app, "이미지 전송 경로 「" + j.paths[pi] + "」 실패: " + why
-                    + ". 다음 경로 「" + j.paths[j.pathIdx] + "」 로 재시도합니다.");
+            Log.add(j.app, "이미지 전송 경로 「" + pathLabel(j, j.paths[pi]) + "」 실패: " + why
+                    + ". 다음 경로 「" + pathLabel(j, j.paths[j.pathIdx]) + "」 로 재시도합니다.");
             tryPath(j, sess);
             return;
         }
@@ -825,7 +839,10 @@ public final class ImageSender {
     private static void shareFail(final Job j, final long sess) {
         if (current == null || current.id != j.id || j.session != sess) return;
 
-        final boolean sawWindow = (j.launchedAt > 0L) && KakaoAccessibility.sawKakaoSince(j.launchedAt);
+        int ev = 0;
+        try { ev = KakaoAccessibility.kakaoEventCount(); } catch (Throwable ignore) { }
+        final boolean sawWindow = ev > 0
+                || ((j.launchedAt > 0L) && KakaoAccessibility.sawKakaoSince(j.launchedAt));
         final boolean stillLocked = j.woke && !screenReady(j.app);
 
         // ── 원인 후보를 정직하게 나열한다. 확정할 수 없는 것을 확정으로 적지 않는다. ──
@@ -1079,12 +1096,12 @@ public final class ImageSender {
                 .append(" · 절전 해제: ").append(j.woke ? "시도함(WakeActivity)" : "불필요(화면 켜짐 상태)")
                 .append('\n');
         if (j.woke) {
-            b.append("화면 활성화 액티비티 실행: ").append(yn(j.wakeShown))
-                    .append(j.wakeShown ? "" : " ← 우리 액티비티조차 실행되지 않았습니다(시스템 차단 판단 근거)");
+            b.append("화면 활성화 단계 실행: ").append(yn(j.wakeShown))
+                    .append(j.wakeShown ? "" : " ← 앱 자체 화면조차 실행되지 않았습니다(시스템 차단 판단 근거)");
             if (j.wakeErr.length() > 0) b.append(" · 오류: ").append(j.wakeErr);
             b.append('\n');
         }
-        b.append("카카오톡 공유 수신 액티비티: ").append(sh(j).text()).append('\n');
+        b.append("카카오톡 공유 수신 대상: ").append(sh(j).text()).append('\n');
         b.append("시도한 실행 경로: ").append(j.trail.isEmpty() ? "없음" : trailText(j)).append('\n');
         b.append("공유 인텐트 전달 시각: ")
                 .append(j.launchedAt == 0L ? "전달되지 않음"
@@ -1093,8 +1110,13 @@ public final class ImageSender {
                 .append('\n');
         b.append("카카오톡 창 감지: ")
                 .append(j.launchedAt == 0L ? "해당 없음"
-                        : yn(KakaoAccessibility.sawKakaoSince(j.launchedAt)))
-                .append(" ← N 이면 공유창이 뜨지 않았거나 접근성이 창을 보지 못한 상태입니다\n");
+                        : yn(KakaoAccessibility.sawKakaoSince(j.launchedAt)));
+        int ev = 0;
+        try { ev = KakaoAccessibility.kakaoEventCount(); } catch (Throwable ignore) { }
+        b.append(" · 창 이벤트 ").append(ev).append("건")
+                .append(ev == 0 ? " ← 0 건이면 공유창이 표시되지 않은 상태입니다"
+                        : " ← 창은 표시되었고 대화방 선택·전송 단계에서 실패한 상태입니다")
+                .append('\n');
         b.append("접근성 서비스 연결: ").append(yn(KakaoAccessibility.connected()))
                 .append(" · 설정 허용: ").append(yn(accessibilityOn(j.app)))
                 .append(" · 접근성 예약 이름: \"").append(safe(KakaoAccessibility.armedRoom())).append("\"\n");
