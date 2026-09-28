@@ -179,6 +179,7 @@ public final class ScreenAccount {
                 (accN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "카카오톡 계정", ScreenAccounts.build(a)); }
                 }));
+        kakao.addView(ScreenKakaoLink.row(a, fc));
         int need = permMissing(a);
         kakao.addView(Ui.navRow(a, Icon.LOCK, fc, "권한 · 시작 설정", (need == 0) ? "모두 허용됨" : (need + "건 필요"),
                 (need == 0) ? Theme.OK : Theme.AMBER, new Runnable() {

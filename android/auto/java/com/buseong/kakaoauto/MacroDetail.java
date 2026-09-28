@@ -320,6 +320,13 @@ public final class MacroDetail {
                 });
                 card.addView(now);
                 col.addView(card);
+
+                String route = ScreenKakaoLink.routeLine(a, rooms.isEmpty() ? null : rooms.get(0));
+                if (route != null) {
+                    col.addView(Nav.note(a, route, Theme.ACCENT2, "직접 연결 설정", new Runnable() {
+                        @Override public void run() { ScreenKakaoLink.open(a); }
+                    }));
+                }
             }
         });
     }
