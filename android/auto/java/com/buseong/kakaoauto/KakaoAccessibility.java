@@ -180,8 +180,21 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static final int DUMP_TAIL_ROOM = 1200;
     /** 대화 본문처럼 보이는 긴 글자는 이만큼만 남긴다 (남의 대화를 개발자한테 보내지 않게) */
     private static final int TEXT_KEEP = 20;
-    /** 이 길이 이하면 방/사람 이름으로 보고 통째로 남긴다 (그게 있어야 셀렉터를 고친다) */
-    private static final int NAME_MAX = 24;
+    /**
+     * 이 길이 이하면 방/사람 이름으로 보고 통째로 남긴다 (그게 있어야 셀렉터를 고친다).
+     *
+     * 24자였는데 실사용 단체방 이름이 30자를 넘겼다(이모지로 시작 + 공백 다수).
+     * 그래서 정작 찾던 이름이 「행 이름」 수집과 진단 목록에서 통째로 빠졌다 —
+     * 사용자에게 "화면에 이런 이름이 있었습니다" 를 보여줘야 할 자리에 그 이름만 없었다.
+     * 카톡 단체방 이름 길이까지 올린다.
+     */
+    private static final int NAME_MAX = 40;
+    /** 말줄임 접두 매칭을 인정할 최소 길이 (공백 제거 기준). 이보다 짧으면 우연히 겹친다. */
+    private static final int MIN_PREFIX = 6;
+    /** 이모지·기호를 걷어낸 뒤의 접두 매칭 최소 길이 */
+    private static final int MIN_PREFIX_CORE = 4;
+    /** 검색창에 넣을 질의 최대 길이 (완전일치는 이모지·말줄임 때문에 0건이 되기 쉽다) */
+    private static final int SEARCH_QUERY_MAX = 8;
     /** 실패 메시지에 넣을 "화면에 실제로 있던 방 이름" 최대 개수 */
     private static final int SHOW_NAMES = 8;
 
@@ -195,12 +208,43 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 전송 버튼을 누른 뒤 진짜 나갔는지 확인 */
     private static final int P_VERIFY = 3;
 
+    // ── 이름 매칭 등급 (숫자가 작을수록 확실하다) ──────────────────────────────
+    /** 정규화 후 완전히 같다 */
+    private static final int L_EXACT = 0;
+    /** 공백·보이지 않는 문자를 무시하면 같다 */
+    private static final int L_SQUASH = 1;
+    /** 이모지·기호·문장부호를 걷어내면 같다 */
+    private static final int L_CORE = 2;
+    /** 목록에서 잘려 표시된 앞부분이 일치한다 */
+    private static final int L_PREFIX = 3;
+    /** 부분 일치 (제일 약하다) */
+    private static final int L_PART = 4;
+    private static final int L_COUNT = 5;
+
+    /**
+     * 이 서비스가 다루는 전송 흐름은 <b>공유창 흐름 하나뿐</b>이다.
+     * 채팅방 안에서 「+ → 앨범 → 선택 → 전송」 을 누르는 흐름은 만들지 않았다 —
+     * 검증된 뷰 id 가 하나도 없고, 안드로이드 14 이상에서 카톡이 사진 접근을
+     * 「선택된 항목만」 으로 갖고 있으면 앨범 탭이 <b>시스템 사진 선택기(다른 패키지)</b> 를
+     * 띄워서 packageNames=com.kakao.talk 필터에 아예 걸리지 않는다.
+     * 진단에 흐름 이름을 박아둔다 — 나중에 흐름이 늘었을 때 어느 쪽 실패인지 헷갈리지 않는다.
+     */
+    private static final String FLOW = "공유창(ACTION_SEND_MULTIPLE → 대화방 선택 → 전송)";
+
     // ── 예약(armed) 상태 — 서비스 인스턴스와 별개로 살아있어야 해서 static ────────
     private static volatile KakaoAccessibility INSTANCE = null;
     private static volatile boolean armed = false;
     /** 카톡 화면을 마지막으로 본 시각 (0 = 한 번도 못 봄). 공유창이 떴는지 진단용. */
     private static volatile long lastKakaoWindowAt = 0L;
+    /**
+     * 화면에서 찾을 <b>대화방 표시 이름</b>. 저장값({@code RoomRef.key()}) 이 아니다 —
+     * 여기에 계정키와 구분자(U+0001)가 섞여 들어오면 카톡 화면의 어떤 글자와도 안 맞는다.
+     */
     private static volatile String targetRoom = null;
+    /** arm 에 넘어온 저장값 원본 ({@code RoomRef.key()} 일 수 있다). 세션 조회·진단에만 쓴다. */
+    private static volatile String targetKey = "";
+    /** 이번 시도에서 카톡 창 이벤트를 몇 건 받았나. 0 이면 공유창이 아예 안 떴다는 뜻이다. */
+    private static volatile int kakaoEvents = 0;
     private static volatile long armedUntil = 0L;
     /** 우리가 포기할 시각. 항상 armedUntil 보다 앞이다 (원인 보고는 우리가 한다). */
     private static volatile long deadlineAt = 0L;
@@ -297,10 +341,16 @@ public final class KakaoAccessibility extends AccessibilityService {
      * 현장에서 가장 흔한 실패라 이게 비어 있으면 사용자는 아무 단서도 못 받는다.
      */
     public static long arm(String room, long timeoutMs, Result cb, Context ctx) {
-        String r = (room == null) ? "" : room.trim();
+        String raw = (room == null) ? "" : room.trim();
+        // 저장값(RoomRef.key() = 계정키 + U+0001 + 방이름)이 그대로 넘어오는 호출부가 있다.
+        // 그 값을 화면에서 찾으면 100% 실패한다 (카톡 화면에 계정키와 제어문자가 있을 수 없다).
+        // 호출부가 이미 표시 이름을 넘겼으면 구분자가 없으니 이 줄은 아무 일도 하지 않는다.
+        String r = (raw.indexOf(RoomRef.SEP) >= 0) ? RoomRef.parse(raw).name : raw;
         long t = (timeoutMs <= 0) ? DEFAULT_TIMEOUT_MS : timeoutMs;
 
         long now = System.currentTimeMillis();
+        targetKey = raw;
+        kakaoEvents = 0;
         targetRoom = r;
         armedUntil = now + t;
         // 호출자보다 먼저 포기한다. 아주 짧은 타임아웃이면 절반 지점에서.
@@ -353,9 +403,12 @@ public final class KakaoAccessibility extends AccessibilityService {
                 // 조기 return 해도 이번 시도의 덤프는 남는다 (서비스가 없어서 트리는 못 읽는다)
                 StringBuilder sb = new StringBuilder(512);
                 sb.append("=== 카카오톡 화면 진단 ").append(stamp()).append(" ===\n");
-                sb.append("시도 id: ").append(id).append('\n');
+                sb.append("시도 id: ").append(id).append(" · 전송 흐름: ").append(FLOW).append('\n');
+                sb.append(a11yBlock(ctx));
                 sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
-                sb.append("대상 대화방: \"").append(r).append("\"\n");
+                sb.append("찾으려던 이름: \"").append(r).append("\"\n");
+                if (!r.equals(raw)) sb.append("설정 저장값: \"").append(vis(raw)).append("\"\n");
+                sb.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
                 sb.append(env(ctx));
                 sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
                 sb.append("=== 끝 ===\n");
@@ -417,10 +470,25 @@ public final class KakaoAccessibility extends AccessibilityService {
         return INSTANCE != null;
     }
 
-    /** 지금 노리고 있는 방 이름. 예약 없으면 "" */
+    /** 지금 노리고 있는 방 이름(화면에서 찾는 표시 이름). 예약 없으면 "" */
     public static String armedRoom() {
         String r = targetRoom;
         return (r == null || !armed) ? "" : r;
+    }
+
+    /** arm 에 넘어온 저장값 원본({@code RoomRef.key()} 일 수 있다). 예약 없으면 "" */
+    public static String armedRoomKey() {
+        String k = targetKey;
+        return (k == null || !armed) ? "" : k;
+    }
+
+    /**
+     * 이번 시도에서 카카오톡 창 이벤트를 몇 건 받았나.
+     * <b>0 이면 공유창이 아예 뜨지 않은 것</b>이고, 1건 이상이면 창은 떴으나
+     * 방 선택·전송 단계에서 실패한 것이다. 이 둘은 조치가 완전히 다르므로 꼭 구분해서 보고한다.
+     */
+    public static int kakaoEventCount() {
+        return kakaoEvents;
     }
 
     // ── 진단 덤프 공개 API ───────────────────────────────────────────────────
@@ -507,6 +575,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static void clear() {
         armed = false;
         targetRoom = null;
+        targetKey = "";
         armedUntil = 0L;
         deadlineAt = 0L;
         callback = null;
@@ -615,6 +684,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         // 카톡 화면을 실제로 봤다는 표시. 공유창이 아예 안 뜬 경우와
         // 떴는데 방을 못 고른 경우를 구분하는 데 쓴다 (ImageSender 진단).
         lastKakaoWindowAt = System.currentTimeMillis();
+        if (kakaoEvents < Integer.MAX_VALUE) kakaoEvents++;
 
         int type;
         try { type = e.getEventType(); } catch (Throwable ignore) { return; }
@@ -743,7 +813,9 @@ public final class KakaoAccessibility extends AccessibilityService {
                 names.append(cut(hits.get(i).name, 24));
             }
             dumpAndFail("이름이 유사한 대화방이 다수 검색되어 전송을 중단했습니다(" + names + ")."
-                    + " 오발송을 방지하기 위해 선택하지 않았습니다. 설정의 대화방 이름을 화면에 표시된 그대로 전체 입력하십시오." + nextStep());
+                    + " 오발송을 방지하기 위해 선택하지 않았습니다."
+                    + wantVsSeen(roomLike(sc))
+                    + " . 설정의 대화방 이름을 화면에 표시된 그대로 전체 입력하십시오." + nextStep());
             return;
         }
 
@@ -834,13 +906,13 @@ public final class KakaoAccessibility extends AccessibilityService {
                     + tail;
         }
         String names = roomLike(sc);
-        return "대화방 목록에서 「" + cut(room, 24) + "」 을 찾지 못했습니다."
+        return "대화방 목록에서 「" + cut(room, NAME_MAX) + "」 을 찾지 못했습니다."
+                + wantVsSeen(names)
                 + (names.length() > 0
-                    ? " 당시 화면에 표시된 이름: " + names
-                      + " . 카카오톡에 표시된 이름과 문자가 다른 경우(이모지·괄호·띄어쓰기) 설정의 대화방 이름을"
+                    ? " . 두 이름의 문자가 다른 경우(이모지·괄호·띄어쓰기) 설정의 대화방 이름을"
                       + " 화면에 표시된 그대로 수정하십시오."
-                    : " 화면에서 대화방 이름으로 인식되는 문자를 읽지 못했습니다."
-                      + " 카카오톡 공유창이 목록을 아직 표시하지 않은 상태일 수 있습니다. 카카오톡을 실행한 후 다시 시도하십시오.")
+                    : " . 카카오톡 공유창이 목록을 아직 표시하지 않은 상태일 수 있습니다."
+                      + " 카카오톡을 실행한 후 다시 시도하십시오.")
                 + tail;
     }
 
@@ -1042,9 +1114,9 @@ public final class KakaoAccessibility extends AccessibilityService {
             return false;
         }
 
-        // 완전일치 검색은 이모지/말줄임표 때문에 0건이 되기 쉽다 → 앞 8자만 넣는다
-        String q = norm(room);
-        if (q.length() > 8) q = q.substring(0, 8);
+        // 완전일치 검색은 이모지·말줄임표 때문에 0건이 되기 쉽다 → 앞 이모지를 떼고 앞부분만 넣는다
+        String q = searchQuery(room);
+        if (q.length() == 0) { searchImpossible = true; return false; }
 
         try {
             // 커스텀 검색뷰는 눌러야 편집 모드가 되는 경우가 있다 → CLICK → FOCUS → SET_TEXT
@@ -1314,9 +1386,14 @@ public final class KakaoAccessibility extends AccessibilityService {
     private String miniBody(String where, String tag) {
         StringBuilder sb = new StringBuilder(1024);
         sb.append("=== 카카오톡 화면 진단(간이) ").append(stamp()).append(" ===\n");
-        sb.append("시도 id: ").append(attempt).append(" · 경로: ").append(tag).append('\n');
+        sb.append("시도 id: ").append(attempt).append(" · 경로: ").append(tag)
+                .append(" · 전송 흐름: ").append(FLOW).append('\n');
+        sb.append(a11yBlock(this));
         sb.append("실패: ").append(where).append('\n');
-        sb.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        sb.append("찾으려던 이름: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        sb.append("화면에서 확인된 이름: ").append(seenNames.length() == 0 ? "없음" : seenNames).append('\n');
+        sb.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
+        sb.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
         sb.append("단계: ").append(whereNow())
                 .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
                 .append(" · 전송 입력 ").append(sendTry).append("회")
@@ -1324,7 +1401,6 @@ public final class KakaoAccessibility extends AccessibilityService {
         sb.append(env(this));
         sb.append("마지막으로 본 화면: ")
                 .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : seenShape).append('\n');
-        if (seenNames.length() > 0) sb.append("당시 확인된 이름: ").append(seenNames).append('\n');
         if (seenBtns.length() > 0) sb.append("당시 확인된 버튼: ").append(seenBtns).append('\n');
         sb.append(notesBlock());
         sb.append("=== 끝 ===\n");
@@ -1464,11 +1540,10 @@ public final class KakaoAccessibility extends AccessibilityService {
                         + (lastActivityCls.length() > 0
                             ? " (당시 표시된 화면: " + shortCls(lastActivityCls) + ")" : "");
             }
-            return "대화방 목록에서 「" + cut(room, 24) + "」 을 찾지 못한 상태로 시간이 초과되었습니다."
+            return "대화방 목록에서 「" + cut(room, NAME_MAX) + "」 을 찾지 못한 상태로 시간이 초과되었습니다."
+                    + wantVsSeen(seenNames)
                     + (seenNames.length() > 0
-                        ? " 당시 화면에 표시된 이름: " + seenNames
-                          + " . 설정의 대화방 이름을 화면에 표시된 그대로 수정하십시오."
-                        : " 화면에서 대화방 이름으로 인식되는 문자를 읽지 못했습니다.")
+                        ? " . 설정의 대화방 이름을 화면에 표시된 그대로 수정하십시오." : "")
                     + nextStep();
         }
         if (p == P_AFTER) {
@@ -1497,14 +1572,15 @@ public final class KakaoAccessibility extends AccessibilityService {
      * 접근성끼리 부딪히면 증상이 "카톡 레이아웃이 바뀐 것" 과 구분이 안 된다 —
      * 이게 메시지와 덤프에 없으면 엉뚱한 데를 고치게 된다.
      */
-    private String otherA11y() {
+    private static String otherA11y(Context c) {
+        if (c == null) return "";
         StringBuilder sb = new StringBuilder(96);
         int n = 0;
         try {
-            String flat = android.provider.Settings.Secure.getString(getContentResolver(),
+            String flat = android.provider.Settings.Secure.getString(c.getContentResolver(),
                     android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (flat == null || flat.trim().length() == 0) return "";
-            String mine = getPackageName();
+            String mine = c.getPackageName();
             String[] parts = flat.split(":");
             for (int i = 0; i < parts.length && n < 6; i++) {
                 String p = (parts[i] == null) ? "" : parts[i].trim();
@@ -1513,7 +1589,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 String pkg = (slash > 0) ? p.substring(0, slash) : p;
                 if (pkg.equals(mine)) continue;         // 우리 건 뺀다
                 if (n > 0) sb.append(", ");
-                sb.append(appLabel(pkg)).append('(').append(pkg).append(')');
+                sb.append(appLabel(c, pkg)).append('(').append(pkg).append(')');
                 n++;
             }
         } catch (Throwable t) {
@@ -1522,22 +1598,72 @@ public final class KakaoAccessibility extends AccessibilityService {
         return sb.toString();
     }
 
-    /** 실패 메시지에 붙일 "다른 접근성 앱이 켜져 있다" 안내. 없으면 "". */
+    /**
+     * 실패 메시지에 붙일 "다른 접근성 앱이 켜져 있다" 안내. 없으면 "".
+     * 화면 조작 실패에서 제일 먼저 확인할 항목이라 덤프 상단에도 같은 값을 박는다({@link #a11yBlock}).
+     */
     private String a11yTail() {
-        String o = otherA11y();
+        String o = otherA11y(this);
         if (o.length() == 0) return "";
         return " · 참고: 타사 접근성 앱이 활성 상태입니다(" + o + "). 해당 앱은 자동 조작과 충돌하여"
-                + " 카카오톡 레이아웃이 변경된 것과 동일한 증상을 유발합니다. 일시 해제한 후 다시 시도하십시오.";
+                + " 카카오톡 레이아웃이 변경된 것과 동일한 증상을 유발합니다."
+                + " 이미지 전송 중에는 해당 앱의 자동 클릭 동작을 중지하거나 접근성 권한을 일시 해제하십시오.";
+    }
+
+    /**
+     * 진단 <b>맨 위</b>에 들어가는 타사 접근성 앱 목록.
+     * 화면 조작이 실패했을 때 가장 먼저 확인해야 하는 항목이므로 아래로 내려보내지 않는다.
+     */
+    private static String a11yBlock(Context c) {
+        String o = otherA11y(c);
+        if (o.length() == 0) return "활성 상태인 타사 접근성 앱: 없음\n";
+        return "활성 상태인 타사 접근성 앱: " + o + "\n"
+                + "  ← 화면 조작 실패 시 가장 먼저 확인할 항목입니다."
+                + " 해당 앱의 자동 클릭 동작을 중지한 후 다시 시도하십시오.\n";
     }
 
     /** 패키지의 앱 이름 (못 찾으면 패키지명 그대로) */
-    private String appLabel(String pkg) {
+    private static String appLabel(Context c, String pkg) {
         try {
-            android.content.pm.PackageManager pm = getPackageManager();
+            android.content.pm.PackageManager pm = c.getPackageManager();
             CharSequence l = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
             if (l != null && l.length() > 0) return l.toString();
         } catch (Throwable ignore) { }
         return pkg;
+    }
+
+    /**
+     * 실패 문구의 핵심 한 줄 — <b>찾으려던 이름</b>과 <b>화면에서 본 이름들</b>을 나란히 남긴다.
+     * 둘을 떨어뜨려 놓으면 사용자가 비교를 못 하고, 비교만 되면 대부분 스스로 고친다
+     * (이모지·괄호·띄어쓰기 차이가 눈에 바로 보인다).
+     */
+    private static String wantVsSeen(String seen) {
+        String want = (targetRoom == null) ? "" : targetRoom;
+        return " · 찾으려던 이름: 「" + cut(want, NAME_MAX) + "」"
+                + " · 화면에서 확인된 이름: " + (seen == null || seen.length() == 0 ? "없음" : seen);
+    }
+
+    /**
+     * 그 대화방을 여는 인텐트(알림 contentIntent)를 갖고 있나.
+     * 공유창이 안 뜨는 원인을 좁힐 때 "대체 경로 재료가 있는지" 를 같이 봐야 한다.
+     */
+    private static String openIntentState() {
+        String k = targetKey;
+        if (k == null || k.length() == 0) return "확인 불가(대상 대화방 없음)";
+        try {
+            return KakaoListener.hasOpenIntent(RoomRef.parse(k))
+                    ? "보유"
+                    : "없음(해당 대화방 알림을 아직 수신하지 않았거나 카카오톡이 제공하지 않음)";
+        } catch (Throwable t) {
+            return "확인 실패(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** 이번 시도에서 카톡 창 이벤트를 받았나 — "공유창 미표시" 와 "표시됐으나 실패" 를 가른다 */
+    private static String eventState() {
+        return kakaoEvents == 0
+                ? "0건 (카카오톡 화면 이벤트를 한 건도 수신하지 못했습니다 = 공유창 미표시로 판단)"
+                : (kakaoEvents + "건 (카카오톡 화면은 표시되었습니다)");
     }
 
     /** 기기/OS/화면/앱 정보 — bounds 숫자를 해석하려면 해상도가 필요하다 */
@@ -1629,14 +1755,16 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static final class Hit {
         AccessibilityNodeInfo node;
         String name = "";
-        int level = 9;          // 0 정확 · 1 공백무시 · 2 말줄임 접두 · 3 부분일치
+        /** {@code L_EXACT} ~ {@code L_PART} */
+        int level = L_PART;
         String rowKey = "";
 
         String how() {
             switch (level) {
-                case 0: return "정확히 일치";
-                case 1: return "공백/특수문자 무시";
-                case 2: return "말줄임 접두";
+                case L_EXACT: return "정확히 일치";
+                case L_SQUASH: return "공백·보이지 않는 문자 무시";
+                case L_CORE: return "이모지·기호 제거 후 일치";
+                case L_PREFIX: return "말줄임 접두 일치";
                 default: return "부분 일치";
             }
         }
@@ -1653,10 +1781,8 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     /** 한 step 에서 화면에서 알아낸 모든 것 */
     private final class Scan {
-        final ArrayList<Hit> h0 = new ArrayList<Hit>(4);
-        final ArrayList<Hit> h1 = new ArrayList<Hit>(4);
-        final ArrayList<Hit> h2 = new ArrayList<Hit>(4);
-        final ArrayList<Hit> h3 = new ArrayList<Hit>(4);
+        /** 매칭 등급별 후보 (index = L_* 상수). 등급이 늘면 {@link #newTiers()} 만 고친다. */
+        final ArrayList<ArrayList<Hit>> tiers = newTiers();
         final ArrayList<Btn> btns = new ArrayList<Btn>(8);
         final ArrayList<Btn> tabs = new ArrayList<Btn>(6);
         final ArrayList<AccessibilityNodeInfo> scrollables = new ArrayList<AccessibilityNodeInfo>(4);
@@ -1679,10 +1805,19 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         /** 제일 확실한 후보 묶음만 돌려준다 (행 기준 중복 제거) */
         ArrayList<Hit> bestHits() {
-            if (!h0.isEmpty()) return dedupe(h0);
-            if (!h1.isEmpty()) return dedupe(h1);
-            if (!h2.isEmpty()) return dedupe(h2);
-            return dedupe(h3);
+            for (int i = 0; i < tiers.size(); i++) {
+                ArrayList<Hit> t = tiers.get(i);
+                if (!t.isEmpty()) return dedupe(t);
+            }
+            return new ArrayList<Hit>(0);
+        }
+
+        /** 이름을 확실하게 맞춘 후보가 있나 (= 지금 보고 있는 화면이 방 목록이라는 강한 증거) */
+        boolean strongHit() {
+            for (int i = 0; i <= L_CORE; i++) {
+                if (!tiers.get(i).isEmpty()) return true;
+            }
+            return false;
         }
 
         private ArrayList<Hit> dedupe(ArrayList<Hit> in) {
@@ -1723,6 +1858,12 @@ public final class KakaoAccessibility extends AccessibilityService {
             }
             return best;
         }
+    }
+
+    private static ArrayList<ArrayList<Hit>> newTiers() {
+        ArrayList<ArrayList<Hit>> out = new ArrayList<ArrayList<Hit>>(L_COUNT);
+        for (int i = 0; i < L_COUNT; i++) out.add(new ArrayList<Hit>(4));
+        return out;
     }
 
     /** 순회 상태 */
@@ -1786,6 +1927,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         final String room = (targetRoom == null) ? "" : targetRoom;
         final String roomN = norm(room).toLowerCase(Locale.ROOT);
         final String roomS = squash(room);
+        final String roomC = core(room);
         final StringBuilder sig = new StringBuilder(256);
         final int topThird = screenH() / 3;
 
@@ -1859,20 +2001,18 @@ public final class KakaoAccessibility extends AccessibilityService {
                     // ── 방 이름 후보 ──
                     if (vis && !editable && (tx.length() > 0 || ds.length() > 0) && roomN.length() > 0) {
                         String cand = (tx.length() > 0) ? tx : ds;
-                        Hit hit = match(cand, roomN, roomS, room);
+                        Hit hit = match(cand, roomN, roomS, roomC);
                         if (hit != null) {
                             hit.node = n;
                             AccessibilityNodeInfo row = rowOf(n);
                             hit.rowKey = keyOf(row);
                             recycleRow(row, n);
                             boolean idBonus = idIn(id, ROOM_IDS);
-                            if (idBonus && hit.level > 0) hit.level--;
-                            switch (hit.level) {
-                                case 0: sc.h0.add(hit); break;
-                                case 1: sc.h1.add(hit); break;
-                                case 2: sc.h2.add(hit); break;
-                                default: sc.h3.add(hit); break;
-                            }
+                            if (idBonus && hit.level > L_EXACT) hit.level--;
+                            int lv = hit.level;
+                            if (lv < 0) lv = 0;
+                            if (lv >= L_COUNT) lv = L_COUNT - 1;
+                            sc.tiers.get(lv).add(hit);
                             keep = true;
                         }
                     }
@@ -1947,7 +2087,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (sawShareList) return;
         boolean listy = (sc.listRows >= 2) || (sc.rows >= 2) || (sc.checkables >= 2);
         if (listy && (sc.scrollables.size() > 0 || sc.checkables >= 2)) sawShareList = true;
-        else if (!sc.h0.isEmpty() || !sc.h1.isEmpty()) sawShareList = true;   // 방 이름을 정확히 찾았다
+        else if (sc.strongHit()) sawShareList = true;   // 방 이름을 확실하게 찾았다
     }
 
     /**
@@ -1992,25 +2132,68 @@ public final class KakaoAccessibility extends AccessibilityService {
         return true;
     }
 
-    /** 이름 매칭. 안 맞으면 null. */
-    private static Hit match(String cand, String roomN, String roomS, String room) {
+    /**
+     * 이름 매칭. 안 맞으면 null.
+     *
+     * 실사용 이름(🎆로 시작 · 30자 · 공백 다수)을 기준으로 다시 짰다. 예전 판의 구멍은 셋이었다.
+     *  1) 이모지·기호를 걷어낸 비교가 없었다 → 앞의 이모지 한 글자 때문에 전부 빗나간다.
+     *  2) 말줄임 대응이 "…" 가 <b>글자에 들어온 경우</b>만 봤다. 뷰가 그림으로만 자르면
+     *     글자에는 말줄임표가 없어서 접두 일치가 성립하지 않는다 → 마커 없는 접두도 본다.
+     *  3) 연속 공백은 {@link #norm} 이 한 칸으로 줄이고 {@link #squash} 가 전부 지운다 (그대로 유지).
+     *
+     * 너그러워진 만큼 오발송 위험이 커지는 것은 <b>후보가 둘 이상이면 전송을 중단하는</b>
+     * {@link #doPick} 규칙이 막는다. 짧은 접두는 우연히 겹치니 최소 길이를 요구한다.
+     */
+    private static Hit match(String cand, String roomN, String roomS, String roomC) {
         String cn = cand.toLowerCase(Locale.ROOT);
+        if (cn.equals(roomN)) return hitOf(cand, L_EXACT);
+
         String cs = squash(cand);
-        if (cn.equals(roomN)) { Hit h = new Hit(); h.name = cand; h.level = 0; return h; }
-        if (cs.length() > 0 && cs.equals(roomS)) { Hit h = new Hit(); h.name = cand; h.level = 1; return h; }
-        // 카톡이 긴 방 이름을 "…" 로 잘라서 보여주는 경우
-        String base = cs;
-        if (base.endsWith("…")) base = base.substring(0, base.length() - 1);
-        else if (base.endsWith("...")) base = base.substring(0, base.length() - 3);
-        if (base.length() >= 3 && !base.equals(cs) && roomS.startsWith(base)) {
-            Hit h = new Hit(); h.name = cand; h.level = 2; return h;
+        if (cs.length() > 0 && cs.equals(roomS)) return hitOf(cand, L_SQUASH);
+
+        String cc = core(cand);
+        if (cc.length() >= 2 && roomC.length() >= 2 && cc.equals(roomC)) return hitOf(cand, L_CORE);
+
+        // 목록에서 잘려 표시된 경우 — 말줄임표가 글자에 있든 없든 둘 다 본다
+        String base = stripEllipsis(cs);
+        boolean marked = !base.equals(cs);
+        if (base.length() >= (marked ? 3 : MIN_PREFIX)
+                && roomS.length() > base.length() && roomS.startsWith(base)) {
+            return hitOf(cand, L_PREFIX);
         }
+        String baseC = core(base);
+        if (baseC.length() >= (marked ? 2 : MIN_PREFIX_CORE)
+                && roomC.length() > baseC.length() && roomC.startsWith(baseC)) {
+            return hitOf(cand, L_PREFIX);
+        }
+
         // 부분 일치 — 남의 대화 미리보기 줄을 잡지 않게 길이를 제한한다
         if (roomS.length() >= 2 && cs.contains(roomS)
                 && cs.length() <= roomS.length() + 14) {
-            Hit h = new Hit(); h.name = cand; h.level = 3; return h;
+            return hitOf(cand, L_PART);
+        }
+        if (roomC.length() >= 4 && cc.contains(roomC)
+                && cc.length() <= roomC.length() + 14) {
+            return hitOf(cand, L_PART);
         }
         return null;
+    }
+
+    private static Hit hitOf(String name, int level) {
+        Hit h = new Hit();
+        h.name = name;
+        h.level = level;
+        return h;
+    }
+
+    /** 끝에 붙은 말줄임표(… · ...)를 뗀다 */
+    private static String stripEllipsis(String s) {
+        String t = (s == null) ? "" : s;
+        while (true) {
+            if (t.endsWith("…")) { t = t.substring(0, t.length() - 1); continue; }
+            if (t.endsWith("...")) { t = t.substring(0, t.length() - 3); continue; }
+            return t;
+        }
     }
 
     /** 전송 버튼 우선순위. 9 = 후보 아님. */
@@ -2157,10 +2340,22 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
         out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
         out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
-        out.append("시도 id: ").append(attempt).append('\n');
+        out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(FLOW).append('\n');
+        // 타사 접근성 앱은 화면 조작 실패에서 가장 먼저 봐야 하는 항목이다 → 맨 위에 둔다
+        out.append(a11yBlock(this));
         out.append("실패: ").append((where == null || where.length() == 0) ? "(수동 수집)" : where).append('\n');
-        out.append("대상 대화방: \"").append(room).append("\"  (정규화: \"").append(norm(room))
-                .append("\" / 공백무시: \"").append(squash(room)).append("\")\n");
+        out.append("찾으려던 이름: \"").append(room).append("\"\n");
+        out.append("  (정규화: \"").append(norm(room))
+                .append("\" / 공백무시: \"").append(squash(room))
+                .append("\" / 이모지·기호 제거: \"").append(core(room))
+                .append("\" / 검색 질의: \"").append(searchQuery(room)).append("\")\n");
+        String key = (targetKey == null) ? "" : targetKey;
+        if (!key.equals(room)) {
+            out.append("  설정 저장값: \"").append(vis(key))
+                    .append("\"  (계정키·구분자는 화면 매칭에서 제외했습니다)\n");
+        }
+        out.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
+        out.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
         out.append("단계: ").append(whereNow())
                 .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
                 .append(" · 전송 입력 ").append(sendTry).append("회")
@@ -2170,11 +2365,6 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
         out.append("마지막 액티비티/다이얼로그: ")
                 .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
-        String others = otherA11y();
-        out.append("활성 상태인 타사 접근성 앱: ")
-                .append(others.length() == 0 ? "없음" : others)
-                .append(others.length() == 0 ? "" : "  ← 접근성 앱 충돌 시 레이아웃 변경과 동일한 증상이 발생합니다")
-                .append('\n');
 
         ArrayList<AccessibilityNodeInfo> rs = roots();
         out.append("카카오톡 창 개수: ").append(rs.size()).append('\n');
@@ -2250,8 +2440,9 @@ public final class KakaoAccessibility extends AccessibilityService {
                     .append(" prio=").append(b.prio)
                     .append(' ').append(boundsStr(b.node)).append('\n');
         }
-        out.append("대화방 이름으로 인식된 문자: ")
-                .append(roomLike(sc).length() == 0 ? "없음" : roomLike(sc)).append('\n');
+        String seenNow = roomLike(sc);
+        out.append("화면에서 확인된 이름(위의 「찾으려던 이름」 과 비교하십시오): ")
+                .append(seenNow.length() == 0 ? "없음" : seenNow).append('\n');
         out.append("화면에서 수집된 문자(중복 제거, 앞 ").append(Math.min(40, sc.leafTexts.size())).append("개):\n");
         for (int i = 0; i < sc.leafTexts.size() && i < 40; i++) {
             out.append("  ").append(i + 1).append(". ").append(privacyCut(sc.leafTexts.get(i))).append('\n');
@@ -2541,11 +2732,73 @@ public final class KakaoAccessibility extends AccessibilityService {
                     || c == '️' || c == '︎' || c == '­') {
                 continue;
             }
+            // 제어문자는 화면 글자에 있을 수 없다. 특히 RoomRef.SEP(U+0001) 가 섞인 값이
+            // 넘어오면 여기서 털어내야 완전일치·검색이 조용히 실패하지 않는다.
+            if (c < ' ' || c == '\u007f') continue;
             b.append(c);
         }
         String t = b.toString();
         while (t.contains("  ")) t = t.replace("  ", " ");
         return t.trim();
+    }
+
+    /**
+     * <b>이모지·기호·문장부호를 걷어내고 글자와 숫자만 남긴다</b> (비교 전용).
+     * 카톡 방 이름은 이모지로 시작하거나 중간에 기호가 끼는 경우가 흔하고,
+     * 접근성이 읽어오는 글자에서 그 이모지가 빠지거나 다른 변형으로 오는 경우가 있다.
+     * 그때 이름 전체가 어긋나는 것을 막는다. 한글·영문·숫자는 그대로 남는다.
+     */
+    static String core(String s) {
+        String t = squash(s);
+        StringBuilder b = new StringBuilder(t.length());
+        int i = 0;
+        while (i < t.length()) {
+            int cp = t.codePointAt(i);
+            int n = Character.charCount(cp);
+            if (Character.isLetterOrDigit(cp)) b.appendCodePoint(cp);
+            i += n;
+        }
+        return b.toString();
+    }
+
+    /**
+     * 검색창에 넣을 질의.
+     * 완전일치를 넣으면 이모지·말줄임 때문에 0건이 되기 쉽다. 그래서
+     *  (1) 앞에 붙은 이모지·기호를 떼고 (검색창에 이모지를 넣으면 카톡이 0건을 준다)
+     *  (2) 글자 {@link #SEARCH_QUERY_MAX} 자까지만 넣는다 (서러게이트 쌍은 쪼개지 않는다).
+     */
+    static String searchQuery(String room) {
+        String t = norm(room);
+        int i = 0;
+        while (i < t.length()) {
+            int cp = t.codePointAt(i);
+            if (Character.isLetterOrDigit(cp)) break;
+            i += Character.charCount(cp);
+        }
+        if (i >= t.length()) i = 0;      // 글자가 하나도 없으면 원본 그대로 넣어본다
+        String body = t.substring(i).trim();
+        if (body.length() == 0) body = t;
+        int end = 0, kept = 0;
+        while (end < body.length() && kept < SEARCH_QUERY_MAX) {
+            end += Character.charCount(body.codePointAt(end));
+            kept++;
+        }
+        return body.substring(0, end).trim();
+    }
+
+    /** 보이지 않는 문자를 눈에 보이게 바꿔 적는다 (진단에서 "왜 안 맞았나" 를 보여주는 용도) */
+    static String vis(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < ' ' || c == '\u007f') {
+                b.append("<U+").append(String.format(Locale.ROOT, "%04X", (int) c)).append('>');
+            } else {
+                b.append(c);
+            }
+        }
+        return b.toString();
     }
 
     /** 공백 전부 제거 + 소문자 (너그러운 비교용) */

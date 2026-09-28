@@ -22,13 +22,64 @@ import android.view.WindowManager;
  *      — <b>보안 잠금(패턴·PIN·지문)이 걸려 있으면 실패한다.</b> 그때는 로그로 알려준다.
  *   3. 받아온 공유 인텐트를 실행하고 바로 {@link #finish()}
  *
- * 화면이 이미 켜져 있고 안 잠겨 있으면 {@link ImageSender} 가 이걸 거치지 않는다
+ * <h3>두 번째 역할 — 포그라운드 호출자 만들기</h3>
+ * 앱이 화면에 없을 때 startActivity 를 시스템이 조용히 막는 경우가 있다(백그라운드 액티비티 차단).
+ * 예외도 안 던지고 로그도 안 남으니 호출부는 "던졌는데 아무 일도 안 일어났다" 만 보게 된다.
+ * 그래서 {@link ImageSender} 는 앱이 화면에 없으면 <b>이 액티비티를 먼저 띄우고</b>
+ * 여기서 공유 인텐트를 던진다 — 그 순간 호출자는 화면에 보이는 우리 액티비티다.
+ *
+ * <h3>세 번째 역할 — 차단 여부를 알려주기</h3>
+ * {@link #watch} 로 등록해두면 이 액티비티가 <b>실제로 떴는지</b>({@link Watcher#shown})와
+ * <b>공유 인텐트 실행 결과</b>({@link Watcher#launched})를 알려준다.
+ * 뜨지도 않았다는 사실 자체가 "시스템이 우리 액티비티 실행을 차단했다" 의 유일한 증거다.
+ *
+ * 화면이 이미 켜져 있고 앱이 화면에 표시된 상태면 {@link ImageSender} 가 이걸 거치지 않는다
  * (필요 없는 단계를 끼워 넣으면 그 자체가 실패 지점이 된다).
  */
 public final class WakeActivity extends Activity {
 
     /** 실행할 인텐트를 담아오는 엑스트라 키 (우리 앱만 쓴다 — 매니페스트에서 exported=false) */
     public static final String EXTRA_RUN = "com.buseong.kakaoauto.WAKE_RUN";
+
+    /** 호출부가 준 식별자 (어느 전송 건의 깨우기인지 구별한다) */
+    public static final String EXTRA_ID = "com.buseong.kakaoauto.WAKE_ID";
+
+    /**
+     * 이 액티비티가 실제로 떴는지 · 담아온 인텐트가 실행됐는지 호출부에 알려주는 통로.
+     * 콜백은 <b>메인 스레드</b>에서 불린다.
+     */
+    public interface Watcher {
+        /** 액티비티가 화면에 떴다 = 시스템이 우리 액티비티 실행을 허용했다 */
+        void shown(long id);
+        /** 담아온 인텐트 실행 결과. err 가 null 이면 성공. */
+        void launched(long id, String err);
+    }
+
+    /** 감시자는 한 번에 한 건만 (ImageSender 가 한 번에 한 건만 돌린다) */
+    private static volatile Watcher watcher = null;
+    private static volatile long watchId = 0L;
+
+    /** id 건의 깨우기 결과를 받는다. 같은 자리를 덮어쓴다. */
+    public static void watch(long id, Watcher w) {
+        watchId = id;
+        watcher = w;
+    }
+
+    /** 감시 해제 (그 id 의 감시자일 때만) */
+    public static void unwatch(long id) {
+        if (watchId == id) watcher = null;
+    }
+
+    private static void report(long id, boolean shown, String err) {
+        Watcher w = watcher;
+        if (w == null || watchId != id) return;
+        try {
+            if (shown) w.shown(id);
+            else w.launched(id, err);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "깨우기 결과 통지 실패", t);
+        }
+    }
 
     /** 잠금 해제 콜백을 기다리는 한도. 넘으면 그냥 실행해본다. */
     private static final long DISMISS_WAIT_MS = 1200L;
@@ -44,22 +95,43 @@ public final class WakeActivity extends Activity {
     /** 잠금 해제 실패 안내를 한 번만 남긴다 */
     private boolean lockWarned = false;
 
+    /** 호출부가 준 식별자 (0 = 통지 없음) */
+    private long id = 0L;
+
     /**
      * 공유 인텐트를 감싸서 이 액티비티로 띄우는 인텐트를 만든다.
      * inner 는 우리가 만든 카톡 공유 인텐트여야 한다.
      */
     public static Intent wrap(Context c, Intent inner) {
+        return wrap(c, inner, 0L);
+    }
+
+    /**
+     * 위와 같지만 결과를 돌려받을 식별자를 같이 싣는다 ({@link #watch}).
+     * id 가 0 이면 통지하지 않는다.
+     */
+    public static Intent wrap(Context c, Intent inner, long id) {
         Intent i = new Intent(c, WakeActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP
                 | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
         if (inner != null) i.putExtra(EXTRA_RUN, inner);
+        if (id != 0L) i.putExtra(EXTRA_ID, id);
         return i;
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+
+        // ── 0. "우리 액티비티가 떴다" 를 먼저 알린다 ──
+        //  이게 안 오면 시스템이 백그라운드 액티비티 실행을 차단한 것이다.
+        //  차단은 예외도 로그도 남기지 않으므로 호출부는 이 신호로만 구별할 수 있다.
+        try {
+            Intent in0 = getIntent();
+            if (in0 != null) id = in0.getLongExtra(EXTRA_ID, 0L);
+        } catch (Throwable ignore) { }
+        report(id, true, null);
 
         // ── 1. 화면 켜기 + 잠금화면 위에 표시 ──
         try {
@@ -156,16 +228,20 @@ public final class WakeActivity extends Activity {
         try { h.removeCallbacksAndMessages(null); } catch (Throwable ignore) { }
 
         if (run == null) {
+            report(id, false, "실행할 카카오톡 인텐트가 전달되지 않았습니다");
             finish();
             return;
         }
+        String err = null;
         try {
             run.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(run);
         } catch (Throwable t) {
+            err = "공유창 실행 예외 " + t.getClass().getSimpleName();
             Log.add(this, "화면 절전은 해제되었으나 카카오톡 공유창을 열지 못했습니다 ("
                     + t.getClass().getSimpleName() + "). 카카오톡이 설치되지 않았거나 버전이 호환되지 않습니다.");
         }
+        report(id, false, err);
         finish();
     }
 

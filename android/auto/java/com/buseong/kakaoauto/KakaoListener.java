@@ -42,6 +42,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   boolean        sendTo(ctx, ref|room, text)   — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
  *   Set&lt;String&gt; imageTypesFor(ref|room)     — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
  *   boolean        sendImageTo(ctx, ref|room, uri) — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
+ *   PendingIntent  openIntentFor(ref|room)        — 그 대화방을 여는 인텐트 (카톡 알림의 contentIntent)
+ *   boolean        hasOpenIntent(ref|room)        — 위 인텐트를 갖고 있나 (진단 표시용)
  *   int            othersSinceMine(ref|room)     — 내 마지막 발송 뒤 남이 올린 메시지 수 (도배 방지 판정)
  *   List<RoomInfo> knownRooms(ctx)               — 최근 감지된 방 (계정·단체여부·감지시각, 최대 50개)
  *   void           forgetRoom(ctx, ref)          — 감지된 방 1건 삭제 (멤버 오인식 정리)
@@ -117,6 +119,20 @@ public final class KakaoListener extends NotificationListenerService {
         public final String room;
         /** 답장 액션의 PendingIntent (카톡이 준 것) */
         public volatile PendingIntent pending;
+        /**
+         * 알림 본문을 탭했을 때 실행되는 인텐트 = <b>그 대화방 열기</b> (카톡이 만든 것).
+         *
+         * 이게 있으면 대화방을 열 때 이름 매칭·검색·스크롤이 전부 필요 없다 —
+         * 카톡이 지목한 "그 방" 이라서 이름 표기 차이(이모지·말줄임)와 무관하다.
+         * 다만 <b>이미지 첨부 수단은 아니다</b>: 방만 열리고, 우리 SAF URI 를 카톡 앨범
+         * 그리드에서 지목할 방법이 없다. 그래서 지금은 진단(보유 여부)과
+         * 향후 대체 경로 재료로만 보관한다.
+         *
+         * 답장 액션(pending)과 별개 객체다. contentIntent 를 send() 해도 답장 세션은 죽지 않는다
+         * (FLAG_AUTO_CANCEL 은 사용자가 알림을 탭했을 때만 적용된다).
+         * 없으면 null (카톡이 안 넣어준 알림).
+         */
+        public volatile PendingIntent open;
         /** 그 액션에 달린 RemoteInput 들 (결과 키가 여기 있다) */
         public volatile RemoteInput[] inputs;
         /**
@@ -350,6 +366,12 @@ public final class KakaoListener extends NotificationListenerService {
             // 사진을 알림 답장으로 보낼 수 있나 — 이 앱이 살아있는 동안 딱 한 번만 알려준다
             probeImageOnce(ctxOrApp(), r.dataTypes);
         }
+        // 대화방 열기 인텐트. 새 알림에 없으면 이전에 받아둔 것을 그대로 둔다 —
+        // 쓸 수 있는 인텐트를 null 로 덮는 건 손실뿐이다.
+        try {
+            PendingIntent ci = n.contentIntent;
+            if (ci != null) s.open = ci;
+        } catch (Throwable ignore) { }
         s.lastAt = m.at;
 
         // ── 그룹 판정을 세션에 반영한다 (약한 근거로 강한 근거를 덮지 않는다) ──
@@ -1057,6 +1079,39 @@ public final class KakaoListener extends NotificationListenerService {
             return java.util.Collections.emptySet();
         }
         return imageOnly(s.dataTypes);
+    }
+
+    /**
+     * 그 대화방을 여는 인텐트(= 카톡 알림의 contentIntent). 없으면 null.
+     *
+     * 그 방 알림을 한 번이라도 본 뒤에만 생긴다(세션과 수명이 같다 — 프로세스가 죽으면 사라진다).
+     * 이름 매칭 없이 대화방으로 직행하는 유일한 수단이지만, <b>이미지 첨부까지는 못 한다</b>:
+     * 방이 열린 뒤 사진을 고르는 단계는 카톡 자기 앨범(MediaStore)이라서 우리 URI 를 지목할 수 없다.
+     *
+     * 쓰는 쪽 주의 — {@code send()} 는 액티비티를 띄우므로 백그라운드 실행 제한을 받는다.
+     * 우리 특권을 전달하려면 API 34 이상에서 {@code ActivityOptions.makeBasic()
+     * .setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)}
+     * 를 같이 넘겨야 한다.
+     */
+    public static PendingIntent openIntentFor(RoomRef ref) {
+        Session s = findSession(ref, false);
+        return (s == null) ? null : s.open;
+    }
+
+    /** 저장값(방 이름 또는 {@code RoomRef.key()})으로 조회하는 버전 */
+    public static PendingIntent openIntentFor(String room) {
+        Session s = lookup(room);
+        return (s == null) ? null : s.open;
+    }
+
+    /** 그 대화방을 여는 인텐트를 갖고 있나 (진단 표시용 — 인텐트를 밖으로 내주지 않는다) */
+    public static boolean hasOpenIntent(RoomRef ref) {
+        return openIntentFor(ref) != null;
+    }
+
+    /** 저장값으로 확인하는 버전 */
+    public static boolean hasOpenIntent(String room) {
+        return openIntentFor(room) != null;
     }
 
     /**
