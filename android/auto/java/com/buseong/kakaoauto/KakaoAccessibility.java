@@ -1440,6 +1440,13 @@ public final class KakaoAccessibility extends AccessibilityService {
         AccessibilityNodeInfo btnSend = null;
         /** 첨부 메뉴의 「사진」 항목 (문서 5장) */
         AccessibilityNodeInfo menuPhoto = null;
+        /**
+         * {@link #ATTACH_MENU_PHOTO} 안에서 {@link #menuPhoto} 가 맞은 후보의 순번.
+         * 실측값 「사진」(0번)이 다른 후보보다 <b>항상</b> 이긴다 — 뒤쪽 후보는 실기기에서
+         * 확인된 값이 아니라 다른 카톡 버전용 예비값이다. 화면 순서가 우선순위를 뒤집으면
+         * 근거 없는 값이 근거 있는 값을 밀어내는 셈이 된다.
+         */
+        int menuPhotoRank = Integer.MAX_VALUE;
         /** desc 가 첨부/추가/더보기 인 clickable 노드 (문서 8장 — id 는 미확보) */
         AccessibilityNodeInfo plusByDesc = null;
         final ArrayList<Photo> photos = new ArrayList<Photo>(16);
@@ -1588,7 +1595,12 @@ public final class KakaoAccessibility extends AccessibilityService {
                             String lblS = squash(lbl);
                             for (int k = 0; k < ATTACH_MENU_PHOTO_S.length; k++) {
                                 if (!lblS.equals(ATTACH_MENU_PHOTO_S[k])) continue;
-                                if (a.menuPhoto == null) { a.menuPhoto = n; keep = true; }
+                                // 더 앞선(= 근거가 확실한) 후보가 맞으면 갈아탄다.
+                                if (k < a.menuPhotoRank) {
+                                    a.menuPhoto = n;
+                                    a.menuPhotoRank = k;
+                                    keep = true;
+                                }
                                 break;
                             }
                         }
@@ -3805,8 +3817,14 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append(AID_BTN_SEND).append(": ").append(a.btnSend == null ? "없음"
                 : ("enabled=" + bool(a.sendEnabled) + " clickable=" + bool(a.sendClickable)
                    + " " + boundsStr(a.btnSend))).append('\n');
+        // 어느 라벨로 맞았는지 같이 남긴다 — 실측값 「사진」 이 아닌 예비 후보로 맞았다면
+        // 그 카톡 버전의 라벨을 문서에 추가해야 한다는 신호다.
         out.append("첨부 메뉴 「사진」 항목: ").append(a.menuPhoto == null ? "없음"
-                : boundsStr(a.menuPhoto)).append('\n');
+                : (boundsStr(a.menuPhoto) + " · 일치 라벨 「"
+                   + (a.menuPhotoRank < ATTACH_MENU_PHOTO.length
+                      ? ATTACH_MENU_PHOTO[a.menuPhotoRank] : "?") + "」"
+                   + (a.menuPhotoRank == 0 ? " (실측값)" : " (실측 미확인 예비 후보)")))
+                .append('\n');
         out.append("메시지 입력창(").append(joinIds(CHATROOM_IDS)).append("): ")
                 .append(a.inputRect == null
                         ? (a.editRect == null ? "없음" : ("id 불일치 · 편집 가능 노드 " + rectStr(a.editRect)))
