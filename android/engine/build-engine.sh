@@ -79,9 +79,10 @@ have_lib="$(node -p "require('$HERE/node_modules/agent-messenger/package.json').
 grep -q "agent-messenger@${want_lib}'" "$HERE/src/main.mjs" || die "src/main.mjs 의 LIB 상수를 agent-messenger@${want_lib} 로 맞춰줘."
 
 mkdir -p "$OUT/assets/engine"
-#  번들은 순수 ASCII 로 만든다 (주석 제거 + --charset=ascii). 1MB 짜리 소스에 섞인 비ASCII 바이트가
-#  x86_64 에뮬레이터의 Node 18 에서 소스 로딩 중 utf8 디코드 RangeError 를 간헐적으로 냈다.
+#  주석·공백을 빼고 순수 ASCII 로 만든다 (1MB → 770KB, 기기에서 파싱할 양이 준다).
 #  식별자는 줄이지 않는다 (기기 로그의 스택 트레이스를 읽을 수 있게). 라이선스 고지는 NOTICE.txt 에 있다.
+#  ※ KVM 없는 x86_64 에뮬레이터(소프트웨어 CPU)에서는 NaN|0 이 -1 로 계산돼 Node 가 파일을 못 읽는다.
+#    엔진 시험은 실기기나 KVM 에뮬레이터에서 해야 한다.
 ( cd "$HERE" && npx --no-install esbuild src/main.mjs --bundle --platform=node --target=node18 \
     --format=cjs --minify-whitespace --minify-syntax --charset=ascii --legal-comments=none \
     --log-level=warning --outfile="$OUT/assets/engine/main.js" ) \
