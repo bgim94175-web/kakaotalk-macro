@@ -27,7 +27,7 @@ import java.util.List;
  * 섹션은 4개다 — 라이선스 / 카카오톡 / 기록 / 고급.
  * <b>아코디언은 '고급' 한 곳에서만</b> 쓴다 (UI_V3 10장이 허용한 유일한 예외).
  *
- * 값 요약 색 규칙: 손댈 게 없으면 ACCENT·TEXT, 조치가 필요하면 AMBER, 꺼진 건 DIM.
+ * 값 요약 색 규칙: 손댈 게 없으면 OK·TEXT, 조치가 필요하면 AMBER, 꺼진 건 DIM.
  */
 public final class ScreenAccount {
     private ScreenAccount() {}
@@ -55,6 +55,8 @@ public final class ScreenAccount {
     private static final class Pane {
         final WeakReference<LinearLayout> body;
         final Filler fill;
+        /** 만들 때의 기능 색. 다시 채울 때도 같은 색으로 그린다 */
+        final int accent = Theme.accent();
 
         Pane(LinearLayout body, Filler fill) {
             this.body = new WeakReference<LinearLayout>(body);
@@ -101,35 +103,43 @@ public final class ScreenAccount {
 
     /** 탭 본문과 열려 있는 서브화면을 모두 제자리에서 다시 그린다 */
     public static void refresh() {
-        MainActivity a = (ACT == null) ? null : ACT.get();
-        if (a == null || a.isFinishing()) { PANES.clear(); return; }
+        final int keep = Theme.accent();
+        try {
+            MainActivity a = (ACT == null) ? null : ACT.get();
+            if (a == null || a.isFinishing()) { PANES.clear(); return; }
 
-        LinearLayout col = (BODY == null) ? null : BODY.get();
-        if (col != null) {
-            try {
-                col.removeAllViews();
-                fill(a, col);
-            } catch (Throwable t) {
-                Log.add(a, "내정보 화면 갱신에 실패했습니다: " + t);
+            LinearLayout col = (BODY == null) ? null : BODY.get();
+            if (col != null) {
+                Theme.setAccent(Nav.tabColor(Nav.ACCOUNT));
+                try {
+                    col.removeAllViews();
+                    fill(a, col);
+                } catch (Throwable t) {
+                    Log.add(a, "내정보 화면 갱신에 실패했습니다: " + t);
+                }
             }
-        }
-        for (int i = PANES.size() - 1; i >= 0; i--) {
-            Pane p = PANES.get(i);
-            LinearLayout body = p.body.get();
-            if (body == null || !body.isAttachedToWindow()) { PANES.remove(i); continue; }
-            try {
-                body.removeAllViews();
-                p.fill.fill(a, body);
-            } catch (Throwable t) {
-                Log.add(a, "내정보 상세 화면 갱신에 실패했습니다: " + t);
+            for (int i = PANES.size() - 1; i >= 0; i--) {
+                Pane p = PANES.get(i);
+                LinearLayout body = p.body.get();
+                if (body == null || !body.isAttachedToWindow()) { PANES.remove(i); continue; }
+                try {
+                    body.removeAllViews();
+                    Theme.setAccent(p.accent);
+                    p.fill.fill(a, body);
+                } catch (Throwable t) {
+                    Log.add(a, "내정보 상세 화면 갱신에 실패했습니다: " + t);
+                }
             }
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
     // ── 목록 (UI_V3 8장) ────────────────────────────────────────────────────
 
     private static void fill(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.title(a, "내정보"));
+        final int fc = Theme.F_ACCOUNT;
+        col.addView(Ui.pageHead(a, "ACCOUNT", "내정보", "라이선스 · 카카오톡 계정 · 권한 · 기록", fc));
 
         // 조용히 실패한 이미지 전송은 문제를 확인하러 오는 이 화면에서도 한 번 알린다
         View imgWarn = ScreenMacro.imgFailNote(a);
@@ -146,16 +156,16 @@ public final class ScreenAccount {
                     }));
         }
 
-        col.addView(Nav.gap(a, 6));
+        col.addView(memberCard(a, st, ok));
 
         // ── 라이선스 ──
         col.addView(Ui.sectionHeader(a, null, "라이선스"));
         LinearLayout lic = Ui.group(a);
-        lic.addView(Ui.navRow(a, "라이선스 키", keyValue(st), ok ? Theme.TEXT : Theme.RED,
+        lic.addView(Ui.navRow(a, Icon.KEY, fc, "라이선스 키", keyValue(st), ok ? Theme.TEXT : Theme.RED,
                 new Runnable() {
                     @Override public void run() { pushLicense(a); }
                 }));
-        lic.addView(Ui.navRow(a, "이용 기능", featValue(a, st), featColor(a),
+        lic.addView(Ui.navRow(a, Icon.SPARK, fc, "이용 기능", featValue(a, st), featColor(a),
                 new Runnable() {
                     @Override public void run() { Nav.push(a, "이용 기능", sub(a, FEATURES)); }
                 }));
@@ -165,14 +175,14 @@ public final class ScreenAccount {
         col.addView(Ui.sectionHeader(a, null, "카카오톡"));
         LinearLayout kakao = Ui.group(a);
         int accN = Accounts.count(a);
-        kakao.addView(Ui.navRow(a, "카카오톡 계정", accValue(a, accN),
+        kakao.addView(Ui.navRow(a, Icon.USERS, fc, "카카오톡 계정", accValue(a, accN),
                 (accN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "카카오톡 계정", ScreenAccounts.build(a)); }
                 }));
         int need = permMissing(a);
-        kakao.addView(Ui.navRow(a, "권한", (need == 0) ? "모두 허용됨" : (need + "개 필요"),
-                (need == 0) ? Theme.ACCENT : Theme.AMBER, new Runnable() {
-                    @Override public void run() { Nav.push(a, "권한", sub(a, PERMS)); }
+        kakao.addView(Ui.navRow(a, Icon.LOCK, fc, "권한 · 시작 설정", (need == 0) ? "모두 허용됨" : (need + "건 필요"),
+                (need == 0) ? Theme.OK : Theme.AMBER, new Runnable() {
+                    @Override public void run() { Setup.open(a); }
                 }));
         col.addView(kakao);
 
@@ -180,18 +190,80 @@ public final class ScreenAccount {
         col.addView(Ui.sectionHeader(a, null, "기록"));
         LinearLayout rec = Ui.group(a);
         final int lines = Log.count(a);
-        rec.addView(Ui.navRow(a, "활동 로그", (lines > 0) ? (lines + "줄") : "기록 없음",
+        rec.addView(Ui.navRow(a, Icon.LIST, fc, "활동 로그", (lines > 0) ? (lines + "줄") : "기록 없음",
                 (lines > 0) ? Theme.TEXT : Theme.DIM, new Runnable() {
                     @Override public void run() { Nav.push(a, "활동 로그", sub(a, LOG)); }
                 }));
-        rec.addView(Ui.navRow(a, "이미지 전송 진단", diagValue(a), diagColor(a), new Runnable() {
-            @Override public void run() { Nav.push(a, "이미지 전송 진단", sub(a, DIAG)); }
+        rec.addView(Ui.navRow(a, Icon.IMAGE, fc, "이미지 전송 기록", diagValue(a), diagColor(a), new Runnable() {
+            @Override public void run() { Nav.push(a, "이미지 전송 기록", sub(a, DIAG)); }
         }));
         col.addView(rec);
 
         // ── 고급 (아코디언 허용 구역) ──
         col.addView(Nav.gap(a, 6));
         col.addView(Nav.foldGroup(a, advFold(a)));
+    }
+
+    /** 골드 멤버십 카드: 마스킹한 키 + 기능별 색 점과 남은 기간 */
+    private static LinearLayout memberCard(final MainActivity a, License.State st, boolean ok) {
+        LinearLayout card = new LinearLayout(a);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Theme.sheen(Theme.mix(Theme.CARD, Theme.GOLD, 0.22f), Theme.mix(Theme.BG, Theme.GOLD, 0.04f),
+                Theme.R_XL, Theme.fade(Theme.GOLD, 0.40f), a));
+        int p = Theme.dp(a, 20);
+        card.setPadding(p, p, p, Theme.dp(a, 18));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        lp.bottomMargin = Theme.dp(a, 8);
+        card.setLayoutParams(lp);
+
+        LinearLayout top = Ui.row(a);
+        TextView eb = Ui.eyebrow(a, "MEMBERSHIP", Theme.GOLD);
+        eb.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        top.addView(eb);
+        top.addView(Ui.chip(a, ok ? "인증됨" : (st.locked ? "잠김" : "미인증"), ok ? Theme.OK : Theme.RED));
+        card.addView(top);
+
+        TextView key = new TextView(a);
+        key.setText(keyValue(st));
+        key.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        key.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+        key.setTextColor(Theme.GOLD_HI);
+        key.setLetterSpacing(0.08f);
+        key.setSingleLine(true);
+        key.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        kp.topMargin = Theme.dp(a, 16);
+        key.setLayoutParams(kp);
+        card.addView(key);
+
+        TextView dev = Ui.sub(a, Device.deviceName());
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        dp.topMargin = Theme.dp(a, 6);
+        dev.setLayoutParams(dp);
+        card.addView(dev);
+
+        card.addView(Ui.heroRule(a, Theme.GOLD));
+        for (int i = 0; i < Features.ALL.length; i++) {
+            String id = Features.ALL[i];
+            Ui.State fs = MainActivity.featState(a, id);
+            long exp = expOf(st, id);
+            LinearLayout r = Ui.row(a);
+            r.setPadding(0, Theme.dp(a, 8), 0, 0);
+            View ic = Ui.icon(a, Features.icon(id), (fs == Ui.State.OFF) ? Theme.DIM : Features.color(id), 16);
+            LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
+            ip.rightMargin = Theme.dp(a, 10);
+            r.addView(ic, ip);
+            TextView nm = Ui.body(a, Features.label(id));
+            nm.setTextColor((fs == Ui.State.OFF) ? Theme.DIM : Theme.TEXT);
+            nm.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+            r.addView(nm);
+            String v = (fs == Ui.State.OFF) ? "미구매" : ((exp > 0) ? ("D-" + Ui.daysLeft(exp)) : "사용 중");
+            TextView vt = Ui.sub(a, v);
+            vt.setTextColor((fs == Ui.State.EXPIRING) ? Theme.AMBER : ((fs == Ui.State.OFF) ? Theme.DIM : Theme.SUB));
+            r.addView(vt);
+            card.addView(r);
+        }
+        return card;
     }
 
     private static void pushLicense(MainActivity a) {
@@ -292,14 +364,11 @@ public final class ScreenAccount {
     private static String diagValue(MainActivity a) {
         Scheduler.ImageFail fail = lastFail(a);
         if (fail != null) return "실패 기록 · " + ScreenMacro.agoShort(fail.at);
-        long at = ScreenMacro.dumpAtSafe(a);
-        if (at > 0) return "화면 기록 1건";
         return "기록 없음";
     }
 
     private static int diagColor(MainActivity a) {
-        if (lastFail(a) != null) return Theme.AMBER;
-        return (ScreenMacro.dumpAtSafe(a) > 0) ? Theme.TEXT : Theme.DIM;
+        return (lastFail(a) != null) ? Theme.AMBER : Theme.DIM;
     }
 
     // ── 서브화면: 라이선스 키 ───────────────────────────────────────────────
@@ -316,7 +385,7 @@ public final class ScreenAccount {
             t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
             head.addView(t);
             head.addView(Ui.chip(a, ok ? "인증됨" : (st.locked ? "잠김" : "미인증"),
-                    ok ? Theme.ACCENT : Theme.RED));
+                    ok ? Theme.OK : Theme.RED));
             card.addView(head);
 
             final String key = (st.key == null) ? "" : st.key.trim();
@@ -448,6 +517,11 @@ public final class ScreenAccount {
         LinearLayout row = Ui.row(a);
         row.setMinimumHeight(Theme.dp(a, 48));
 
+        android.widget.FrameLayout tile = Ui.iconTile(a, Features.icon(id), Features.color(id));
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(Theme.dp(a, 36), Theme.dp(a, 36));
+        tp.rightMargin = Theme.dp(a, 12);
+        row.addView(tile, tp);
+
         LinearLayout left = new LinearLayout(a);
         left.setOrientation(LinearLayout.VERTICAL);
         left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
@@ -492,7 +566,7 @@ public final class ScreenAccount {
     }
 
     private static int stateColor(Ui.State fs) {
-        if (fs == Ui.State.ON) return Theme.ACCENT;
+        if (fs == Ui.State.ON) return Theme.OK;
         if (fs == Ui.State.EXPIRING) return Theme.AMBER;
         return Theme.DIM;
     }
@@ -506,160 +580,13 @@ public final class ScreenAccount {
         return Nav.day(expiresAt) + " 까지 · " + Ui.daysLeft(expiresAt) + "일 남음";
     }
 
-    // ── 서브화면: 권한 ──────────────────────────────────────────────────────
-
-    /** 점검 대상 권한 한 건 */
-    private static final class Perm {
-        final String name;
-        final String desc;
-        final boolean ok;
-        final Runnable fix;
-
-        Perm(String name, String desc, boolean ok, Runnable fix) {
-            this.name = name;
-            this.desc = desc;
-            this.ok = ok;
-            this.fix = fix;
-        }
-    }
-
-    private static ArrayList<Perm> perms(final MainActivity a) {
-        boolean noti;
-        try { noti = KakaoListener.connected(a); } catch (Throwable t) { noti = false; }
-        boolean acc;
-        try { acc = ImageSender.accessibilityOn(a); } catch (Throwable t) { acc = false; }
-        boolean ov;
-        try { ov = ImageSender.overlayOn(a); } catch (Throwable t) { ov = false; }
-
-        ArrayList<Perm> l = new ArrayList<Perm>(4);
-        l.add(new Perm("알림 접근",
-                "카카오톡 알림을 읽어 대화방을 식별하고 알림 답장으로 발송합니다. 비활성 시 발송이 불가합니다.",
-                noti, new Runnable() {
-                    @Override public void run() {
-                        Nav.openIntent(a, new Intent(
-                                android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
-                                "알림 접근 설정");
-                        Ui.toast(a, "목록에서 「카톡 오토 · 알림 읽기」를 허용하십시오.");
-                    }
-                }));
-        l.add(new Perm("배터리 최적화 제외",
-                "절전 상태에서 예약 발송 알람이 중단되지 않도록 예외로 등록합니다.",
-                ignoringBattery(a), new Runnable() {
-                    @Override public void run() { requestBattery(a); }
-                }));
-        l.add(new Perm("접근성",
-                "이미지 첨부 발송에만 사용됩니다. 텍스트 발송에는 영향이 없습니다.",
-                acc, new Runnable() {
-                    @Override public void run() { ImageSender.openSettings(a); }
-                }));
-        l.add(new Perm("다른 앱 위에 표시",
-                "화면이 꺼진 상태에서 카카오톡 공유 화면을 표시하기 위해 필요합니다. "
-                        + "비활성 시 예약 발송의 이미지 전송이 실패합니다.",
-                ov, new Runnable() {
-                    @Override public void run() { ImageSender.openOverlaySettings(a); }
-                }));
-        return l;
-    }
+    // ── 권한 (시작 설정 화면이 전부 다룬다) ──────────────────────────────────
 
     private static int permMissing(MainActivity a) {
-        ArrayList<Perm> l = perms(a);
-        int n = 0;
-        for (int i = 0; i < l.size(); i++) if (!l.get(i).ok) n++;
-        return n;
-    }
-
-    private static final Filler PERMS = new Filler() {
-        @Override public void fill(final MainActivity a, LinearLayout col) {
-            ArrayList<Perm> l = perms(a);
-            int need = 0;
-            for (int i = 0; i < l.size(); i++) if (!l.get(i).ok) need++;
-
-            TextView lead = Ui.sub(a, (need == 0)
-                    ? "필요한 권한이 모두 허용되어 있습니다."
-                    : "허용되지 않은 권한이 " + need + "개 있습니다. 각 항목의 권한 설정을 실행하십시오.");
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            lp.bottomMargin = Theme.dp(a, 10);
-            lead.setLayoutParams(lp);
-            col.addView(lead);
-
-            LinearLayout card = Ui.card(a);
-            for (int i = 0; i < l.size(); i++) {
-                if (i > 0) card.addView(Ui.divider(a));
-                card.addView(permRow(a, l.get(i)));
-            }
-            col.addView(card);
-
-            col.addView(Nav.note(a, "권한 설정 후 이 화면으로 돌아오면 상태가 자동으로 갱신됩니다.",
-                    Theme.ACCENT2, "상태 다시 확인", new Runnable() {
-                        @Override public void run() { refresh(); }
-                    }));
-        }
-    };
-
-    private static LinearLayout permRow(final MainActivity a, final Perm p) {
-        LinearLayout box = new LinearLayout(a);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        LinearLayout top = Ui.row(a);
-        TextView nt = new TextView(a);
-        nt.setText(p.name);
-        nt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-        nt.setTextColor(Theme.TEXT);
-        nt.setTypeface(Typeface.DEFAULT_BOLD);
-        nt.setIncludeFontPadding(false);
-        nt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        top.addView(nt);
-        top.addView(Ui.chip(a, p.ok ? "허용" : "필요", p.ok ? Theme.ACCENT : Theme.AMBER));
-        box.addView(top);
-
-        LinearLayout bot = Ui.row(a);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        bp.topMargin = Theme.dp(a, 6);
-        bot.setLayoutParams(bp);
-
-        TextView dt = Ui.sub(a, p.desc);
-        dt.setMaxLines(3);
-        dt.setEllipsize(TextUtils.TruncateAt.END);
-        dt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        bot.addView(dt);
-
-        TextView b = Ui.btn(a, p.ok ? "확인" : "권한 설정", false);
-        b.setPadding(Theme.dp(a, 14), Theme.dp(a, 12), Theme.dp(a, 14), Theme.dp(a, 12));
-        LinearLayout.LayoutParams bbp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bbp.leftMargin = Theme.dp(a, 12);
-        b.setLayoutParams(bbp);
-        b.setContentDescription(p.name + " 권한 설정");
-        b.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (p.fix != null) p.fix.run();
-            }
-        });
-        bot.addView(b);
-        box.addView(bot);
-        return box;
-    }
-
-    private static boolean ignoringBattery(Context c) {
         try {
-            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
-            return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
+            return Setup.missingRequired(a);
         } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static void requestBattery(Context c) {
-        Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-        i.setData(Uri.parse("package:" + c.getPackageName()));
-        try {
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            c.startActivity(i);
-        } catch (Throwable t) {
-            Log.add(c, "배터리 최적화 제외 창을 열지 못했습니다: " + t);
-            Nav.openIntent(c, new Intent(
-                    android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                    "배터리 최적화");
+            return 0;
         }
     }
 
@@ -715,17 +642,14 @@ public final class ScreenAccount {
         }
     };
 
-    // ── 서브화면: 이미지 전송 진단 ──────────────────────────────────────────
+    // ── 서브화면: 이미지 전송 기록 ──────────────────────────────────────────
 
     private static final Filler DIAG = new Filler() {
         @Override public void fill(final MainActivity a, LinearLayout col) {
-            final long at = ScreenMacro.dumpAtSafe(a);
             final Scheduler.ImageFail fail = lastFail(a);
-            final boolean hasAny = (at > 0) || (fail != null);
 
-            TextView lead = Ui.sub(a, "이미지 전송이 실패한 시점의 카카오톡 화면 구성을 보관합니다. "
-                    + "기록을 개발자에게 전달하면 원인 추정 없이 조치가 가능합니다. "
-                    + "보관 대상은 화면에 표시된 글자와 버튼 이름이며, 대화 내용은 수집하지 않습니다.");
+            TextView lead = Ui.sub(a, "예약 발송의 이미지 전송이 실패하면 마지막 실패 기록을 보관합니다."
+                    + " 이미지 전송이 성공하면 기록은 자동으로 삭제됩니다.");
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
             lp.bottomMargin = Theme.dp(a, 10);
             lead.setLayoutParams(lp);
@@ -738,7 +662,6 @@ public final class ScreenAccount {
                         (fail.room.length() == 0) ? "미확인" : Nav.preview(fail.room, 16)));
                 card.addView(Ui.kv(a, "사유", Nav.preview(fail.why, 40)));
             }
-            card.addView(Ui.kv(a, "화면 기록", (at > 0) ? ScreenMacro.ago(at) : "없음"));
             col.addView(card);
 
             LinearLayout btns = Ui.row(a);
@@ -746,20 +669,11 @@ public final class ScreenAccount {
             bp.topMargin = Theme.dp(a, 14);
             btns.setLayoutParams(bp);
 
-            TextView view = Ui.btn(a, "보기", false);
-            view.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-            view.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { ScreenMacro.showDiag(a); }
-            });
-            btns.addView(view);
-
             TextView copy = Ui.btn(a, "복사", false);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, WRAP, 1f);
-            cp.leftMargin = Theme.dp(a, 10);
-            copy.setLayoutParams(cp);
+            copy.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
             copy.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    Nav.copy(a, "이미지 전송 진단", ScreenMacro.diagText(a));
+                    Nav.copy(a, "이미지 전송 기록", ScreenMacro.failText(a));
                 }
             });
             btns.addView(copy);
@@ -769,23 +683,16 @@ public final class ScreenAccount {
             LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(0, WRAP, 1f);
             dp.leftMargin = Theme.dp(a, 10);
             clear.setLayoutParams(dp);
-            if (!hasAny) clear.setAlpha(0.55f);
+            if (fail == null) clear.setAlpha(0.55f);
             clear.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    if (!hasAny) { Ui.toast(a, "삭제할 기록이 없습니다."); return; }
-                    Nav.confirm(a, "진단 기록 삭제",
-                            "보관된 카카오톡 화면 기록과 마지막 실패 기록을 삭제합니다. 복구할 수 없습니다.\n"
-                                    + "전달 전이라면 복사를 먼저 실행하십시오.",
+                    if (fail == null) { Ui.toast(a, "삭제할 기록이 없습니다."); return; }
+                    Nav.confirm(a, "전송 기록 삭제", "마지막 실패 기록을 삭제합니다. 복구할 수 없습니다.",
                             "삭제", new Runnable() {
                                 @Override public void run() {
-                                    try {
-                                        KakaoAccessibility.clearDump(a);
-                                    } catch (Throwable t) {
-                                        Log.add(a, "화면 기록 삭제에 실패했습니다: " + t);
-                                    }
                                     Scheduler.clearImageFail(a);
-                                    Log.add(a, "이미지 전송 진단 기록을 삭제했습니다.");
-                                    Ui.toast(a, "진단 기록을 삭제했습니다.");
+                                    Log.add(a, "이미지 전송 실패 기록을 삭제했습니다.");
+                                    Ui.toast(a, "전송 기록을 삭제했습니다.");
                                     refresh();
                                 }
                             });
