@@ -2,8 +2,8 @@
 <!-- 카톡 오토 관리자앱 · 서버 관리자 API 만 호출한다 (네트워크 권한 하나) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.buseong.kakaoadmin"
-    android:versionCode="20"
-    android:versionName="2.0">
+    android:versionCode="21"
+    android:versionName="2.1">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 

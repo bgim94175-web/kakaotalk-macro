@@ -10,7 +10,7 @@
 |---|---|:---:|---|---|---|
 | KakaoAuto | v1.8 (원본) | 9 | KakaoAuto | `5b938482fa1d6eaff6a0cbbb23977d71ae0f65b8acd95a19c790d99c7f282467` | 구버전 · 원본 키 없음 |
 | KakaoAdmin | v1.4 (원본) | 5 | KakaoAdmin | `3f74e4ed37e9550737757cb62c4fde5e9195ad8f5e8dc3b61e3936a5c0d93f00` | 구버전 · 원본 키 없음 |
-| KakaoAuto + KakaoAdmin | v2.0 (현재) | 20 | KakaoMacro | `33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730fa` | **현재 정품** (`keystore/app.jks`) |
+| KakaoAuto + KakaoAdmin | v2.0 · v2.1 (현재) | 20 · 21 | KakaoMacro | `33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730fa` | **현재 정품** (`keystore/app.jks`) |
 
 - v1.8 / v1.4 는 **서로 다른 키**로 서명됐고 그 키(.jks)가 우리한테 없다. 그래서 v2.0 은
   덮어쓰기 업데이트가 안 되고 사용자가 앱을 지워야 한다 (`DEPLOY.md` 4-1).
