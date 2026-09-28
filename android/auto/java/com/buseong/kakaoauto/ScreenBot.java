@@ -46,16 +46,20 @@ public final class ScreenBot {
         MainActivity a = (ACT == null) ? null : ACT.get();
         LinearLayout col = (BODY == null) ? null : BODY.get();
         if (a == null || col == null || a.isFinishing()) return;
+        int keep = Theme.accent();
         try {
+            Theme.setAccent(Nav.tabColor(Nav.BOT));
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
             Log.add(a, "봇 화면 갱신에 실패했습니다: " + t);
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
     private static void fill(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.title(a, "봇"));
+        col.addView(Ui.pageHead(a, "BOTS", "봇", "대상 대화방에서 알림을 받아 자동으로 응답합니다.", Theme.F_ROOMBOT));
 
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
@@ -63,23 +67,55 @@ public final class ScreenBot {
                     new Runnable() { @Override public void run() { Nav.go(Nav.ACCOUNT); } }));
         }
 
-        col.addView(Nav.gap(a, 6));
-        LinearLayout g = Ui.group(a);
+        col.addView(botCard(a, Features.ROOMBOT, NAME_ROOMBOT, "ROOM GUARD",
+                "입·퇴장 인사 · 금지어 · 도배 감지 · 공지 안내", roomBotValue(a), roomBotColor(a),
+                new Runnable() {
+                    @Override public void run() { Nav.push(a, NAME_ROOMBOT, BotDetail.roomBot(a)); }
+                }));
+        col.addView(botCard(a, Features.MINIGAME, NAME_MINIGAME, "MINI GAME",
+                "끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹", miniGameValue(a), miniGameColor(a),
+                new Runnable() {
+                    @Override public void run() { Nav.push(a, NAME_MINIGAME, BotDetail.miniGame(a)); }
+                }));
 
-        g.addView(Ui.navRow(a, NAME_ROOMBOT, roomBotValue(a), roomBotColor(a), new Runnable() {
-            @Override public void run() {
-                Nav.push(a, NAME_ROOMBOT, BotDetail.roomBot(a));
-            }
-        }));
-        g.addView(Ui.navRow(a, NAME_MINIGAME, miniGameValue(a), miniGameColor(a), new Runnable() {
-            @Override public void run() {
-                Nav.push(a, NAME_MINIGAME, BotDetail.miniGame(a));
-            }
-        }));
-        col.addView(g);
+        col.addView(Nav.note(a, "각 봇에서 대상 대화방과 동작을 설정합니다."
+                + " 봇은 대상 대화방의 알림이 수신될 때 동작합니다.", Theme.ACCENT2, null, null));
+    }
 
-        col.addView(Ui.sub(a, "각 항목에서 대상 대화방과 동작을 설정합니다."
-                + " 봇은 대상 대화방의 알림이 수신될 때 동작합니다."));
+    /** 봇 하나 = 기능 색 머리 카드 한 장. 카드 전체가 눌린다. */
+    private static View botCard(MainActivity a, String feat, String name, String eyebrow, String desc,
+                                String value, int valueColor, final Runnable onTap) {
+        int fc = Features.color(feat);
+        LinearLayout card = Ui.hero(a, fc, Features.icon(feat), eyebrow, name, desc);
+        card.addView(Ui.heroRule(a, fc));
+        LinearLayout r = Ui.row(a);
+        r.setPadding(0, Theme.dp(a, 8), 0, 0);
+        View dot = new View(a);
+        boolean live = (valueColor == Theme.TEXT);
+        dot.setBackground(Theme.circle(live ? Theme.OK : ((valueColor == Theme.AMBER) ? Theme.AMBER : Theme.DIM), a));
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 7), Theme.dp(a, 7));
+        dp.rightMargin = Theme.dp(a, 10);
+        r.addView(dot, dp);
+        android.widget.TextView v = Ui.body(a, value);
+        v.setTextColor(live ? Theme.TEXT : valueColor);
+        v.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(v);
+        android.widget.TextView go = Ui.sub(a, License.allowed(a, feat) ? "설정" : "기능 안내");
+        go.setTextColor(fc);
+        r.addView(go);
+        View arrow = Ui.icon(a, Icon.CHEVRON, fc, 16);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
+        ap.leftMargin = Theme.dp(a, 4);
+        r.addView(arrow, ap);
+        card.addView(r);
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setContentDescription(name + ", " + value);
+        Ui.press(card);
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View vv) { onTap.run(); }
+        });
+        return card;
     }
 
     // ── 값 요약 (UI_V3 2장 — 제목만 있는 행은 만들지 않는다) ────────────────

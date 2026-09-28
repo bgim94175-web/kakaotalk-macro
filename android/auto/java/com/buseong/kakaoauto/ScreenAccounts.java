@@ -37,6 +37,7 @@ public final class ScreenAccounts {
     // ── 셸 ──────────────────────────────────────────────────────────────────
 
     public static View build(MainActivity a) {
+        Theme.setAccent(Theme.F_ACCOUNT);
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
@@ -52,11 +53,15 @@ public final class ScreenAccounts {
         MainActivity a = (ACT == null) ? null : ACT.get();
         LinearLayout col = (BODY == null) ? null : BODY.get();
         if (a == null || col == null || a.isFinishing()) return;
+        int keep = Theme.accent();
         try {
+            Theme.setAccent(Theme.F_ACCOUNT);
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
             Log.add(a, "카카오톡 계정 목록 갱신에 실패했습니다: " + t);
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
@@ -87,6 +92,16 @@ public final class ScreenAccounts {
         Settings s = Settings.load(a);
         int used = 0;
         for (int i = 0; i < keys.size(); i++) if (s.accountOn(keys.get(i))) used++;
+
+        LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.USERS, "KAKAOTALK ACCOUNTS", "카카오톡 계정",
+                "이 기기에서 감지된 카카오톡 계정입니다. 체크한 계정만 발송·응답 대상이 됩니다.");
+        hero.addView(Ui.heroRule(a, Theme.F_ACCOUNT));
+        LinearLayout stats = Ui.row(a);
+        stats.setPadding(0, Theme.dp(a, 10), 0, 0);
+        stats.addView(Ui.stat(a, "감지 계정", list.size() + "개", Theme.TEXT));
+        stats.addView(Ui.stat(a, "사용", used + "개", (used == 0) ? Theme.AMBER : Theme.TEXT));
+        hero.addView(stats);
+        col.addView(hero);
 
         col.addView(Ui.sectionHeader(a, null, "발송 대상 계정"));
         TextView lead = Ui.sub(a, "체크한 계정의 대화방만 발송·응답 대상이 됩니다. "

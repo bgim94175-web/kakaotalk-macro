@@ -73,6 +73,7 @@ public final class ScreenRooms {
     // ── 셸 ──────────────────────────────────────────────────────────────────
 
     public static View build(MainActivity a) {
+        Theme.setAccent(Theme.F_ROOMS);
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
@@ -89,11 +90,15 @@ public final class ScreenRooms {
         MainActivity a = (ACT == null) ? null : ACT.get();
         LinearLayout col = (BODY == null) ? null : BODY.get();
         if (a == null || col == null || a.isFinishing()) return;
+        int keep = Theme.accent();
         try {
+            Theme.setAccent(Theme.F_ROOMS);
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
             Log.add(a, "대상 대화방 목록 갱신에 실패했습니다: " + t);
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
@@ -117,10 +122,20 @@ public final class ScreenRooms {
             if (rows.get(i).selected) selected++;
         }
 
+        LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "대상 대화방",
+                "선택한 대화방에 발송합니다. 대화방은 카카오톡 알림을 1회 수신하면 자동으로 감지됩니다.");
+        hero.addView(Ui.heroRule(a, Theme.F_ROOMS));
+        LinearLayout stats = Ui.row(a);
+        stats.setPadding(0, Theme.dp(a, 10), 0, 0);
+        stats.addView(Ui.stat(a, "선택", selected + "개", (selected == 0) ? Theme.AMBER : Theme.TEXT));
+        stats.addView(Ui.stat(a, "감지", detected + "개", Theme.TEXT));
+        hero.addView(stats);
+        col.addView(hero);
+
         // 계정이 2개 이상이면 계정 화면으로 가는 길을 맨 위에 둔다 (UI_V3 5장)
         if (accCount >= 2) {
             LinearLayout top = Ui.group(a);
-            top.addView(Ui.navRow(a, "카카오톡 계정",
+            top.addView(Ui.navRow(a, Icon.USERS, Theme.F_ACCOUNT, "카카오톡 계정",
                     accCount + "개 감지 · " + usedAccounts(a, accs) + "개 사용", 0,
                     new Runnable() {
                         @Override public void run() {

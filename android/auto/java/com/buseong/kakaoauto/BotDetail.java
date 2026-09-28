@@ -37,6 +37,8 @@ public final class BotDetail {
     private static final class Pane {
         final WeakReference<LinearLayout> body;
         final Filler fill;
+        /** 만들 때의 기능 색. 다시 채울 때도 같은 색으로 그린다 */
+        final int accent = Theme.accent();
 
         Pane(LinearLayout body, Filler fill) {
             this.body = new WeakReference<LinearLayout>(body);
@@ -47,7 +49,13 @@ public final class BotDetail {
     private static final ArrayList<Pane> PANES = new ArrayList<Pane>();
     private static WeakReference<MainActivity> ACT;
 
-    /** 서브화면 한 장을 만든다 */
+    /** 기능 색을 정하고 서브화면 한 장을 만든다 (색은 이 화면과 여기서 여는 하위 화면이 같이 쓴다) */
+    private static View screen(MainActivity a, int color, Filler f) {
+        Theme.setAccent(color);
+        return screen(a, f);
+    }
+
+    /** 서브화면 한 장을 만든다 (지금 기능 색을 이어받는다) */
     private static View screen(MainActivity a, Filler f) {
         ACT = new WeakReference<MainActivity>(a);
         prune();
@@ -63,18 +71,24 @@ public final class BotDetail {
 
     /** 지금 열려 있는 봇 상세 화면을 모두 제자리에서 다시 그린다 */
     public static void refresh() {
-        MainActivity a = (ACT == null) ? null : ACT.get();
-        if (a == null || a.isFinishing()) { PANES.clear(); return; }
-        for (int i = PANES.size() - 1; i >= 0; i--) {
-            Pane p = PANES.get(i);
-            LinearLayout col = p.body.get();
-            if (col == null || !col.isAttachedToWindow()) { PANES.remove(i); continue; }
-            try {
-                col.removeAllViews();
-                p.fill.fill(a, col);
-            } catch (Throwable t) {
-                Log.add(a, "봇 설정 화면 갱신에 실패했습니다: " + t);
+        final int keep = Theme.accent();
+        try {
+            MainActivity a = (ACT == null) ? null : ACT.get();
+            if (a == null || a.isFinishing()) { PANES.clear(); return; }
+            for (int i = PANES.size() - 1; i >= 0; i--) {
+                Pane p = PANES.get(i);
+                LinearLayout col = p.body.get();
+                if (col == null || !col.isAttachedToWindow()) { PANES.remove(i); continue; }
+                try {
+                    col.removeAllViews();
+                    Theme.setAccent(p.accent);
+                    p.fill.fill(a, col);
+                } catch (Throwable t) {
+                    Log.add(a, "봇 설정 화면 갱신에 실패했습니다: " + t);
+                }
             }
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
@@ -113,7 +127,7 @@ public final class BotDetail {
     // ── 1. 대화방 관리봇 ────────────────────────────────────────────────────
 
     public static View roomBot(MainActivity a) {
-        return screen(a, new Filler() {
+        return screen(a, Theme.F_ROOMBOT, new Filler() {
             @Override public void fill(final MainActivity a, LinearLayout col) {
                 if (!License.allowed(a, Features.ROOMBOT)) {
                     locked(a, col, Features.ROOMBOT, ScreenBot.NAME_ROOMBOT);
@@ -124,7 +138,7 @@ public final class BotDetail {
                 final Settings s = Settings.load(a);
                 final Settings.RoomBotCfg r = s.roombot;
 
-                col.addView(Nav.gap(a, 6));
+                final int fc = Theme.F_ROOMBOT;
                 col.addView(onCard(a, s, ScreenBot.NAME_ROOMBOT,
                         "등록한 대화방의 입·퇴장, 금지어, 도배를 감시합니다", true));
 
@@ -132,7 +146,7 @@ public final class BotDetail {
                 col.addView(Ui.sectionHeader(a, null, "대상"));
                 LinearLayout g1 = Ui.group(a);
                 List<RoomRef> rooms = r.roomRefs();
-                g1.addView(Ui.navRow(a, "대상 대화방", roomValue(a, rooms),
+                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", roomValue(a, rooms),
                         rooms.isEmpty() ? Theme.AMBER : Theme.TEXT, new Runnable() {
                             @Override public void run() {
                                 Nav.push(a, "대상 대화방", roomSelect(a, roomBotRooms(a),
@@ -144,14 +158,14 @@ public final class BotDetail {
                 // ── 설정 ──
                 col.addView(Ui.sectionHeader(a, null, "설정"));
                 LinearLayout g2 = Ui.group(a);
-                g2.addView(Ui.navRow(a, "입·퇴장 인사", greetValue(r),
+                g2.addView(Ui.navRow(a, Icon.DOOR, fc, "입·퇴장 인사", greetValue(r),
                         (r.welcomeOn || r.leaveOn) ? Theme.TEXT : Theme.DIM, new Runnable() {
                             @Override public void run() { Nav.push(a, "입·퇴장 인사", greet(a)); }
                         }));
-                g2.addView(Ui.navRow(a, "감지 규칙", detectValue(r), Theme.TEXT, new Runnable() {
+                g2.addView(Ui.navRow(a, Icon.EYE, fc, "감지 규칙", detectValue(r), Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "감지 규칙", detect(a)); }
                 }));
-                g2.addView(Ui.navRow(a, "명령 · 관리", cmdValue(r), Theme.TEXT, new Runnable() {
+                g2.addView(Ui.navRow(a, Icon.TERMINAL, fc, "명령 · 관리", cmdValue(r), Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "명령 · 관리", command(a)); }
                 }));
                 col.addView(g2);
@@ -160,7 +174,7 @@ public final class BotDetail {
                 col.addView(Ui.sectionHeader(a, null, "기록"));
                 LinearLayout g3 = Ui.group(a);
                 final List<String> warned = topWarned(a);
-                g3.addView(Ui.navRow(a, "경고 누적",
+                g3.addView(Ui.navRow(a, Icon.WARN, fc, "경고 누적",
                         warned.isEmpty() ? "없음" : (warned.size() + "명"),
                         warned.isEmpty() ? Theme.DIM : Theme.TEXT, new Runnable() {
                             @Override public void run() { Nav.push(a, "경고 누적", warns(a)); }
@@ -456,7 +470,7 @@ public final class BotDetail {
     // ── 2. 미니게임봇 ───────────────────────────────────────────────────────
 
     public static View miniGame(MainActivity a) {
-        return screen(a, new Filler() {
+        return screen(a, Theme.F_MINIGAME, new Filler() {
             @Override public void fill(final MainActivity a, LinearLayout col) {
                 if (!License.allowed(a, Features.MINIGAME)) {
                     locked(a, col, Features.MINIGAME, ScreenBot.NAME_MINIGAME);
@@ -467,7 +481,7 @@ public final class BotDetail {
                 final Settings s = Settings.load(a);
                 final Settings.MiniGameCfg g = s.minigame;
 
-                col.addView(Nav.gap(a, 6));
+                final int fc = Theme.F_MINIGAME;
                 col.addView(onCard(a, s, ScreenBot.NAME_MINIGAME,
                         "명령어로 게임을 진행하고 대화방별 점수를 기록합니다", false));
 
@@ -475,7 +489,7 @@ public final class BotDetail {
                 col.addView(Ui.sectionHeader(a, null, "대상"));
                 LinearLayout g1 = Ui.group(a);
                 List<RoomRef> rooms = g.roomRefs();
-                g1.addView(Ui.navRow(a, "대상 대화방", roomValue(a, rooms),
+                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", roomValue(a, rooms),
                         rooms.isEmpty() ? Theme.AMBER : Theme.TEXT, new Runnable() {
                             @Override public void run() {
                                 Nav.push(a, "대상 대화방", roomSelect(a, miniGameRooms(a),
@@ -488,14 +502,14 @@ public final class BotDetail {
                 // ── 설정 ──
                 col.addView(Ui.sectionHeader(a, null, "설정"));
                 LinearLayout g2 = Ui.group(a);
-                g2.addView(Ui.navRow(a, "게임 선택", gamesValue(g),
+                g2.addView(Ui.navRow(a, Icon.DICE, fc, "게임 선택", gamesValue(g),
                         (onGames(g) > 0) ? Theme.TEXT : Theme.AMBER, new Runnable() {
                             @Override public void run() { Nav.push(a, "게임 선택", games(a)); }
                         }));
-                g2.addView(Ui.navRow(a, "명령 접두사", g.cmdPrefix, Theme.TEXT, new Runnable() {
+                g2.addView(Ui.navRow(a, Icon.TERMINAL, fc, "명령 접두사", g.cmdPrefix, Theme.TEXT, new Runnable() {
                     @Override public void run() { editPrefix(a, s, false); }
                 }));
-                g2.addView(Ui.navRow(a, "응답 쿨다운", Nav.dur(g.cooldownMs), Theme.TEXT,
+                g2.addView(Ui.navRow(a, Icon.CLOCK, fc, "응답 쿨다운", Nav.dur(g.cooldownMs), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
                                 final Nav.NumField n = new Nav.NumField("쿨다운 (초)", "3", 0, 600,
@@ -513,7 +527,7 @@ public final class BotDetail {
                                         });
                             }
                         }));
-                g2.addView(Ui.navRow(a, "1일 최대 발송", g.dailyLimit + "회", Theme.TEXT,
+                g2.addView(Ui.navRow(a, Icon.GAUGE, fc, "1일 최대 발송", g.dailyLimit + "회", Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
                                 final Nav.NumField n = new Nav.NumField("1일 최대 발송 수", "300",
@@ -536,10 +550,10 @@ public final class BotDetail {
                 // ── 안내 · 기록 ──
                 col.addView(Ui.sectionHeader(a, null, "명령어 · 기록"));
                 LinearLayout g3 = Ui.group(a);
-                g3.addView(Ui.navRow(a, "명령어 목록", "7개", Theme.SUB, new Runnable() {
+                g3.addView(Ui.navRow(a, Icon.LIST, fc, "명령어 목록", "7개", Theme.SUB, new Runnable() {
                     @Override public void run() { Nav.push(a, "명령어 목록", commands(a)); }
                 }));
-                g3.addView(Ui.navRow(a, "점수 · 진행 상태", scoreValue(a, g), Theme.SUB,
+                g3.addView(Ui.navRow(a, Icon.TROPHY, fc, "점수 · 진행 상태", scoreValue(a, g), Theme.SUB,
                         new Runnable() {
                             @Override public void run() { Nav.push(a, "점수 · 진행 상태", scores(a)); }
                         }));
@@ -701,8 +715,7 @@ public final class BotDetail {
     private static void locked(final MainActivity a, LinearLayout col, final String feat,
                                String name) {
         final String refresh = "구매 내역 새로고침";
-        col.addView(Nav.gap(a, 6));
-        col.addView(Ui.featureCard(a, name, Features.descLong(feat),
+        col.addView(Ui.featureCard(a, Features.color(feat), Features.icon(feat), name, Features.descLong(feat),
                 Ui.State.OFF, 0L, new Runnable() {
                     @Override public void run() { Gate.openBuy(a, feat); }
                 }, null));
@@ -715,8 +728,12 @@ public final class BotDetail {
             }
         });
         col.addView(again);
-        col.addView(Ui.sub(a, "결제 후 활성화까지 시간이 소요될 수 있습니다."
-                + " 활성화되지 않으면 위 버튼으로 구매 내역을 다시 조회하십시오."));
+        TextView note = Ui.sub(a, "결제 후 활성화까지 시간이 소요될 수 있습니다."
+                + " 활성화되지 않으면 위 버튼으로 구매 내역을 다시 조회하십시오.");
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
+        np.topMargin = Theme.dp(a, 10);
+        note.setLayoutParams(np);
+        col.addView(note);
     }
 
     /** 설정키가 없으면 저장이 안 된다 — 화면 맨 위에서 알린다 */
@@ -730,12 +747,15 @@ public final class BotDetail {
     /** 봇 사용 토글 카드 (매크로 탭의 자동발송 카드와 같은 모양) */
     private static LinearLayout onCard(final MainActivity a, final Settings s, String name,
                                        String desc, final boolean forRoomBot) {
-        LinearLayout card = Ui.card(a);
+        int fc = forRoomBot ? Theme.F_ROOMBOT : Theme.F_MINIGAME;
+        LinearLayout card = Ui.hero(a, fc, forRoomBot ? Icon.SHIELD : Icon.DICE,
+                forRoomBot ? "ROOM GUARD" : "MINI GAME", name, desc);
+        card.addView(Ui.heroRule(a, fc));
         final TextView status = Ui.sub(a, statusText(a, s, forRoomBot));
         status.setTextColor(statusColor(s, forRoomBot));
 
         boolean on = forRoomBot ? s.roombot.enabled : s.minigame.enabled;
-        card.addView(Ui.switchRow(a, name, desc, on, new Ui.OnToggle() {
+        card.addView(Ui.switchRow(a, on ? "사용 중" : "사용 안 함", null, on, new Ui.OnToggle() {
             @Override public void on(boolean v) {
                 if (forRoomBot) s.roombot.enabled = v;
                 else s.minigame.enabled = v;
@@ -744,10 +764,13 @@ public final class BotDetail {
                 status.setTextColor(statusColor(s, forRoomBot));
                 Log.add(a, (forRoomBot ? "대화방 관리봇을 " : "미니게임봇을 ")
                         + (v ? "사용으로 변경했습니다." : "미사용으로 변경했습니다."));
+                refresh();
                 ScreenBot.refresh();
             }
         }));
-        card.addView(Ui.divider(a));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        sp.topMargin = Theme.dp(a, 6);
+        status.setLayoutParams(sp);
         card.addView(status);
         return card;
     }
@@ -891,7 +914,7 @@ public final class BotDetail {
                 final Settings.RoomBotCfg r = s.roombot;
                 final boolean ban = (which == WORDS_BAN);
                 final List<String> items = ban ? r.banWords : r.adminNames;
-                final int color = ban ? Theme.RED : Theme.VIOLET;
+                final int color = ban ? Theme.RED : Theme.F_ROOMBOT;
                 final String what = ban ? "금지어" : "관리자";
 
                 col.addView(Ui.sectionHeader(a, null, what + " " + items.size() + "개"));
