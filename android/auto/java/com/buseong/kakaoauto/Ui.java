@@ -2,9 +2,13 @@ package com.buseong.kakaoauto;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -22,8 +26,10 @@ import android.widget.Toast;
 /**
  * 뷰 조립기. 모든 화면은 이것만 쓴다. XML 레이아웃도, 외부 라이브러리도 안 쓴다.
  *
- * 원칙
- *  - 한 화면에 카드 4~6개 이하. 카드 안에서 접어라.
+ * 원칙 (UI_V3)
+ *  - 한 화면에는 한 가지 일만. 상세 설정은 아코디언이 아니라 Nav.push 로 서브화면을 연다.
+ *  - 목록은 navRow(제목 + 지금 값 + ›) 를 group() 안에 쌓는다. 제목만 있는 행은 만들지 마라.
+ *  - 한 화면에 보이는 항목은 최대 7개, 섹션은 3개 이하 (sectionHeader 로 경계를 만든다).
  *  - 숫자/긴 글 입력은 다이얼로그로 분리하고, 화면엔 "현재 값 + 수정"만 보여준다.
  *  - 그림자·애니메이션·그라디언트 남용 금지. 여백과 글자 위계로 정리한다.
  *
@@ -162,21 +168,27 @@ public final class Ui {
         return v;
     }
 
-    /** 구역 머리말: 작은 라벨 + 제목 */
+    /**
+     * 구역 머리말. **한 줄이다.** (예전엔 라벨+제목 2줄이었는데 목록 화면에서 너무 무거웠다)
+     * titleTxt 가 있으면 그걸 쓰고, 없으면 labelTxt 를 쓴다 — 시그니처는 그대로 둔 채 표시만 한 줄로 줄였다.
+     * group() 바로 위에 놓는 용도. 아래 여백은 8dp 만 둔다.
+     */
     public static LinearLayout sectionHeader(Context c, String labelTxt, String titleTxt) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.topMargin = Theme.dp(c, 18);
-        lp.bottomMargin = Theme.dp(c, 12);
+        lp.bottomMargin = Theme.dp(c, 8);
         l.setLayoutParams(lp);
-        if (labelTxt != null && labelTxt.length() > 0) l.addView(label(c, labelTxt));
-        if (titleTxt != null && titleTxt.length() > 0) {
-            TextView t = base(c, titleTxt, 18f, Theme.TEXT, true);
-            t.setLetterSpacing(-0.01f);
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            tp.topMargin = Theme.dp(c, 5);
-            t.setLayoutParams(tp);
+
+        String one = (titleTxt != null && titleTxt.length() > 0) ? titleTxt : labelTxt;
+        if (one != null && one.length() > 0) {
+            TextView t = base(c, one, 13f, Theme.SUB, true);
+            t.setLetterSpacing(0.02f);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            t.setPadding(Theme.dp(c, 4), 0, Theme.dp(c, 4), 0);
+            t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
             l.addView(t);
         }
         return l;
@@ -416,6 +428,408 @@ public final class Ui {
                 return false;
             }
         });
+    }
+
+    // ── 목록형 컴포넌트 (UI_V3 9장) ───────────────────────────────────────────
+    //  화면은 "제목 + 지금 값 + ›" 행만 쌓는다. 상세는 Nav.push 로 서브화면을 연다.
+    //  행의 좌우 패딩은 행이 갖고 group() 은 0 이다 → 구분선이 카드 폭 전체에 닿는다.
+
+    private static final Object SEP_TAG = new Object();
+
+    /** 행 높이·좌우 패딩 (navRow / navRowSwitch / checkRow 가 같이 쓴다) */
+    private static final int ROW_H = 56;
+    private static final int ROW_PH = 16;
+
+    /**
+     * 행들을 담는 카드. addView 로 자식을 붙이면 **자식 사이에만** 1dp 구분선이 자동으로 들어간다.
+     * 컨테이너 좌우 패딩은 0 이다 (행이 자기 패딩을 갖는다).
+     * 중간 삽입(index 지정)에는 구분선을 넣지 않는다 — 목록은 위에서 아래로 쌓는 것만 쓴다.
+     */
+    public static LinearLayout group(Context c) {
+        return new Group(c);
+    }
+
+    /** group() 의 실제 구현. 바깥에서 직접 new 하지 말고 group() 을 써라. */
+    public static final class Group extends LinearLayout {
+        private boolean inserting;
+
+        Group(Context c) {
+            super(c);
+            setOrientation(LinearLayout.VERTICAL);
+            setBackground(Theme.round(Theme.CARD, Theme.R_LG, Theme.LINE, 1, c));
+            setPadding(0, 0, 0, 0);
+            try { setClipToOutline(true); } catch (Throwable ignore) { /* 모양만 손해 */ }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+            lp.bottomMargin = Theme.dp(c, 12);
+            setLayoutParams(lp);
+        }
+
+        @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
+            boolean appending = (index < 0 || index >= getChildCount());
+            if (!inserting && child != null && appending && getChildCount() > 0) {
+                inserting = true;
+                try {
+                    View sep = new View(getContext());
+                    sep.setBackgroundColor(Theme.LINE);
+                    sep.setTag(SEP_TAG);
+                    super.addView(sep, -1, new LinearLayout.LayoutParams(
+                            MATCH, Math.max(1, Theme.dp(getContext(), 1))));
+                } catch (Throwable ignore) {
+                    // 구분선 실패는 무해
+                } finally {
+                    inserting = false;
+                }
+            }
+            super.addView(child, index, params);
+        }
+    }
+
+    /**
+     * 목록 행: 좌 제목 · 우 현재값 · `›`.
+     * 값이 비면 `›` 만 남는다. 값은 우측정렬 + 한 줄 + 말줄임이며 행 폭의 절반을 넘지 않는다.
+     * onTap 이 있으면 행 전체가 눌린다(누를 때 alpha 0.7).
+     *
+     * @param valueColor 값 글자색. 0 이면 Theme.SUB. 꺼진 기능은 DIM, 설정이 필요하면 AMBER 를 넘긴다.
+     */
+    public static LinearLayout navRow(Context c, String title, String value, int valueColor,
+                                      final Runnable onTap) {
+        NavRow r = new NavRow(c);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setMinimumHeight(Theme.dp(c, ROW_H));
+        int ph = Theme.dp(c, ROW_PH);
+        int pv = Theme.dp(c, 12);
+        r.setPadding(ph, pv, ph, pv);
+        r.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        TextView t = base(c, title, 15f, Theme.TEXT, true);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        r.addView(t);
+
+        boolean has = (value != null && value.length() > 0);
+        TextView v = base(c, has ? value : "", 14f, (valueColor == 0) ? Theme.SUB : valueColor, false);
+        v.setGravity(Gravity.END);
+        v.setSingleLine(true);
+        v.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        vp.leftMargin = Theme.dp(c, 12);
+        v.setLayoutParams(vp);
+        if (!has) v.setVisibility(View.GONE);
+        r.addView(v);
+        r.value = v;
+
+        TextView arrow = base(c, "›", 19f, Theme.DIM, false);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(WRAP, WRAP);
+        ap.leftMargin = Theme.dp(c, 8);
+        arrow.setLayoutParams(ap);
+        r.addView(arrow);
+
+        r.setContentDescription(has ? ((title == null ? "" : title) + ", " + value) : title);
+        if (onTap != null) {
+            r.setClickable(true);
+            r.setFocusable(true);
+            press(r);
+            r.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View vv) {
+                    try { onTap.run(); } catch (Throwable t2) { Log.add(vv.getContext(), "화면 열기 실패: " + t2); }
+                }
+            });
+        }
+        return r;
+    }
+
+    /** navRow 의 값 글자가 행 폭의 절반을 넘지 않게 재는 행 */
+    private static final class NavRow extends LinearLayout {
+        TextView value;
+        private int cap = -1;
+
+        NavRow(Context c) { super(c); }
+
+        @Override protected void onMeasure(int wSpec, int hSpec) {
+            if (value != null) {
+                int half = (MeasureSpec.getSize(wSpec) - getPaddingLeft() - getPaddingRight()) / 2;
+                if (half > 0 && half != cap) {
+                    cap = half;
+                    value.setMaxWidth(half);
+                }
+            }
+            super.onMeasure(wSpec, hSpec);
+        }
+    }
+
+    /**
+     * 목록 행 + 토글. 값 대신 스위치가 오른쪽에 붙는다 (서브화면으로 안 가는 on/off 설정용).
+     * 상태는 switchRow 와 같게 뷰 태그에 들어있다 → isOn(view) / setOn(view, b) 가 그대로 쓰인다.
+     */
+    public static LinearLayout navRowSwitch(Context c, String title, String sub, boolean on,
+                                            OnToggle cb) {
+        LinearLayout r = switchRow(c, title, sub, on, cb);
+        int ph = Theme.dp(c, ROW_PH);
+        r.setPadding(ph, Theme.dp(c, 12), ph, Theme.dp(c, 12));
+        r.setMinimumHeight(Theme.dp(c, ROW_H));
+        press(r);
+        return r;
+    }
+
+    /**
+     * 체크박스 행. 다중 선택 목록(대상 방, 사용 계정)에 쓴다.
+     * 왼쪽 체크 영역과 오른쪽 ✕ 영역의 터치가 분리돼 있다 — 지우려다 선택이 바뀌는 일이 없다.
+     *
+     * @param badges  제목 아래에 붙는 짧은 배지들 (`단체` / `1:1`). null 이면 없음
+     * @param onDelete null 이면 ✕ 를 아예 안 만든다
+     */
+    public static LinearLayout checkRow(Context c, String title, String sub, String[] badges,
+                                        boolean checked, final OnToggle cb, final Runnable onDelete) {
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.HORIZONTAL);
+        root.setGravity(Gravity.CENTER_VERTICAL);
+        root.setMinimumHeight(Theme.dp(c, 60));
+        root.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        LinearLayout tap = new LinearLayout(c);
+        tap.setOrientation(LinearLayout.HORIZONTAL);
+        tap.setGravity(Gravity.CENTER_VERTICAL);
+        int pv = Theme.dp(c, 12);
+        tap.setPadding(Theme.dp(c, ROW_PH), pv, Theme.dp(c, 8), pv);
+        tap.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        tap.setClickable(true);
+        tap.setFocusable(true);
+        press(tap);
+
+        final Check box = new Check(c, checked);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(Theme.dp(c, 22), Theme.dp(c, 22));
+        bp.rightMargin = Theme.dp(c, 12);
+        box.setLayoutParams(bp);
+        tap.addView(box);
+
+        LinearLayout col = new LinearLayout(c);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+
+        TextView t = base(c, title, 15f, Theme.TEXT, true);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+        col.addView(t);
+
+        boolean hasSub = (sub != null && sub.length() > 0);
+        boolean hasBadge = (badges != null && badges.length > 0);
+        if (hasSub || hasBadge) {
+            LinearLayout line2 = new LinearLayout(c);
+            line2.setOrientation(LinearLayout.HORIZONTAL);
+            line2.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams l2 = new LinearLayout.LayoutParams(MATCH, WRAP);
+            l2.topMargin = Theme.dp(c, 5);
+            line2.setLayoutParams(l2);
+
+            if (hasBadge) {
+                for (int i = 0; i < badges.length; i++) {
+                    String b = badges[i];
+                    if (b == null || b.length() == 0) continue;
+                    TextView bv = badge(c, b, Theme.SUB);
+                    LinearLayout.LayoutParams bvp = new LinearLayout.LayoutParams(WRAP, WRAP);
+                    bvp.rightMargin = Theme.dp(c, 6);
+                    bv.setLayoutParams(bvp);
+                    line2.addView(bv);
+                }
+            }
+            if (hasSub) {
+                TextView sv = base(c, sub, 12.5f, Theme.DIM, false);
+                sv.setSingleLine(true);
+                sv.setEllipsize(TextUtils.TruncateAt.END);
+                sv.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+                line2.addView(sv);
+            }
+            col.addView(line2);
+        }
+        tap.addView(col);
+        root.addView(tap);
+
+        final String nm = (title == null) ? "" : title;
+        tap.setContentDescription(nm + (checked ? ", 선택됨" : ", 선택 안 됨"));
+        tap.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                boolean now = !box.isChecked();
+                box.set(now);
+                v.setContentDescription(nm + (now ? ", 선택됨" : ", 선택 안 됨"));
+                if (cb != null) {
+                    try { cb.on(now); } catch (Throwable t2) { Log.add(v.getContext(), "선택 저장 실패: " + t2); }
+                }
+            }
+        });
+
+        if (onDelete != null) {
+            TextView x = base(c, "✕", 15f, Theme.DIM, false);
+            x.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams xp = new LinearLayout.LayoutParams(Theme.dp(c, 48), Theme.dp(c, 48));
+            xp.rightMargin = Theme.dp(c, 4);
+            x.setLayoutParams(xp);
+            x.setClickable(true);
+            x.setFocusable(true);
+            x.setContentDescription(nm + " 삭제");
+            press(x);
+            x.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    try { onDelete.run(); } catch (Throwable t2) { Log.add(v.getContext(), "삭제 실패: " + t2); }
+                }
+            });
+            root.addView(x);
+        }
+        return root;
+    }
+
+    /** checkRow 의 체크박스. 켜짐=ACCENT 채움+체크, 꺼짐=LINE2 보더. 직접 그린다(위젯 의존 없음). */
+    public static final class Check extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path tick = new Path();
+        private final float radius;
+        private final float border;
+        private final float stroke;
+        private boolean on;
+
+        Check(Context c, boolean on) {
+            super(c);
+            this.on = on;
+            radius = Theme.dp(c, 6);
+            border = Math.max(1f, Theme.dp(c, 1.5f));
+            stroke = Math.max(2f, Theme.dp(c, 2));
+        }
+
+        public boolean isChecked() { return on; }
+
+        public void set(boolean b) {
+            if (on == b) return;
+            on = b;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            if (on) {
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Theme.ACCENT);
+                cv.drawRoundRect(0f, 0f, w, h, radius, radius, paint);
+
+                tick.rewind();
+                tick.moveTo(w * 0.25f, h * 0.52f);
+                tick.lineTo(w * 0.43f, h * 0.70f);
+                tick.lineTo(w * 0.76f, h * 0.31f);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(Theme.ON_ACCENT);
+                paint.setStrokeWidth(stroke);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeJoin(Paint.Join.ROUND);
+                cv.drawPath(tick, paint);
+            } else {
+                float in = border / 2f;
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(border);
+                paint.setColor(Theme.LINE2);
+                cv.drawRoundRect(in, in, w - in, h - in, radius, radius, paint);
+            }
+        }
+    }
+
+    /** 작은 배지 (10sp pill, 색상 12% 배경). `단체` / `1:1` 처럼 두세 글자만 넣는다. */
+    public static TextView badge(Context c, String text, int color) {
+        int col = (color == 0) ? Theme.SUB : color;
+        TextView t = base(c, text, 10f, col, true);
+        t.setBackground(Theme.pill(Theme.fade(col, 0.12f), 0, c));
+        t.setPadding(Theme.dp(c, 7), Theme.dp(c, 3), Theme.dp(c, 7), Theme.dp(c, 3));
+        t.setGravity(Gravity.CENTER);
+        t.setSingleLine(true);
+        t.setLayoutParams(new LinearLayout.LayoutParams(WRAP, WRAP));
+        return t;
+    }
+
+    /**
+     * 되돌리기 스낵바. 붙이면 5초 뒤 스스로 사라지고, action 을 누르면 실행 후 즉시 사라진다.
+     * 화면에서 떼어지면 Handler 콜백도 같이 정리한다 (화면을 나가도 타이머가 살아있지 않다).
+     * 하단에 띄우려면 Nav.snack(...) 을 써라 — 탭바 높이까지 맞춰서 붙여준다.
+     */
+    public static View snack(Context c, String msg, String action, final Runnable onAction) {
+        final Snack s = new Snack(c);
+        s.setOrientation(LinearLayout.HORIZONTAL);
+        s.setGravity(Gravity.CENTER_VERTICAL);
+        s.setBackground(Theme.round(Theme.CARD2, Theme.R_MD, Theme.LINE2, 1, c));
+        s.setPadding(Theme.dp(c, 14), Theme.dp(c, 10), Theme.dp(c, 8), Theme.dp(c, 10));
+        s.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        TextView t = base(c, msg, 13f, Theme.TEXT, false);
+        t.setMaxLines(2);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setLineSpacing(0, 1.3f);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        s.addView(t);
+
+        if (action != null && action.length() > 0) {
+            TextView b = base(c, action, 13f, Theme.ACCENT, true);
+            b.setGravity(Gravity.CENTER);
+            b.setMinimumHeight(Theme.dp(c, 48));
+            b.setMinimumWidth(Theme.dp(c, 48));
+            b.setPadding(Theme.dp(c, 14), 0, Theme.dp(c, 14), 0);
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(WRAP, WRAP);
+            bp.leftMargin = Theme.dp(c, 8);
+            b.setLayoutParams(bp);
+            b.setClickable(true);
+            b.setFocusable(true);
+            press(b);
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    s.dismiss();
+                    if (onAction != null) {
+                        try { onAction.run(); } catch (Throwable t2) { Log.add(v.getContext(), "되돌리기 실패: " + t2); }
+                    }
+                }
+            });
+            s.addView(b);
+        }
+        return s;
+    }
+
+    /** snack() 의 실제 구현. 5초 타이머를 스스로 들고 있다. */
+    public static final class Snack extends LinearLayout {
+        /** 화면에 머무는 시간 */
+        public static final long SHOW_MS = 5000L;
+
+        private final Handler h = new Handler(Looper.getMainLooper());
+        private final Runnable gone = new Runnable() {
+            @Override public void run() { dismiss(); }
+        };
+
+        Snack(Context c) { super(c); }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            ViewGroup.LayoutParams lp = getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams f = (FrameLayout.LayoutParams) lp;
+                if (f.gravity <= 0) {
+                    f.gravity = Gravity.BOTTOM;
+                    setLayoutParams(f);
+                }
+            }
+            h.removeCallbacks(gone);
+            h.postDelayed(gone, SHOW_MS);
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            h.removeCallbacks(gone);
+            super.onDetachedFromWindow();
+        }
+
+        /** 지금 치운다 (타이머도 정리) */
+        public void dismiss() {
+            h.removeCallbacks(gone);
+            if (getParent() instanceof ViewGroup) {
+                try { ((ViewGroup) getParent()).removeView(this); return; } catch (Throwable ignore) { }
+            }
+            setVisibility(View.GONE);
+        }
     }
 
     // ── 알림 ──────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import android.service.notification.StatusBarNotification;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -32,14 +33,22 @@ import java.util.concurrent.ConcurrentHashMap;
  *   1) onNotificationPosted 안에서 절대 블로킹하지 않는다 → 파싱/세션갱신만 하고 나머지는 BG 스레드로 넘긴다.
  *   2) 기능 실행은 전부 License.allowed() 를 통과해야 한다 (macro / roombot / minigame 각각).
  *
+ * 방은 이름 하나가 아니라 {@link RoomRef}(계정키 + 방 이름)로 잡는다. 듀얼 메신저로 카톡이
+ * 두 개 깔리면 같은 이름의 방이 계정별로 따로 있고 답장창(세션)도 계정별로 따로다 (UI_V3 6장).
+ * 세션 맵·방 캐시의 키는 전부 {@code RoomRef.key()} 다. 방 이름만 받는 예전 오버로드는
+ * {@code RoomRef.parse()} 로 위임하고, 기본 계정에서 못 찾으면 이름이 유일할 때만 다른 계정도 뒤진다.
+ *
  * 다른 클래스가 쓰는 공개 API
- *   boolean      sendTo(ctx, room, text)      — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
- *   Set&lt;String&gt; imageTypesFor(room)          — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
- *   boolean      sendImageTo(ctx, room, uri)  — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
- *   int          othersSinceMine(room)        — 내 마지막 발송 뒤 남이 올린 메시지 수 (도배 방지 판정)
- *   List<String> knownRooms() / knownRooms(ctx) — 최근 감지된 방 이름 (설정 화면 방 선택용, 최대 50개)
- *   boolean      hasSession(room) / isKnownRoom(room) / connected(ctx)
- *   void         post(Runnable, delayMs)      — 공용 BG 핸들러 (지연 발송에 쓴다)
+ *   boolean        sendTo(ctx, ref|room, text)   — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
+ *   Set&lt;String&gt; imageTypesFor(ref|room)     — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
+ *   boolean        sendImageTo(ctx, ref|room, uri) — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
+ *   int            othersSinceMine(ref|room)     — 내 마지막 발송 뒤 남이 올린 메시지 수 (도배 방지 판정)
+ *   List<RoomInfo> knownRooms(ctx)               — 최근 감지된 방 (계정·단체여부·감지시각, 최대 50개)
+ *   void           forgetRoom(ctx, ref)          — 감지된 방 1건 삭제 (멤버 오인식 정리)
+ *   void           clearRooms(ctx)               — 감지 캐시 전체 초기화
+ *   Set<String>    accountsSeen(ctx)             — 지금까지 확인된 계정키
+ *   boolean        hasSession(room) / isKnownRoom(room) / connected(ctx)
+ *   void           post(Runnable, delayMs)       — 공용 BG 핸들러 (지연 발송에 쓴다)
  *
  * 주의: 같은 패키지의 Log 클래스 때문에 android.util.Log 는 풀네임으로만 쓴다.
  */
@@ -47,7 +56,7 @@ public final class KakaoListener extends NotificationListenerService {
 
     public static final String KAKAO = "com.kakao.talk";
 
-    /** 방 이름 캐시 최대 개수 (SPEC 8.2 — 방 목록은 평문 Prefs 에 이름만) */
+    /** 감지 방 캐시 최대 개수 (SPEC 8.2 — 방 목록은 평문 Prefs 에 계정·이름만) */
     public static final int MAX_ROOMS = 50;
 
     /** 메모리에 들고 있을 방 세션 최대 개수 (넘치면 오래된 방부터 버린다) */
@@ -102,6 +111,9 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 방 하나에 대한 최근 알림 상태. 발송에 필요한 재료가 여기 다 있다. */
     public static final class Session {
+        /** 이 세션이 붙은 방 (계정 + 이름) */
+        public final RoomRef ref;
+        /** 방 이름 (= ref.name). 예전 코드가 그대로 읽을 수 있게 남겨둔다 */
         public final String room;
         /** 답장 액션의 PendingIntent (카톡이 준 것) */
         public volatile PendingIntent pending;
@@ -147,23 +159,56 @@ public final class KakaoListener extends NotificationListenerService {
         /** 자동응답 보류 로그를 이 방에서 이미 남겼나 */
         volatile boolean blockLogged = false;
 
-        Session(String room) { this.room = room; }
+        Session(RoomRef ref) { this.ref = ref; this.room = ref.name; }
     }
 
+    /** 키는 {@code RoomRef.key()} — 동명 대화방이 계정별로 공존한다 */
     private static final ConcurrentHashMap<String, Session> SESSIONS =
             new ConcurrentHashMap<String, Session>();
 
-    /** 최근 감지된 방 이름 (최신이 뒤). 접근은 전부 synchronized(ROOMS). */
-    private static final LinkedHashSet<String> ROOMS = new LinkedHashSet<String>();
+    /** 감지된 방 한 건 (화면에 뿌리는 값, 불변) */
+    public static final class RoomInfo {
+        /** 계정 + 방 이름 */
+        public final RoomRef ref;
+        /** 단체방인가 (false = 1:1) */
+        public final boolean group;
+        /** 마지막 감지 시각 (epoch ms). 0 이면 구버전 저장값이라 모름 */
+        public final long lastAt;
+
+        RoomInfo(RoomRef ref, boolean group, long lastAt) {
+            this.ref = ref;
+            this.group = group;
+            this.lastAt = lastAt;
+        }
+    }
+
+    /** 방 캐시 내부 레코드 (가변) */
+    private static final class Room {
+        RoomRef ref;
+        boolean group;
+        long lastAt;
+        /** 디스크에 마지막으로 쓴 감지 시각 (Prefs 쓰기 빈도 제한용) */
+        long savedAt;
+    }
+
+    /** 같은 방 알림이 쏟아질 때 방 캐시를 다시 쓰는 최소 간격 (ms) */
+    private static final long ROOM_SAVE_MS = 60000L;
+
+    /** 최근 감지된 방 (키 = RoomRef.key(), 최신이 뒤). 접근은 전부 synchronized(ROOMS). */
+    private static final LinkedHashMap<String, Room> ROOMS = new LinkedHashMap<String, Room>();
     private static volatile boolean roomsLoaded = false;
 
     /** 마지막으로 본 내 표시이름 (카톡이 알림에 넣어준다) */
     private static volatile String selfName = "";
 
+    /** 계정별 내 표시이름 (계정키 → 카톡 프로필 이름) */
+    private static final ConcurrentHashMap<String, String> SELF =
+            new ConcurrentHashMap<String, String>();
+
     /** 리스너가 시스템에 붙어 있는지 (메모리 플래그 — 프로세스 죽으면 false 로 돌아간다) */
     private static volatile boolean bound = false;
 
-    /** Context 를 안 넘겨주는 호출자(knownRooms())를 위한 보관용 */
+    /** Context 를 안 넘겨주는 호출자(knownRooms() 등)를 위한 보관용 */
     private static volatile Context APP;
 
     // ── BG 핸들러 ─────────────────────────────────────────────────────────────
@@ -193,7 +238,7 @@ public final class KakaoListener extends NotificationListenerService {
         try {
             bg().postDelayed(r, d);
         } catch (Throwable t) {
-            android.util.Log.w("KakaoAuto", "지연 실행 실패 — 바로 실행할게", t);
+            android.util.Log.w("KakaoAuto", "지연 실행에 실패하여 즉시 실행합니다", t);
             try { r.run(); } catch (Throwable ignore) { /* 아래 로그는 호출자가 남긴다 */ }
         }
     }
@@ -213,13 +258,13 @@ public final class KakaoListener extends NotificationListenerService {
         bound = true;
         APP = getApplicationContext();
         loadRooms(APP);
-        Log.add(APP, "알림 읽기 권한이 연결됐어 — 이제 카톡 알림을 감지할 수 있어");
+        Log.add(APP, "알림 접근 권한이 연결되었습니다. 카카오톡 알림 감지를 시작합니다.");
     }
 
     @Override
     public void onListenerDisconnected() {
         bound = false;
-        Log.add(APP, "알림 읽기 권한이 끊겼어 — 설정에서 다시 켜줘 (발송 불가)");
+        Log.add(APP, "알림 접근 권한이 해제되었습니다. 발송이 불가하며, 설정에서 재허용이 필요합니다.");
         super.onListenerDisconnected();
     }
 
@@ -228,7 +273,7 @@ public final class KakaoListener extends NotificationListenerService {
         try {
             handle(sbn, shortcutLabel(sbn));
         } catch (Throwable t) {
-            Log.add(ctxOrApp(), "알림 처리 중 오류가 났어: " + t);
+            Log.add(ctxOrApp(), "알림 처리 중 오류가 발생했습니다: " + t);
         }
     }
 
@@ -280,17 +325,21 @@ public final class KakaoListener extends NotificationListenerService {
         final Bundle ex = n.extras;
         if (ex == null) return;
 
-        final Msg m = parse(ex, sbn.getPostTime(), shortcutLabel);
+        // 어느 카톡 계정에서 온 알림인가 (듀얼 메신저면 프로필마다 UserHandle 이 다르다)
+        final String acc = Accounts.keyOf(sbn);
+
+        final Msg m = parse(ex, sbn.getPostTime(), shortcutLabel, acc);
         if (m == null) return;
         if (m.room.length() == 0 || m.text.length() == 0) return;
 
         // 세션 갱신 (여기까지는 아주 싸다 — 메인 스레드에서 해도 된다)
-        Session s = SESSIONS.get(m.room);
+        final String skey = m.ref.key();
+        Session s = SESSIONS.get(skey);
         if (s == null) {
-            Session fresh = new Session(m.room);
-            Session prev = SESSIONS.putIfAbsent(m.room, fresh);
+            Session fresh = new Session(m.ref);
+            Session prev = SESSIONS.putIfAbsent(skey, fresh);
             s = (prev != null) ? prev : fresh;
-            if (SESSIONS.size() > MAX_SESSIONS) trimSessions(m.room);
+            if (SESSIONS.size() > MAX_SESSIONS) trimSessions(skey);
         }
 
         Reply r = findReply(n);
@@ -348,6 +397,13 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 트리거 / 자동응답 / 봇으로 넘긴다. BG 스레드에서만 호출된다. */
     private static void dispatch(Context ctx, Msg m) {
+        // 계정 레지스트리 갱신 (Prefs 를 쓰니까 알림 콜백이 아니라 여기서 한다)
+        try {
+            Accounts.seen(ctx, m.acc, m.selfName);
+        } catch (Throwable t) {
+            Log.add(ctx, "카카오톡 계정 기록 중 오류: " + t);
+        }
+
         // 판정 근거 로그는 여기서 남긴다 (Log.add 가 Prefs 를 동기로 쓰니까 메인 스레드에서 안 부른다)
         whyLog(ctx, m);
 
@@ -355,48 +411,49 @@ public final class KakaoListener extends NotificationListenerService {
         try {
             if (License.allowed(ctx, Features.MACRO)) {
                 try {
-                    Trigger.onMessage(ctx, m.room, m.sender, m.text, m.fromMe);
+                    // 그룹 여부·내 메시지 여부를 여기서 이미 판정했으니 둘 다 넘긴다
+                    Trigger.onMessage(ctx, m.ref, m.sender, m.text, m.group, m.fromMe);
                 } catch (Throwable t) {
-                    Log.add(ctx, "메시지추적 처리 중 오류: " + t);
+                    Log.add(ctx, "메시지 추적 처리 중 오류: " + t);
                 }
                 // 자동응답은 1:1 전용이다. 여기서 group==false 를 한 번 더 확인한다.
                 if (!m.group && !m.fromMe && safeForAutoReply(ctx, m)) {
                     try {
-                        AutoReply.onDirectMessage(ctx, m.room, m.sender, m.text);
+                        AutoReply.onDirectMessage(ctx, m.ref, m.sender, m.text);
                     } catch (Throwable t) {
                         Log.add(ctx, "자동응답 처리 중 오류: " + t);
                     }
                 }
             }
         } catch (Throwable t) {
-            Log.add(ctx, "매크로 게이트 확인 실패: " + t);
+            Log.add(ctx, "매크로 사용 권한 확인 실패: " + t);
         }
 
         // 봇은 내 메시지에 반응하면 자기 말에 자기가 답하는 루프가 생긴다 → 내 메시지는 안 넘긴다
         if (!m.fromMe) {
             try {
                 if (License.allowed(ctx, Features.ROOMBOT)) {
-                    RoomBot.onMessage(ctx, m.room, m.sender, m.text, m.group);
+                    RoomBot.onMessage(ctx, m.ref, m.sender, m.text, m.group);
                 }
             } catch (Throwable t) {
                 Log.add(ctx, "방 관리봇 처리 중 오류: " + t);
             }
             try {
                 if (License.allowed(ctx, Features.MINIGAME)) {
-                    MiniGame.onMessage(ctx, m.room, m.sender, m.text, m.group);
+                    MiniGame.onMessage(ctx, m.ref, m.sender, m.text, m.group);
                 }
             } catch (Throwable t) {
                 Log.add(ctx, "미니게임봇 처리 중 오류: " + t);
             }
         }
 
-        // 방 이름 캐시는 **디스패치 뒤에** 넣는다.
+        // 방 캐시는 **디스패치 뒤에** 넣는다.
         // 자동응답의 "모르는 사람만" 판정이 isKnownRoom() 을 쓰기 때문에,
         // 먼저 캐시하면 처음 온 사람도 이미 아는 방으로 잡혀서 판정이 항상 거짓이 된다.
-        // 방 목록(설정 화면의 방 선택)에는 **믿을 수 있는 방 이름만** 넣는다.
+        // 방 목록(방 관리 화면)에는 **믿을 수 있는 방 이름만** 넣는다.
         // 단체방인데 title 밖에 못 읽은 경우를 넣으면 목록에 멤버 이름이 쌓인다.
         if (m.roomTrusted) {
-            remember(ctx, m.room);
+            remember(ctx, m.ref, m.group, m.at);
         } else {
             roomSrcWarn(ctx, m);
         }
@@ -406,6 +463,12 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 알림 하나에서 뽑아낸 한 건의 메시지 */
     private static final class Msg {
+        /** 이 알림이 온 카톡 계정키 */
+        String acc = RoomRef.DEFAULT_ACC;
+        /** 계정 + 방 이름. 세션 맵·방 캐시의 키가 여기서 나온다 (parse 끝에서 확정) */
+        RoomRef ref = RoomRef.of(RoomRef.DEFAULT_ACC, "");
+        /** 이 계정의 내 카톡 프로필 이름 (못 읽으면 "") */
+        String selfName = "";
         String room = "";
         String sender = "";
         String text = "";
@@ -457,8 +520,9 @@ public final class KakaoListener extends NotificationListenerService {
      * `방이름 != 발신자` 를 검사할 때 이미 둘이 같아져 있었다 → 단체방이 영원히 1:1 로 잡혔고
      * 오픈프로필 자동응답이 단체방에 나갔다.
      */
-    private static Msg parse(Bundle ex, long postTime, String shortcutLabel) {
+    private static Msg parse(Bundle ex, long postTime, String shortcutLabel, String acc) {
         Msg m = new Msg();
+        m.acc = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
         m.at = (postTime > 0) ? postTime : System.currentTimeMillis();
 
         String title = getCs(ex, Notification.EXTRA_TITLE);
@@ -490,16 +554,20 @@ public final class KakaoListener extends NotificationListenerService {
         m.roomSrc = roomSrc;
         m.roomTrusted = !"title".equals(roomSrc);
 
-        // 내 표시이름 (내 메시지 판정에 쓴다)
+        // 내 표시이름 (내 메시지 판정에 쓴다). 계정마다 프로필 이름이 다르니 계정별로 기억한다.
         String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
         if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
             me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
         }
-        if (me.length() > 0) selfName = me;
+        if (me.length() > 0) {
+            selfName = me;
+            SELF.put(m.acc, me);
+        }
+        m.selfName = me;
 
         // android.messages: 마지막 본문 + 서로 다른 발신자 수 (둘 다 그룹 판정 재료다).
         // 발신자 수는 "나를 뺀" 사람 수다 — 내 이름까지 세면 1:1 도 2명으로 잡힌다.
-        String myName = (me.length() > 0) ? me : selfName();
+        String myName = (me.length() > 0) ? me : selfName(m.acc);
         Bundle[] msgs = messages(ex);
         LinkedHashSet<String> others = senderNames(msgs, myName);
         int senders = others.size();
@@ -527,7 +595,9 @@ public final class KakaoListener extends NotificationListenerService {
         String headName = nameLike(m.text);
         int cut = m.text.indexOf(" : ");
         m.body = (headName.length() > 0 && cut > 0) ? m.text.substring(cut + 3).trim() : m.text;
-        String prefixName = knownName(headName, title, convo, m.room);
+        // "아는 발신자" 조회는 계정까지 맞춰야 한다 — 같은 이름 방이 두 계정에 있을 수 있다
+        String skey = RoomRef.of(m.acc, m.room).key();
+        String prefixName = knownName(headName, title, convo, skey);
         if (headName.length() > 0 && prefixName.length() == 0) m.oddPrefix = headName;
 
         // ── 그룹 판정 (sender 폴백보다 먼저!) ─────────────────────────────────
@@ -590,6 +660,7 @@ public final class KakaoListener extends NotificationListenerService {
 
         m.room = m.room.trim();
         m.sender = m.sender.trim();
+        m.ref = RoomRef.of(m.acc, m.room);
         m.key = m.at + "|" + m.sender + "|" + m.text;
         return m;
     }
@@ -650,17 +721,18 @@ public final class KakaoListener extends NotificationListenerService {
      * 아는 이름 = 알림 title 또는 conversationTitle 과 같거나, 그 방에서 최근에 본 발신자.
      * (그래야 "사과 : 맛있어" 같은 평범한 1:1 문장이 단체방 근거로 쓰이지 않는다)
      */
-    private static String knownName(String name, String title, String convo, String room) {
+    private static String knownName(String name, String title, String convo, String sessionKey) {
         if (name == null || name.length() == 0) return "";
         if (title != null && name.equals(title.trim())) return name;
         if (convo != null && name.equals(convo.trim())) return name;
-        return seenSender(room, name) ? name : "";
+        return seenSender(sessionKey, name) ? name : "";
     }
 
-    /** 그 방에서 최근에 카톡이 알려준 발신자인가 */
-    private static boolean seenSender(String room, String name) {
-        if (room == null || room.length() == 0 || name == null || name.length() == 0) return false;
-        Session s = SESSIONS.get(room);
+    /** 그 방에서 최근에 카톡이 알려준 발신자인가 (sessionKey = RoomRef.key()) */
+    private static boolean seenSender(String sessionKey, String name) {
+        if (sessionKey == null || sessionKey.length() == 0
+                || name == null || name.length() == 0) return false;
+        Session s = SESSIONS.get(sessionKey);
         if (s == null) return false;
         synchronized (s.recentSenders) {
             return s.recentSenders.contains(name);
@@ -765,24 +837,25 @@ public final class KakaoListener extends NotificationListenerService {
      * <b>방마다 처음 1회만</b> 남긴다 — 사용자가 오작동을 신고할 때 그 방의 근거만 있으면 충분하다.
      */
     private static void whyLog(Context ctx, Msg m) {
-        Session s = SESSIONS.get(m.room);
+        Session s = SESSIONS.get(m.ref.key());
         if (s != null) {
             if (s.whyLogged) return;
             s.whyLogged = true;
         }
-        Log.add(ctx, "방 판정: 「" + m.room + "」 " + (m.group ? "단체방" : "1:1")
+        Log.add(ctx, "대화방 판정: 「" + m.ref.label(ctx) + "」 " + (m.group ? "단체방" : "1:1")
                 + " (근거: " + m.why + " / 발신자: "
-                + (m.sender.length() == 0 ? "모름" : m.sender) + ")");
+                + (m.sender.length() == 0 ? "확인 불가" : m.sender) + ")");
     }
 
     /** 자동응답 방어선이 막았을 때 (드물고 중요한 일이라 남기되, 방마다 처음 1회만) */
-    private static void blockLog(Context ctx, String room, String why) {
-        Session s = SESSIONS.get(room);
+    private static void blockLog(Context ctx, RoomRef ref, String why) {
+        Session s = SESSIONS.get(ref.key());
         if (s != null) {
             if (s.blockLogged) return;
             s.blockLogged = true;
         }
-        Log.add(ctx, "자동응답 보류: 「" + room + "」 " + why + " — 단체방 오발송을 막았어");
+        Log.add(ctx, "자동응답 보류: 「" + ref.label(ctx) + "」 " + why
+                + " 단체방 오발송을 차단했습니다.");
     }
 
     /**
@@ -792,9 +865,9 @@ public final class KakaoListener extends NotificationListenerService {
      */
     private static boolean safeForAutoReply(Context ctx, Msg m) {
         if (m.group) return false;
-        Session s = SESSIONS.get(m.room);
+        Session s = SESSIONS.get(m.ref.key());
         if (s != null && s.group) {
-            blockLog(ctx, m.room, "이 방을 단체방으로 기억하고 있어");
+            blockLog(ctx, m.ref, "해당 대화방이 단체방으로 기록되어 있습니다.");
             return false;
         }
         // 카톡이 직접 알려줬거나(isGroupConversation=false) android.messages 로 1:1 이 확정된 방은
@@ -815,9 +888,9 @@ public final class KakaoListener extends NotificationListenerService {
         // 그래서 근거가 RANK_MESSAGES 미만이면 무조건 보류한다.
         // 요즘 카톡은 MessagingStyle(android.messages)과 isGroupConversation 을 둘 다 넣어주므로
         // 실제 사용자는 위 return true 로 빠지고, 여기까지 오는 건 아주 오래된 카톡뿐이다.
-        blockLog(ctx, m.room,
-                "1:1 인지 확실하지 않아서 자동응답을 보류했어 (카톡이 알림에 대화 정보를 안 넣어줬어). "
-                        + "카톡을 최신 버전으로 업데이트하면 해결돼");
+        blockLog(ctx, m.ref,
+                "1:1 여부를 확정할 수 없습니다. 카카오톡 알림에 대화 정보가 포함되지 않았습니다. "
+                        + "카카오톡을 최신 버전으로 업데이트하십시오.");
         return false;
     }
 
@@ -933,16 +1006,17 @@ public final class KakaoListener extends NotificationListenerService {
             imageProbed = want;
         }
         final String raw = (types == null || types.isEmpty())
-                ? "(카톡이 데이터 타입을 하나도 안 걸어놨어)" : types.toString();
+                ? "(카카오톡이 선언한 데이터 타입 없음)" : types.toString();
         // Log.add 는 Prefs 를 동기로 쓴다 → 알림 콜백(메인 스레드)에서 직접 부르면 안 된다
         post(new Runnable() {
             @Override public void run() {
                 if (want == 1) {
-                    Log.add(ctx, "카톡이 알림 답장에 사진 첨부를 허용해 — 화면 안 움직이고 보낼 수 있어"
-                            + " · 허용 타입: " + img);
+                    Log.add(ctx, "카카오톡이 알림 답장 이미지 첨부를 허용합니다. 화면 조작 없이 전송됩니다."
+                            + " 허용 타입: " + img);
                 } else {
-                    Log.add(ctx, "카톡이 알림 답장에 사진을 안 받아 — 공유창을 열어서 보내야 해(화면이 잠깐 움직여)"
-                            + " · 카톡이 선언한 타입: " + raw);
+                    Log.add(ctx, "카카오톡이 알림 답장 이미지 첨부를 허용하지 않습니다. "
+                            + "공유창을 경유하여 전송되며 전송 중 화면이 전환됩니다."
+                            + " 선언된 타입: " + raw);
                 }
             }
         }, 0);
@@ -970,10 +1044,15 @@ public final class KakaoListener extends NotificationListenerService {
      * 세션이 죽어 있으면(그 방 알림을 아직 못 봤거나 알림이 치워졌으면) 빈 Set 이다.
      */
     public static java.util.Set<String> imageTypesFor(String room) {
-        if (room == null) return java.util.Collections.emptySet();
-        String r = room.trim();
-        if (r.length() == 0) return java.util.Collections.emptySet();
-        Session s = findSession(r);
+        return imageTypesFor(lookup(room));
+    }
+
+    /** 계정까지 지정해서 조회하는 버전 */
+    public static java.util.Set<String> imageTypesFor(RoomRef ref) {
+        return imageTypesFor(findSession(ref, false));
+    }
+
+    private static java.util.Set<String> imageTypesFor(Session s) {
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
             return java.util.Collections.emptySet();
         }
@@ -991,22 +1070,33 @@ public final class KakaoListener extends NotificationListenerService {
      * 우리가 확인할 방법이 없다. 그래서 호출자가 어느 경로로 보냈는지 로그에 꼭 남겨야 한다.
      */
     public static boolean sendImageTo(Context ctx, String room, Uri uri) {
-        String r = (room == null) ? "" : room.trim();
-        if (ctx == null || r.length() == 0 || uri == null) return false;
+        return sendImageTo(ctx, RoomRef.parse(room), uri, lookup(room));
+    }
 
-        Session s = findSession(r);
+    /** 계정까지 지정해서 보내는 버전 */
+    public static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri) {
+        return sendImageTo(ctx, ref, uri, findSession(ref, false));
+    }
+
+    private static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri, Session s) {
+        if (ctx == null || ref == null || !ref.valid() || uri == null) return false;
+        final String r = ref.label(ctx);
+
         if (s == null) {
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 방 세션이 없어(그 방 카톡 알림이 와야 보낼 수 있어)");
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 대화방 세션이 없습니다. "
+                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 전송이 가능합니다.");
             return false;
         }
         PendingIntent pi = s.pending;
         RemoteInput[] inputs = s.inputs;
         if (pi == null || inputs == null || inputs.length == 0) {
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 답장창이 없어(카톡 알림이 다시 와야 해)");
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 답장창이 없습니다. "
+                    + "카카오톡 알림이 다시 수신되면 복구됩니다.");
             return false;
         }
         if (!bound) {
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 알림 읽기 권한이 꺼져 있어 — 설정에서 켜줘");
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 알림 접근 권한이 비활성 상태입니다. "
+                    + "설정에서 권한을 허용하십시오.");
             return false;
         }
 
@@ -1020,7 +1110,8 @@ public final class KakaoListener extends NotificationListenerService {
         String key = matchType(s.dataTypes, mime);
         RemoteInput target = inputFor(inputs, key);
         if (key == null || target == null) {
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 카톡이 알림 답장에서 이 사진 타입(" + mime + ")을 안 받아");
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 카카오톡이 알림 답장에서 해당 이미지 타입("
+                    + mime + ")을 허용하지 않습니다.");
             return false;
         }
 
@@ -1037,8 +1128,8 @@ public final class KakaoListener extends NotificationListenerService {
             try {
                 ctx.grantUriPermission(KAKAO, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (Throwable t) {
-                Log.add(ctx, "사진 읽기 권한을 카톡에 못 넘겼어 — "
-                        + t.getClass().getSimpleName() + " (그래도 보내볼게)");
+                Log.add(ctx, "이미지 읽기 권한을 카카오톡에 부여하지 못했습니다 ("
+                        + t.getClass().getSimpleName() + "). 전송은 계속 진행합니다.");
             }
             filled.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
@@ -1057,10 +1148,11 @@ public final class KakaoListener extends NotificationListenerService {
             // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
             s.pending = null;
             s.inputs = null;
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 답장창이 만료됐어(카톡 알림이 다시 와야 해)");
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 답장창이 만료되었습니다. "
+                    + "카카오톡 알림이 다시 수신되면 복구됩니다.");
             return false;
         } catch (Throwable t) {
-            Log.add(ctx, "사진 답장 실패: 「" + r + "」 " + t);
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 " + t);
             return false;
         }
     }
@@ -1114,38 +1206,83 @@ public final class KakaoListener extends NotificationListenerService {
      * 세션이 없으면(= 그 방 카톡 알림을 아직 못 봤으면) 보낼 방법이 없다 → false.
      */
     /**
+     * 저장값(방 이름 또는 {@code RoomRef.key()}) 하나로 세션을 찾는다.
+     * 계정 구분자가 없는 값은 <b>구버전 저장값</b>이라 계정을 알 수 없다 → 기본 계정에서 못 찾으면
+     * 이름이 유일할 때만 다른 계정도 뒤진다. 구분자가 있는 값은 그 계정 안에서만 찾는다.
+     */
+    private static Session lookup(String stored) {
+        if (stored == null) return null;
+        boolean legacy = (stored.indexOf(RoomRef.SEP) < 0);
+        return findSession(RoomRef.parse(stored), legacy);
+    }
+
+    /**
      * 방 세션 찾기. 정확히 일치하는 게 없으면 조금 너그럽게 찾는다 —
      * 사용자가 방 이름을 손으로 입력할 때 공백/대소문자/이모지 정도는 어긋나기 쉽고,
      * 카톡이 방 이름을 안 알려줘서 사용자가 직접 적어 넣은 경우도 있다.
      * 애매하게 여러 개 걸리면 **아무것도 고르지 않는다** (엉뚱한 방에 보내는 게 더 큰 사고다).
+     *
+     * 너그러운 탐색도 <b>같은 계정 안에서만</b> 한다. 계정이 다르면 아예 다른 카톡이다.
+     * crossAcc 는 계정 정보가 없는 구버전 저장값만 쓰는 예외 경로다 (이름이 유일할 때만 인정).
      */
-    private static Session findSession(String room) {
-        Session exact = SESSIONS.get(room);
+    private static Session findSession(RoomRef ref, boolean crossAcc) {
+        if (ref == null || !ref.valid()) return null;
+
+        Session exact = SESSIONS.get(ref.key());
         if (exact != null) return exact;
 
-        String want = normRoom(room);
+        String want = normRoom(ref.name);
         if (want.length() == 0) return null;
 
         Session hit = null;
-        // 1차: 정규화해서 완전히 같은 것
+        // 1차: 같은 계정 + 정규화해서 완전히 같은 이름
         for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
-            if (want.equals(normRoom(e.getKey()))) {
+            Session v = e.getValue();
+            if (v == null || !v.ref.acc.equals(ref.acc)) continue;
+            if (want.equals(normRoom(v.ref.name))) {
                 if (hit != null) return null;      // 둘 이상 → 애매하니 포기
-                hit = e.getValue();
+                hit = v;
             }
         }
         if (hit != null) return hit;
 
-        // 2차: 한쪽이 다른 쪽을 포함 (방 이름 뒤에 인원수 "(12)" 가 붙는 경우 등)
+        // 2차: 같은 계정 + 한쪽이 다른 쪽을 포함 (방 이름 뒤에 인원수 "(12)" 가 붙는 경우 등)
         for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
-            String have = normRoom(e.getKey());
+            Session v = e.getValue();
+            if (v == null || !v.ref.acc.equals(ref.acc)) continue;
+            String have = normRoom(v.ref.name);
             if (have.length() == 0) continue;
             if (have.contains(want) || want.contains(have)) {
                 if (hit != null) return null;      // 둘 이상 → 애매하니 포기
-                hit = e.getValue();
+                hit = v;
+            }
+        }
+        if (hit != null || !crossAcc) return hit;
+
+        // 3차: 계정 정보가 없는 구버전 저장값 — 이름이 딱 하나 걸릴 때만 그 계정으로 보낸다
+        for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
+            Session v = e.getValue();
+            if (v == null) continue;
+            if (want.equals(normRoom(v.ref.name))) {
+                if (hit != null) return null;
+                hit = v;
             }
         }
         return hit;
+    }
+
+    /**
+     * 그 계정이 사용 대상인가. 설정을 못 읽으면(라이선스 미인증 등) 막지 않는다 —
+     * 설정을 못 읽는 것과 사용자가 제외한 것은 다르다.
+     */
+    private static boolean accountAllowed(Context ctx, String acc) {
+        if (ctx == null || acc == null) return true;
+        try {
+            Settings st = Settings.load(ctx);
+            return st == null || st.accountOn(acc);
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     /** 방 이름 비교용 정규화: 공백 제거 + 소문자 */
@@ -1154,23 +1291,50 @@ public final class KakaoListener extends NotificationListenerService {
         return v.replaceAll("\\s+", "").toLowerCase(java.util.Locale.KOREA);
     }
 
+    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 구버전 저장값 호환용이다. */
     public static boolean sendTo(Context ctx, String room, String text) {
-        String r = (room == null) ? "" : room.trim();
-        if (r.length() == 0) {
-            Log.add(ctx, "발송 실패: 방 이름이 비어있어");
+        return sendTo(ctx, RoomRef.parse(room), text, lookup(room));
+    }
+
+    /**
+     * 계정까지 지정해서 그 계정의 세션으로만 보내는 버전.
+     *
+     * 계정키가 기본값("0")인 참조는 <b>구버전 저장값이거나 아직 계정이 확정되지 않은 값</b>이다.
+     * 업데이트 전에는 계정 개념이 없어서 모든 대화방이 이름만으로 저장됐는데, 그 방이 실제로는
+     * 부계정(듀얼 메신저) 것일 수 있다. 그런 값을 기본 계정에 못 박으면 발송이 조용히 끊긴다.
+     * 그래서 기본 계정 참조는 계정을 가로질러 찾되, 이름이 딱 하나 걸릴 때만 보낸다
+     * (여러 계정에 같은 이름이 있으면 findSession 이 null 을 돌려주므로 오발송은 없다).
+     */
+    public static boolean sendTo(Context ctx, RoomRef ref, String text) {
+        boolean crossAcc = (ref != null && ref.isDefault());
+        return sendTo(ctx, ref, text, findSession(ref, crossAcc));
+    }
+
+    private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
+        if (ref == null || !ref.valid()) {
+            Log.add(ctx, "발송 실패: 대상 대화방이 지정되지 않았습니다.");
             return false;
         }
+        // 계정 사용 여부는 여기 한 곳에서만 검사한다.
+        // 엔진마다 흩어놓으면 빠지는 경로가 생긴다 — 실제로 메시지 추적의 '다른 대화방으로 발송'
+        // 경로가 수신 대화방만 검사하고 발송 대상 계정은 검사하지 않아 미사용 계정으로 나갔다.
+        if (!accountAllowed(ctx, ref.acc)) {
+            Log.add(ctx, "발송 취소: " + ref.label(ctx) + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다.");
+            return false;
+        }
+        final String r = ref.label(ctx);
         if (text == null || text.trim().length() == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 보낼 내용이 비어있어");
+            Log.add(ctx, "발송 실패: 「" + r + "」 발송할 내용이 비어 있습니다.");
             return false;
         }
-        Session s = findSession(r);
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 방 세션이 없어(그 방 카톡 알림이 와야 발송 가능)");
+            Log.add(ctx, "발송 실패: 「" + r + "」 대화방 세션이 없습니다. "
+                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다.");
             return false;
         }
         if (!bound) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 알림 읽기 권한이 꺼져 있어 — 설정에서 켜줘");
+            Log.add(ctx, "발송 실패: 「" + r + "」 알림 접근 권한이 비활성 상태입니다. "
+                    + "설정에서 권한을 허용하십시오.");
             return false;
         }
 
@@ -1186,7 +1350,7 @@ public final class KakaoListener extends NotificationListenerService {
                 results.putCharSequence(key, text);
             }
             if (results.isEmpty()) {
-                Log.add(ctx, "발송 실패: 「" + r + "」 답장 입력칸을 못 찾았어");
+                Log.add(ctx, "발송 실패: 「" + r + "」 답장 입력란을 찾지 못했습니다.");
                 return false;
             }
             RemoteInput.addResultsToIntent(inputs, filled, results);
@@ -1206,7 +1370,8 @@ public final class KakaoListener extends NotificationListenerService {
             // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
             s.pending = null;
             s.inputs = null;
-            Log.add(ctx, "발송 실패: 「" + r + "」 답장창이 만료됐어(카톡 알림이 다시 와야 해)");
+            Log.add(ctx, "발송 실패: 「" + r + "」 답장창이 만료되었습니다. "
+                    + "카카오톡 알림이 다시 수신되면 복구됩니다.");
             return false;
         } catch (Throwable t) {
             Log.add(ctx, "발송 실패: 「" + r + "」 " + t);
@@ -1228,9 +1393,21 @@ public final class KakaoListener extends NotificationListenerService {
         return (s == null) ? 0 : s.othersSinceMine;
     }
 
+    /** 계정까지 지정해서 조회하는 버전 */
+    public static int othersSinceMine(RoomRef ref) {
+        Session s = session(ref);
+        return (s == null) ? 0 : s.othersSinceMine;
+    }
+
     /** 내가 그 방으로 마지막으로 보낸 시각 (epoch ms). 없으면 0. */
     public static long lastMineAt(String room) {
         Session s = session(room);
+        return (s == null) ? 0L : s.lastMine;
+    }
+
+    /** 계정까지 지정해서 조회하는 버전 */
+    public static long lastMineAt(RoomRef ref) {
+        Session s = session(ref);
         return (s == null) ? 0L : s.lastMine;
     }
 
@@ -1240,15 +1417,34 @@ public final class KakaoListener extends NotificationListenerService {
         return (s == null) ? 0L : s.lastAt;
     }
 
+    /** 계정까지 지정해서 조회하는 버전 */
+    public static long lastSeenAt(RoomRef ref) {
+        Session s = session(ref);
+        return (s == null) ? 0L : s.lastAt;
+    }
+
     /** 지금 그 방으로 발송할 수 있나 (= 살아있는 답장창이 있나) */
     public static boolean hasSession(String room) {
-        Session s = session(room);
+        return live(session(room));
+    }
+
+    /** 계정까지 지정해서 확인하는 버전 */
+    public static boolean hasSession(RoomRef ref) {
+        return live(session(ref));
+    }
+
+    private static boolean live(Session s) {
         return s != null && s.pending != null && s.inputs != null && s.inputs.length > 0;
     }
 
+    /** 저장값(방 이름 또는 RoomRef.key())으로 세션 조회. 구버전 저장값 호환용이다. */
     public static Session session(String room) {
-        if (room == null) return null;
-        return SESSIONS.get(room.trim());
+        return lookup(room);
+    }
+
+    /** 계정까지 지정해서 세션 조회 */
+    public static Session session(RoomRef ref) {
+        return findSession(ref, false);
     }
 
     /** 세션이 너무 쌓이면 오래 본 적 없는 방부터 버린다 (방금 만든 방은 남긴다) */
@@ -1269,16 +1465,13 @@ public final class KakaoListener extends NotificationListenerService {
         }
     }
 
-    /** 발송 가능한 방 이름들 (지금 세션이 살아있는 방만) */
-    public static List<String> liveRooms() {
-        ArrayList<String> out = new ArrayList<String>();
+    /** 발송 가능한 방들 (지금 세션이 살아있는 방만) */
+    public static List<RoomRef> liveRooms() {
+        ArrayList<RoomRef> out = new ArrayList<RoomRef>();
         Iterator<Map.Entry<String, Session>> it = SESSIONS.entrySet().iterator();
         while (it.hasNext()) {
-            Map.Entry<String, Session> e = it.next();
-            Session s = e.getValue();
-            if (s != null && s.pending != null && s.inputs != null && s.inputs.length > 0) {
-                out.add(e.getKey());
-            }
+            Session s = it.next().getValue();
+            if (live(s)) out.add(s.ref);
         }
         return out;
     }
@@ -1286,6 +1479,14 @@ public final class KakaoListener extends NotificationListenerService {
     /** 마지막으로 본 내 표시이름. 모르면 "". */
     public static String selfName() {
         return (selfName == null) ? "" : selfName;
+    }
+
+    /** 그 계정의 내 표시이름. 그 계정에서 못 봤으면 마지막으로 본 이름, 그것도 없으면 "". */
+    public static String selfName(String acc) {
+        String k = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
+        String v = SELF.get(k);
+        if (v != null && v.length() > 0) return v;
+        return selfName();
     }
 
     /** 알림 읽기 권한이 실제로 붙어 있나 (설정에 체크돼 있는지는 connected(ctx) 로 확인) */
@@ -1306,16 +1507,36 @@ public final class KakaoListener extends NotificationListenerService {
         }
     }
 
-    // ── 방 이름 캐시 (평문 Prefs · 이름만 · 최대 50개) ────────────────────────
+    // ── 방 캐시 (평문 Prefs · 계정 + 방 이름 + 단체여부 + 감지시각 · 최대 50개) ──
+    //
+    //  키는 RoomRef.key() 다. 구버전 저장값(줄바꿈으로 이은 방 이름 목록)은 읽을 때
+    //  기본 계정("0")·1:1·감지시각 0 으로 채워 넣는다 (UI_V3 6장 하위호환).
 
-    /** 최근 감지된 방 이름 (최신이 앞). 설정 화면의 방 선택 목록에 쓴다. */
-    public static List<String> knownRooms(Context c) {
+    /** 최근 감지된 방 (최신이 앞). 방 관리 화면의 목록에 쓴다. */
+    public static List<RoomInfo> knownRooms(Context c) {
         loadRooms(c);
-        ArrayList<String> out = new ArrayList<String>();
+        ArrayList<RoomInfo> out = new ArrayList<RoomInfo>();
         synchronized (ROOMS) {
-            out.addAll(ROOMS);
+            Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+            while (it.hasNext()) {
+                Room r = it.next().getValue();
+                if (r == null) continue;
+                out.add(new RoomInfo(r.ref, r.group, r.lastAt));
+            }
         }
         java.util.Collections.reverse(out);   // 최근에 본 방이 위로
+        return out;
+    }
+
+    /** 그 계정에서 감지된 방만 (최신이 앞) */
+    public static List<RoomInfo> knownRooms(Context c, String acc) {
+        String k = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
+        List<RoomInfo> all = knownRooms(c);
+        ArrayList<RoomInfo> out = new ArrayList<RoomInfo>();
+        for (int i = 0; i < all.size(); i++) {
+            RoomInfo r = all.get(i);
+            if (r.ref.acc.equals(k)) out.add(r);
+        }
         return out;
     }
 
@@ -1323,27 +1544,111 @@ public final class KakaoListener extends NotificationListenerService {
      * Context 없이 호출하는 버전. 가능하면 knownRooms(ctx) 를 써라 —
      * 이건 리스너가 한 번도 안 돌았고 앱 컨텍스트도 못 구한 상황에서 빈 목록이 나온다.
      */
-    public static List<String> knownRooms() {
+    public static List<RoomInfo> knownRooms() {
         return knownRooms(appContext());
     }
 
-    /** 그 방을 전에 본 적 있나. 자동응답의 "모르는 사람만" 판정에 쓴다. */
+    /** 그 계정에서 감지된 방 개수 (계정 화면의 `이 계정의 방 N개`) */
+    public static int roomCount(Context c, String acc) {
+        return knownRooms(c, acc).size();
+    }
+
+    /** 지금까지 확인된 계정키 (방 캐시 · 살아있는 세션 · 계정 레지스트리의 합집합) */
+    public static java.util.Set<String> accountsSeen(Context c) {
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        List<Accounts.Acc> regs = Accounts.all(c);
+        for (int i = 0; i < regs.size(); i++) out.add(regs.get(i).key);
+        loadRooms(c);
+        synchronized (ROOMS) {
+            Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+            while (it.hasNext()) {
+                Room r = it.next().getValue();
+                if (r != null) out.add(r.ref.acc);
+            }
+        }
+        Iterator<Map.Entry<String, Session>> si = SESSIONS.entrySet().iterator();
+        while (si.hasNext()) {
+            Session s = si.next().getValue();
+            if (s != null) out.add(s.ref.acc);
+        }
+        if (out.isEmpty()) out.add(RoomRef.DEFAULT_ACC);
+        return java.util.Collections.unmodifiableSet(out);
+    }
+
+    /**
+     * 그 방을 전에 본 적 있나. 자동응답의 「모르는 사람만」 판정에 쓴다.
+     * 계정 구분자가 없는 값이면 계정을 가리지 않고 이름만 본다 (구버전 저장값 호환).
+     */
     public static boolean isKnownRoom(String room) {
         if (room == null) return false;
-        String r = room.trim();
-        if (r.length() == 0) return false;
+        String v = room.trim();
+        if (v.length() == 0) return false;
+        if (v.indexOf(RoomRef.SEP) >= 0) return isKnownRoom(RoomRef.parse(v));
+
         loadRooms(appContext());
         synchronized (ROOMS) {
-            return ROOMS.contains(r);
+            Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+            while (it.hasNext()) {
+                Room r = it.next().getValue();
+                if (r != null && r.ref.name.equals(v)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 계정까지 맞춰서 확인하는 버전 */
+    public static boolean isKnownRoom(RoomRef ref) {
+        if (ref == null || !ref.valid()) return false;
+        loadRooms(appContext());
+        synchronized (ROOMS) {
+            return ROOMS.containsKey(ref.key());
         }
     }
 
-    /** 방 이름 캐시를 비운다 (내정보 탭의 초기화용) */
+    /**
+     * 감지된 방 1건을 캐시에서 지운다. 멤버 이름이 방으로 잘못 들어간 항목을 지우는 용도다
+     * (UI_V3 5장 — ✕ 버튼). 지운 방이 다시 감지되면 또 들어온다.
+     */
+    public static void forgetRoom(Context c, RoomRef ref) {
+        if (c == null || ref == null || !ref.valid()) return;
+        loadRooms(c);
+        boolean removed;
+        synchronized (ROOMS) {
+            removed = (ROOMS.remove(ref.key()) != null);
+        }
+        if (!removed) return;
+        SESSIONS.remove(ref.key());
+        saveRooms(c);
+    }
+
+    /** 그 계정의 감지 방·세션을 전부 지운다 (계정 기록 삭제에 딸려 온다) */
+    static void forgetAccount(Context c, String acc) {
+        String k = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
+        loadRooms(c);
+        boolean changed = false;
+        synchronized (ROOMS) {
+            Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+            while (it.hasNext()) {
+                Room r = it.next().getValue();
+                if (r != null && r.ref.acc.equals(k)) { it.remove(); changed = true; }
+            }
+        }
+        Iterator<Map.Entry<String, Session>> si = SESSIONS.entrySet().iterator();
+        while (si.hasNext()) {
+            Session s = si.next().getValue();
+            if (s != null && s.ref.acc.equals(k)) si.remove();
+        }
+        SELF.remove(k);
+        if (changed) saveRooms(c);
+    }
+
+    /** 감지 캐시를 비운다 (UI_V3 5장 — 감지 목록 전체 지우기. 선택된 방 설정은 건드리지 않는다) */
     public static void clearRooms(Context c) {
         synchronized (ROOMS) {
             ROOMS.clear();
             roomsLoaded = true;
         }
+        ROOM_WARNED.clear();
         Prefs.remove(c, K_ROOMS);
     }
 
@@ -1352,39 +1657,69 @@ public final class KakaoListener extends NotificationListenerService {
             java.util.Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     private static void roomSrcWarn(Context c, Msg m) {
-        if (m == null || m.room.length() == 0) return;
-        if (!ROOM_WARNED.add(m.room)) return;
+        if (m == null || !m.ref.valid()) return;
+        if (!ROOM_WARNED.add(m.ref.key())) return;
         if (ROOM_WARNED.size() > 200) ROOM_WARNED.clear();
-        Log.add(c, "「" + m.room + "」 은 단체방인데 카톡이 방 이름을 안 알려줘서 "
-                + "방 목록에 안 넣었어 (알림에 있는 건 말한 사람 이름이야). "
-                + "그 방에 직접 보내려면 방 이름을 손으로 입력해줘");
+        Log.add(c, "「" + m.ref.label(c) + "」: 단체방이나 카카오톡이 대화방 이름을 제공하지 않아 "
+                + "감지 목록에 등록하지 않았습니다. 알림에 포함된 이름은 발신자입니다. "
+                + "해당 대화방을 대상으로 지정하려면 대화방 이름을 직접 입력하십시오.");
     }
 
-    private static void remember(Context c, String room) {
-        if (room == null) return;
-        String r = room.trim();
-        if (r.length() == 0) return;
+    /** 감지된 방을 캐시에 반영한다. Prefs 쓰기는 꼭 필요할 때만 한다 (알림마다 쓰면 안 된다). */
+    private static void remember(Context c, RoomRef ref, boolean group, long at) {
+        if (ref == null || !ref.valid()) return;
         loadRooms(c);
-        boolean changed;
+        String key = ref.key();
+        long now = (at > 0) ? at : System.currentTimeMillis();
+        boolean save;
         synchronized (ROOMS) {
-            // 이미 맨 뒤(=가장 최근)면 건드릴 게 없다 → 알림마다 Prefs 를 쓰지 않는다
-            String newest = null;
-            Iterator<String> tail = ROOMS.iterator();
-            while (tail.hasNext()) newest = tail.next();
-            if (r.equals(newest)) return;
-
-            // LinkedHashSet 은 재삽입해도 순서가 안 바뀐다 → 최근 순서를 유지하려면 지우고 다시 넣는다
-            ROOMS.remove(r);
-            ROOMS.add(r);
+            Room r = ROOMS.get(key);
+            boolean newest = false;
+            if (r != null) {
+                // 이미 맨 뒤(=가장 최근)면 순서는 건드릴 게 없다
+                String last = null;
+                Iterator<String> tail = ROOMS.keySet().iterator();
+                while (tail.hasNext()) last = tail.next();
+                newest = key.equals(last);
+            }
+            if (r == null) {
+                r = new Room();
+                r.ref = ref;
+                r.group = group;
+                r.lastAt = now;
+                ROOMS.put(key, r);
+                save = true;
+            } else {
+                save = (r.group != group) || !newest;
+                r.group = group;
+                if (now > r.lastAt) r.lastAt = now;
+                if (!newest) {
+                    // LinkedHashMap 은 재삽입해도 순서가 안 바뀐다 → 지우고 다시 넣어 최신으로 올린다
+                    ROOMS.remove(key);
+                    ROOMS.put(key, r);
+                }
+            }
+            if (r.lastAt - r.savedAt >= ROOM_SAVE_MS) save = true;
             while (ROOMS.size() > MAX_ROOMS) {
-                Iterator<String> it = ROOMS.iterator();
+                Iterator<String> it = ROOMS.keySet().iterator();
                 if (!it.hasNext()) break;
                 it.next();
                 it.remove();
+                save = true;
             }
-            changed = true;
+            if (!save) return;
+            stampSaved();
         }
-        if (changed) saveRooms(c);
+        saveRooms(c);
+    }
+
+    /** 방금 저장한 감지시각을 기록한다 (Prefs 쓰기 간격 제한용). synchronized(ROOMS) 안에서만. */
+    private static void stampSaved() {
+        Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+        while (it.hasNext()) {
+            Room r = it.next().getValue();
+            if (r != null) r.savedAt = r.lastAt;
+        }
     }
 
     private static void loadRooms(Context c) {
@@ -1395,35 +1730,95 @@ public final class KakaoListener extends NotificationListenerService {
             if (c == null) { roomsLoaded = false; return; }   // 컨텍스트가 생기면 다시 시도한다
             try {
                 String raw = Prefs.getStr(c, K_ROOMS, null);
-                if (raw == null || raw.length() == 0) return;
-                String[] parts = raw.split("\n");
-                for (int i = 0; i < parts.length; i++) {
-                    String s = parts[i].trim();
-                    if (s.length() > 0) ROOMS.add(s);
+                if (raw == null || raw.trim().length() == 0) return;
+                String head = raw.trim();
+                boolean done = false;
+                if (head.charAt(0) == '{') {
+                    // 현재 형식. 방 이름이 '{' 로 시작하는 구버전 값이 섞여 있을 수 있으니
+                    // 실패하면 구버전 형식으로 한 번 더 읽는다 (감지 목록을 통째로 잃지 않게).
+                    try {
+                        loadJson(head);
+                        done = true;
+                    } catch (Throwable ignore) {
+                        ROOMS.clear();
+                    }
                 }
+                if (!done) loadLegacy(raw);
                 while (ROOMS.size() > MAX_ROOMS) {
-                    Iterator<String> it = ROOMS.iterator();
+                    Iterator<String> it = ROOMS.keySet().iterator();
                     if (!it.hasNext()) break;
                     it.next();
                     it.remove();
                 }
             } catch (Throwable t) {
-                Log.add(c, "방 목록을 불러오지 못했어: " + t);
+                Log.add(c, "대화방 목록을 불러오지 못했습니다: " + t);
             }
+        }
+    }
+
+    /** 현재 형식 (JSON) */
+    private static void loadJson(String raw) throws org.json.JSONException {
+        org.json.JSONObject o = new org.json.JSONObject(raw);
+        org.json.JSONArray arr = o.optJSONArray("r");
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            org.json.JSONObject j = arr.optJSONObject(i);
+            if (j == null) continue;
+            RoomRef ref = RoomRef.of(j.optString("a", RoomRef.DEFAULT_ACC), j.optString("n", ""));
+            if (!ref.valid()) continue;
+            Room r = new Room();
+            r.ref = ref;
+            r.group = j.optInt("g", 0) != 0;
+            r.lastAt = j.optLong("t", 0L);
+            r.savedAt = r.lastAt;
+            ROOMS.remove(ref.key());
+            ROOMS.put(ref.key(), r);
+        }
+    }
+
+    /** 구버전 형식 (줄바꿈으로 이은 방 이름). 계정은 기본 계정으로 채운다. */
+    private static void loadLegacy(String raw) {
+        String[] parts = raw.split("\n");
+        for (int i = 0; i < parts.length; i++) {
+            RoomRef ref = RoomRef.of(RoomRef.DEFAULT_ACC, parts[i]);
+            if (!ref.valid()) continue;
+            Room r = new Room();
+            r.ref = ref;
+            r.group = false;        // 구버전 저장값엔 단체여부가 없다. 다음 알림에서 채워진다
+            r.lastAt = 0L;
+            r.savedAt = 0L;
+            ROOMS.remove(ref.key());
+            ROOMS.put(ref.key(), r);
         }
     }
 
     private static void saveRooms(Context c) {
         if (c == null) return;
-        StringBuilder sb = new StringBuilder(256);
+        String out;
         synchronized (ROOMS) {
-            Iterator<String> it = ROOMS.iterator();
-            while (it.hasNext()) {
-                sb.append(it.next());
-                if (it.hasNext()) sb.append('\n');
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray();
+                Iterator<Map.Entry<String, Room>> it = ROOMS.entrySet().iterator();
+                while (it.hasNext()) {
+                    Room r = it.next().getValue();
+                    if (r == null) continue;
+                    org.json.JSONObject j = new org.json.JSONObject();
+                    j.put("a", r.ref.acc);
+                    j.put("n", r.ref.name);
+                    if (r.group) j.put("g", 1);
+                    if (r.lastAt > 0) j.put("t", r.lastAt);
+                    arr.put(j);
+                }
+                org.json.JSONObject o = new org.json.JSONObject();
+                o.put("v", 2);
+                o.put("r", arr);
+                out = o.toString();
+            } catch (Throwable t) {
+                Log.add(c, "대화방 목록을 저장하지 못했습니다: " + t);
+                return;
             }
         }
-        Prefs.putStr(c, K_ROOMS, sb.toString());
+        Prefs.putStr(c, K_ROOMS, out);
     }
 
     /**

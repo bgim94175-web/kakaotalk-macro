@@ -183,7 +183,7 @@ public final class Api {
         memPw = null;
         SharedPreferences p = prefs(c);
         if (p != null) p.edit().remove(K_PASSWORD).putBoolean(K_REMEMBER, false).apply();
-        App.log(c, "로그아웃했어");
+        App.log(c, "로그아웃되었습니다");
     }
 
     /** 자동 로그인 가능? (저장된 비번이 있나) */
@@ -246,7 +246,7 @@ public final class Api {
             putIf(b, "owner_name", ownerName);
             putIf(b, "owner_contact", ownerContact);
         } catch (Throwable t) {
-            fail(c, cb, "요청을 만들지 못했어: " + t);
+            fail(c, cb, "요청 생성에 실패했습니다: " + t);
             return;
         }
         post(c, "/admin/create", b, cb);
@@ -261,7 +261,7 @@ public final class Api {
             b.put("plan", plan);
             if ("custom".equals(plan)) b.put("days", days);
         } catch (Throwable t) {
-            fail(c, cb, "요청을 만들지 못했어: " + t);
+            fail(c, cb, "요청 생성에 실패했습니다: " + t);
             return;
         }
         post(c, "/admin/grant", b, cb);
@@ -276,7 +276,7 @@ public final class Api {
     public static void revoke(Context c, String key, boolean revoked, Cb cb) {
         JSONObject b = new JSONObject();
         try { b.put("key", normKey(key)); b.put("revoked", revoked); }
-        catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/revoke", b, cb);
     }
 
@@ -287,7 +287,7 @@ public final class Api {
             b.put("key", normKey(key));
             if (reason == null || reason.trim().length() == 0) b.put("reason", JSONObject.NULL);
             else b.put("reason", reason.trim());
-        } catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        } catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/block", b, cb);
     }
 
@@ -308,7 +308,7 @@ public final class Api {
             b.put("id", normOrderId(id));
             String k = normKey(key);
             if (k.length() > 0) b.put("key", k);
-        } catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        } catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/order-approve", b, cb);
     }
 
@@ -318,7 +318,7 @@ public final class Api {
         try {
             b.put("id", normOrderId(id));
             if (memo != null && memo.trim().length() > 0) b.put("memo", memo.trim());
-        } catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        } catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/order-cancel", b, cb);
     }
 
@@ -326,7 +326,7 @@ public final class Api {
     public static void depositMatch(Context c, long depositId, String orderId, Cb cb) {
         JSONObject b = new JSONObject();
         try { b.put("deposit_id", depositId); b.put("order_id", normOrderId(orderId)); }
-        catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/deposit-match", b, cb);
     }
 
@@ -334,7 +334,7 @@ public final class Api {
     public static void depositIgnore(Context c, long depositId, Cb cb) {
         JSONObject b = new JSONObject();
         try { b.put("deposit_id", depositId); }
-        catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/deposit-ignore", b, cb);
     }
 
@@ -344,7 +344,7 @@ public final class Api {
         try {
             b.put("sha256", normSha(sha256));
             if (label != null && label.trim().length() > 0) b.put("label", label.trim());
-        } catch (Throwable t) { fail(c, cb, "요청을 만들지 못했어: " + t); return; }
+        } catch (Throwable t) { fail(c, cb, "요청 생성에 실패했습니다: " + t); return; }
         post(c, "/admin/sig-add", b, cb);
     }
 
@@ -547,7 +547,7 @@ public final class Api {
                              final JSONObject body, final Cb cb) {
         final Context c = (ctx == null) ? null : ctx.getApplicationContext();
         if (c == null) {
-            if (cb != null) cb.done(err(0, "앱 상태가 이상해 (컨텍스트 없음)"));
+            if (cb != null) cb.done(err(0, "앱 상태가 비정상입니다. 앱을 다시 실행하십시오. (컨텍스트 없음)"));
             return;
         }
         final String base = base(c);
@@ -559,7 +559,7 @@ public final class Api {
                 try {
                     r = exec(base, method, path, pw, body);
                 } catch (Throwable t) {
-                    r = err(0, "요청 중에 알 수 없는 오류가 났어: " + t);
+                    r = err(0, "요청 처리 중 알 수 없는 오류가 발생했습니다: " + t);
                 }
                 if (!r.ok) App.log(c, method + " " + path + " 실패 — " + r.error);
                 final Result out = r;
@@ -567,7 +567,7 @@ public final class Api {
                     @Override public void run() {
                         if (cb == null) return;
                         try { cb.done(out); }
-                        catch (Throwable t) { App.log(c, "응답 처리 중 오류: " + t); }
+                        catch (Throwable t) { App.log(c, "응답 처리 중 오류가 발생했습니다: " + t); }
                     }
                 });
             }
@@ -576,13 +576,13 @@ public final class Api {
 
     /** 실제 통신. 백그라운드 스레드에서만 부른다. */
     private static Result exec(String base, String method, String path, String pw, JSONObject body) {
-        if (pw == null || pw.length() == 0) return err(401, "비밀번호가 없어 — 다시 로그인해줘");
+        if (pw == null || pw.length() == 0) return err(401, "비밀번호가 없습니다. 다시 로그인하십시오.");
 
         URL url;
         try {
             url = new URL(base + path);
         } catch (MalformedURLException e) {
-            return err(0, "서버 주소가 잘못됐어: " + base);
+            return err(0, "서버 주소가 올바르지 않습니다: " + base);
         }
 
         HttpURLConnection conn = null;
@@ -611,18 +611,18 @@ public final class Api {
             String text = read((code >= 400) ? conn.getErrorStream() : conn.getInputStream());
 
             if (code == 401 || code == 403) {
-                Result r = err(code, "비밀번호가 틀렸어");
+                Result r = err(code, "비밀번호가 일치하지 않습니다");
                 r.unauthorized = true;
                 return r;
             }
-            if (code == 404) return err(code, "서버에 그 기능이 없어 — 서버를 최신으로 배포했는지 확인해줘");
+            if (code == 404) return err(code, "서버에 해당 기능이 없습니다. 서버가 최신 버전으로 배포되었는지 확인하십시오.");
             if (code >= 500) return err(code, "서버 오류 (" + code + ")" + shortTail(text));
 
             JSONObject json;
             try {
                 json = new JSONObject(text == null ? "" : text);
             } catch (Throwable t) {
-                return err(code, "서버 응답을 이해 못 했어 (JSON 아님)" + shortTail(text));
+                return err(code, "서버 응답을 해석할 수 없습니다 (JSON 형식 아님)" + shortTail(text));
             }
 
             Result r = new Result();
@@ -633,21 +633,21 @@ public final class Api {
             if (r.ok) learnAudit(json);
             if (!r.ok) {
                 String e = json.optString("error", null);
-                if (e == null || e.length() == 0 || "null".equals(e)) e = "서버가 거절했어";
+                if (e == null || e.length() == 0 || "null".equals(e)) e = "서버가 요청을 거부했습니다";
                 r.error = e;
             }
             return r;
 
         } catch (java.net.SocketTimeoutException e) {
-            return err(0, "서버가 20초 안에 답을 안 줬어 (Render 가 자고 있으면 첫 요청이 느려. 다시 눌러봐)");
+            return err(0, "서버가 20초 내에 응답하지 않았습니다. 서버가 절전 상태인 경우 최초 요청이 지연됩니다. 다시 시도하십시오.");
         } catch (java.net.UnknownHostException e) {
-            return err(0, "서버에 연결 못 했어 — 주소를 못 찾아 (" + base + ")");
+            return err(0, "서버에 연결할 수 없습니다. 주소를 확인할 수 없습니다 (" + base + ")");
         } catch (java.net.ConnectException e) {
-            return err(0, "서버에 연결 못 했어 — 연결이 거부됐어");
+            return err(0, "서버에 연결할 수 없습니다. 연결이 거부되었습니다.");
         } catch (javax.net.ssl.SSLException e) {
-            return err(0, "서버에 연결 못 했어 — 보안 연결(HTTPS) 실패");
+            return err(0, "서버에 연결할 수 없습니다. 보안 연결(HTTPS)에 실패했습니다.");
         } catch (IOException e) {
-            return err(0, "서버에 연결 못 했어 (" + e.getClass().getSimpleName() + ")");
+            return err(0, "서버에 연결할 수 없습니다 (" + e.getClass().getSimpleName() + ")");
         } catch (Throwable t) {
             return err(0, "요청 실패: " + t);
         } finally {

@@ -61,7 +61,7 @@ public final class App extends Application {
                     if (e != null) e.printStackTrace(pw);
                     pw.flush();
                     saveCrash(appCtx, sw.toString());
-                    log(appCtx, "앱이 죽었어: " + (e == null ? "원인 불명" : String.valueOf(e)));
+                    log(appCtx, "앱이 비정상 종료되었습니다: " + (e == null ? "원인 미확인" : String.valueOf(e)));
                 } catch (Throwable ignore) {
                     // 크래시 핸들러가 또 죽으면 할 수 있는 게 없다
                 }

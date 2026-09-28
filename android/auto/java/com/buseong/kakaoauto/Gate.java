@@ -66,12 +66,12 @@ public final class Gate {
         }
 
         String name = Features.label(feature);
-        String title = everBought ? (name + " 기간이 끝났어") : (name + " 기능은 별도 구매가 필요해");
+        String title = everBought ? (name + " 사용 기간 만료") : (name + " 별도 구매 필요");
         String msg = Features.descLong(feature) + "\n\n"
                 + (everBought
-                    ? "연장하면 바로 다시 켜져.\n"
-                    : "이 기능만 따로 살 수 있어.\n")
-                + "결제하면 아래 [지금 확인] 만 누르면 바로 켜져 — 다른 탭으로 갈 필요 없어.";
+                    ? "기간을 연장하면 즉시 다시 사용할 수 있습니다.\n"
+                    : "이 기능만 단독으로 구매할 수 있습니다.\n")
+                + "결제 후 아래 [지금 확인] 을 누르면 활성화됩니다. 다른 탭으로 이동할 필요는 없습니다.";
 
         AlertDialog.Builder b = Ui.dialog(a, title);
         b.setMessage(msg);
@@ -83,7 +83,7 @@ public final class Gate {
         });
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
-        Log.add(a, name + " 실행을 막았어 (구매 안 된 기능)");
+        Log.add(a, name + " 실행을 차단했습니다. (미구매 기능)");
     }
 
     /** 키 자체가 없거나 인증이 안 된 경우 */
@@ -92,17 +92,17 @@ public final class Gate {
         if (s != null && s.reason != null && s.reason.length() > 0) {
             try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = null; }
         }
-        String msg = ((why == null || why.length() == 0) ? "아직 라이선스 인증이 안 됐어." : why)
-                + "\n\n내정보 탭에서 키를 등록하면 바로 쓸 수 있어. 키가 없으면 구매 페이지에서 살 수 있어.";
+        String msg = ((why == null || why.length() == 0) ? "라이선스 인증이 완료되지 않았습니다." : why)
+                + "\n\n내정보 탭에서 라이선스 키를 등록하면 사용할 수 있습니다. 키가 없으면 구매 페이지에서 구매하십시오.";
 
-        AlertDialog.Builder b = Ui.dialog(a, "라이선스 인증이 필요해");
+        AlertDialog.Builder b = Ui.dialog(a, "라이선스 인증 필요");
         b.setMessage(msg);
         b.setPositiveButton("구매하기", new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface d, int w) { openBuy(a, feature); }
         });
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
-        Log.add(a, "라이선스가 없어서 실행을 막았어 (" + Features.label(feature) + ")");
+        Log.add(a, "라이선스가 없어 실행을 차단했습니다. (" + Features.label(feature) + ")");
     }
 
     /** 다른 기기에서 접속돼서 잠긴 경우 */
@@ -111,18 +111,18 @@ public final class Gate {
         if (s != null && s.reason != null && s.reason.length() > 0) {
             try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = null; }
         }
-        String msg = ((why == null || why.length() == 0) ? "이 기기는 잠겼어." : why)
-                + "\n\n키 1개는 기기 1대에서만 쓸 수 있어. 기기를 바꾸거나 초기화했으면 관리자에게 기기 초기화를 요청해줘."
-                + "\n초기화를 받은 뒤엔 내정보 탭에서 키를 다시 등록하면 풀려 (새로고침으로는 안 풀린다).";
+        String msg = ((why == null || why.length() == 0) ? "현재 기기가 잠금 처리되었습니다." : why)
+                + "\n\n라이선스 키 1개당 기기 1대만 등록됩니다. 기기를 변경하거나 초기화한 경우 관리자에게 기기 초기화를 요청하십시오."
+                + "\n초기화 후 내정보 탭에서 키를 다시 등록하면 잠금이 해제됩니다. 새로고침만으로는 해제되지 않습니다.";
 
-        AlertDialog.Builder b = Ui.dialog(a, "이 기기는 잠겼어");
+        AlertDialog.Builder b = Ui.dialog(a, "기기 잠금");
         b.setMessage(msg);
         b.setPositiveButton("초기화 요청", new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface d, int w) { openMy(a); }
         });
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
-        Log.add(a, "기기가 잠겨서 실행을 막았어");
+        Log.add(a, "기기가 잠금 상태이므로 실행을 차단했습니다.");
     }
 
     /**
@@ -138,29 +138,29 @@ public final class Gate {
         final MainActivity main = (a instanceof MainActivity) ? (MainActivity) a : null;
         final boolean wasShellOk = (main != null) && Nav.shellOk(main);
 
-        Ui.toast(a, "결제·기능 상태를 확인하는 중이야…");
+        Ui.toast(a, "결제 및 기능 상태를 확인하고 있습니다.");
         License.refresh(a, new License.Cb() {
             @Override public void done(boolean ok, String reason) {
                 // 잠금이 풀렸을 수 있다 → 잠금용 긴 주기를 정상 주기로 되돌린다
                 try { Scheduler.ensureHeartbeat(a); } catch (Throwable t) {
-                    Log.add(a, "라이선스 확인 주기를 다시 잡지 못했어: " + t);
+                    Log.add(a, "라이선스 확인 주기를 재설정하지 못했습니다: " + t);
                 }
 
                 if (!ok) {
                     String why = null;
                     try { why = License.reasonKr(reason); } catch (Throwable t) { why = null; }
-                    Ui.toast(a, "확인 못 했어" + ((why == null || why.length() == 0) ? "" : " — " + why));
+                    Ui.toast(a, "상태를 확인하지 못했습니다." + ((why == null || why.length() == 0) ? "" : " (" + why + ")"));
                 } else {
                     boolean on = true;
                     if (feature != null) {
                         try { on = License.allowed(a, feature); } catch (Throwable t) { on = false; }
                     }
                     if (feature == null) {
-                        Ui.toast(a, "상태를 새로 받았어");
+                        Ui.toast(a, "상태를 갱신했습니다.");
                     } else if (on) {
-                        Ui.toast(a, Features.label(feature) + " 켜졌어! 다시 눌러봐");
+                        Ui.toast(a, Features.label(feature) + " 사용이 활성화되었습니다. 다시 실행하십시오.");
                     } else {
-                        Ui.toast(a, "아직 안 켜졌어. 입금 확인까지 1~2분 걸릴 수 있어 (조금 뒤에 다시 눌러봐)");
+                        Ui.toast(a, "아직 활성화되지 않았습니다. 입금 확인까지 1~2분이 소요될 수 있습니다.");
                     }
                 }
 
@@ -174,9 +174,9 @@ public final class Gate {
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             c.startActivity(i);
-            Log.add(c, what + "를 열었어");
+            Log.add(c, what + " 을(를) 열었습니다.");
         } catch (Throwable t) {
-            Ui.toast(c, "브라우저를 못 열었어. 주소를 직접 열어줘");
+            Ui.toast(c, "브라우저를 열지 못했습니다. 주소를 직접 입력하여 접속하십시오.");
             Log.add(c, what + " 열기 실패 (" + url + "): " + t);
         }
     }

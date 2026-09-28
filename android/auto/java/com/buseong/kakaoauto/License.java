@@ -177,7 +177,7 @@ public final class License {
             Prefs.putBool(c, K_LOCKED, true);
             Prefs.putStr(c, K_REASON, "clock_rollback");
             Prefs.putBool(c, K_OK, false);
-            Log.add(c, "기기 시간이 되돌려진 걸 발견해서 잠갔어 — 다시 인증해줘");
+            Log.add(c, "기기 시간 변경이 감지되어 잠금 처리되었습니다. 라이선스를 다시 인증하십시오.");
             return s;
         }
         // 오프라인 유예 초과
@@ -251,15 +251,15 @@ public final class License {
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
         if (u.length() == 0 || SERVER.equals(u)) {
             Prefs.remove(c, PREF_SERVER);
-            Log.add(c, "서버 주소를 기본값으로 되돌렸어");
+            Log.add(c, "서버 주소를 기본값으로 복원했습니다.");
             return;
         }
         if (!u.startsWith("http://") && !u.startsWith("https://")) {
-            Log.add(c, "서버 주소가 http:// 또는 https:// 로 시작해야 해");
+            Log.add(c, "서버 주소는 http:// 또는 https:// 로 시작해야 합니다.");
             return;
         }
         Prefs.putStr(c, PREF_SERVER, u);
-        Log.add(c, "서버 주소를 바꿨어: " + u);
+        Log.add(c, "서버 주소를 변경했습니다: " + u);
     }
 
     // ── 활성화 (/verify) ──────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ public final class License {
         final String k = normKey(key);
         if (app == null) { post(cb, false, "bad_request"); return; }
         if (k.length() < 4) {
-            Log.add(app, "키가 너무 짧아 — 다시 확인해줘");
+            Log.add(app, "라이선스 키가 너무 짧습니다. 키를 다시 확인하십시오.");
             post(cb, false, "bad_request");
             return;
         }
@@ -297,7 +297,7 @@ public final class License {
                         try {
                             Scheduler.ensureHeartbeat(app);
                         } catch (Throwable t) {
-                            Log.add(app, "라이선스 자동확인 예약에 실패했어 — 가끔 앱을 열어줘: " + t);
+                            Log.add(app, "라이선스 자동확인 예약에 실패했습니다. 주기적으로 앱을 실행하십시오. (" + t + ")");
                         }
                         Log.add(app, "라이선스 인증 성공 · " + featSummary(app));
                     } else {
@@ -307,7 +307,7 @@ public final class License {
                     }
                 } catch (Throwable t) {
                     reason = "no_network";
-                    Log.add(app, "라이선스 인증 중 오류가 났어: " + t);
+                    Log.add(app, "라이선스 인증 중 오류가 발생했습니다: " + t);
                 } finally {
                     ACTIVATING.set(false);
                     post(cb, ok, reason);
@@ -344,16 +344,16 @@ public final class License {
                         reason = p.fail;
                         applyFail(app, reason, k);
                         if ("session_superseded".equals(reason)) {
-                            Log.add(app, "다른 기기에서 접속돼서 이 기기는 잠겼어");
+                            Log.add(app, "다른 기기에서 인증되어 현재 기기가 잠금 처리되었습니다.");
                         } else if (isHard(reason)) {
                             Log.add(app, "라이선스 확인 실패: " + reasonKr(reason));
                         } else {
-                            Log.add(app, "라이선스 확인을 못 했어 (" + reasonKr(reason) + ") — 유예기간 안이면 계속 동작해");
+                            Log.add(app, "라이선스를 확인하지 못했습니다 (" + reasonKr(reason) + "). 유예기간 내에는 정상 동작합니다.");
                         }
                     }
                 } catch (Throwable t) {
                     reason = "no_network";
-                    Log.add(app, "라이선스 확인 중 오류가 났어: " + t);
+                    Log.add(app, "라이선스 확인 중 오류가 발생했습니다: " + t);
                 } finally {
                     post(cb, ok, reason);
                 }
@@ -405,7 +405,7 @@ public final class License {
                     }
                 } catch (Throwable t) {
                     reason = "no_network";
-                    Log.add(app, "새로고침 중 오류가 났어: " + t);
+                    Log.add(app, "새로고침 중 오류가 발생했습니다: " + t);
                 } finally {
                     post(cb, ok, reason);
                 }
@@ -447,7 +447,7 @@ public final class License {
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "설정 캐시 비우기 실패", t);
         }
-        Log.add(app, "라이선스를 이 기기에서 해제했어 (설정도 같이 지워졌어)");
+        Log.add(app, "현재 기기의 라이선스를 해제했습니다. 저장된 설정도 함께 삭제되었습니다.");
     }
 
     // ── 실패 코드 → 한국어 ────────────────────────────────────────────────────
@@ -456,26 +456,26 @@ public final class License {
     public static String reasonKr(String reason) {
         String r = (reason == null) ? "" : reason.trim();
         if (r.length() == 0) return "";
-        if ("bad_request".equals(r)) return "요청이 잘못됐어";
-        if ("invalid_key".equals(r)) return "없는 키야";
-        if ("revoked".equals(r)) return "사용 중지된 키야";
-        if ("blocked".equals(r)) return "차단된 키야 (관리자 문의)";
-        if ("device_mismatch".equals(r)) return "다른 기기에 등록된 키야 (키 1개당 기기 1대)";
-        if ("no_entitlement".equals(r)) return "구매한 기능이 없어";
-        if ("expired".equals(r)) return "기간이 끝났어";
-        if ("bad_app_sig".equals(r)) return "위조된 앱이야";
-        if ("update_required".equals(r)) return "앱을 최신 버전으로 업데이트해줘";
-        if ("no_network".equals(r)) return "서버에 연결 못 했어";
-        if ("bad_signature".equals(r)) return "서버 응답이 위조됐어";
-        if ("session_superseded".equals(r)) return "다른 기기에서 접속됨 — 이 기기는 잠김";
-        if ("clock_rollback".equals(r)) return "기기 시간이 되돌려졌어. 다시 인증해줘";
-        if ("grace_expired".equals(r)) return "오프라인으로 너무 오래 썼어. 인터넷 연결하고 다시 확인해줘";
-        if ("rate_limited".equals(r)) return "요청이 너무 많아. 잠깐 뒤에 다시 해줘";
-        if ("no_license".equals(r)) return "아직 라이선스 인증이 안 됐어";
-        if ("busy".equals(r)) return "이미 인증 중이야. 잠깐만 기다려줘";
-        if ("too_large".equals(r)) return "설정이 너무 커서 서버가 거절했어";
-        if ("server_error".equals(r)) return "서버에 문제가 생겼어. 잠깐 뒤에 다시 해줘";
-        return "알 수 없는 오류야 (" + r + ")";
+        if ("bad_request".equals(r)) return "잘못된 요청입니다.";
+        if ("invalid_key".equals(r)) return "존재하지 않는 라이선스 키입니다.";
+        if ("revoked".equals(r)) return "사용이 중지된 라이선스 키입니다.";
+        if ("blocked".equals(r)) return "차단된 라이선스 키입니다. 관리자에게 문의하십시오.";
+        if ("device_mismatch".equals(r)) return "다른 기기에 등록된 라이선스 키입니다. 키 1개당 기기 1대만 등록됩니다.";
+        if ("no_entitlement".equals(r)) return "구매한 기능이 없습니다.";
+        if ("expired".equals(r)) return "사용 기간이 만료되었습니다.";
+        if ("bad_app_sig".equals(r)) return "앱 서명이 일치하지 않습니다.";
+        if ("update_required".equals(r)) return "앱을 최신 버전으로 업데이트하십시오.";
+        if ("no_network".equals(r)) return "서버에 연결하지 못했습니다.";
+        if ("bad_signature".equals(r)) return "서버 응답의 서명이 유효하지 않습니다.";
+        if ("session_superseded".equals(r)) return "다른 기기에서 인증되어 현재 기기가 잠금 상태입니다.";
+        if ("clock_rollback".equals(r)) return "기기 시간 변경이 감지되었습니다. 라이선스를 다시 인증하십시오.";
+        if ("grace_expired".equals(r)) return "오프라인 사용 기간을 초과했습니다. 인터넷에 연결한 후 다시 확인하십시오.";
+        if ("rate_limited".equals(r)) return "요청이 제한되었습니다. 잠시 후 다시 시도하십시오.";
+        if ("no_license".equals(r)) return "라이선스 인증이 완료되지 않았습니다.";
+        if ("busy".equals(r)) return "인증이 진행 중입니다. 완료까지 대기하십시오.";
+        if ("too_large".equals(r)) return "설정 용량이 초과되어 서버가 요청을 거부했습니다.";
+        if ("server_error".equals(r)) return "서버 오류가 발생했습니다. 잠시 후 다시 시도하십시오.";
+        return "알 수 없는 오류입니다. (" + r + ")";
     }
 
     /** 서버가 내린 판정(상태를 바꿔야 하는 이유)인가. 통신/검증 실패는 아니다. */
@@ -534,7 +534,7 @@ public final class License {
         try {
             Settings.afterLicense(c);
         } catch (Throwable t) {
-            Log.add(c, "설정 준비 중 오류가 났어: " + t);
+            Log.add(c, "설정 준비 중 오류가 발생했습니다: " + t);
         }
     }
 
@@ -578,7 +578,7 @@ public final class License {
                 Keystore.putConfigKey(c, ck);
                 Prefs.clearCache();
                 try { Settings.invalidate(); } catch (Throwable t) { /* 무시 */ }
-                Log.add(c, "설정키를 서버 응답으로 다시 받아 보관했어");
+                Log.add(c, "서버 응답으로 설정키를 재수신하여 보관했습니다.");
             }
         }
         invalidate();
@@ -655,7 +655,7 @@ public final class License {
                     f.plan = (p == null || p.length() == 0 || "null".equals(p)) ? null : p;
                 }
             } catch (Throwable t) {
-                Log.add(c, "기능 목록을 읽지 못했어 — 새로고침이 필요해");
+                Log.add(c, "기능 목록을 읽지 못했습니다. 새로고침이 필요합니다.");
             }
         }
         featRaw = raw;
@@ -807,13 +807,13 @@ public final class License {
         }
         if (r.code != 200) {
             // 서버가 서명 안 한 응답(500/503 등)은 서명검증 대상이 아니다. 연결 실패로 취급한다.
-            Log.add(c, "서버가 HTTP " + r.code + " 로 답했어" + snippet(r.raw));
+            Log.add(c, "서버가 HTTP " + r.code + " 로 응답했습니다." + snippet(r.raw));
             p.fail = (r.code >= 500) ? "server_error" : "no_network";
             return p;
         }
         String raw = (r.raw == null) ? "" : r.raw.trim();
         if (raw.length() == 0) {
-            Log.add(c, "서버 응답이 비어있어");
+            Log.add(c, "서버 응답이 비어 있습니다.");
             p.fail = "no_network";
             return p;
         }
@@ -824,13 +824,13 @@ public final class License {
         String sigB64 = null;
         while (m.find()) { st = m.start(); en = m.end(); sigB64 = m.group(1); }
         if (sigB64 == null || sigB64.length() == 0) {
-            Log.add(c, "서버 응답에 서명이 없어" + snippet(raw));
+            Log.add(c, "서버 응답에 서명이 없습니다." + snippet(raw));
             p.fail = "bad_signature";
             return p;
         }
         String signed = raw.substring(0, st) + raw.substring(en);
         if (!sigOk(c, signed, sigB64)) {
-            Log.add(c, "서버 응답 서명이 안 맞아 — 중간에서 응답을 바꿨을 수 있어");
+            Log.add(c, "서버 응답 서명이 일치하지 않습니다. 전송 중 응답이 변조되었을 수 있습니다.");
             p.fail = "bad_signature";
             return p;
         }
@@ -839,7 +839,7 @@ public final class License {
         try {
             o = new JSONObject(raw);
         } catch (Throwable t) {
-            Log.add(c, "서버 응답을 해석 못 했어" + snippet(raw));
+            Log.add(c, "서버 응답을 해석하지 못했습니다." + snippet(raw));
             p.fail = "bad_signature";
             return p;
         }
@@ -847,7 +847,7 @@ public final class License {
         // ── nonce: 응답 재생(replay) 방어
         String back = str(o, "nonce", "");
         if (nonce != null && !nonce.equals(back)) {
-            Log.add(c, "응답 nonce 가 안 맞아 — 지난 응답을 재사용한 것 같아");
+            Log.add(c, "응답 nonce 가 일치하지 않습니다. 이전 응답이 재사용된 것으로 판단됩니다.");
             p.fail = "bad_signature";
             return p;
         }
@@ -855,7 +855,7 @@ public final class License {
         long ts = o.optLong("ts", 0L);
         long diff = Math.abs(System.currentTimeMillis() - ts);
         if (ts <= 0 || diff > TS_SKEW_MS) {
-            Log.add(c, "서버 응답 시각이 " + (diff / 60000) + "분 어긋났어 — 기기 시간을 확인해줘");
+            Log.add(c, "서버 응답 시각이 " + (diff / 60000) + "분 차이가 발생했습니다. 기기 시간을 확인하십시오.");
             p.fail = "bad_signature";
             return p;
         }
@@ -891,8 +891,8 @@ public final class License {
         // 안드로이드 13(API 33) 아래 기기는 플랫폼에 Ed25519 가 아예 없다.
         // 그냥 실패시키면 안드로이드 8~12 사용자는 앱을 영구히 못 쓰니 직접 구현한 검증기로 한 번 더 본다.
         if (Ed25519.verifySpki(spki, data, sig)) return true;
-        if (last != null) Log.add(c, "이 기기가 Ed25519 검증을 못 해 (" + last + ")");
-        else Log.add(c, "서버 응답 서명이 안 맞아 (내장 Ed25519 검증기)");
+        if (last != null) Log.add(c, "이 기기에서 Ed25519 검증을 수행할 수 없습니다. (" + last + ")");
+        else Log.add(c, "서버 응답 서명이 일치하지 않습니다. (내장 Ed25519 검증기)");
         return false;
     }
 

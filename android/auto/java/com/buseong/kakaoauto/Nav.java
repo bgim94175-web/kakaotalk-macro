@@ -31,11 +31,15 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 하단 탭바 + 화면 전환, 그리고 화면들이 같이 쓰는 조립 도우미.
+ * 하단 탭바 + 화면 전환 + 서브화면 스택, 그리고 화면들이 같이 쓰는 조립 도우미.
  *
  * 화면 규약: 각 화면은 {@code static View build(MainActivity)} 로 뷰를 만들고,
  * 값이 바뀌어 다시 그려야 하면 {@code static void refresh()} 를 제공한다.
  * 탭 전환은 컨테이너를 비우고 새로 만든 뷰를 꽂는다 → 스크롤 위치는 자동으로 맨 위.
+ *
+ * 설정 상세는 {@link #push(MainActivity, String, View)} 로 서브화면을 연다 (UI_V3 2장).
+ * 서브화면에서는 탭바가 숨고 상단에 {@code ‹ 제목} 바가 붙는다. 뒤로가기 키는
+ * MainActivity.onBackPressed → {@link #pop()} 순서로 처리된다.
  *
  * 색·여백은 전부 Theme/Ui 에서 가져온다. 여기 말고 화면 코드에 숫자를 박지 마라.
  */
@@ -58,6 +62,10 @@ public final class Nav {
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<ViewGroup> HOST;
     private static WeakReference<LinearLayout> BAR;
+    private static WeakReference<View> BAR_ROOT;
+
+    /** 올라가 있는 서브화면들 (아래 → 위). 비어있으면 탭 화면을 보고 있는 것이다. */
+    private static final ArrayList<View> SUBS = new ArrayList<View>();
 
     /** 지금 보고 있는 탭 */
     public static int current() { return cur; }
@@ -114,6 +122,9 @@ public final class Nav {
         }
 
         BAR = new WeakReference<LinearLayout>(row);
+        BAR_ROOT = new WeakReference<View>(barRoot);
+        SUBS.clear();           // 셸을 다시 만들면 예전 서브화면은 이미 사라졌다
+        barRoot.setVisibility(View.VISIBLE);
         paintBar();
         return barRoot;
     }
@@ -125,13 +136,15 @@ public final class Nav {
         if (a == null || host == null) return;
         if (tab < 0 || tab > ACCOUNT) tab = HOME;
         cur = tab;
+        SUBS.clear();           // 탭을 옮기면 서브화면 스택은 초기화된다
+        setBarVisible(true);
         paintBar();
 
         View v;
         try {
             v = screen(a, tab);
         } catch (Throwable t) {
-            Log.add(a, "화면을 그리다가 오류가 났어 (" + TAB_NAMES[tab] + "): " + t);
+            Log.add(a, "화면 구성 실패 (" + TAB_NAMES[tab] + "): " + t);
             v = crashView(a, t);
         }
         try {
@@ -139,7 +152,7 @@ public final class Nav {
             host.addView(v, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         } catch (Throwable t) {
-            Log.add(a, "화면을 꽂지 못했어: " + t);
+            Log.add(a, "화면 표시 실패: " + t);
         }
     }
 
@@ -148,21 +161,169 @@ public final class Nav {
         MainActivity a = act();
         if (a == null) return;
         try {
+            // 탭 화면과 그 위에 쌓인 서브화면을 같이 갱신한다.
+            // 시스템 설정(권한 등)을 다녀온 뒤 서브화면만 옛 상태로 남는 문제가 있었다.
             if (cur == HOME) MainActivity.refreshHome();
-            else if (cur == MACRO) ScreenMacro.refresh();
-            else if (cur == BOT) ScreenBot.refresh();
+            else if (cur == MACRO) { ScreenMacro.refresh(); MacroDetail.refresh(); }
+            else if (cur == BOT) { ScreenBot.refresh(); BotDetail.refresh(); }
             else ScreenAccount.refresh();
         } catch (Throwable t) {
-            Log.add(a, "화면 갱신에 실패했어: " + t);
+            Log.add(a, "화면 갱신 실패: " + t);
         }
     }
 
     /** 잠금화면으로 돌아갈 때 참조를 끊는다 (액티비티 누수 방지) */
     public static void detach() {
+        SUBS.clear();
         ACT = null;
         HOST = null;
         BAR = null;
+        BAR_ROOT = null;
         cur = HOME;
+    }
+
+    // ── 서브화면 스택 (UI_V3 2장) ─────────────────────────────────────────────
+    //  설정 상세는 아코디언이 아니라 풀스크린 서브화면으로 연다.
+    //  탭 화면은 그 밑에 그대로 남아있다 → 되돌아올 때 스크롤 위치가 살아있고,
+    //  서브화면끼리도 각자 스크롤을 갖는다 (같은 뷰를 재사용하지 않으니 섞이지 않는다).
+
+    /**
+     * 서브화면을 올린다. 상단에 `‹ 제목` 바가 고정으로 붙고 하단 탭바는 숨는다.
+     * 중첩 푸시가 된다 (대상 방 → 계정 설정). 탭을 옮기면 스택은 비워진다.
+     *
+     * @param content 화면 본문. 보통 Ui.scroll(Ui.screen(...)) 을 넘긴다. LayoutParams 는 여기서 덮어쓴다.
+     */
+    public static void push(MainActivity a, String title, View content) {
+        ViewGroup host = host();
+        if (a == null || a.isFinishing() || host == null || content == null) return;
+
+        LinearLayout wrap = new LinearLayout(a);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setBackgroundColor(Theme.BG);
+        // 아래 화면으로 터치가 새지 않게 (FrameLayout 은 안 먹은 터치를 다음 자식에게 넘긴다)
+        wrap.setClickable(true);
+        wrap.setFocusable(true);
+
+        wrap.addView(subBar(a, title), new LinearLayout.LayoutParams(MATCH, WRAP));
+        wrap.addView(content, new LinearLayout.LayoutParams(MATCH, 0, 1f));
+
+        try {
+            host.addView(wrap, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        } catch (Throwable t) {
+            Log.add(a, "서브화면 표시 실패 (" + title + "): " + t);
+            return;
+        }
+        SUBS.add(wrap);
+        setBarVisible(false);
+
+        // 전환은 알파 페이드만 (밀고 당기는 애니메이션은 라이브러리 없이 하면 더 어색하다)
+        try {
+            wrap.setAlpha(0f);
+            wrap.animate().alpha(1f).setDuration(140L).start();
+        } catch (Throwable ignore) {
+            wrap.setAlpha(1f);
+        }
+    }
+
+    /** 맨 위 서브화면을 닫는다. 스택이 비어 있으면 false (뒤로가기 키가 이걸 보고 앱을 닫는다). */
+    public static boolean pop() {
+        if (SUBS.isEmpty()) return false;
+        View top = SUBS.remove(SUBS.size() - 1);
+        try {
+            if (top.getParent() instanceof ViewGroup) ((ViewGroup) top.getParent()).removeView(top);
+        } catch (Throwable t) {
+            Log.add(top.getContext(), "서브화면 닫기 실패: " + t);
+        }
+        if (SUBS.isEmpty()) setBarVisible(true);
+        return true;
+    }
+
+    /** 서브화면에 있는가 (탭바 숨김 판단) */
+    public static boolean inSub() { return !SUBS.isEmpty(); }
+
+    /** 서브화면 상단 바: `‹ 제목`. 뒤로 영역은 48dp 정사각. */
+    private static LinearLayout subBar(final MainActivity a, String title) {
+        LinearLayout barCol = new LinearLayout(a);
+        barCol.setOrientation(LinearLayout.VERTICAL);
+        barCol.setBackgroundColor(Theme.BG);
+
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(Theme.dp(a, 56));
+        row.setPadding(Theme.dp(a, 4), Theme.dp(a, 4), Theme.dp(a, 16), Theme.dp(a, 4));
+
+        TextView back = new TextView(a);
+        back.setText("‹");
+        back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
+        back.setTextColor(Theme.TEXT);
+        back.setGravity(Gravity.CENTER);
+        back.setIncludeFontPadding(false);
+        back.setContentDescription("뒤로");
+        back.setClickable(true);
+        back.setFocusable(true);
+        Ui.press(back);
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pop(); }
+        });
+        row.addView(back, new LinearLayout.LayoutParams(Theme.dp(a, 48), Theme.dp(a, 48)));
+
+        TextView t = new TextView(a);
+        t.setText((title == null) ? "" : title);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+        t.setTextColor(Theme.TEXT);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setLetterSpacing(-0.01f);
+        t.setIncludeFontPadding(false);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, WRAP, 1f);
+        tp.leftMargin = Theme.dp(a, 2);
+        row.addView(t, tp);
+
+        barCol.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        View line = new View(a);
+        line.setBackgroundColor(Theme.LINE);
+        barCol.addView(line, new LinearLayout.LayoutParams(MATCH, Math.max(1, Theme.dp(a, 1))));
+        return barCol;
+    }
+
+    private static void setBarVisible(boolean show) {
+        View b = (BAR_ROOT == null) ? null : BAR_ROOT.get();
+        if (b == null) return;
+        b.setVisibility(show ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * 되돌리기 스낵바를 지금 화면 하단에 띄운다 (탭바 위). 5초 뒤 스스로 사라진다.
+     * 탭을 옮기거나 화면을 다시 그리면 같이 정리된다.
+     */
+    public static View snack(String msg, String action, Runnable onAction) {
+        ViewGroup host = host();
+        if (host == null) return null;
+        Context c = host.getContext();
+        View s = Ui.snack(c, msg, action, onAction);
+        int side = Theme.dp(c, 16);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(MATCH, WRAP);
+        lp.gravity = Gravity.BOTTOM;
+        lp.leftMargin = side;
+        lp.rightMargin = side;
+        lp.bottomMargin = inSub() ? side : (side + barHeight(c));
+        try {
+            host.addView(s, lp);
+        } catch (Throwable t) {
+            Log.add(c, "안내 표시 실패: " + t);
+            return null;
+        }
+        return s;
+    }
+
+    private static int barHeight(Context c) {
+        View b = (BAR_ROOT == null) ? null : BAR_ROOT.get();
+        int h = (b == null) ? 0 : b.getHeight();
+        return (h > 0) ? h : Theme.dp(c, 64);
     }
 
     private static View screen(MainActivity a, int tab) {
@@ -198,9 +359,9 @@ public final class Nav {
 
     private static View crashView(Context c, Throwable t) {
         LinearLayout col = Ui.screen(c);
-        col.addView(Ui.title(c, "화면을 열지 못했어"));
+        col.addView(Ui.title(c, "화면을 열지 못했습니다"));
         LinearLayout card = Ui.card(c);
-        card.addView(Ui.sub(c, "이 화면을 그리는 중에 오류가 났어. 내정보 탭의 로그를 확인해줘.\n\n"
+        card.addView(Ui.sub(c, "화면을 구성하는 중 오류가 발생했습니다. 내정보 탭의 활동 로그를 확인하십시오.\n\n"
                 + t.getClass().getSimpleName() + ": " + t.getMessage()));
         col.addView(card);
         return Ui.scroll(c, col);
@@ -243,7 +404,10 @@ public final class Nav {
 
     /**
      * 제목 + 요약값만 보이는 카드. 머리를 누르면 body 가 펼쳐진다.
-     * 상세 설정은 전부 이 안에 숨겨라 — 한 화면에 펼친 카드가 여러 개면 읽기 힘들다.
+     *
+     * ★ UI_V3 부터 아코디언은 **내정보 탭의 '고급' 한 곳에서만** 쓴다.
+     * 다른 화면에서 설정 상세를 열 때는 fold 가 아니라 {@link #push(MainActivity, String, View)} +
+     * {@code Ui.navRow} 를 써라 (접혀 있으면 안에 뭐가 있는지 모르고, 펼치면 경계가 사라진다).
      */
     public static Fold fold(Context c, String titleTxt, String summary, boolean open) {
         LinearLayout card = Ui.card(c);
@@ -303,7 +467,7 @@ public final class Nav {
 
     /**
      * 접힘 카드 여러 개를 카드 하나로 묶는다 (구분선으로 나눈다).
-     * SPEC 8.1 "한 화면에 카드 4~6개" 를 지키려고 같은 성격의 fold 는 묶어서 내보낸다.
+     * fold 와 같이 내정보 '고급' 전용이다. 목록 화면은 {@code Ui.group()} 을 쓴다.
      */
     public static LinearLayout foldGroup(Context c, Fold... folds) {
         LinearLayout card = Ui.card(c);
@@ -367,7 +531,11 @@ public final class Nav {
         v.setVisibility(View.GONE);
     }
 
-    /** 제목 + 현재값 + 오른쪽 버튼 한 줄 (설정 항목의 기본형) */
+    /**
+     * 제목 + 현재값 + 오른쪽 버튼 한 줄.
+     * 다이얼로그 안(form/editNums)이나 '고급' 아코디언 안에서 쓴다.
+     * 화면 본문의 설정 항목은 {@code Ui.navRow} + 서브화면으로 옮겼다.
+     */
     public static LinearLayout actionRow(Context c, String titleTxt, String value,
                                         String btnLabel, final Runnable onTap) {
         LinearLayout r = Ui.row(c);
@@ -505,7 +673,7 @@ public final class Nav {
                                       final String feature, final String idleLabel) {
         if (a == null || a.isFinishing()) return;
         final String idle = (idleLabel == null || idleLabel.length() == 0) ? "다시 확인" : idleLabel;
-        if (refreshing) { Ui.toast(a, "이미 확인 중이야. 잠깐만 기다려줘"); return; }
+        if (refreshing) { Ui.toast(a, "확인이 진행 중입니다."); return; }
         refreshing = true;
         busy(btn, true, "확인 중…", idle);
 
@@ -525,7 +693,7 @@ public final class Nav {
 
                 if (!ok) {
                     String why = License.reasonKr(reason);
-                    if (why == null || why.length() == 0) why = "확인하지 못했어";
+                    if (why == null || why.length() == 0) why = "확인 실패";
                     Log.add(a, "기능 새로고침 실패: " + why);
                     Ui.toast(a, why);
                     // 잠김·만료 같은 상태 변화는 바로 화면에 반영해야 한다
@@ -537,10 +705,10 @@ public final class Nav {
                 boolean nowOn = (feature == null) || License.allowed(a, feature);
                 if (nowOn) {
                     if (feature != null && !wasOn) {
-                        Ui.toast(a, Features.label(feature) + " 기능이 켜졌어!");
+                        Ui.toast(a, Features.label(feature) + " 기능이 활성화되었습니다");
                     } else {
                         String fresh = newlyOn(a, before);
-                        Ui.toast(a, (fresh.length() > 0) ? (fresh + " 기능이 켜졌어!") : "최신 상태로 맞췄어");
+                        Ui.toast(a, (fresh.length() > 0) ? (fresh + " 기능이 활성화되었습니다") : "최신 상태로 갱신되었습니다");
                     }
                     redraw(a, wasShellOk);
                     return;
@@ -572,7 +740,7 @@ public final class Nav {
             if (shellOk(a) != wasShellOk) a.renderShell();
             else reload();
         } catch (Throwable t) {
-            Log.add(a, "화면을 다시 그리지 못했어: " + t);
+            Log.add(a, "화면 재구성 실패: " + t);
         }
     }
 
@@ -590,10 +758,10 @@ public final class Nav {
                                      final String feature, final String idle) {
         final String buyFeat = (feature == null) ? Features.MACRO : feature;
         String name = Features.label(buyFeat);
-        AlertDialog.Builder b = Ui.dialog(a, "아직 반영이 안 됐어");
-        b.setMessage(name + " 기능은 아직 꺼진 상태야.\n"
-                + "입금 확인 후 발급까지 조금 걸릴 수 있어. 1~2분 뒤에 [다시 확인]을 눌러줘.\n"
-                + "아직 결제를 안 했으면 구매 페이지에서 결제하면 바로 켜진다.");
+        AlertDialog.Builder b = Ui.dialog(a, "반영 대기 중");
+        b.setMessage(name + " 기능이 아직 비활성 상태입니다.\n"
+                + "입금 확인 후 발급까지 시간이 소요될 수 있습니다. 1~2분 후 [다시 확인]을 선택하십시오.\n"
+                + "결제 전이라면 구매 페이지에서 결제 후 즉시 활성화됩니다.");
         b.setPositiveButton("다시 확인", new android.content.DialogInterface.OnClickListener() {
             @Override public void onClick(android.content.DialogInterface d, int w) {
                 refreshFeature(a, btn, feature, idle);
@@ -606,13 +774,13 @@ public final class Nav {
         });
         b.setNegativeButton("닫기", null);
         Ui.showDark(b);
-        Log.add(a, Features.label(buyFeat) + " 새로고침 — 아직 안 켜졌어");
+        Log.add(a, Features.label(buyFeat) + " 새로고침 — 미활성 상태");
     }
 
     private static void failDialog(final MainActivity a, final TextView btn, final String feature,
                                    final String idle, String why) {
-        AlertDialog.Builder b = Ui.dialog(a, "확인하지 못했어");
-        b.setMessage(why + "\n\n인터넷을 확인하고 [다시 확인]을 눌러줘.");
+        AlertDialog.Builder b = Ui.dialog(a, "확인 실패");
+        b.setMessage(why + "\n\n네트워크 상태를 확인한 후 [다시 확인]을 선택하십시오.");
         b.setPositiveButton("다시 확인", new android.content.DialogInterface.OnClickListener() {
             @Override public void onClick(android.content.DialogInterface d, int w) {
                 refreshFeature(a, btn, feature, idle);
@@ -692,7 +860,7 @@ public final class Nav {
         t.setMinimumWidth(Theme.dp(c, 48));
         t.setClickable(true);
         t.setFocusable(true);
-        t.setContentDescription(label + ", 누르면 지울지 물어봐");
+        t.setContentDescription(label + ", 삭제");
         Ui.press(t);
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (onRemove != null) onRemove.run(); }
@@ -742,7 +910,7 @@ public final class Nav {
                 Activity a = activityOf(flow);
                 if (a == null) { del.run(); return; }
                 // 탭 한 번에 지워버리면 되돌릴 방법이 없다 → 한 번 묻는다
-                confirm(a, "「" + v + "」 지울까?", "목록에서 빼고 바로 저장해.", "지우기", del);
+                confirm(a, "「" + v + "」 삭제", "목록에서 제거하고 즉시 저장합니다.", "삭제", del);
             }
         });
     }
@@ -816,8 +984,8 @@ public final class Nav {
                 try {
                     bad = (onSave == null) ? null : onSave.save();
                 } catch (Throwable t) {
-                    bad = "저장 중 오류가 났어: " + t.getClass().getSimpleName();
-                    Log.add(a, "설정 저장 중 터졌어: " + t);
+                    bad = "저장 중 오류가 발생했습니다: " + t.getClass().getSimpleName();
+                    Log.add(a, "설정 저장 실패: " + t);
                 }
                 if (bad == null) {
                     try { d.dismiss(); } catch (Throwable ignore) { }
@@ -925,12 +1093,12 @@ public final class Nav {
                     try {
                         v = Integer.parseInt(nf.edit.getText().toString().trim());
                     } catch (Throwable t) {
-                        errText(nf.err, "숫자만 넣어줘");
+                        errText(nf.err, "숫자만 입력하십시오");
                         bad = true;
                         continue;
                     }
                     if (v < nf.min || v > nf.max) {
-                        errText(nf.err, nf.min + " ~ " + nf.max + " 사이로 넣어줘");
+                        errText(nf.err, nf.min + " ~ " + nf.max + " 사이의 값을 입력하십시오");
                         bad = true;
                         continue;
                     }
@@ -1031,8 +1199,8 @@ public final class Nav {
         final boolean[] checked = new boolean[pool.size()];
 
         if (pool.isEmpty()) {
-            body.addView(Ui.sub(a, "아직 감지된 방이 없어. 카톡에서 그 방에 메시지가 한 번 오면 여기 목록에 뜬다.\n"
-                    + "지금은 방 이름을 직접 적어줘 (카톡에 보이는 이름과 정확히 같아야 해)."));
+            body.addView(Ui.sub(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 자동으로 등록됩니다.\n"
+                    + "대화방 이름을 직접 입력할 수도 있습니다. 카카오톡에 표시되는 이름과 정확히 일치해야 합니다."));
         } else {
             TextView lb = Ui.label(a, "최근 감지된 방");
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -1099,7 +1267,7 @@ public final class Nav {
                     if (v.length() == 0) continue;
                     if (!out.contains(v)) out.add(v);
                 }
-                if (out.isEmpty()) return "추가할 방을 고르거나 이름을 적어줘";
+                if (out.isEmpty()) return "추가할 대화방을 선택하거나 이름을 입력하십시오";
                 if (cb != null) cb.rooms(out);
                 return null;
             }
@@ -1124,7 +1292,7 @@ public final class Nav {
     /** 긴 글을 읽기만 하는 창 (로그 전체보기 등) */
     public static void showText(Activity a, String titleTxt, String text, final Runnable onCopy) {
         LinearLayout body = col(a);
-        TextView t = Ui.mono(a, (text == null || text.length() == 0) ? "(비어있어)" : text);
+        TextView t = Ui.mono(a, (text == null || text.length() == 0) ? "(내용 없음)" : text);
         body.addView(t);
         AlertDialog.Builder b = Ui.dialog(a, titleTxt);
         ScrollView sc = new ScrollView(a);
@@ -1227,7 +1395,7 @@ public final class Nav {
         box.setFocusable(true);
         Ui.press(box);
         box.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { Ui.toast(v.getContext(), "오른쪽 위 ✕ 를 누르면 지워져"); }
+            @Override public void onClick(View v) { Ui.toast(v.getContext(), "오른쪽 상단 ✕ 를 선택하면 삭제됩니다"); }
         });
         return box;
     }
@@ -1275,7 +1443,7 @@ public final class Nav {
                                 iv.setImageBitmap(out);
                                 state.setVisibility(View.GONE);
                             } else {
-                                state.setText("못 읽음");
+                                state.setText("읽기 실패");
                                 state.setTextColor(Theme.RED);
                             }
                         }
@@ -1294,12 +1462,12 @@ public final class Nav {
         if (c == null || text == null) return;
         try {
             ClipboardManager cm = (ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm == null) { Ui.toast(c, "클립보드를 못 열었어"); return; }
+            if (cm == null) { Ui.toast(c, "클립보드에 접근할 수 없습니다"); return; }
             cm.setPrimaryClip(ClipData.newPlainText((label == null) ? "" : label, text));
-            Ui.toast(c, "복사했어");
+            Ui.toast(c, "복사 완료");
         } catch (Throwable t) {
             Log.add(c, "복사 실패: " + t);
-            Ui.toast(c, "복사를 못 했어");
+            Ui.toast(c, "복사 실패");
         }
     }
 
@@ -1326,10 +1494,10 @@ public final class Nav {
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             c.startActivity(i);
-            Log.add(c, what + "를 열었어");
+            Log.add(c, what + " 열기");
         } catch (Throwable t) {
             Log.add(c, what + " 열기 실패 (" + url + "): " + t);
-            Ui.toast(c, "브라우저를 못 열었어");
+            Ui.toast(c, "브라우저를 열 수 없습니다");
         }
     }
 
@@ -1340,8 +1508,8 @@ public final class Nav {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             c.startActivity(i);
         } catch (Throwable t) {
-            Log.add(c, what + " 화면을 못 열었어: " + t);
-            Ui.toast(c, what + " 화면을 못 열었어. 설정에서 직접 찾아줘");
+            Log.add(c, what + " 화면 열기 실패: " + t);
+            Ui.toast(c, what + " 화면을 열 수 없습니다. 설정에서 직접 이동하십시오.");
         }
     }
 

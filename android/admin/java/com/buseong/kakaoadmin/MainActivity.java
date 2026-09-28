@@ -61,10 +61,10 @@ public final class MainActivity extends Activity {
         if (App.crashUnseen(this)) {
             App.markCrashSeen(this);
             final String crash = App.lastCrash(this);
-            Ui.confirm(this, "지난번에 앱이 죽었어",
+            Ui.confirm(this, "이전 실행에서 비정상 종료 발생",
                     "마지막 크래시: " + Ui.fmtFull(App.lastCrashAt(this))
-                            + "\n내용을 보고 개발자에게 넘겨줘. [설정] 탭에서 다시 볼 수 있어.",
-                    "자세히 보기", false, new Runnable() {
+                            + "\n상세 내용을 확인하여 개발자에게 전달하십시오. [설정] 탭에서 다시 확인할 수 있습니다.",
+                    "상세 보기", false, new Runnable() {
                         @Override public void run() { Ui.showText(MainActivity.this, "마지막 크래시", crash); }
                     });
         }
@@ -143,7 +143,7 @@ public final class MainActivity extends Activity {
         card.addView(pw);
 
         final View remember = Ui.switchRow(this, "비밀번호 저장",
-                "이 기기에만 저장돼. 공용 기기면 끄고 써.", Api.remember(this), null);
+                "현재 기기에만 저장됩니다. 공용 기기에서는 비활성화하십시오.", Api.remember(this), null);
         mt(remember, 6);
         card.addView(remember);
 
@@ -154,7 +154,7 @@ public final class MainActivity extends Activity {
             @Override public void onClick(View v) {
                 String b = base.getText() == null ? "" : base.getText().toString().trim();
                 String p = pw.getText() == null ? "" : pw.getText().toString();
-                if (p.length() == 0) { Ui.toast(MainActivity.this, "비밀번호를 넣어줘"); return; }
+                if (p.length() == 0) { Ui.toast(MainActivity.this, "비밀번호를 입력하십시오"); return; }
                 go.setEnabled(false);
                 go.setText("확인 중…");
                 Api.signIn(MainActivity.this, b, p, Ui.isOn(remember));
@@ -180,8 +180,8 @@ public final class MainActivity extends Activity {
 
         LinearLayout foot = Ui.card(this);
         foot.addView(Ui.label(this, "안내"));
-        TextView ft = Ui.sub(this, "비밀번호는 서버(Render)의 ADMIN_PASSWORD 환경변수 값이야.\n"
-                + "서버가 자고 있으면 첫 요청이 20초 넘게 걸릴 수 있어 — 그럼 한 번 더 눌러줘.");
+        TextView ft = Ui.sub(this, "비밀번호는 서버(Render)의 ADMIN_PASSWORD 환경변수 값입니다.\n"
+                + "서버가 절전 상태인 경우 최초 요청에 20초 이상 소요될 수 있습니다. 응답이 없으면 다시 시도하십시오.");
         mt(ft, 8);
         foot.addView(ft);
         body.addView(foot);
@@ -345,10 +345,10 @@ public final class MainActivity extends Activity {
         try {
             v = s.view();
         } catch (Throwable t) {
-            App.log(this, TABS[i] + " 화면을 만들지 못했어: " + t);
+            App.log(this, TABS[i] + " 화면 생성에 실패했습니다: " + t);
         }
         if (v == null) {
-            content.addView(Ui.emptyBox(this, "화면을 여는 데 실패했어. [설정] → 앱 로그를 봐줘."),
+            content.addView(Ui.emptyBox(this, "화면을 열지 못했습니다. [설정] → 앱 로그를 확인하십시오."),
                     new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                             FrameLayout.LayoutParams.WRAP_CONTENT));
             return;
@@ -440,8 +440,8 @@ public final class MainActivity extends Activity {
     public boolean kicked(Api.Result r) {
         if (r == null || !r.unauthorized) return false;
         Api.signOut(this);
-        App.log(this, "비밀번호가 틀려서 로그아웃됐어");
-        showLogin("비밀번호가 틀렸어. 다시 입력해줘.");
+        App.log(this, "비밀번호 불일치로 로그아웃 처리됨");
+        showLogin("비밀번호가 일치하지 않습니다. 다시 입력하십시오.");
         return true;
     }
 

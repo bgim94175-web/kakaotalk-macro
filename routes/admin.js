@@ -31,8 +31,8 @@ const DEFAULT_PW = 'change-me-now';
 function passwordProblem() {
   const raw = process.env.ADMIN_PASSWORD;
   const pw = (raw === null || raw === undefined) ? '' : String(raw);
-  if (!pw.trim()) return 'ADMIN_PASSWORD 환경변수가 비어 있어';
-  if (pw === DEFAULT_PW) return 'ADMIN_PASSWORD 가 공개된 기본값(' + DEFAULT_PW + ') 그대로야';
+  if (!pw.trim()) return 'ADMIN_PASSWORD 환경변수가 비어 있습니다';
+  if (pw === DEFAULT_PW) return 'ADMIN_PASSWORD 가 공개된 기본값(' + DEFAULT_PW + ') 으로 설정되어 있습니다';
   return null;
 }
 
@@ -59,8 +59,8 @@ async function guard(req, res, next) {
     }
     return res.status(503).json({ ok: false, error: 'admin_disabled',
       reason: 'admin_password_unset',
-      detail: '서버에 관리자 비밀번호가 설정돼 있지 않아서 관리자 API 를 닫아뒀어. ' +
-              '서버 환경변수 ADMIN_PASSWORD 를 채우고 다시 배포해줘' });
+      detail: '서버에 관리자 비밀번호가 설정되지 않아 관리자 API 가 차단되었습니다. ' +
+              '서버 환경변수 ADMIN_PASSWORD 를 설정한 후 재배포하십시오' });
   }
   warnedProblem = '';
 
@@ -72,7 +72,7 @@ async function guard(req, res, next) {
     const mins = Math.ceil(left / 60000);
     res.set('Retry-After', String(Math.ceil(left / 1000)));
     return res.status(429).json({ ok: false, error: 'too_many_attempts',
-      detail: '비밀번호를 너무 많이 틀렸어. ' + mins + '분 뒤에 다시 해줘' });
+      detail: '비밀번호 입력 실패 횟수를 초과했습니다. ' + mins + '분 후 다시 시도하십시오' });
   }
 
   // ── 인증 실패는 기록한다 (관리자앱 [기록] 탭에서 공격을 눈으로 볼 수 있게)
@@ -87,7 +87,7 @@ async function guard(req, res, next) {
     if (st.blocked) {
       res.set('Retry-After', String(Math.ceil(st.blockMs / 1000)));
       return res.status(429).json({ ok: false, error: 'too_many_attempts',
-        detail: '비밀번호를 너무 많이 틀렸어. ' + Math.round(st.blockMs / 60000) + '분 뒤에 다시 해줘' });
+        detail: '비밀번호 입력 실패 횟수를 초과했습니다. ' + Math.round(st.blockMs / 60000) + '분 후 다시 시도하십시오' });
     }
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
@@ -123,10 +123,10 @@ async function attachFeatures(shaped) {
 router.post('/admin/create', wrap(async (req, res) => {
   const b = req.body || {};
   const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, error: '기능을 하나 이상 골라야 해 (macro/roombot/minigame)' });
+  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택하십시오 (macro/roombot/minigame)' });
   const plan = String(b.plan || 'month');
   const dur = keys.durationMs(plan, b.days);
-  if (!dur) return res.json({ ok: false, error: '플랜(month/quarter/year/custom) 또는 days 가 잘못됐어' });
+  if (!dur) return res.json({ ok: false, error: '플랜(month/quarter/year/custom) 또는 days 값이 올바르지 않습니다' });
 
   const out = await db.tx((client) => keys.createLicenses(client, {
     features: feats, plan: plan, days: b.days, count: b.count,
@@ -140,14 +140,14 @@ router.post('/admin/create', wrap(async (req, res) => {
 router.post('/admin/grant', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, error: '기능을 하나 이상 골라야 해' });
+  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택하십시오' });
   const plan = String(b.plan || 'month');
-  if (!keys.durationMs(plan, b.days)) return res.json({ ok: false, error: '플랜 또는 days 가 잘못됐어' });
+  if (!keys.durationMs(plan, b.days)) return res.json({ ok: false, error: '플랜 또는 days 값이 올바르지 않습니다' });
 
   const out = await db.tx((client) => keys.grant(client, key, feats, plan, b.days));
-  if (!out) return res.json({ ok: false, error: '없는 키야' });
+  if (!out) return res.json({ ok: false, error: '등록되지 않은 키입니다' });
   res.json({ ok: true, key: key, plan: plan, duration_days: out.duration_days,
              changed: out.changed, activated: out.activated });
 }));
@@ -156,7 +156,7 @@ router.post('/admin/revoke-feature', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
   const feature = String(b.feature || '').trim().toLowerCase();
-  if (!key || !features.isValid(feature)) return res.json({ ok: false, error: 'key / feature 확인해' });
+  if (!key || !features.isValid(feature)) return res.json({ ok: false, error: 'key / feature 값을 확인하십시오' });
 
   const removed = await db.tx(async (client) => {
     const r = await db.q('DELETE FROM entitlements WHERE key=$1 AND feature=$2', [key, feature], client);
@@ -194,9 +194,9 @@ router.get('/admin/list', wrap(async (req, res) => {
 
 router.get('/admin/license', wrap(async (req, res) => {
   const key = keys.normKey(req.query.key);
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const row = await db.one('SELECT * FROM licenses WHERE key=$1', [key]);
-  if (!row) return res.json({ ok: false, error: '없는 키야' });
+  if (!row) return res.json({ ok: false, error: '등록되지 않은 키입니다' });
   const shaped = (await attachFeatures([db.shapeLicense(row)]))[0];
   const a = await db.q('SELECT * FROM audit_log WHERE key=$1 ORDER BY at DESC, id DESC LIMIT 20', [key]);
   const cfg = await db.one('SELECT rev, updated_at FROM configs WHERE key=$1', [key]);
@@ -264,7 +264,7 @@ router.post('/admin/revoke', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
   const revoked = b.revoked === undefined ? true : !!b.revoked;
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const r = await db.q('UPDATE licenses SET revoked=$1 WHERE key=$2', [revoked, key]);
   if (r.rowCount > 0) {
     await audit.record(req, 'revoked', { key: key, detail: revoked ? '관리자 회수' : '관리자 회수 해제' });
@@ -275,7 +275,7 @@ router.post('/admin/revoke', wrap(async (req, res) => {
 router.post('/admin/block', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const reason = (b.reason === null || b.reason === undefined || String(b.reason).trim() === '')
     ? null : String(b.reason).trim().slice(0, 500);
   const r = await db.q('UPDATE licenses SET blocked_reason=$1 WHERE key=$2', [reason, key]);
@@ -289,7 +289,7 @@ router.post('/admin/block', wrap(async (req, res) => {
 router.post('/admin/reset-device', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const now = Date.now();
   const r = await db.q(
     `UPDATE licenses SET device_id=NULL, device_name=NULL, device_fp=NULL,
@@ -297,7 +297,7 @@ router.post('/admin/reset-device', wrap(async (req, res) => {
             reset_count=COALESCE(reset_count,0)+1, last_reset_at=$1::bigint
       WHERE key=$2
       RETURNING reset_count`, [now, key]);
-  if (!r.rowCount) return res.json({ ok: false, error: '없는 키야' });
+  if (!r.rowCount) return res.json({ ok: false, error: '등록되지 않은 키입니다' });
   const cnt = Number(r.rows[0].reset_count) || 0;
   await audit.record(req, 'reset', { key: key, detail: '관리자 기기 초기화 (누적 ' + cnt + '회)' });
   res.json({ ok: true, key: key, reset_count: cnt });
@@ -305,7 +305,7 @@ router.post('/admin/reset-device', wrap(async (req, res) => {
 
 router.post('/admin/delete', wrap(async (req, res) => {
   const key = keys.normKey((req.body || {}).key);
-  if (!key) return res.json({ ok: false, error: 'key 가 필요해' });
+  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const removed = await db.tx(async (client) => {
     await db.q('DELETE FROM configs WHERE key=$1', [key], client);
     const r = await db.q('DELETE FROM licenses WHERE key=$1', [key], client); // entitlements 는 CASCADE
@@ -334,7 +334,7 @@ router.get('/admin/orders', wrap(async (req, res) => {
 router.post('/admin/order-approve', wrap(async (req, res) => {
   const b = req.body || {};
   const id = keys.normOrderId(b.id);
-  if (!id) return res.json({ ok: false, error: 'id 가 필요해' });
+  if (!id) return res.json({ ok: false, error: 'id 값이 필요합니다' });
   const askedKey = keys.normKey(b.key);
 
   // 자동 입금확인(POST /api/deposit-hook)과 **같은 로직**을 쓴다
@@ -352,7 +352,7 @@ router.post('/admin/order-approve', wrap(async (req, res) => {
 router.post('/admin/order-cancel', wrap(async (req, res) => {
   const b = req.body || {};
   const id = keys.normOrderId(b.id);
-  if (!id) return res.json({ ok: false, error: 'id 가 필요해' });
+  if (!id) return res.json({ ok: false, error: 'id 값이 필요합니다' });
   const memo = b.memo === null || b.memo === undefined ? null : String(b.memo).trim().slice(0, 500);
   const now = Date.now();
   const r = await db.q(
@@ -392,11 +392,11 @@ router.post('/admin/deposit-match', wrap(async (req, res) => {
   const b = req.body || {};
   const depositId = Math.floor(Number(b.deposit_id));
   const orderId = keys.normOrderId(b.order_id);
-  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 가 필요해' });
-  if (!orderId) return res.json({ ok: false, error: 'order_id 가 필요해' });
+  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 값이 필요합니다' });
+  if (!orderId) return res.json({ ok: false, error: 'order_id 값이 필요합니다' });
 
   const dep = await db.one('SELECT * FROM deposits WHERE id=$1', [depositId]);
-  if (!dep) return res.json({ ok: false, error: '없는 입금 기록이야' });
+  if (!dep) return res.json({ ok: false, error: '존재하지 않는 입금 기록입니다' });
 
   const out = await db.tx((client) => keys.approveOrder(client, orderId, null));
   if (out.error) return res.json({ ok: false, error: out.error });
@@ -412,7 +412,7 @@ router.post('/admin/deposit-match', wrap(async (req, res) => {
 
 router.post('/admin/deposit-ignore', wrap(async (req, res) => {
   const depositId = Math.floor(Number((req.body || {}).deposit_id));
-  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 가 필요해' });
+  if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 값이 필요합니다' });
   const r = await db.q("UPDATE deposits SET status='ignored' WHERE id=$1", [depositId]);
   res.json({ ok: r.rowCount > 0, deposit_id: depositId });
 }));
@@ -439,7 +439,7 @@ router.get('/admin/sigs', wrap(async (req, res) => {
 router.post('/admin/sig-add', wrap(async (req, res) => {
   const b = req.body || {};
   const sha = String(b.sha256 || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
-  if (sha.length !== 64) return res.json({ ok: false, error: 'sha256 은 64자 hex 여야 해' });
+  if (sha.length !== 64) return res.json({ ok: false, error: 'sha256 은 64자 hex 형식이어야 합니다' });
   await db.q(
     `INSERT INTO app_signatures (sha256,label,allowed,created_at) VALUES ($1,$2,TRUE,$3)
      ON CONFLICT (sha256) DO UPDATE SET label=COALESCE(EXCLUDED.label, app_signatures.label), allowed=TRUE`,
@@ -450,7 +450,7 @@ router.post('/admin/sig-add', wrap(async (req, res) => {
 
 router.post('/admin/sig-del', wrap(async (req, res) => {
   const sha = String((req.body || {}).sha256 || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
-  if (!sha) return res.json({ ok: false, error: 'sha256 이 필요해' });
+  if (!sha) return res.json({ ok: false, error: 'sha256 값이 필요합니다' });
   const r = await db.q('DELETE FROM app_signatures WHERE sha256=$1', [sha]);
   license.bustSigCache();
   res.json({ ok: r.rowCount > 0, sha256: sha });

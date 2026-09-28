@@ -6,6 +6,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -26,6 +27,11 @@ import java.util.regex.Pattern;
  *   Settings.flush(ctx);             // 캐시에 들어있는 걸 그대로 저장
  *
  * JSON 은 필드 추가에 안전하다 — 없는 키는 기본값을 유지한다(opt*). 옛 설정이 깨지지 않는다.
+ *
+ * ★ 방 목록은 전부 {@link RoomRef#key()} 문자열이다 ("계정키\u0001방이름").
+ *   저장 타입은 List&lt;String&gt; 그대로라서 옛 설정 파일이 그냥 읽힌다 —
+ *   구분자가 없는 옛 값은 {@link RoomRef#parse} 가 기본 계정("0")으로 해석한다.
+ *   코드에서는 {@code roomRefs()} / {@code setRoomRefs(...)} 로 다뤄라.
  */
 public final class Settings {
 
@@ -78,6 +84,56 @@ public final class Settings {
             L_MSG, L_ROOMS, L_INTERVAL, L_INTERVAL_MAX, L_MINMSG, L_ENABLED, L_NEXT
     };
 
+    // ── 방 키 도구 (RoomRef) ──────────────────────────────────────────────────
+
+    /**
+     * 저장된 방 키 목록 → RoomRef 목록.
+     * 구분자가 없는 옛 값은 {@link RoomRef#parse} 가 기본 계정("0")으로 채워준다.
+     */
+    public static ArrayList<RoomRef> refsOf(List<String> keys) {
+        ArrayList<RoomRef> out = new ArrayList<RoomRef>();
+        if (keys == null) return out;
+        HashSet<String> seen = new HashSet<String>();
+        for (int i = 0; i < keys.size(); i++) {
+            String k = keys.get(i);
+            if (k == null || k.trim().length() == 0) continue;
+            RoomRef r = RoomRef.parse(k);
+            if (r == null) continue;
+            String norm = r.key();
+            if (norm == null || norm.length() == 0 || !seen.add(norm)) continue;
+            out.add(r);
+        }
+        return out;
+    }
+
+    /** RoomRef 목록 → 저장용 키 목록 (중복 제거) */
+    public static ArrayList<String> keysOf(List<RoomRef> refs) {
+        ArrayList<String> out = new ArrayList<String>();
+        if (refs == null) return out;
+        for (int i = 0; i < refs.size(); i++) {
+            RoomRef r = refs.get(i);
+            if (r == null) continue;
+            String k = r.key();
+            if (k == null || k.length() == 0 || out.contains(k)) continue;
+            out.add(k);
+        }
+        return out;
+    }
+
+    /** 저장된 키 목록 안에 이 방이 있나. 구분자 없는 옛 값도 같은 방으로 본다. */
+    public static boolean hasRoom(List<String> keys, RoomRef room) {
+        if (keys == null || room == null) return false;
+        String want = room.key();
+        if (want == null) return false;
+        for (int i = 0; i < keys.size(); i++) {
+            String k = keys.get(i);
+            if (k == null || k.trim().length() == 0) continue;
+            RoomRef r = RoomRef.parse(k);
+            if (r != null && want.equals(r.key())) return true;
+        }
+        return false;
+    }
+
     // ── 모델 ──────────────────────────────────────────────────────────────────
 
     /** 자동발송 매크로 (SPEC 8.4 A) */
@@ -85,7 +141,10 @@ public final class Settings {
         public boolean enabled = false;
         /** 보낼 메시지. 여러 줄 허용. */
         public String message = "";
-        /** 발송 대상 방 이름 (카톡 알림의 방 이름과 정확히 같아야 한다) */
+        /**
+         * 발송 대상 방 — {@link RoomRef#key()} 목록.
+         * 구분자 없는 옛 값(방 이름만)은 기본 계정("0")으로 읽힌다.
+         */
         public List<String> rooms = new ArrayList<String>();
         /** 발송 주기 최소/최대 (분). 이 사이에서 랜덤으로 다음 시각을 잡는다. */
         public int intervalMinMin = 20;
@@ -105,6 +164,21 @@ public final class Settings {
         public String quietTo = "";
         /** 하루 최대 발송 수 */
         public int dailyLimit = 200;
+
+        /** 발송 대상 방 (RoomRef 목록) */
+        public List<RoomRef> roomRefs() {
+            return refsOf(rooms);
+        }
+
+        /** 발송 대상 방을 통째로 교체 */
+        public void setRoomRefs(List<RoomRef> list) {
+            rooms = keysOf(list);
+        }
+
+        /** 이 방이 발송 대상인가 */
+        public boolean coversRoom(RoomRef room) {
+            return hasRoom(rooms, room);
+        }
 
         /** 이미지 추가. 5장 넘거나 중복이면 false. */
         public boolean addImage(String uri) {
@@ -161,7 +235,7 @@ public final class Settings {
         public String message = "";
         /** SCOPE_* 중 하나 */
         public String scope = SCOPE_ALL;
-        /** scope=EXCEPT 일 때 제외할 방(사람) 이름 */
+        /** scope=EXCEPT 일 때 제외할 방(사람) — {@link RoomRef#key()} 목록 */
         public List<String> exceptRooms = new ArrayList<String>();
         /** 같은 사람에게 다시 응답하기까지 최소 간격 (기본 6시간) */
         public long cooldownMs = 6 * 3600 * 1000L;
@@ -189,16 +263,22 @@ public final class Settings {
             return inHours(hourOf(atMillis));
         }
 
+        /** 제외 방 (RoomRef 목록) */
+        public List<RoomRef> exceptRoomRefs() {
+            return refsOf(exceptRooms);
+        }
+
+        /** 제외 방을 통째로 교체 */
+        public void setExceptRoomRefs(List<RoomRef> list) {
+            exceptRooms = keysOf(list);
+        }
+
         /** 이 방(사람)에게 응답 대상인가. unknown = 내 방 목록에 없는 상대. */
-        public boolean coversRoom(String room, boolean unknown) {
+        public boolean coversRoom(RoomRef room, boolean unknown) {
             if (SCOPE_UNKNOWN.equals(scope)) return unknown;
             if (SCOPE_EXCEPT.equals(scope)) {
                 if (room == null) return true;
-                String r = room.trim();
-                for (int i = 0; i < exceptRooms.size(); i++) {
-                    if (r.equals(exceptRooms.get(i).trim())) return false;
-                }
-                return true;
+                return !hasRoom(exceptRooms, room);
             }
             return true;   // ALL
         }
@@ -223,13 +303,16 @@ public final class Settings {
         /** MODE_* 중 하나 */
         public String mode = MODE_CONTAINS;
         public boolean ignoreCase = true;
-        /** 빈 목록 = 모든 방 */
+        /** 빈 목록 = 모든 방. 값은 {@link RoomRef#key()}. */
         public List<String> rooms = new ArrayList<String>();
         /** 내 메시지도 감지할지 */
         public boolean fromMe = false;
         /** 보낼 메시지. {방} {이름} {메시지} {시간} 치환. */
         public String reply = "";
-        /** 빈 값 = 감지된 방으로 / 지정하면 그 방으로 */
+        /**
+         * 빈 값 = 감지된 방으로 / 지정하면 그 방으로.
+         * {@link RoomRef#key()} 를 넣으면 그 계정의 방으로, 방 이름만 넣으면 감지된 방과 같은 계정으로 보낸다.
+         */
         public String target = "";
         /** 0~60000 랜덤 지연 상한 */
         public int delayMs = 0;
@@ -239,15 +322,21 @@ public final class Settings {
         public boolean oncePerRoom = false;
         public boolean enabled = true;
 
-        /** 이 방에서 감지 대상인가 */
-        public boolean coversRoom(String room) {
+        /** 감지 대상 방 (RoomRef 목록). 빈 목록이면 모든 방. */
+        public List<RoomRef> roomRefs() {
+            return refsOf(rooms);
+        }
+
+        /** 감지 대상 방을 통째로 교체 */
+        public void setRoomRefs(List<RoomRef> list) {
+            rooms = keysOf(list);
+        }
+
+        /** 이 방에서 감지 대상인가 (빈 목록 = 모든 방) */
+        public boolean coversRoom(RoomRef room) {
             if (rooms.isEmpty()) return true;
             if (room == null) return false;
-            String r = room.trim();
-            for (int i = 0; i < rooms.size(); i++) {
-                if (r.equals(rooms.get(i).trim())) return true;
-            }
-            return false;
+            return hasRoom(rooms, room);
         }
 
         /** 메시지가 이 규칙에 걸리나. 정규식이 깨져 있으면 false. */
@@ -274,17 +363,18 @@ public final class Settings {
 
         /** 저장 전 검사. 문제가 없으면 null, 있으면 사용자에게 보여줄 한국어 문장. */
         public String validate() {
-            if (pattern == null || pattern.trim().length() == 0) return "감지할 문자열을 입력해줘";
-            if (reply == null || reply.trim().length() == 0) return "보낼 메시지를 입력해줘";
+            if (pattern == null || pattern.trim().length() == 0) return "감지할 문자열을 입력하십시오.";
+            if (reply == null || reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
             if (MODE_REGEX.equals(mode)) {
                 try {
                     Pattern.compile(pattern);
                 } catch (Throwable t) {
                     String why = t.getMessage();
-                    return "정규식이 잘못됐어" + ((why == null) ? "" : (" — " + why.replace('\n', ' ')));
+                    return "정규식 형식이 올바르지 않습니다."
+                            + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
                 }
             }
-            if (delayMs < 0 || delayMs > 60000) return "지연은 0~60초 사이여야 해";
+            if (delayMs < 0 || delayMs > 60000) return "지연 시간은 0~60초 범위로 입력하십시오.";
             return null;
         }
 
@@ -302,14 +392,17 @@ public final class Settings {
         public String title() {
             if (name != null && name.trim().length() > 0) return name.trim();
             if (pattern != null && pattern.trim().length() > 0) return pattern.trim();
-            return "이름 없는 트리거";
+            return "이름 없음";
         }
     }
 
     /** 방 관리봇 (SPEC 8.5). 카톡은 외부 앱이 강제퇴장을 못 한다 → 경고 + 관리자 호출만 한다. */
     public static final class RoomBotCfg {
         public boolean enabled = false;
-        /** 빈 목록 = 동작 안 함 (실수로 모든 방에 봇이 도는 걸 막는다) */
+        /**
+         * 빈 목록 = 동작 안 함 (실수로 모든 방에 봇이 도는 걸 막는다).
+         * 값은 {@link RoomRef#key()}.
+         */
         public List<String> rooms = new ArrayList<String>();
         public boolean welcomeOn = false;
         public String welcomeMsg = "";
@@ -335,13 +428,18 @@ public final class Settings {
         /** 하루 최대 봇 발송 수 */
         public int dailyLimit = 300;
 
-        public boolean coversRoom(String room) {
-            if (room == null) return false;
-            String r = room.trim();
-            for (int i = 0; i < rooms.size(); i++) {
-                if (r.equals(rooms.get(i).trim())) return true;
-            }
-            return false;
+        /** 봇이 도는 방 (RoomRef 목록) */
+        public List<RoomRef> roomRefs() {
+            return refsOf(rooms);
+        }
+
+        /** 봇이 도는 방을 통째로 교체 */
+        public void setRoomRefs(List<RoomRef> list) {
+            rooms = keysOf(list);
+        }
+
+        public boolean coversRoom(RoomRef room) {
+            return hasRoom(rooms, room);
         }
 
         /** 걸린 금지어를 돌려준다. 없으면 null. */
@@ -371,6 +469,7 @@ public final class Settings {
     /** 미니게임봇 (SPEC 8.6) */
     public static final class MiniGameCfg {
         public boolean enabled = false;
+        /** 빈 목록 = 동작 안 함. 값은 {@link RoomRef#key()}. */
         public List<String> rooms = new ArrayList<String>();
         public String cmdPrefix = "!";
         public boolean word = true;       // 끝말잇기
@@ -383,13 +482,18 @@ public final class Settings {
         /** 하루 최대 봇 발송 수 */
         public int dailyLimit = 300;
 
-        public boolean coversRoom(String room) {
-            if (room == null) return false;
-            String r = room.trim();
-            for (int i = 0; i < rooms.size(); i++) {
-                if (r.equals(rooms.get(i).trim())) return true;
-            }
-            return false;
+        /** 봇이 도는 방 (RoomRef 목록) */
+        public List<RoomRef> roomRefs() {
+            return refsOf(rooms);
+        }
+
+        /** 봇이 도는 방을 통째로 교체 */
+        public void setRoomRefs(List<RoomRef> list) {
+            rooms = keysOf(list);
+        }
+
+        public boolean coversRoom(RoomRef room) {
+            return hasRoom(rooms, room);
         }
 
         public boolean gameOn(String id) {
@@ -433,6 +537,43 @@ public final class Settings {
     public RoomBotCfg roombot = new RoomBotCfg();
     public MiniGameCfg minigame = new MiniGameCfg();
 
+    /**
+     * 대상 카카오톡 계정 키 목록 (듀얼 메신저 등 다중 계정).
+     *
+     * <b>비어 있으면 모든 계정이 대상이다.</b> 기존 사용자는 이 값이 없으니 자동으로 전부 포함된다 —
+     * 계정 축을 추가했다고 발송이 멈추면 안 된다. 사용자가 계정을 골라야 목록이 채워진다.
+     */
+    public List<String> accounts = new ArrayList<String>();
+
+    /**
+     * 이 계정이 발송·봇 대상인가. 목록이 비어 있으면 항상 true (전체 계정).
+     * 계정 키를 못 읽는 기기는 기본 계정 "0" 으로 취급한다.
+     */
+    public boolean accountOn(String acc) {
+        if (accounts == null || accounts.isEmpty()) return true;
+        String a = (acc == null || acc.trim().length() == 0) ? "0" : acc.trim();
+        for (int i = 0; i < accounts.size(); i++) {
+            String k = accounts.get(i);
+            if (k == null) continue;
+            if (a.equals(k.trim())) return true;
+        }
+        return false;
+    }
+
+    /** 지름길 — 설정을 읽어서 계정 사용 여부만 본다 */
+    public static boolean accountOn(Context c, String acc) {
+        try {
+            return load(c).accountOn(acc);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** 대상 계정 목록을 통째로 교체 (빈 목록 = 전체 계정) */
+    public void setAccounts(List<String> list) {
+        accounts = clampStrings(list, 32);
+    }
+
     // ── 캐시 + 불러오기/저장 ──────────────────────────────────────────────────
 
     /** 리스너 서비스가 알림마다 읽으니까 매번 복호화하지 않고 캐시한다 */
@@ -463,10 +604,10 @@ public final class Settings {
                 String raw = Prefs.secGet(c, SLOT);
                 if (raw != null && raw.length() > 0) {
                     out = fromJson(raw);
-                    if (out == null) Log.add(c, "설정이 깨져 있어서 기본값으로 시작할게");
+                    if (out == null) Log.add(c, "설정 파일이 손상되어 기본값으로 시작합니다.");
                 }
             } catch (Throwable t) {
-                Log.add(c, "설정을 읽는 중 오류가 났어: " + t);
+                Log.add(c, "설정 읽기에 실패했습니다. 기본값으로 시작합니다. (" + t + ")");
                 out = null;
             }
             if (out == null) out = migrate(c);
@@ -490,23 +631,33 @@ public final class Settings {
      * 설정키가 없으면 저장이 안 된다 — 조용히 넘기지 않고 로그로 알린다.
      * (secHas 만 보면 예전 blob 이 남아있을 때 "저장됨"으로 착각한다 → 반드시 다시 읽어서 확인)
      */
-    public void save(Context c) {
-        if (c == null) return;
+    /**
+     * 설정을 저장한다. 저장에 성공했으면 true.
+     *
+     * 라이선스 인증 전에는 설정키가 없어 저장이 불가능한데, 예전에는 로그만 남기고 조용히 넘어가서
+     * 화면에는 바뀐 값이 그대로 보였다. 프로세스가 죽으면 그대로 사라진다.
+     * 호출부는 반환값을 보고 사용자에게 알려야 한다.
+     */
+    public boolean save(Context c) {
+        if (c == null) return false;
         cached = this;
         try {
             if (!Prefs.secReady(c)) {
-                Log.add(c, "설정을 저장하지 못했어 (설정키 없음). 내정보 탭에서 라이선스 인증부터 해줘");
-                return;
+                Log.add(c, "설정을 저장하지 못했습니다. 설정키가 없습니다 — 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.");
+                return false;
             }
             String json = toJson();
             Prefs.secPut(c, SLOT, json);
             String back = Prefs.secGet(c, SLOT);
             if (back == null || !back.equals(json)) {
-                Log.add(c, "설정 저장을 확인 못 했어 — 다시 한 번 저장해줘");
+                Log.add(c, "설정 저장을 확인하지 못했습니다. 다시 저장하십시오.");
+                return false;
             }
+            return true;
         } catch (Throwable t) {
-            Log.add(c, "설정 저장 중 오류가 났어: " + t);
+            Log.add(c, "설정 저장에 실패했습니다. (" + t + ")");
         }
+        return false;
     }
 
     /** 캐시에 들어있는 설정을 그대로 저장 (Settings.macro(ctx) 로 고친 뒤 부르면 된다) */
@@ -538,8 +689,8 @@ public final class Settings {
 
     /** 트리거 추가. 30개를 넘으면 안내문을 돌려준다(성공이면 null). */
     public String addTrigger(TriggerCfg t) {
-        if (t == null) return "트리거가 비어있어";
-        if (triggers.size() >= MAX_TRIGGERS) return "트리거는 최대 " + MAX_TRIGGERS + "개까지야";
+        if (t == null) return "규칙 내용이 비어 있습니다.";
+        if (triggers.size() >= MAX_TRIGGERS) return "규칙은 최대 " + MAX_TRIGGERS + "개까지 등록됩니다.";
         String bad = t.validate();
         if (bad != null) return bad;
         triggers.add(t);
@@ -570,6 +721,7 @@ public final class Settings {
         try {
             JSONObject o = new JSONObject();
             o.put("v", VERSION);
+            o.put("accounts", arr(accounts));
 
             JSONObject m = new JSONObject();
             m.put("enabled", macro.enabled);
@@ -672,6 +824,9 @@ public final class Settings {
             return null;
         }
         Settings s = new Settings();
+
+        // 키가 없으면 빈 목록 그대로 = 전체 계정 대상 (기존 사용자가 자동으로 전부 포함된다)
+        s.accounts = list(o, "accounts");
 
         JSONObject m = o.optJSONObject("macro");
         if (m != null) {
@@ -796,12 +951,12 @@ public final class Settings {
             String back = Prefs.secGet(c, SLOT);
             if (back != null && back.equals(json)) {
                 for (int i = 0; i < LEGACY.length; i++) Prefs.remove(c, LEGACY[i]);
-                Log.add(c, "예전 버전 설정을 옮겨서 암호화 저장했어 (방 " + s.macro.rooms.size() + "개)");
+                Log.add(c, "이전 버전 설정을 이전하여 암호화 저장했습니다. (대상 대화방 " + s.macro.rooms.size() + "개)");
             } else {
-                Log.add(c, "예전 설정을 옮기다 저장에 실패했어 — 옛 설정은 그대로 남겨뒀어");
+                Log.add(c, "이전 버전 설정의 저장에 실패했습니다. 기존 설정은 삭제하지 않고 보존했습니다.");
             }
         } else {
-            Log.add(c, "예전 설정을 찾았어. 라이선스 인증하면 암호화해서 옮겨줄게");
+            Log.add(c, "이전 버전 설정이 확인되었습니다. 라이선스 인증 후 암호화하여 이전됩니다.");
         }
         return s;
     }

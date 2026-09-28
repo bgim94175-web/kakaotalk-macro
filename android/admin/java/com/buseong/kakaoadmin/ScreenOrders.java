@@ -105,7 +105,7 @@ public final class ScreenOrders implements MainActivity.Screen {
                 if (listBox == null) return;
                 listBox.removeAllViews();
                 if (!r.ok) {
-                    listBox.addView(Ui.emptyBox(a, "주문을 못 읽었어\n" + r.error));
+                    listBox.addView(Ui.emptyBox(a, "주문 목록을 불러오지 못했습니다\n" + r.error));
                     a.fail("주문 목록", r);
                     return;
                 }
@@ -125,7 +125,7 @@ public final class ScreenOrders implements MainActivity.Screen {
                     }
                 }
                 if (arr.length() == 0) {
-                    listBox.addView(Ui.emptyBox(a, "해당 주문이 없어"));
+                    listBox.addView(Ui.emptyBox(a, "해당 조건의 주문이 없습니다"));
                     return;
                 }
                 for (int i = 0; i < arr.length(); i++) {
@@ -270,7 +270,7 @@ public final class ScreenOrders implements MainActivity.Screen {
     /** 승인 — 기존키를 넣으면 연장, 비우면 신규발급 */
     private void openApprove(final String id, String targetKey, JSONObject o) {
         LinearLayout box = Ui.col(a);
-        box.addView(Ui.sub(a, "기존 키에 붙이려면 아래에 키를 넣어줘. 비워두면 새 키를 발급해."));
+        box.addView(Ui.sub(a, "기존 키에 기능을 추가하려면 아래에 키를 입력하십시오. 비워 두면 신규 키가 발급됩니다."));
 
         LinearLayout info = Ui.col(a);
         mt(info, 10);
@@ -306,8 +306,8 @@ public final class ScreenOrders implements MainActivity.Screen {
             @Override public void onClick(View v) {
                 final String k = Api.normKey(key.getText() == null ? "" : key.getText().toString());
                 String msg = (k.length() > 0)
-                        ? ("기존 키에 기능을 붙일까?\n" + k + "\n이미 가진 기능이면 남은 기간에 더해져.")
-                        : "새 키를 발급해서 이 주문을 완료 처리할까?";
+                        ? ("기존 키에 기능을 추가합니다.\n" + k + "\n보유 중인 기능은 남은 기간에 합산됩니다.")
+                        : "신규 키를 발급하고 이 주문을 완료 처리합니다.";
                 Ui.confirm(a, "주문 승인", msg, "승인", false, new Runnable() {
                     @Override public void run() {
                         Api.orderApprove(a, id, k, new Api.Cb() {
@@ -333,11 +333,11 @@ public final class ScreenOrders implements MainActivity.Screen {
 
     private void showIssued(String id, final String key, boolean isNew) {
         LinearLayout box = Ui.col(a);
-        box.addView(Ui.sub(a, id + " 을 완료 처리했어. " + (isNew ? "새 키를 발급했어." : "기존 키를 연장했어.")));
+        box.addView(Ui.sub(a, id + " 이 완료 처리되었습니다. " + (isNew ? "신규 키가 발급되었습니다." : "기존 키가 연장되었습니다.")));
         TextView big = Ui.monoBig(a, (key == null || key.length() == 0) ? "(키 없음)" : key);
         mt(big, 14);
         box.addView(big);
-        TextView tip = Ui.hint(a, "구매자에게 이 키를 전달해줘. 구매자는 /order/<주문번호> 페이지에서도 자동으로 볼 수 있어.");
+        TextView tip = Ui.hint(a, "구매자에게 이 키를 전달하십시오. 구매자는 /order/<주문번호> 페이지에서도 확인할 수 있습니다.");
         mt(tip, 10);
         box.addView(tip);
 
@@ -356,14 +356,14 @@ public final class ScreenOrders implements MainActivity.Screen {
         Ui.input(a, "주문 취소", "취소 사유 (예: 입금 없음)", null, false, new Ui.OnText() {
             @Override public void text(final String s) {
                 Ui.confirm(a, "주문 취소",
-                        id + " 을 취소할까?\n" + (s.length() > 0 ? ("사유: " + s) : "사유 없이 취소해."),
+                        id + " 을 취소 처리합니다.\n" + (s.length() > 0 ? ("사유: " + s) : "사유 미기재로 취소됩니다."),
                         "취소 처리", true, new Runnable() {
                             @Override public void run() {
                                 Api.orderCancel(a, id, s, new Api.Cb() {
                                     @Override public void done(Api.Result r) {
                                         if (a.kicked(r)) return;
                                         if (!r.ok) { a.fail("주문 취소", r); return; }
-                                        Ui.toast(a, "주문 취소했어");
+                                        Ui.toast(a, "주문이 취소되었습니다");
                                         App.log(a, "주문 취소 " + id + (s.length() > 0 ? (" / " + s) : ""));
                                         a.invalidate(2);
                                         a.refreshStats();
@@ -389,7 +389,7 @@ public final class ScreenOrders implements MainActivity.Screen {
                 if (listBox == null) return;
                 listBox.removeAllViews();
                 if (!r.ok) {
-                    listBox.addView(Ui.emptyBox(a, "입금 내역을 못 읽었어\n" + r.error));
+                    listBox.addView(Ui.emptyBox(a, "입금 내역을 불러오지 못했습니다\n" + r.error));
                     a.fail("입금 내역", r);
                     return;
                 }
@@ -408,8 +408,8 @@ public final class ScreenOrders implements MainActivity.Screen {
                     noteLabel.setVisibility(View.VISIBLE);
                 }
                 if (arr.length() == 0) {
-                    listBox.addView(Ui.emptyBox(a, "입금 기록이 없어\n"
-                            + "자동화 앱이 /api/deposit-hook 으로 알림을 보내면 여기 쌓여."));
+                    listBox.addView(Ui.emptyBox(a, "입금 기록이 없습니다\n"
+                            + "자동화 앱이 /api/deposit-hook 으로 알림을 전송하면 이 목록에 기록됩니다."));
                     return;
                 }
                 // 확인이 필요한 건(미매칭·모호)을 위로
@@ -488,14 +488,14 @@ public final class ScreenOrders implements MainActivity.Screen {
             TextView ig = Ui.btnSm(a, "무시", Theme.SUB, false);
             ig.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    Ui.confirm(a, "입금 무시", "이 입금 기록을 무시 처리할까?\n목록에서 확인 필요 표시가 사라져.",
+                    Ui.confirm(a, "입금 무시", "이 입금 기록을 무시 처리합니다.\n목록의 확인 필요 표시가 해제됩니다.",
                             "무시", false, new Runnable() {
                                 @Override public void run() {
                                     Api.depositIgnore(a, depId, new Api.Cb() {
                                         @Override public void done(Api.Result r) {
                                             if (a.kicked(r)) return;
                                             if (!r.ok) { a.fail("입금 무시", r); return; }
-                                            Ui.toast(a, "무시 처리했어");
+                                            Ui.toast(a, "무시 처리되었습니다");
                                             App.log(a, "입금기록 " + depId + " 무시");
                                             a.refreshStats();
                                             load();
@@ -521,9 +521,9 @@ public final class ScreenOrders implements MainActivity.Screen {
                 final JSONArray arr = r.arr("orders");
                 LinearLayout box = Ui.col(a);
                 if (arr.length() == 0) {
-                    box.addView(Ui.emptyBox(a, "대기 중인 주문이 없어"));
+                    box.addView(Ui.emptyBox(a, "대기 중인 주문이 없습니다"));
                 } else {
-                    box.addView(Ui.sub(a, "이 입금(" + Ui.won(amount) + ")과 묶을 주문을 골라줘."));
+                    box.addView(Ui.sub(a, "이 입금(" + Ui.won(amount) + ")에 매칭할 주문을 선택하십시오."));
                 }
 
                 final AlertDialog.Builder b = Ui.dialog(a, "수동 매칭");
@@ -555,8 +555,8 @@ public final class ScreenOrders implements MainActivity.Screen {
                     row.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
                             Ui.confirm(a, "수동 매칭",
-                                    "입금기록 " + depositId + " 을 주문 " + id + " 에 매칭하고 승인할까?\n"
-                                            + "키가 발급(또는 연장)되고 주문이 완료 처리돼.",
+                                    "입금기록 " + depositId + " 을 주문 " + id + " 에 매칭하고 승인합니다.\n"
+                                            + "키가 발급 또는 연장되고 주문이 완료 처리됩니다.",
                                     "매칭 + 승인", false, new Runnable() {
                                         @Override public void run() {
                                             Api.depositMatch(a, depositId, id, new Api.Cb() {

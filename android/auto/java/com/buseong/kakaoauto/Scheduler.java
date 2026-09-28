@@ -150,7 +150,7 @@ public final class Scheduler {
         }
         if (!License.allowed(c, Features.MACRO)) {
             cancel(c);
-            Log.add(c, "자동발송 예약을 껐어 — 매크로 기능이 켜져 있지 않아(구매·인증 확인)");
+            Log.add(c, "자동발송 예약을 해제했습니다. 매크로 기능이 활성 상태가 아닙니다. 구매 내역과 인증 상태를 확인하십시오.");
             return;
         }
 
@@ -181,7 +181,7 @@ public final class Scheduler {
             if (am != null && pi != null) am.cancel(pi);
             if (pi != null) pi.cancel();
         } catch (Throwable t) {
-            Log.add(c, "발송 알람을 끄지 못했어: " + t);
+            Log.add(c, "발송 알람 해제에 실패했습니다. (" + t + ")");
         }
 
         Prefs.putLong(c, K_NEXT, 0L);
@@ -309,8 +309,8 @@ public final class Scheduler {
                 // 앱을 방금 열어서 이미 확인했거나(때가 아님), 잠긴 상태다 — 네트워크는 아낀다.
                 // 잠긴 상태면 finally 의 ensureHeartbeat 가 12시간 뒤로 잡아준다(30분마다 깨지 않게).
                 if (st.locked) {
-                    Log.add(c, "기기가 잠겨 있어서 라이선스 확인을 건너뛸게 —"
-                            + " 다시 인증하면 바로 정상으로 돌아와 (다음 확인은 12시간 뒤)");
+                    Log.add(c, "기기가 잠금 상태이므로 라이선스 확인을 건너뜁니다."
+                            + " 재인증 시 정상 상태로 복구됩니다. (다음 확인 12시간 후)");
                 }
                 return;
             }
@@ -330,7 +330,7 @@ public final class Scheduler {
                 Thread.currentThread().interrupt();
             }
         } catch (Throwable t) {
-            Log.add(c, "라이선스 확인 중 오류가 났어: " + t);
+            Log.add(c, "라이선스 확인 중 오류가 발생했습니다. (" + t + ")");
         } finally {
             release(wl);
             // 예정 시각을 지워서 갱신된 lic_lastok 기준으로 다시 계산되게 한다
@@ -338,7 +338,7 @@ public final class Scheduler {
             try {
                 ensureHeartbeat(c);
             } catch (Throwable t) {
-                Log.add(c, "다음 라이선스 확인 예약에 실패했어: " + t);
+                Log.add(c, "다음 라이선스 확인 예약에 실패했습니다. (" + t + ")");
             }
         }
     }
@@ -354,7 +354,7 @@ public final class Scheduler {
             if (am != null && pi != null) am.cancel(pi);
             if (pi != null) pi.cancel();
         } catch (Throwable t) {
-            Log.add(c, "라이선스 확인 알람을 끄지 못했어: " + t);
+            Log.add(c, "라이선스 확인 알람 해제에 실패했습니다. (" + t + ")");
         }
         Prefs.putLong(c, K_HB_NEXT, 0L);
     }
@@ -383,7 +383,7 @@ public final class Scheduler {
 
         synchronized (LOCK) {
             if (running) {
-                Log.add(c, "앞선 자동발송이 아직 안 끝났어 — 이번 알람은 건너뛸게");
+                Log.add(c, "이전 자동발송이 진행 중입니다. 이번 주기는 건너뜁니다.");
                 return;
             }
             running = true;
@@ -394,7 +394,7 @@ public final class Scheduler {
             wl = acquire(c, "kakaoauto:send", WAKE_TIMEOUT_MS);
             work(c);
         } catch (Throwable t) {
-            Log.add(c, "자동발송 중 오류가 났어: " + t);
+            Log.add(c, "자동발송 중 오류가 발생했습니다. (" + t + ")");
         } finally {
             release(wl);
             synchronized (LOCK) { running = false; }
@@ -402,9 +402,9 @@ public final class Scheduler {
             try {
                 scheduleNext(c);
                 long at = nextAt(c);
-                if (at > 0) Log.add(c, "다음 발송은 " + when(at) + " 쯤이야");
+                if (at > 0) Log.add(c, "다음 발송 예정 " + when(at));
             } catch (Throwable t) {
-                Log.add(c, "다음 발송 예약에 실패했어: " + t);
+                Log.add(c, "다음 발송 예약에 실패했습니다. (" + t + ")");
             }
 
             kickHeartbeat(c);
@@ -418,7 +418,7 @@ public final class Scheduler {
 
         // 1) 기능 게이트 — 유일한 관문
         if (!License.allowed(c, Features.MACRO)) {
-            Log.add(c, "자동발송을 건너뛰었어 — 매크로 기능이 켜져 있지 않아(구매·인증 확인)");
+            Log.add(c, "자동발송을 건너뛰었습니다. 매크로 기능이 활성 상태가 아닙니다. 구매 내역과 인증 상태를 확인하십시오.");
             return;
         }
 
@@ -426,54 +426,62 @@ public final class Scheduler {
         try {
             s = Settings.load(c);
         } catch (Throwable t) {
-            Log.add(c, "설정을 읽지 못해서 발송을 건너뛰었어: " + t);
+            Log.add(c, "설정을 읽지 못해 발송을 건너뛰었습니다. (" + t + ")");
             return;
         }
         final Settings.Macro m = s.macro;
 
         // 2) 활성 여부
         if (!m.enabled) {
-            Log.add(c, "자동발송이 꺼져 있어서 안 보냈어");
+            Log.add(c, "자동발송이 비활성 상태이므로 발송하지 않았습니다.");
             return;
         }
 
         // 3) 방해금지 시간
         if (m.inQuiet(now)) {
-            Log.add(c, "방해금지 시간(" + m.quietFrom + "~" + m.quietTo + ")이라 이번엔 안 보낼게");
+            Log.add(c, "방해금지 시간대(" + m.quietFrom + "~" + m.quietTo + ")이므로 발송하지 않았습니다.");
             return;
         }
 
         // 4) 일일 한도
         final int limit = m.dailyLimit;
         if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-            Log.add(c, "하루 발송 한도(" + limit + "건)를 다 썼어 — 자정에 다시 0부터 센다");
+            Log.add(c, "일일 발송 한도(" + limit + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
             return;
         }
 
         // 5) 보낼 내용 / 대상
         final String msg = (m.message == null) ? "" : m.message;
         if (msg.trim().length() == 0) {
-            Log.add(c, "발송 메시지가 비어있어서 안 보냈어 — 매크로 탭에서 메시지를 적어줘");
+            Log.add(c, "발송 메시지가 비어 있어 발송하지 않았습니다. 매크로 탭에서 메시지를 입력하십시오.");
             return;
         }
-        List<String> rooms = new ArrayList<String>();
-        if (m.rooms != null) {
-            for (int i = 0; i < m.rooms.size(); i++) {
-                String r = m.rooms.get(i);
-                if (r != null && r.trim().length() > 0) rooms.add(r.trim());
-            }
+        // 대상 계정 필터 — Settings.accounts 가 비어 있으면 모든 계정이 대상이다
+        List<RoomRef> rooms = new ArrayList<RoomRef>();
+        int offAccount = 0;
+        List<RoomRef> all = m.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid()) continue;
+            if (!s.accountOn(r.acc)) { offAccount++; continue; }
+            rooms.add(r);
         }
         if (rooms.isEmpty()) {
-            Log.add(c, "대상 방이 없어서 안 보냈어 — 매크로 탭에서 방을 추가해줘");
+            if (offAccount > 0) {
+                Log.add(c, "대상 대화방 " + offAccount + "개가 모두 미사용 계정에 속해 발송하지 않았습니다."
+                        + " 내정보 탭의 카톡 계정에서 대상 계정을 확인하십시오.");
+            } else {
+                Log.add(c, "대상 대화방이 없어 발송하지 않았습니다. 매크로 탭에서 대화방을 추가하십시오.");
+            }
             return;
         }
 
         // 6) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
         if (!KakaoListener.listenerBound()) {
             if (KakaoListener.connected(c)) {
-                Log.add(c, "알림 리스너가 아직 안 붙었어 — 카톡 알림이 한 번 오면 발송이 살아난다");
+                Log.add(c, "알림 리스너가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
             } else {
-                Log.add(c, "알림 읽기 권한이 꺼져 있어서 발송을 못 해 — 내정보 탭에서 권한을 켜줘");
+                Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
             }
             return;
         }
@@ -492,19 +500,21 @@ public final class Scheduler {
                 break;
             }
             if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-                Log.add(c, "하루 발송 한도(" + limit + "건)에 걸려서 남은 방은 멈췄어");
+                Log.add(c, "일일 발송 한도(" + limit + "건)에 도달하여 남은 대화방은 중단했습니다.");
                 left = rooms.size() - i;
                 break;
             }
 
-            String room = rooms.get(i);
+            RoomRef room = rooms.get(i);
+            // 계정이 2개 이상이면 label(c) 가 계정 이름까지 붙여준다 (하나면 방 이름만)
+            String label = room.label(c);
 
             // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 minNeed 개 이상 쌓인 방에만 보낸다
             int others = 0;
             try {
                 others = KakaoListener.othersSinceMine(room);
             } catch (Throwable t) {
-                Log.add(c, "「" + room + "」 새 메시지 수를 못 읽었어: " + t);
+                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. (" + t + ")");
             }
             if (others < minNeed) {
                 waiting++;
@@ -515,7 +525,7 @@ public final class Scheduler {
             try {
                 sent = KakaoListener.sendTo(c, room, msg);
             } catch (Throwable t) {
-                Log.add(c, "「" + room + "」 발송 중 오류: " + t);
+                Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }
 
             if (sent) {
@@ -524,46 +534,49 @@ public final class Scheduler {
 
                 // 이미지 첨부 (EVERY / EVERY_N). NEVER·MANUAL 은 imagesThisTime 이 false 를 준다.
                 int seq = bumpSeq(c);
-                final String imgRoom = room;
+                // ImageSender 는 방 키로 세션을 찾는다. 사용자에게 보이는 기록엔 표시용 이름을 쓴다.
+                final String imgKey = room.key();
+                final String imgLabel = label;
                 try {
                     if (m.imagesThisTime(seq)) {
                         // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
                         //   여기서 결과를 기록하지 않으면 사진이 안 갔다는 걸 사용자가 영원히 모른다.
-                        ImageSender.sendWithResult(c, imgRoom, m.images, new ImageSender.Done() {
+                        ImageSender.sendWithResult(c, imgKey, m.images, new ImageSender.Done() {
                             @Override public void done(boolean ok, String detail) {
                                 if (ok) {
-                                    clearImageFail(c, imgRoom);
-                                    Log.add(c, "「" + imgRoom + "」 사진 전송을 끝냈어");
+                                    clearImageFail(c, imgLabel);
+                                    Log.add(c, "「" + imgLabel + "」 이미지 전송을 완료했습니다.");
                                 } else {
-                                    noteImageFail(c, imgRoom, detail);
-                                    Log.add(c, "「" + imgRoom + "」 사진 전송 실패 — "
+                                    noteImageFail(c, imgLabel, detail);
+                                    Log.add(c, "「" + imgLabel + "」 이미지 전송에 실패했습니다. "
                                             + ((detail == null || detail.length() == 0)
-                                               ? "원인 불명" : detail));
+                                               ? "원인 확인 불가" : detail));
                                 }
                                 refreshUi();
                             }
                         });
                     }
                 } catch (Throwable t) {
-                    noteImageFail(c, imgRoom, "전송을 시작하지도 못했어 — " + t);
-                    Log.add(c, "「" + imgRoom + "」 사진 전송을 시작하지 못했어: " + t);
+                    noteImageFail(c, imgLabel, "전송을 시작하지 못했습니다. (" + t + ")");
+                    Log.add(c, "「" + imgLabel + "」 이미지 전송을 시작하지 못했습니다. (" + t + ")");
                 }
 
                 if (i < rooms.size() - 1) gap();
             } else {
                 if (failed.length() > 0) failed.append(", ");
-                failed.append(room);
+                failed.append(label);
             }
         }
 
         StringBuilder sb = new StringBuilder(96);
         sb.append("자동발송 · 성공 ").append(ok).append("건");
         if (waiting > 0) {
-            sb.append(" / 대기 ").append(waiting).append("개 방(새 메시지 ")
+            sb.append(" / 대기 ").append(waiting).append("개 대화방(신규 메시지 ")
               .append(minNeed).append("개 미달)");
         }
         if (failed.length() > 0) sb.append(" / 실패: ").append(failed);
-        if (left > 0) sb.append(" / 시간이 모자라 ").append(left).append("개 방은 다음 주기로");
+        if (offAccount > 0) sb.append(" / 미사용 계정 제외 ").append(offAccount).append("개");
+        if (left > 0) sb.append(" / 시간 부족으로 ").append(left).append("개 대화방은 다음 주기로 이월");
         Log.add(c, sb.toString());
     }
 
@@ -585,7 +598,7 @@ public final class Scheduler {
         ImageFail(long at, String room, String why) {
             this.at = at;
             this.room = (room == null) ? "" : room;
-            this.why = (why == null || why.length() == 0) ? "원인 불명" : why;
+            this.why = (why == null || why.length() == 0) ? "원인 확인 불가" : why;
         }
     }
 
@@ -607,14 +620,14 @@ public final class Scheduler {
         Context c = app(ctx);
         if (c == null) return;
         String w = (why == null) ? "" : why.trim();
-        if (w.length() == 0) w = "원인 불명";
+        if (w.length() == 0) w = "원인 확인 불가";
         if (w.length() > IMG_FAIL_WHY_MAX) w = w.substring(0, IMG_FAIL_WHY_MAX) + "…";
         try {
             Prefs.putLong(c, K_IMG_FAIL_AT, System.currentTimeMillis());
             Prefs.putStr(c, K_IMG_FAIL_ROOM, (room == null) ? "" : room);
             Prefs.putStr(c, K_IMG_FAIL_WHY, w);
         } catch (Throwable t) {
-            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 남겼어", t);
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 남겼다", t);
         }
     }
 
@@ -643,7 +656,7 @@ public final class Scheduler {
             Prefs.remove(c, K_IMG_FAIL_ROOM);
             Prefs.remove(c, K_IMG_FAIL_WHY);
         } catch (Throwable t) {
-            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 지웠어", t);
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 지웠다", t);
         }
     }
 
@@ -657,7 +670,7 @@ public final class Scheduler {
             if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
             return PendingIntent.getBroadcast(c, REQ_ALARM, i, flags);
         } catch (Throwable t) {
-            Log.add(c, "알람 PendingIntent 를 못 만들었어: " + t);
+            Log.add(c, "발송 알람을 등록하지 못했습니다. (" + t + ")");
             return null;
         }
     }
@@ -670,7 +683,7 @@ public final class Scheduler {
             if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
             return PendingIntent.getBroadcast(c, REQ_HEARTBEAT, i, flags);
         } catch (Throwable t) {
-            Log.add(c, "라이선스 확인 알람 PendingIntent 를 못 만들었어: " + t);
+            Log.add(c, "라이선스 확인 알람을 등록하지 못했습니다. (" + t + ")");
             return null;
         }
     }
@@ -685,7 +698,7 @@ public final class Scheduler {
         if (am == null) {
             if (!warnedHb) {
                 warnedHb = true;
-                Log.add(c, "알람 서비스를 못 가져와서 라이선스 자동확인을 예약하지 못했어");
+                Log.add(c, "알람 서비스를 사용할 수 없어 라이선스 자동확인을 예약하지 못했습니다.");
             }
             return false;
         }
@@ -707,7 +720,7 @@ public final class Scheduler {
             Prefs.putLong(c, K_HB_NEXT, 0L);
             if (!warnedHb) {
                 warnedHb = true;
-                Log.add(c, "라이선스 자동확인 예약에 실패했어 — 가끔 앱을 열어줘: " + t);
+                Log.add(c, "라이선스 자동확인 예약에 실패했습니다. 주기적으로 앱을 실행하십시오. (" + t + ")");
             }
             return false;
         }
@@ -721,7 +734,7 @@ public final class Scheduler {
     private static boolean arm(Context c, long at) {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) {
-            Log.add(c, "알람 서비스를 못 가져와서 발송 예약에 실패했어");
+            Log.add(c, "알람 서비스를 사용할 수 없어 발송 예약에 실패했습니다.");
             return false;
         }
         PendingIntent pi = pending(c);
@@ -741,21 +754,21 @@ public final class Scheduler {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
                 return true;
             } catch (SecurityException se) {
-                Log.add(c, "정확한 알람 권한이 없어서 대략 예약으로 바꿨어 — 몇 분 늦을 수 있어");
+                Log.add(c, "정확한 알람 권한이 없어 대략적인 시각으로 예약했습니다. 최대 수 분 지연될 수 있습니다.");
             } catch (Throwable t) {
-                Log.add(c, "정확한 알람 예약이 실패해서 대략 예약으로 바꿔볼게: " + t);
+                Log.add(c, "정확한 알람 예약에 실패하여 대략적인 시각으로 예약합니다. (" + t + ")");
             }
         } else if (!warnedInexact) {
             warnedInexact = true;
-            Log.add(c, "「알람 및 리마인더」 권한이 꺼져 있어 — 대략적인 시각으로 예약할게. "
-                    + "몇 분 늦을 수 있어(설정에서 허용하면 정확해진다)");
+            Log.add(c, "「알람 및 리마인더」 권한이 비활성 상태입니다. 대략적인 시각으로 예약되며 최대 수 분 지연될 수 있습니다. "
+                    + "시스템 설정에서 허용하면 정확한 시각에 발송됩니다.");
         }
 
         try {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
             return true;
         } catch (Throwable t) {
-            Log.add(c, "발송 알람 예약에 완전히 실패했어: " + t);
+            Log.add(c, "발송 알람 예약에 실패했습니다. (" + t + ")");
             return false;
         }
     }
@@ -772,7 +785,7 @@ public final class Scheduler {
         try {
             PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
             if (pm == null) {
-                warnWake(c, "전원 관리자를 못 가져왔어");
+                warnWake(c, "전원 관리자를 사용할 수 없음");
                 return null;
             }
             wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag);
@@ -791,7 +804,7 @@ public final class Scheduler {
     private static void warnWake(Context c, String why) {
         if (warnedWake) return;
         warnedWake = true;
-        Log.add(c, "WakeLock 을 못 잡았어(" + why + ") — 화면이 꺼진 동안 작업이 끊길 수 있어");
+        Log.add(c, "WakeLock 획득에 실패했습니다(" + why + "). 화면이 꺼진 동안 작업이 중단될 수 있습니다.");
     }
 
     private static void release(PowerManager.WakeLock wl) {
@@ -852,7 +865,7 @@ public final class Scheduler {
         try {
             return Settings.macro(c);
         } catch (Throwable t) {
-            Log.add(c, "설정을 읽지 못해서 발송 예약을 못 했어: " + t);
+            Log.add(c, "설정을 읽지 못해 발송 예약에 실패했습니다. (" + t + ")");
             return null;
         }
     }

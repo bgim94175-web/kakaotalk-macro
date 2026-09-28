@@ -773,10 +773,10 @@ public final class Ui {
             ClipboardManager cm = (ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm == null) throw new IllegalStateException("클립보드 서비스 없음");
             cm.setPrimaryClip(ClipData.newPlainText(what == null ? "복사" : what, text));
-            toast(c, (what == null ? "" : what + " ") + "복사했어");
+            toast(c, (what == null ? "" : what + " ") + "복사되었습니다");
         } catch (Throwable t) {
             App.log(c, "복사 실패: " + t);
-            toast(c, "복사 못 했어");
+            toast(c, "복사에 실패했습니다");
         }
     }
 

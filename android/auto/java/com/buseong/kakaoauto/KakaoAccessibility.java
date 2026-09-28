@@ -348,22 +348,22 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         KakaoAccessibility me = INSTANCE;
         if (me == null) {
-            Log.add(ctx, "접근성 서비스가 아직 안 붙었어 — 공유창을 자동으로 못 누를 수 있어");
+            Log.add(ctx, "접근성 서비스가 연결되지 않았습니다. 공유창 자동 조작이 동작하지 않을 수 있습니다.");
             if (ctx != null) {
                 // 조기 return 해도 이번 시도의 덤프는 남는다 (서비스가 없어서 트리는 못 읽는다)
                 StringBuilder sb = new StringBuilder(512);
-                sb.append("=== 카톡 화면 진단 ").append(stamp()).append(" ===\n");
+                sb.append("=== 카카오톡 화면 진단 ").append(stamp()).append(" ===\n");
                 sb.append("시도 id: ").append(id).append('\n');
-                sb.append("실패: 접근성 서비스가 안 붙어 있어서 화면을 아예 못 읽었어\n");
-                sb.append("노린 방: \"").append(r).append("\"\n");
+                sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
+                sb.append("대상 대화방: \"").append(r).append("\"\n");
                 sb.append(env(ctx));
-                sb.append("다음 할 일: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 껐다 켜고 다시 시도해줘.\n");
+                sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
                 sb.append("=== 끝 ===\n");
                 saveDump(ctx, sb.toString(), id);
             }
             return id;
         }
-        Log.add(me, "카톡 공유창 자동 조작 예약했어 — 방: " + r + " (시도 " + id + ")");
+        Log.add(me, "카카오톡 공유창 자동 조작을 예약했습니다. 대화방: " + r + " (시도 " + id + ")");
         me.kick(700L);   // 이벤트를 놓쳐도 스스로 한 번은 찾아본다
         return id;
     }
@@ -383,8 +383,8 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (me != null && was) {
             try {
                 if (lastDumpAttempt(me) != attempt) {
-                    me.saveMini("호출한 쪽(사진 전송)이 먼저 포기했어 — 공유창이 안 떴거나 시간이 다 됐어."
-                            + " 카톡 공유창이 떠 있으면 닫고, 「다른 앱 위에 표시」 권한과 카톡 버전을 확인해줘",
+                    me.saveMini("호출 측(이미지 전송)이 먼저 중단되었습니다. 공유창이 표시되지 않았거나 시간이 초과되었습니다."
+                            + " 카카오톡 공유창이 열려 있으면 닫고, 「다른 앱 위에 표시」 권한과 카카오톡 버전을 확인하십시오.",
                             "disarm");
                 }
             } catch (Throwable ignore) { }
@@ -405,7 +405,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (!armed) return false;
         if (System.currentTimeMillis() > armedUntil) {
             KakaoAccessibility me = INSTANCE;
-            if (me != null) me.dumpAndFail("카톡이 끝까지 응답을 안 했어 (" + whereNow() + ")");
+            if (me != null) me.dumpAndFail("카카오톡이 응답하지 않았습니다. (" + whereNow() + ")");
             else clear();
             return false;
         }
@@ -432,15 +432,15 @@ public final class KakaoAccessibility extends AccessibilityService {
      */
     public static String dumpScreen() {
         KakaoAccessibility me = INSTANCE;
-        if (me == null) return "접근성 서비스가 안 붙어 있어서 화면을 못 읽었어";
-        if (!armed) return "지금은 예약(armed) 상태가 아니라 화면을 안 읽었어 — 진단은 전송을 시도하는 동안에만 떠낸다";
+        if (me == null) return "접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.";
+        if (!armed) return "예약(armed) 상태가 아니므로 화면을 읽지 않았습니다. 진단은 전송 시도 중에만 수집됩니다.";
         try {
             String d = me.buildDump(lastWhere);
             // 손으로 떠낸 것도 저장해둔다 — 화면에서 바로 복사 못 하고 나중에 찾는 경우가 있다
             try { saveDump(me, d, attempt); } catch (Throwable ignore) { }
             return d;
         } catch (Throwable t) {
-            return "화면 덤프를 만들다 실패했어 — " + t.getClass().getSimpleName();
+            return "화면 기록 생성에 실패했습니다. (" + t.getClass().getSimpleName() + ")";
         }
     }
 
@@ -553,11 +553,11 @@ public final class KakaoAccessibility extends AccessibilityService {
                     | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
             setServiceInfo(info);
         } catch (Throwable t) {
-            Log.add(this, "접근성 서비스 설정 적용 실패 — " + t.getClass().getSimpleName()
-                    + " (기본 설정으로 계속 갈게)");
+            Log.add(this, "접근성 서비스 설정 적용에 실패했습니다 (" + t.getClass().getSimpleName()
+                    + "). 기본 설정으로 계속 동작합니다.");
         }
-        Log.add(this, "접근성 서비스 켜졌어 — 이미지 전송 쓸 수 있어"
-                + (canGesture() ? "" : " (좌표 탭 폴백은 못 써 — 접근성 설정에 canPerformGestures 가 없어)"));
+        Log.add(this, "접근성 서비스가 활성화되었습니다. 이미지 전송이 가능합니다."
+                + (canGesture() ? "" : " (좌표 탭 대체 경로는 사용할 수 없습니다. 접근성 설정에 canPerformGestures 가 없습니다.)"));
         if (isArmed()) kick(500L);
     }
 
@@ -566,26 +566,26 @@ public final class KakaoAccessibility extends AccessibilityService {
         // 시스템이 서비스를 잠깐 멈출 때 온다. 진행 중이던 예약은 못 끝내니까 실패로 정리.
         // 이 경로도 덤프를 남긴다 — 여기서 비면 사용자는 "왜 실패했는지" 를 통째로 잃는다.
         if (isArmed()) {
-            String w = "접근성 서비스가 중단됐어 (" + whereNow() + ")"
-                    + " — 다른 접근성 앱과 부딪혔거나 시스템이 우리를 껐어."
-                    + " 카톡 공유창이 그대로 떠 있으면 뒤로가기로 닫고 다시 시도해줘";
+            String w = "접근성 서비스가 중단되었습니다. (" + whereNow() + ")"
+                    + " 타사 접근성 앱과 충돌했거나 시스템이 서비스를 종료했습니다."
+                    + " 카카오톡 공유창이 열려 있으면 뒤로가기로 닫고 다시 시도하십시오.";
             saveMini(w, "onInterrupt");
             finish(false, w);
         } else {
-            Log.add(this, "접근성 서비스가 잠깐 중단됐어");
+            Log.add(this, "접근성 서비스가 일시 중단되었습니다.");
         }
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
         if (isArmed()) {
-            String w = "접근성 권한이 꺼졌어 (" + whereNow() + ")"
-                    + " — 설정 › 접근성 › 카톡 오토 를 다시 켜고 시도해줘";
+            String w = "접근성 권한이 해제되었습니다. (" + whereNow() + ")"
+                    + " 설정 › 접근성 › 카톡 오토 를 다시 활성화한 후 시도하십시오.";
             saveMini(w, "onUnbind");
             finish(false, w);
         }
         if (INSTANCE == this) INSTANCE = null;
-        Log.add(this, "접근성 서비스 꺼졌어 — 이미지 전송은 안 돼");
+        Log.add(this, "접근성 서비스가 비활성화되었습니다. 이미지 전송이 불가합니다.");
         try {
             h.removeCallbacksAndMessages(null);
         } catch (Throwable ignore) { }
@@ -679,14 +679,14 @@ public final class KakaoAccessibility extends AccessibilityService {
                 // 창이 사라진 것만으로는 성공이 아니다 — 사용자가 뒤로가기를 눌러도 똑같이 사라진다.
                 // 전송(확인) 버튼을 실제로 누른 적이 있을 때만 "갔다" 로 본다.
                 if (sendTry > 0) {
-                    finish(true, targetRoom + " — 전송 버튼을 누른 뒤 공유창이 닫혔어. 카톡에서 한 번 확인해줘");
+                    finish(true, targetRoom + " · 전송 버튼 입력 후 공유창이 닫혔습니다. 카카오톡에서 전송 결과를 확인하십시오.");
                     return;
                 }
                 // 여기가 단건 공유형(탭하면 바로 보냄)일 수도, 뒤로가기로 닫힌 것일 수도 있다.
                 // 구분할 방법이 없으니 성공이라고 우기지 않는다.
-                dumpAndFail("방 「" + cut(pickedName, 20) + "」 을 누른 뒤 공유창이 사라졌는데"
-                        + " 전송 버튼을 누른 적이 없어 — 사진이 갔는지 확인이 안 돼."
-                        + " 카톡을 열어서 먼저 확인해줘 (이미 갔으면 다시 보내지 마)");
+                dumpAndFail("대화방 「" + cut(pickedName, 20) + "」 선택 후 공유창이 닫혔으나"
+                        + " 전송 버튼이 입력되지 않았습니다. 전송 여부를 확인할 수 없습니다."
+                        + " 카카오톡에서 전송 결과를 먼저 확인하십시오. 이미 전송된 경우 재전송하지 마십시오.");
                 return;
             }
             retry();
@@ -728,7 +728,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private void doPick(Scan sc) {
         final String room = targetRoom;
         if (room == null || room.length() == 0) {
-            finish(false, "보낼 방 이름이 비어있어");
+            finish(false, "대상 대화방 이름이 비어 있습니다.");
             return;
         }
         markShareList(sc);
@@ -742,8 +742,8 @@ public final class KakaoAccessibility extends AccessibilityService {
                 if (i > 0) names.append(", ");
                 names.append(cut(hits.get(i).name, 24));
             }
-            dumpAndFail("비슷한 방이 여러 개라 안 보냈어(" + names + ") — 엉뚱한 방에 사진이 가는 게 최악이라"
-                    + " 일부러 안 눌렀어. 설정의 방 이름을 화면에 보이는 그대로(끝까지) 고쳐줘" + nextStep());
+            dumpAndFail("이름이 유사한 대화방이 다수 검색되어 전송을 중단했습니다(" + names + ")."
+                    + " 오발송을 방지하기 위해 선택하지 않았습니다. 설정의 대화방 이름을 화면에 표시된 그대로 전체 입력하십시오." + nextStep());
             return;
         }
 
@@ -762,8 +762,8 @@ public final class KakaoAccessibility extends AccessibilityService {
             }
             // 클릭 자체가 안 먹었다 — 다음 번에 다시
             if (sameSig >= STUCK_ROUNDS) {
-                dumpAndFail("방 「" + cut(hit.name, 24) + "」 을 찾았는데 눌러도 안 먹혔어"
-                        + " (누를 수 있는 행이 아니었거나 다른 게 위를 덮고 있어)" + nextStep());
+                dumpAndFail("대화방 「" + cut(hit.name, 24) + "」 을 찾았으나 선택 입력이 처리되지 않았습니다"
+                        + " (선택 가능한 항목이 아니거나 다른 요소가 화면을 덮고 있습니다)" + nextStep());
                 return;
             }
             retry();
@@ -827,20 +827,20 @@ public final class KakaoAccessibility extends AccessibilityService {
         String tail = a11yTail();
 
         if (!sawShareList) {
-            return "카톡이 공유창(방 고르기 목록) 대신 다른 화면을 띄웠어 — 방 이름 문제가 아니야."
-                    + " 카톡을 직접 열어서 잠금(비밀번호)·재로그인·업데이트 안내 같은 게 떠 있는지 확인해줘."
-                    + " 그거 지우고 카톡 채팅 목록이 보이는 상태로 만든 다음 다시 시도해줘."
-                    + (lastActivityCls.length() > 0 ? " (그때 떠 있던 화면: " + shortCls(lastActivityCls) + ")" : "")
+            return "카카오톡이 공유창(대화방 선택 목록) 대신 다른 화면을 표시했습니다. 대화방 이름 문제가 아닙니다."
+                    + " 카카오톡을 직접 실행하여 잠금(비밀번호)·재로그인·업데이트 안내가 표시되는지 확인하십시오."
+                    + " 해당 화면을 해제하고 카카오톡 채팅 목록이 표시된 상태에서 다시 시도하십시오."
+                    + (lastActivityCls.length() > 0 ? " (당시 표시된 화면: " + shortCls(lastActivityCls) + ")" : "")
                     + tail;
         }
         String names = roomLike(sc);
-        return "방 목록에서 「" + cut(room, 24) + "」 을 못 찾았어."
+        return "대화방 목록에서 「" + cut(room, 24) + "」 을 찾지 못했습니다."
                 + (names.length() > 0
-                    ? " 그때 화면에 있던 이름은 이거야 → " + names
-                      + " . 카톡에 있는 이름과 글자가 다르면(이모지·괄호·띄어쓰기) 설정의 방 이름을"
-                      + " 화면에 보이는 그대로 고쳐줘"
-                    : " 그런데 화면에서 방 이름처럼 보이는 글자를 하나도 못 읽었어 —"
-                      + " 카톡 공유창이 목록을 아직 안 그렸을 수 있어. 카톡을 한 번 열어두고 다시 시도해줘")
+                    ? " 당시 화면에 표시된 이름: " + names
+                      + " . 카카오톡에 표시된 이름과 문자가 다른 경우(이모지·괄호·띄어쓰기) 설정의 대화방 이름을"
+                      + " 화면에 표시된 그대로 수정하십시오."
+                    : " 화면에서 대화방 이름으로 인식되는 문자를 읽지 못했습니다."
+                      + " 카카오톡 공유창이 목록을 아직 표시하지 않은 상태일 수 있습니다. 카카오톡을 실행한 후 다시 시도하십시오.")
                 + tail;
     }
 
@@ -858,7 +858,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             // 이미 체크돼 있으면 절대 누르면 안 된다 — 누르면 선택이 풀린다.
             Boolean checked = rowChecked(row);
             if (checked != null && checked.booleanValue()) {
-                note("「" + cut(hit.name, 20) + "」 은 이미 선택돼 있어 — 다시 누르지 않을게");
+                note("「" + cut(hit.name, 20) + "」 은 이미 선택된 상태입니다. 재선택하지 않습니다.");
                 clickedRow = true;
                 clickedAt = System.currentTimeMillis();
                 sawShareList = true;
@@ -886,8 +886,8 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         // (a) 채팅방으로 들어갔다 = 단건 공유형. 우리가 방을 눌렀다는 증거가 있을 때만 성공으로 본다.
         if (sc.chatInput && clickedRow && sawShareList) {
-            note("방을 누르니 채팅방으로 넘어갔어 — 보내진 걸로 볼게. 카톡에서 확인해줘");
-            finish(true, targetRoom + " — 채팅방으로 넘어갔어. 카톡에서 확인해줘");
+            note("대화방 선택 후 채팅방으로 전환되었습니다. 전송된 것으로 처리합니다. 카카오톡에서 확인하십시오.");
+            finish(true, targetRoom + " · 채팅방으로 전환되었습니다. 카카오톡에서 확인하십시오.");
             return;
         }
 
@@ -899,7 +899,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         // 권한 요청이나 다른 경고 다이얼로그의 "확인" 을 눌러버릴 수 있다.
         // 확실한 viewId(prio 0)만 예외로 허용한다.
         if (checkedNow || (b != null && (changed || b.prio == 0))) {
-            if (checkedNow) note("방이 선택(체크)됐어 — 이제 전송 버튼을 찾을게");
+            if (checkedNow) note("대화방이 선택되었습니다. 전송 버튼을 탐색합니다.");
             phase = P_SEND;
             phaseAt = now;
             sameSig = 0;
@@ -923,10 +923,10 @@ public final class KakaoAccessibility extends AccessibilityService {
             }
             Btn dis = sc.bestBtn(false);
             String extra = (dis == null) ? ""
-                    : " · 하단 버튼 「" + cut(dis.label, 20) + "」 은 비활성이야(선택이 안 된 거야)";
-            dumpAndFail("방 「" + cut(pickedName, 20) + "」 을 눌렀는데 선택도 안 되고 화면도 안 바뀌었어"
-                    + extra + " — 이름은 맞는데 우리가 엉뚱한 자리를 누른 거야." + nextStep()
-                    + " 계속 이러면 화면 진단을 복사해서 개발자에게 보내줘 (그게 있으면 고칠 수 있어)"
+                    : " · 하단 버튼 「" + cut(dis.label, 20) + "」 이 비활성 상태입니다(선택이 처리되지 않았습니다)";
+            dumpAndFail("대화방 「" + cut(pickedName, 20) + "」 을 선택했으나 선택 상태와 화면이 변경되지 않았습니다"
+                    + extra + ". 이름은 일치하나 선택 위치가 올바르지 않습니다." + nextStep()
+                    + " 증상이 반복되면 화면 진단을 복사하여 개발자에게 전달하십시오."
                     + a11yTail());
             return;
         }
@@ -937,7 +937,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     private void doSend(Scan sc) {
         if (sc.chatInput && clickedRow && sawShareList) {
-            finish(true, targetRoom + " — 채팅방으로 넘어갔어. 카톡에서 확인해줘");
+            finish(true, targetRoom + " · 채팅방으로 전환되었습니다. 카카오톡에서 확인하십시오.");
             return;
         }
 
@@ -945,9 +945,9 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (b != null) {
             if (sendTry >= MAX_SEND_TRY) {
                 dumpAndFail("전송 버튼 「" + cut(b.label, 20) + "」 을 " + sendTry
-                        + "번 눌렀는데 화면이 그대로야 — 사진이 갔는지 확인이 안 돼."
-                        + " 카톡을 열어서 「" + cut(pickedName, 20) + "」 에 사진이 갔는지 먼저 확인해줘"
-                        + " (갔으면 다시 보내지 마)." + nextStep());
+                        + "회 입력했으나 화면이 변경되지 않았습니다. 전송 여부를 확인할 수 없습니다."
+                        + " 카카오톡에서 「" + cut(pickedName, 20) + "」 의 전송 결과를 먼저 확인하십시오."
+                        + " 이미 전송된 경우 재전송하지 마십시오." + nextStep());
                 return;
             }
             if (clickNode(b.node, "전송 버튼")) {
@@ -963,8 +963,8 @@ public final class KakaoAccessibility extends AccessibilityService {
                 return;
             }
             if (sameSig >= STUCK_ROUNDS) {
-                dumpAndFail("전송 버튼 「" + cut(b.label, 20) + "」 을 눌러도 안 먹혔어"
-                        + " (버튼처럼 보이지만 실제로 누르는 자리가 아니야)." + nextStep() + a11yTail());
+                dumpAndFail("전송 버튼 「" + cut(b.label, 20) + "」 입력이 처리되지 않았습니다"
+                        + " (버튼 형태이나 실제 입력 대상이 아닙니다)." + nextStep() + a11yTail());
                 return;
             }
             retry();
@@ -975,15 +975,15 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (sameSig >= STUCK_ROUNDS) {
             Btn dis = sc.bestBtn(false);
             if (dis != null) {
-                dumpAndFail("전송 버튼 「" + cut(dis.label, 20) + "」 이 비활성이야 — 방 선택이 안 된 것 같아."
-                        + " 카톡 공유창에서 방을 손으로 한 번 눌러보고, 그때 방 이름이 화면에"
-                        + " 어떻게 적혀 있는지 확인해줘." + nextStep());
+                dumpAndFail("전송 버튼 「" + cut(dis.label, 20) + "」 이 비활성 상태입니다. 대화방 선택이 처리되지 않았습니다."
+                        + " 카카오톡 공유창에서 대화방을 직접 선택하고, 해당 대화방 이름이 화면에"
+                        + " 어떻게 표기되는지 확인하십시오." + nextStep());
             } else {
-                dumpAndFail("전송 버튼을 못 찾았어 (화면에 있던 누를 수 있는 글자: "
+                dumpAndFail("전송 버튼을 찾지 못했습니다 (화면에서 인식된 입력 가능 항목: "
                         + joinBtnLabels(sc) + ")"
-                        + (sawShareList ? "" : " · 공유 목록은 한 번도 못 봤어 — 카톡이 다른 화면을 띄운 것 같아")
+                        + (sawShareList ? "" : " · 공유 목록이 확인되지 않았습니다. 카카오톡이 다른 화면을 표시한 것으로 판단됩니다")
                         + "." + nextStep()
-                        + " 화면 진단을 복사해서 보내주면 이 버튼 이름을 다음 버전에 넣을 수 있어"
+                        + " 화면 진단을 전달하면 해당 버튼 이름을 다음 버전에 반영할 수 있습니다."
                         + a11yTail());
             }
             return;
@@ -1014,8 +1014,8 @@ public final class KakaoAccessibility extends AccessibilityService {
                 kick(400L);
                 return;
             }
-            dumpAndFail("전송 버튼 「" + cut(lastSendLabel, 20) + "」 을 눌렀는데 화면이 그대로야 —"
-                    + " 사진이 갔는지 확인이 안 돼. 카톡을 열어서 먼저 확인해줘 (갔으면 다시 보내지 마)."
+            dumpAndFail("전송 버튼 「" + cut(lastSendLabel, 20) + "」 입력 후 화면이 변경되지 않았습니다."
+                    + " 전송 여부를 확인할 수 없습니다. 카카오톡에서 먼저 확인하십시오. 이미 전송된 경우 재전송하지 마십시오."
                     + nextStep());
             return;
         }
@@ -1034,7 +1034,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             // 검색 아이콘/힌트 라벨일 수 있다. 눌러서 입력창을 띄워만 본다.
             if (sc.searchOpener != null) {
                 if (clickNode(sc.searchOpener, "검색 열기")) {
-                    note("방이 안 보여서 검색을 열었어");
+                    note("대화방이 목록에 없어 검색을 실행했습니다.");
                     return true;
                 }
             }
@@ -1054,7 +1054,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, q);
             boolean ok = box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
             if (!ok) {
-                note("검색창에 글자를 못 넣었어 — 직접 눌러봐야 할 수도 있어");
+                note("검색창에 문자를 입력하지 못했습니다. 직접 입력이 필요할 수 있습니다.");
                 searchImpossible = true;
                 return false;
             }
@@ -1066,11 +1066,11 @@ public final class KakaoAccessibility extends AccessibilityService {
                     went = got.length() > 0 && squash(got).contains(squash(q));
                 }
             } catch (Throwable ignore) { }
-            note("방이 안 보여서 검색창에 「" + q + "」 넣어봤어"
-                    + (went ? "" : " (글자가 안 들어간 것 같아)"));
+            note("대화방이 목록에 없어 검색창에 「" + q + "」 를 입력했습니다."
+                    + (went ? "" : " (문자가 입력되지 않은 것으로 판단됩니다)"));
             return true;
         } catch (Throwable t) {
-            note("검색창 입력 실패 — " + t.getClass().getSimpleName());
+            note("검색창 입력에 실패했습니다. (" + t.getClass().getSimpleName() + ")");
             searchImpossible = true;
             return false;
         }
@@ -1109,7 +1109,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private boolean scrollNext(Scan sc) {
         if (scrolls >= MAX_SCROLL) {
             scrollDone = true;
-            note("목록을 " + scrolls + "번 내려봤는데 방이 없어");
+            note("목록을 " + scrolls + "회 스크롤했으나 대화방을 찾지 못했습니다.");
             scrollBackToTop(sc);
             return false;
         }
@@ -1242,7 +1242,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 좌표 탭. canPerformGestures 가 없으면 조용히 실패하니 미리 확인한다. */
     private boolean tapNode(AccessibilityNodeInfo n, String what) {
         if (!canGesture()) {
-            note(what + " 좌표 탭을 못 써 — 접근성 설정에 canPerformGestures 가 없어");
+            note(what + " 좌표 탭을 사용할 수 없습니다. 접근성 설정에 canPerformGestures 가 없습니다.");
             return false;
         }
         Rect r = boundsOf(n);
@@ -1292,11 +1292,11 @@ public final class KakaoAccessibility extends AccessibilityService {
         try {
             dump = buildDump(w);
         } catch (Throwable t) {
-            dump = "화면 덤프를 만들다 실패했어 — " + t.getClass().getSimpleName()
+            dump = "화면 기록 생성에 실패했습니다. (" + t.getClass().getSimpleName() + ")"
                     + "\n" + miniBody(w, "buildDump 실패");
         }
         try { saveDump(this, dump, id); } catch (Throwable ignore) { }
-        finish(false, w + " · 화면 진단을 남겼어(매크로 › 사진 첨부 › 화면 진단 보기)");
+        finish(false, w + " · 화면 진단을 저장했습니다 (매크로 › 이미지 첨부 › 화면 진단 보기).");
         // 실패했으면 사진이 붙은 공유창을 남겨두지 않는다 — 그대로 두면 다음 시도까지 망친다.
         // (finish 가 핸들러를 비우니까 반드시 finish 다음에 예약한다)
         closeShare();
@@ -1318,9 +1318,9 @@ public final class KakaoAccessibility extends AccessibilityService {
         sb.append("실패: ").append(where).append('\n');
         sb.append("노린 방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
         sb.append("단계: ").append(whereNow())
-                .append(" · 방 클릭 ").append(clickedRow ? "함" : "안 함")
-                .append(" · 전송 클릭 ").append(sendTry).append("회")
-                .append(" · 목록 본 적 ").append(sawShareList ? "있음" : "없음").append('\n');
+                .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
+                .append(" · 전송 입력 ").append(sendTry).append("회")
+                .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
         sb.append(env(this));
         sb.append("마지막으로 본 화면: ")
                 .append(seenAt == 0 ? "없음(화면을 한 번도 못 훑었어)" : seenShape).append('\n');
@@ -1458,29 +1458,29 @@ public final class KakaoAccessibility extends AccessibilityService {
         String room = (targetRoom == null) ? "" : targetRoom;
         if (p == P_PICK) {
             if (!sawShareList) {
-                return "시간이 다 됐는데 공유창(방 고르기 목록)을 한 번도 못 봤어 — 방 이름 문제가 아니야."
-                        + " 카톡을 직접 열어서 잠금·재로그인·업데이트 안내가 떠 있는지 확인하고,"
-                        + " 채팅 목록이 보이는 상태에서 다시 시도해줘"
+                return "시간이 초과되었으나 공유창(대화방 선택 목록)이 확인되지 않았습니다. 대화방 이름 문제가 아닙니다."
+                        + " 카카오톡을 직접 실행하여 잠금·재로그인·업데이트 안내가 표시되는지 확인하고,"
+                        + " 채팅 목록이 표시된 상태에서 다시 시도하십시오."
                         + (lastActivityCls.length() > 0
-                            ? " (그때 떠 있던 화면: " + shortCls(lastActivityCls) + ")" : "");
+                            ? " (당시 표시된 화면: " + shortCls(lastActivityCls) + ")" : "");
             }
-            return "방 목록에서 「" + cut(room, 24) + "」 을 못 찾아서 시간이 다 됐어."
+            return "대화방 목록에서 「" + cut(room, 24) + "」 을 찾지 못한 상태로 시간이 초과되었습니다."
                     + (seenNames.length() > 0
-                        ? " 그때 화면에 있던 이름은 이거야 → " + seenNames
-                          + " . 설정의 방 이름을 화면에 보이는 그대로 고쳐줘"
-                        : " 화면에서 방 이름처럼 보이는 글자를 못 읽었어")
+                        ? " 당시 화면에 표시된 이름: " + seenNames
+                          + " . 설정의 대화방 이름을 화면에 표시된 그대로 수정하십시오."
+                        : " 화면에서 대화방 이름으로 인식되는 문자를 읽지 못했습니다.")
                     + nextStep();
         }
         if (p == P_AFTER) {
-            return "방을 눌렀는데 선택됐는지 확인이 안 돼서 시간이 다 됐어." + nextStep();
+            return "대화방을 선택했으나 선택 상태를 확인하지 못한 상태로 시간이 초과되었습니다." + nextStep();
         }
         if (p == P_SEND) {
-            return "전송 버튼을 못 찾아서 시간이 다 됐어"
-                    + (seenBtns.length() > 0 ? " (그때 보였던 버튼: " + seenBtns + ")" : "")
+            return "전송 버튼을 찾지 못한 상태로 시간이 초과되었습니다"
+                    + (seenBtns.length() > 0 ? " (당시 확인된 버튼: " + seenBtns + ")" : "")
                     + "." + nextStep();
         }
-        return "전송 버튼을 누른 뒤 화면이 안 바뀌어서 시간이 다 됐어 — 사진이 갔는지 확인이 안 돼."
-                + " 카톡을 열어서 먼저 확인해줘 (갔으면 다시 보내지 마)." + nextStep();
+        return "전송 버튼 입력 후 화면이 변경되지 않은 상태로 시간이 초과되었습니다. 전송 여부를 확인할 수 없습니다."
+                + " 카카오톡에서 먼저 확인하십시오. 이미 전송된 경우 재전송하지 마십시오." + nextStep();
     }
 
     /**
@@ -1488,8 +1488,8 @@ public final class KakaoAccessibility extends AccessibilityService {
      * "눌렀는데 아무 일도 안 일어났어" 로 끝내면 사용자는 뭘 해야 할지 모른다.
      */
     private static String nextStep() {
-        return " 카톡 공유창이 그대로 떠 있을 거야 — 내가 뒤로가기로 닫아볼게."
-                + " 안 닫혔으면 뒤로가기로 직접 닫고, 카톡을 채팅 목록 화면으로 둔 다음 다시 시도해줘.";
+        return " 카카오톡 공유창이 열린 상태일 수 있습니다. 뒤로가기로 자동 종료를 시도합니다."
+                + " 종료되지 않으면 뒤로가기로 직접 닫고, 카카오톡을 채팅 목록 화면으로 둔 후 다시 시도하십시오.";
     }
 
     /**
@@ -1526,8 +1526,8 @@ public final class KakaoAccessibility extends AccessibilityService {
     private String a11yTail() {
         String o = otherA11y();
         if (o.length() == 0) return "";
-        return " · 참고: 다른 접근성 앱이 켜져 있어(" + o + ") — 이런 앱은 우리 조작과 부딪혀서"
-                + " 카톡 레이아웃이 바뀐 것처럼 보이게 만들어. 잠깐 끄고 다시 해봐";
+        return " · 참고: 타사 접근성 앱이 활성 상태입니다(" + o + "). 해당 앱은 자동 조작과 충돌하여"
+                + " 카카오톡 레이아웃이 변경된 것과 동일한 증상을 유발합니다. 일시 해제한 후 다시 시도하십시오.";
     }
 
     /** 패키지의 앱 이름 (못 찾으면 패키지명 그대로) */
@@ -2153,31 +2153,31 @@ public final class KakaoAccessibility extends AccessibilityService {
         final String room = (targetRoom == null) ? "" : targetRoom;
         String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
 
-        out.append("=== 카톡 화면 진단 ").append(now).append(" ===\n");
-        out.append("※ 이 덤프에는 그때 카톡 화면에 보이던 이름·문구가 들어있어.\n");
-        out.append("   개발자에게 보내기 전에 한 번 읽어보고, 곤란한 줄이 있으면 지우고 보내.\n");
-        out.append("   (대화 본문처럼 긴 글자는 앞 ").append(TEXT_KEEP).append("자만 남겼어)\n");
+        out.append("=== 카카오톡 화면 진단 ").append(now).append(" ===\n");
+        out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
+        out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
+        out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
         out.append("시도 id: ").append(attempt).append('\n');
-        out.append("실패: ").append((where == null || where.length() == 0) ? "(직접 떠냄)" : where).append('\n');
-        out.append("노린 방: \"").append(room).append("\"  (정리: \"").append(norm(room))
+        out.append("실패: ").append((where == null || where.length() == 0) ? "(수동 수집)" : where).append('\n');
+        out.append("대상 대화방: \"").append(room).append("\"  (정규화: \"").append(norm(room))
                 .append("\" / 공백무시: \"").append(squash(room)).append("\")\n");
         out.append("단계: ").append(whereNow())
-                .append(" · 방 클릭 ").append(clickedRow ? "함" : "안 함")
-                .append(" · 전송 클릭 ").append(sendTry).append("회")
-                .append(" · 목록 본 적 ").append(sawShareList ? "있음" : "없음").append('\n');
+                .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
+                .append(" · 전송 입력 ").append(sendTry).append("회")
+                .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
         out.append(env(this));
-        out.append("카톡 버전: ").append(kakaoVersion()).append('\n');
+        out.append("카카오톡 버전: ").append(kakaoVersion()).append('\n');
         out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
         out.append("마지막 액티비티/다이얼로그: ")
-                .append(lastActivityCls.length() == 0 ? "모름" : lastActivityCls).append('\n');
+                .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
         String others = otherA11y();
-        out.append("같이 켜져 있는 다른 접근성 앱: ")
+        out.append("활성 상태인 타사 접근성 앱: ")
                 .append(others.length() == 0 ? "없음" : others)
-                .append(others.length() == 0 ? "" : "  ← 접근성끼리 부딪히면 증상이 레이아웃 변경과 구분이 안 된다")
+                .append(others.length() == 0 ? "" : "  ← 접근성 앱 충돌 시 레이아웃 변경과 동일한 증상이 발생합니다")
                 .append('\n');
 
         ArrayList<AccessibilityNodeInfo> rs = roots();
-        out.append("카톡 창 개수: ").append(rs.size()).append('\n');
+        out.append("카카오톡 창 개수: ").append(rs.size()).append('\n');
         try {
             List<AccessibilityWindowInfo> ws = getWindows();
             if (ws != null) {
@@ -2198,15 +2198,15 @@ public final class KakaoAccessibility extends AccessibilityService {
                 }
             }
         } catch (Throwable t) {
-            out.append("  (창 목록을 못 읽었어 — ").append(t.getClass().getSimpleName()).append(")\n");
+            out.append("  (창 목록을 읽지 못했습니다 — ").append(t.getClass().getSimpleName()).append(")\n");
         }
 
         if (rs.isEmpty()) {
-            out.append("\n지금 화면에 카톡 창이 하나도 없어 — 공유창이 이미 닫혔거나 다른 앱이 앞에 있어.\n");
+            out.append("\n현재 화면에 카카오톡 창이 없습니다. 공유창이 이미 닫혔거나 다른 앱이 전면에 있습니다.\n");
             out.append("마지막으로 본 화면: ")
-                    .append(seenAt == 0 ? "없음(한 번도 못 훑었어)" : seenShape).append('\n');
-            if (seenNames.length() > 0) out.append("그때 보였던 이름: ").append(seenNames).append('\n');
-            if (seenBtns.length() > 0) out.append("그때 보였던 버튼: ").append(seenBtns).append('\n');
+                    .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : seenShape).append('\n');
+            if (seenNames.length() > 0) out.append("당시 확인된 이름: ").append(seenNames).append('\n');
+            if (seenBtns.length() > 0) out.append("당시 확인된 버튼: ").append(seenBtns).append('\n');
             out.append(notesBlock());
             out.append("=== 끝 ===\n");
             return out.toString();
@@ -2216,33 +2216,33 @@ public final class KakaoAccessibility extends AccessibilityService {
         try {
             sc = scan(rs);
         } catch (Throwable t) {
-            out.append("\n화면을 훑다 실패했어 — ").append(t.getClass().getSimpleName()).append('\n');
+            out.append("\n화면 수집에 실패했습니다 — ").append(t.getClass().getSimpleName()).append('\n');
             out.append(notesBlock()).append("=== 끝 ===\n");
             recycleAll(rs);
             return out.toString();
         }
 
         out.append("노드 ").append(sc.nodes).append("개")
-                .append(sc.truncated ? " (한도에서 잘렸어!)" : "").append('\n');
+                .append(sc.truncated ? " (한도 초과로 일부 생략)" : "").append('\n');
         out.append("스크롤 가능 노드: ").append(sc.scrollables.size()).append("개\n");
         for (int i = 0; i < sc.scrollables.size() && i < 6; i++) {
             AccessibilityNodeInfo n = sc.scrollables.get(i);
             out.append("  - ").append(shortCls(className(n))).append(" id=")
                     .append(shortId(viewId(n))).append(' ').append(boundsStr(n)).append('\n');
         }
-        out.append("목록 행(제일 큰 스크롤 노드의 자식): ").append(sc.listRows)
-                .append("개 · 행처럼 생긴 글자: ").append(sc.rows).append("개\n");
+        out.append("목록 행(최대 스크롤 노드의 자식): ").append(sc.listRows)
+                .append("개 · 행으로 인식된 문자: ").append(sc.rows).append("개\n");
         out.append("체크 가능 노드(보이는 것): ").append(sc.checkables).append("개 (켜진 것 ")
                 .append(sc.checkedCount).append("개) → ")
-                .append(sc.checkables > 0 ? "다중선택형(b)으로 보여" : "체크박스가 안 보여 = 단건형(a)일 수 있어")
+                .append(sc.checkables > 0 ? "다중선택형(b)으로 판단" : "체크박스 미확인 = 단건형(a) 가능")
                 .append('\n');
-        out.append("검색 입력창: ").append(sc.searchBox == null ? "못 찾음"
+        out.append("검색 입력창: ").append(sc.searchBox == null ? "미확인"
                 : (shortId(viewId(sc.searchBox)) + " " + boundsStr(sc.searchBox))).append('\n');
-        out.append("검색 열기 후보: ").append(sc.searchOpener == null ? "못 찾음"
+        out.append("검색 열기 후보: ").append(sc.searchOpener == null ? "미확인"
                 : (cut(text2(sc.searchOpener), 20) + " / " + shortId(viewId(sc.searchOpener)))).append('\n');
         out.append("채팅방 입력창 보임: ").append(sc.chatInput ? "Y" : "N").append('\n');
 
-        out.append("버튼 같은 노드(누를 수 있고 글자 있는 것) ").append(sc.btns.size()).append("개:\n");
+        out.append("버튼으로 인식된 노드(입력 가능 + 문자 포함) ").append(sc.btns.size()).append("개:\n");
         for (int i = 0; i < sc.btns.size() && i < 12; i++) {
             Btn b = sc.btns.get(i);
             out.append("  - \"").append(cut(b.label, 24)).append("\" id=").append(b.id)
@@ -2301,9 +2301,9 @@ public final class KakaoAccessibility extends AccessibilityService {
                     return false;
                 }
             });
-            if (w.truncated) out.append("  …트리가 ").append(DUMP_MAX_NODES).append("노드에서 잘렸어\n");
+            if (w.truncated) out.append("  …트리가 ").append(DUMP_MAX_NODES).append("노드에서 생략되었습니다\n");
         }
-        if (skipped[0] > 0) out.append("… 외 ").append(skipped[0]).append("개 더 있었어(여기서 잘랐어)\n");
+        if (skipped[0] > 0) out.append("… 외 ").append(skipped[0]).append("개 생략\n");
         out.append('\n').append(notesBlock());
         out.append("=== 끝 ===\n");
 

@@ -48,7 +48,7 @@ public final class AutoReply {
 
     private static final Random RND = new Random();
 
-    /** 발신자 → 마지막 응답 시각 */
+    /** 발신자 키(계정+이름) → 마지막 응답 시각 */
     private static final HashMap<String, Long> LAST = new HashMap<String, Long>();
     /** 오늘 날짜 (yyyyMMdd) */
     private static String today = "";
@@ -63,43 +63,56 @@ public final class AutoReply {
     /**
      * 1:1 개인톡 한 건을 받아서 자동응답 여부를 판단하고, 보낼 거면 예약한다.
      * KakaoListener 는 그룹방·내 메시지를 걸러서 넘겨주지만, 여기서도 한 번 더 확인한다.
+     *
+     * @param room 메시지가 온 방 (계정 + 상대 이름)
      */
-    public static void onDirectMessage(final Context c, String room, String sender, String text) {
-        if (c == null || text == null || text.trim().length() == 0) return;
+    public static void onDirectMessage(final Context c, final RoomRef room, String sender, String text) {
+        if (c == null || room == null || text == null || text.trim().length() == 0) return;
         if (!License.allowed(c, Features.MACRO)) return;
 
-        Settings.AutoReplyCfg cfg = Settings.autoreply(c);
+        Settings set;
+        try {
+            set = Settings.load(c);
+        } catch (Throwable t) {
+            return;
+        }
+        // 대상 계정이 아니면 응답하지 않는다 (Settings.accounts 가 비어 있으면 모든 계정이 대상)
+        if (!set.accountOn(room.acc)) return;
+
+        Settings.AutoReplyCfg cfg = set.autoreply;
         if (cfg == null || !cfg.enabled) return;
 
-        final String r = (room == null) ? "" : room.trim();
+        if (!room.valid()) return;
         final String who = (sender == null) ? "" : sender.trim();
-        if (r.length() == 0) return;
+        final String label = room.label(c);
 
         // 그룹방이면 자동응답 대상이 아니다 (리스너가 본 방 정보로 한 번 더 확인)
-        KakaoListener.Session s = KakaoListener.session(r);
+        KakaoListener.Session s = KakaoListener.session(room);
         if (s != null && s.group) return;
 
         // 내 메시지면 무시
-        String me = KakaoListener.selfName();
+        String me = KakaoListener.selfName(room.acc);
         if (who.length() > 0 && me.length() > 0 && who.equals(me)) return;
 
         if (cfg.message == null || cfg.message.trim().length() == 0) {
-            warn(c, "empty", "자동응답이 켜져 있는데 보낼 메시지가 비어있어 — 매크로 탭에서 채워줘");
+            warn(c, "empty", "자동응답이 활성 상태이나 응답 메시지가 비어 있습니다. 매크로 탭에서 메시지를 입력하십시오.");
             return;
         }
 
         // 「모르는 사람만」 판정: 이 방을 전에 본 적이 없으면 모르는 사람.
         // (KakaoListener 는 디스패치가 끝난 뒤에 방을 캐시하니까 첫 메시지는 여기서 unknown 으로 잡힌다)
-        boolean unknown = !KakaoListener.isKnownRoom(r);
-        if (!cfg.coversRoom(r, unknown)) return;
+        boolean unknown = !KakaoListener.isKnownRoom(room);
+        if (!cfg.coversRoom(room, unknown)) return;
 
         final long now = System.currentTimeMillis();
         if (!cfg.inHours(now)) {
-            warn(c, "hours", "자동응답 운영시간(" + cfg.hourFrom + "시~" + cfg.hourTo + "시)이 아니라 넘겼어");
+            warn(c, "hours", "자동응답 운영시간(" + cfg.hourFrom + "시~" + cfg.hourTo
+                    + "시)이 아니므로 응답하지 않았습니다.");
             return;
         }
 
-        final String key = (who.length() > 0) ? who : r;
+        // 쿨다운·첫메시지 판정 키는 계정까지 포함한다 (같은 이름이 두 계정에 있을 수 있다)
+        final String key = personKey(room, who);
         final long stamp;
         synchronized (AutoReply.class) {
             load(c);
@@ -111,7 +124,8 @@ public final class AutoReply {
             if (last != null && now - last.longValue() < cool) return;
 
             if (cfg.dailyLimit > 0 && sentToday >= cfg.dailyLimit) {
-                warn(c, "limit", "자동응답 하루 한도(" + cfg.dailyLimit + "개)를 다 썼어 — 자정에 초기화돼");
+                warn(c, "limit", "자동응답 일일 한도(" + cfg.dailyLimit
+                        + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
                 return;
             }
 
@@ -123,29 +137,40 @@ public final class AutoReply {
             save(c);
         }
 
-        final String msg = cfg.render(who.length() > 0 ? who : r, now);
+        final String msg = cfg.render(who.length() > 0 ? who : room.name, now);
         if (msg == null || msg.trim().length() == 0) {
             refund(c, key, stamp);
-            warn(c, "render", "자동응답 메시지가 치환 후 비어버렸어 — 메시지를 확인해줘");
+            warn(c, "render", "자동응답 메시지가 치환 후 비어 있습니다. 메시지 내용을 확인하십시오.");
             return;
         }
 
         final long wait = delayOf(cfg.delayMaxMs);
         KakaoListener.post(new Runnable() {
             @Override public void run() {
-                boolean ok = KakaoListener.sendTo(c, r, msg);
+                boolean ok = KakaoListener.sendTo(c, room, msg);
                 if (ok) {
-                    Log.add(c, "자동응답 보냈어 → 「" + r + "」 (오늘 " + count() + "개)");
+                    Log.add(c, "자동응답 발송 · 「" + label + "」 (금일 " + count() + "건)");
                 } else {
                     refund(c, key, stamp);
-                    Log.add(c, "자동응답 발송이 실패했어 → 「" + r + "」 (한도는 되돌렸어)");
+                    Log.add(c, "자동응답 발송에 실패했습니다. 「" + label + "」 (일일 한도는 복구했습니다.)");
                 }
             }
         }, wait);
 
         if (wait > 0) {
-            Log.add(c, "자동응답 예약 — 「" + r + "」 에 " + (wait / 1000) + "초 뒤 보낼게");
+            Log.add(c, "자동응답 예약 · 「" + label + "」 " + (wait / 1000) + "초 후 발송");
         }
+    }
+
+    /**
+     * 사람별 상태 키. 계정 + 상대 이름으로 만든다 (상대 이름을 모르면 방 키).
+     * {@link RoomRef#key()} 와 같은 형식이라 옛 평문 기록도 {@link RoomRef#parse} 로 올려 쓸 수 있다.
+     */
+    private static String personKey(RoomRef room, String who) {
+        if (room == null) return (who == null) ? "" : who.trim();
+        if (who == null || who.trim().length() == 0) return room.key();
+        RoomRef r = RoomRef.of(room.acc, who.trim());
+        return (r == null) ? room.key() : r.key();
     }
 
     /** 0 ~ delayMaxMs 사이 랜덤 */
@@ -170,11 +195,23 @@ public final class AutoReply {
         return sentToday;
     }
 
-    /** 이 사람에게 마지막으로 응답한 시각 (없으면 0) */
+    /**
+     * 이 사람에게 마지막으로 응답한 시각 (없으면 0).
+     * 계정 구분자가 없는 이름을 넘기면 기본 계정("0")의 기록을 본다.
+     */
     public static synchronized long lastRepliedAt(Context c, String who) {
-        if (who == null) return 0L;
+        if (who == null || who.trim().length() == 0) return 0L;
         load(c);
-        Long v = LAST.get(who.trim());
+        RoomRef r = RoomRef.parse(who.trim());
+        Long v = LAST.get((r == null) ? who.trim() : r.key());
+        return (v == null) ? 0L : v.longValue();
+    }
+
+    /** 이 계정의 이 사람에게 마지막으로 응답한 시각 (없으면 0) */
+    public static synchronized long lastRepliedAt(Context c, RoomRef room, String who) {
+        if (room == null) return lastRepliedAt(c, who);
+        load(c);
+        Long v = LAST.get(personKey(room, who));
         return (v == null) ? 0L : v.longValue();
     }
 
@@ -184,7 +221,7 @@ public final class AutoReply {
         return LAST.size();
     }
 
-    /** 최근 응답한 사람들 (최신 순, 최대 n명) */
+    /** 최근 응답한 사람들 (최신 순, 최대 n명. 표시용 이름) */
     public static synchronized List<String> recentPeople(Context c, int n) {
         load(c);
         ArrayList<Map.Entry<String, Long>> all =
@@ -195,7 +232,11 @@ public final class AutoReply {
             }
         });
         ArrayList<String> out = new ArrayList<String>();
-        for (int i = 0; i < all.size() && (n <= 0 || out.size() < n); i++) out.add(all.get(i).getKey());
+        for (int i = 0; i < all.size() && (n <= 0 || out.size() < n); i++) {
+            String k = all.get(i).getKey();
+            RoomRef r = RoomRef.parse(k);
+            out.add((r == null) ? k : r.label());
+        }
         return out;
     }
 
@@ -277,12 +318,15 @@ public final class AutoReply {
                 while (it.hasNext()) {
                     String k = it.next();
                     long v = last.optLong(k, 0L);
-                    if (k.length() > 0 && v > 0) LAST.put(k, Long.valueOf(v));
+                    if (k.length() == 0 || v <= 0) continue;
+                    // 옛 기록은 계정 구분자가 없는 이름이다 → 기본 계정 키로 올려준다
+                    RoomRef r = RoomRef.parse(k);
+                    LAST.put((r == null) ? k : r.key(), Long.valueOf(v));
                 }
             }
             trim();
         } catch (Throwable t) {
-            Log.add(c, "자동응답 이력이 깨져 있어서 초기화했어: " + t);
+            Log.add(c, "자동응답 이력이 손상되어 초기화했습니다. (" + t + ")");
             LAST.clear();
             sentToday = 0;
         }
@@ -303,7 +347,7 @@ public final class AutoReply {
             o.put("last", last);
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
-            Log.add(c, "자동응답 이력을 저장하지 못했어: " + t);
+            Log.add(c, "자동응답 이력을 저장하지 못했습니다. (" + t + ")");
         }
     }
 }

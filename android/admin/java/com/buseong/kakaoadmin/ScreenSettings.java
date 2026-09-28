@@ -42,7 +42,7 @@ public final class ScreenSettings implements MainActivity.Screen {
         // ── 서버 접속
         LinearLayout conn = Ui.card(a);
         conn.addView(Ui.h2(a, "서버 접속"));
-        TextView ch = Ui.sub(a, "주소나 비밀번호를 바꾸면 저장할 때 바로 확인해봐.");
+        TextView ch = Ui.sub(a, "주소 또는 비밀번호 변경 시 저장 시점에 서버 연결을 검증합니다.");
         mt(ch, 6);
         conn.addView(ch);
 
@@ -58,11 +58,11 @@ public final class ScreenSettings implements MainActivity.Screen {
         TextView l2 = Ui.label(a, "관리자 비밀번호");
         mt(l2, 14);
         conn.addView(l2);
-        pwFieldView = Ui.pwField(a, "바꾸지 않으려면 비워둬");
+        pwFieldView = Ui.pwField(a, "변경하지 않으려면 비워 두십시오");
         mt(pwFieldView, 7);
         conn.addView(pwFieldView);
 
-        rememberRow = Ui.switchRow(a, "비밀번호 저장", "끄면 앱을 닫을 때 비번이 사라져.",
+        rememberRow = Ui.switchRow(a, "비밀번호 저장", "비활성 시 앱 종료 시점에 비밀번호가 삭제됩니다.",
                 Api.remember(a), null);
         mt(rememberRow, 4);
         conn.addView(rememberRow);
@@ -78,8 +78,8 @@ public final class ScreenSettings implements MainActivity.Screen {
         // ── 앱서명 허용목록
         LinearLayout sigs = Ui.card(a);
         sigs.addView(Ui.h2(a, "앱 서명 허용목록"));
-        TextView sh = Ui.sub(a, "여기에 등록된 SHA-256 서명으로 빌드된 APK 만 인증을 통과해.\n"
-                + "빌드할 때 build.sh 가 출력하는 '서버 등록용 hex' 를 붙여넣어라.");
+        TextView sh = Ui.sub(a, "등록된 SHA-256 서명으로 빌드된 APK 만 인증을 통과합니다.\n"
+                + "build.sh 가 출력하는 '서버 등록용 hex' 값을 입력하십시오.");
         mt(sh, 6);
         sigs.addView(sh);
 
@@ -128,7 +128,7 @@ public final class ScreenSettings implements MainActivity.Screen {
         crashBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 String c = App.lastCrash(a);
-                if (c == null) { Ui.toast(a, "저장된 크래시가 없어 — 좋은 거야"); return; }
+                if (c == null) { Ui.toast(a, "저장된 크래시 기록이 없습니다"); return; }
                 Ui.showText(a, "마지막 크래시 · " + Ui.fmtFull(App.lastCrashAt(a)), c);
             }
         });
@@ -138,14 +138,14 @@ public final class ScreenSettings implements MainActivity.Screen {
         mt(clearBtn, 8);
         clearBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                Ui.confirm(a, "기록 지우기", "이 기기에 쌓인 앱 로그와 크래시 기록을 지울까?\n"
-                        + "서버 기록(감사로그)은 안 지워져.", "지우기", true, new Runnable() {
+                Ui.confirm(a, "기록 지우기", "현재 기기에 저장된 앱 로그와 크래시 기록을 삭제합니다.\n"
+                        + "서버 기록(감사로그)은 삭제되지 않습니다.", "지우기", true, new Runnable() {
                     @Override public void run() {
                         App.logClear(a);
                         App.clearCrash(a);
-                        App.log(a, "로그를 비웠어");
+                        App.log(a, "로그 및 크래시 기록 삭제됨");
                         paintCrash();
-                        Ui.toast(a, "지웠어");
+                        Ui.toast(a, "삭제되었습니다");
                     }
                 });
             }
@@ -156,14 +156,14 @@ public final class ScreenSettings implements MainActivity.Screen {
         // ── 로그아웃
         LinearLayout out = Ui.card(a);
         out.addView(Ui.h2(a, "로그아웃"));
-        TextView oh = Ui.sub(a, "저장된 비밀번호를 이 기기에서 지우고 로그인 화면으로 돌아가.");
+        TextView oh = Ui.sub(a, "현재 기기에 저장된 비밀번호를 삭제하고 로그인 화면으로 전환합니다.");
         mt(oh, 6);
         out.addView(oh);
         TextView logout = Ui.btnDanger(a, "로그아웃");
         mt(logout, 12);
         logout.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                Ui.confirm(a, "로그아웃", "저장된 비밀번호를 지우고 로그인 화면으로 갈까?",
+                Ui.confirm(a, "로그아웃", "저장된 비밀번호를 삭제하고 로그인 화면으로 전환합니다.",
                         "로그아웃", true, new Runnable() {
                             @Override public void run() {
                                 Api.signOut(a);
@@ -202,7 +202,7 @@ public final class ScreenSettings implements MainActivity.Screen {
         boolean keep = Ui.isOn(rememberRow);
 
         if (pw.length() == 0) pw = Api.password(a);
-        if (pw.length() == 0) { Ui.toast(a, "비밀번호가 없어 — 새로 입력해줘"); return; }
+        if (pw.length() == 0) { Ui.toast(a, "비밀번호가 없습니다. 비밀번호를 입력하십시오"); return; }
 
         Api.signIn(a, base, pw, keep);
         if (pwFieldView != null) pwFieldView.setText("");
@@ -215,7 +215,7 @@ public final class ScreenSettings implements MainActivity.Screen {
                     a.fail("서버 확인", r);
                     return;
                 }
-                Ui.toast(a, "저장했어");
+                Ui.toast(a, "저장되었습니다");
                 App.log(a, "서버 설정 저장 (" + Api.base(a) + ")");
                 a.refreshStats();
                 reload();
@@ -235,7 +235,7 @@ public final class ScreenSettings implements MainActivity.Screen {
                 if (sigBox == null) return;
                 sigBox.removeAllViews();
                 if (!r.ok) {
-                    sigBox.addView(Ui.emptyBox(a, "허용목록을 못 읽었어\n" + r.error));
+                    sigBox.addView(Ui.emptyBox(a, "허용목록을 불러오지 못했습니다\n" + r.error));
                     a.fail("서명 목록", r);
                     return;
                 }
@@ -246,7 +246,7 @@ public final class ScreenSettings implements MainActivity.Screen {
                 if (sigNote != null) {
                     StringBuilder n = new StringBuilder();
                     if (arr.length() == 0 && env.length() == 0) {
-                        n.append("⚠ 허용목록이 완전히 비어있어 → 서버가 서명검사를 통과시켜. 지금 등록해줘.");
+                        n.append("⚠ 허용목록이 비어 있어 서버의 서명 검사가 무효화된 상태입니다. 서명을 등록하십시오.");
                         sigNote.setTextColor(Theme.AMBER);
                     } else {
                         n.append("DB ").append(arr.length()).append("개");
@@ -258,7 +258,7 @@ public final class ScreenSettings implements MainActivity.Screen {
                 }
 
                 if (arr.length() == 0) {
-                    sigBox.addView(Ui.emptyBox(a, "DB 에 등록된 서명이 없어"));
+                    sigBox.addView(Ui.emptyBox(a, "DB 에 등록된 서명이 없습니다"));
                 } else {
                     for (int i = 0; i < arr.length(); i++) {
                         JSONObject o = arr.optJSONObject(i);
@@ -325,14 +325,14 @@ public final class ScreenSettings implements MainActivity.Screen {
         del.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.confirm(a, "서명 삭제",
-                        "이 서명을 허용목록에서 지울까?\n이 서명으로 빌드된 앱은 다음 인증에서 '위조된 앱이야' 로 막혀.\n\n" + sha,
+                        "이 서명을 허용목록에서 삭제합니다.\n해당 서명으로 빌드된 앱은 다음 인증에서 '위조된 앱입니다' 로 차단됩니다.\n\n" + sha,
                         "삭제", true, new Runnable() {
                             @Override public void run() {
                                 Api.sigDel(a, sha, new Api.Cb() {
                                     @Override public void done(Api.Result r) {
                                         if (a.kicked(r)) return;
                                         if (!r.ok) { a.fail("서명 삭제", r); return; }
-                                        Ui.toast(a, "삭제했어");
+                                        Ui.toast(a, "삭제되었습니다");
                                         App.log(a, "앱서명 삭제 " + sha);
                                         loadSigs();
                                     }
@@ -348,7 +348,7 @@ public final class ScreenSettings implements MainActivity.Screen {
 
     private void openAddSig() {
         LinearLayout box = Ui.col(a);
-        box.addView(Ui.sub(a, "build.sh 가 출력한 '서버 등록용 hex' 64자를 붙여넣어. 콜론이 있어도 알아서 지워줘."));
+        box.addView(Ui.sub(a, "build.sh 가 출력한 '서버 등록용 hex' 64자를 입력하십시오. 콜론은 자동으로 제거됩니다."));
         final EditText sha = Ui.field(a, "SHA-256 (64자 hex)");
         sha.setTypeface(android.graphics.Typeface.MONOSPACE);
         sha.setMinLines(2);
@@ -370,7 +370,7 @@ public final class ScreenSettings implements MainActivity.Screen {
             @Override public void onClick(View v) {
                 String hex = Api.normSha(sha.getText() == null ? "" : sha.getText().toString());
                 if (hex.length() != 64) {
-                    Ui.toast(a, "SHA-256 은 64자 hex 여야 해 (지금 " + hex.length() + "자)");
+                    Ui.toast(a, "SHA-256 은 64자 hex 형식입니다. 현재 " + hex.length() + "자");
                     return;
                 }
                 String lb = (label.getText() == null) ? "" : label.getText().toString().trim();
@@ -379,7 +379,7 @@ public final class ScreenSettings implements MainActivity.Screen {
                         if (a.kicked(r)) return;
                         if (!r.ok) { a.fail("서명 추가", r); return; }
                         try { dlg.dismiss(); } catch (Throwable ignore) { }
-                        Ui.toast(a, "추가했어");
+                        Ui.toast(a, "추가되었습니다");
                         App.log(a, "앱서명 추가 " + hex);
                         loadSigs();
                     }
@@ -395,7 +395,7 @@ public final class ScreenSettings implements MainActivity.Screen {
         statBox.removeAllViews();
         JSONObject s = a.statsJson();
         if (s == null) {
-            statBox.addView(Ui.emptyBox(a, "통계를 아직 못 읽었어 — 위의 [새로고침] 을 눌러봐"));
+            statBox.addView(Ui.emptyBox(a, "통계가 조회되지 않았습니다. 상단 [새로고침] 을 실행하십시오"));
             return;
         }
         statBox.addView(Ui.kvTight(a, "총 키", Ui.num(s.optLong("total", 0)) + "개"));

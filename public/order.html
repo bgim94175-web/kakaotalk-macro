@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>주문 상태 · 카톡 매크로</title>
-<meta name="description" content="주문번호로 입금 대기 · 발급 상태를 확인해.">
+<meta name="description" content="주문번호로 입금 대기 및 발급 상태를 확인합니다.">
 <meta name="theme-color" content="#0B0F14">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex">
@@ -32,8 +32,8 @@
   <section class="wrap" style="padding-top:26px">
     <p class="eyebrow">주문 상태</p>
     <h1 style="font-size:clamp(23px,6vw,31px)">주문 진행 상황</h1>
-    <p class="lead">입금하면 이 화면이 알아서 갱신돼. 발급된 키가 여기 바로 떠 —
-      직접 새로고침 안 해도 되니까 이 탭을 열어두면 돼.</p>
+    <p class="lead">입금 후 이 화면은 자동으로 갱신됩니다. 발급된 키가 이 화면에 표시됩니다.
+      수동 새로고침은 필요하지 않으므로 이 탭을 열어 두십시오.</p>
 
     <div id="result" aria-live="polite"></div>
 
@@ -45,7 +45,7 @@
           <input type="text" id="oid" name="oid" placeholder="ORD-260927-A3K9QZ"
                  autocomplete="off" spellcheck="false" maxlength="64"
                  autocapitalize="characters" aria-describedby="oid-hint">
-          <p class="hint" id="oid-hint">구매 신청 직후 화면이나 복사해둔 주문번호를 넣어줘.</p>
+          <p class="hint" id="oid-hint">구매 신청 직후 화면 또는 복사해 둔 주문번호를 입력하십시오.</p>
         </div>
         <div style="height:12px"></div>
         <button type="submit" class="btn primary wide">조회</button>
@@ -54,8 +54,8 @@
 
     <div class="note dim" style="margin-top:12px">
       <span class="ic" aria-hidden="true">i</span>
-      <span><span data-manual="입금 확인 후 &lt;b&gt;관리자가 키를 발급&lt;/b&gt;해 — 알려준 금액을 뒷자리까지 정확히 보내줘.">입금 확인은 <b>금액 매칭으로 자동</b>이야 — 알려준 금액을 뒷자리까지 정확히 보내면 보통 1~2분 안에 키가 나와.</span>
-        금액이 다르거나 30분이 지나도 그대로면 주문번호와 입금자명을 들고 관리자에게 문의해줘.</span>
+      <span><span data-manual="입금 확인 후 &lt;b&gt;관리자가 키를 발급&lt;/b&gt;합니다. 안내된 금액을 뒷자리까지 정확히 입금하십시오.">입금 확인은 <b>금액 매칭으로 자동 처리</b>됩니다. 안내된 금액을 뒷자리까지 정확히 입금하면 통상 1~2분 내 키가 발급됩니다.</span>
+        입금 금액이 다르거나 30분 경과 후에도 상태가 변경되지 않으면 주문번호와 입금자명을 첨부하여 관리자에게 문의하십시오.</span>
     </div>
   </section>
 </main>
@@ -67,7 +67,7 @@
       <a href="/buy">구매 신청</a>
       <a href="/my">내 키 조회</a>
     </div>
-    <p style="margin:0">발급된 키는 앱에 넣으면 바로 활성화돼 · 키 1개 = 기기 1대</p>
+    <p style="margin:0">발급된 키를 앱에 입력하면 즉시 활성화됩니다 · 키 1개 = 기기 1대</p>
   </div>
 </footer>
 </body>

@@ -44,11 +44,11 @@ public final class Keystore {
             byte[] fk = fallbackKey(c);
             String f = (fk == null) ? null : Crypto.seal(fk, b64);
             if (f == null) {
-                Log.add(c, "설정키를 안전하게 저장 못 했어 — 앱을 다시 켜면 라이선스 재인증이 필요해");
+                Log.add(c, "설정키를 안전하게 저장하지 못했습니다. 앱을 재시작하면 라이선스 재인증이 필요합니다.");
                 return;
             }
             blob = "f1:" + f;
-            Log.add(c, "이 기기는 보안 키저장소를 못 써서 기기지문 방식으로 설정키를 보관했어");
+            Log.add(c, "이 기기는 보안 키저장소를 사용할 수 없어 기기지문 방식으로 설정키를 보관했습니다.");
         }
         Prefs.putStr(c, BLOB_KEY, blob);
         Prefs.clearCache();
@@ -69,7 +69,7 @@ public final class Keystore {
             v = (fk == null) ? null : Crypto.open(fk, blob.substring(3));
         }
         if (v == null) {
-            Log.add(c, "보관된 설정키를 못 열었어 — 라이선스 재인증이 필요해");
+            Log.add(c, "보관된 설정키를 열지 못했습니다. 라이선스 재인증이 필요합니다.");
             return null;
         }
         cache = v;

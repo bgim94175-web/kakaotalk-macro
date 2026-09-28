@@ -80,7 +80,7 @@ public final class ImagePicker {
             a.startActivityForResult(Intent.createChooser(g, "사진 고르기"), requestCode);
         } catch (Throwable t2) {
             Log.add(a, "사진 선택창을 아예 못 열었어 — " + t2.getClass().getSimpleName());
-            Ui.toast(a, "사진 선택창을 못 열었어");
+            Ui.toast(a, "이미지 선택창을 열지 못했습니다.");
         }
     }
 
@@ -129,12 +129,12 @@ public final class ImagePicker {
             }
         }
 
-        if (over) Ui.toast(a, "사진은 " + cap + "장까지야");
+        if (over) Ui.toast(a, "이미지는 최대 " + cap + "장까지 첨부됩니다.");
 
         if (out.isEmpty()) {
-            Log.add(a, "사진을 고르긴 했는데 읽을 수 있는 게 없어");
+            Log.add(a, "선택한 이미지 중 읽을 수 있는 항목이 없습니다.");
         } else {
-            Log.add(a, "사진 " + out.size() + "장 골랐어" + (over ? " (" + cap + "장 넘은 건 버렸어)" : ""));
+            Log.add(a, "이미지 " + out.size() + "장을 선택했습니다." + (over ? " (" + cap + "장 초과분은 제외)" : ""));
         }
         return out;
     }
@@ -146,7 +146,7 @@ public final class ImagePicker {
             c.getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable t) {
             Log.add(c, "사진 권한 고정 실패 — " + shortUri(u.toString()) + " ("
-                    + t.getClass().getSimpleName() + "). 앱을 껐다 켜면 다시 골라야 할 수 있어");
+                    + t.getClass().getSimpleName() + "). 앱 재시작 후 이미지를 다시 선택해야 할 수 있습니다.");
         }
     }
 
@@ -263,7 +263,7 @@ public final class ImagePicker {
             else dead++;
         }
         if (dead > 0) {
-            Log.add(c, "첨부 사진 " + dead + "장이 안 읽혀 — 지워졌거나 권한이 풀렸어. 다시 골라줘");
+            Log.add(c, "첨부 이미지 " + dead + "장을 읽을 수 없습니다. 파일이 삭제되었거나 접근 권한이 해제되었습니다. 이미지를 다시 선택하십시오.");
         }
         return out;
     }

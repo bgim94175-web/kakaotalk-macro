@@ -1,13 +1,7 @@
 package com.buseong.kakaoauto;
 
 import android.content.Intent;
-import android.graphics.Typeface;
-import android.text.InputType;
-import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -20,10 +14,17 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 매크로 화면. 자동발송 · 메시지 · 대상 방 · 주기 · 사진 첨부 · 메시지 추적 · 오픈프로필 자동응답.
+ * 매크로 탭 — <b>목록만</b> 있는 화면 (UI_V3 4장).
  *
- * 복잡한 설정은 전부 접힌 카드(Nav.fold) 안이나 다이얼로그로 숨긴다.
- * 첫 화면에는 "지금 값" 만 보인다.
+ * 예전에는 이 한 장에 설정 행 25개 + 아코디언 7개가 쌓여 있었다. 접혀 있으면 안에 뭐가 있는지 모르고,
+ * 펼치면 옆 카드와 섞여서 경계가 사라진다 — 사용자가 "뭘 어떻게 설정해야 할지 모르겠다" 고 한 원인이다.
+ * 그래서 이 화면은 상단 토글 카드 + 「제목 · 지금 값 · ›」 행만 남기고,
+ * 실제 설정은 전부 {@link MacroDetail} 의 전용 서브화면으로 내보냈다.
+ *
+ * 값 요약 규칙(UI_V3 4장): 미설정은 AMBER 로 `설정 필요`, 꺼진 기능은 DIM, 켜진 기능은 TEXT.
+ * 색만 봐도 지금 손을 대야 하는 행이 어디인지 판단된다.
+ *
+ * 진단(사진 전송 실패 기록·화면 기록) 관련 도구는 내정보 탭도 같이 쓰므로 이 클래스에 남겨둔다.
  */
 public final class ScreenMacro {
     private ScreenMacro() {}
@@ -31,23 +32,14 @@ public final class ScreenMacro {
     private static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
 
-    // 펼쳐둔 카드 기억용 비트 (다시 그려도 접히지 않게)
-    private static final int F_MSG = 1;
-    private static final int F_ROOMS = 1 << 1;
-    private static final int F_CYCLE = 1 << 2;
-    private static final int F_IMAGE = 1 << 3;
-    private static final int F_TRIG = 1 << 4;
-    private static final int F_REPLY = 1 << 5;
-    private static final int F_LIMIT = 1 << 6;
-    /** 사진 카드 안의 "전용 폰 세팅" 접힘 섹션 */
-    private static final int F_PHONE = 1 << 7;
-    private static int openBits = 0;
-
     /** 화면 기록이 이보다 오래됐으면 "지난 기록" 이라고 못을 박는다 */
     private static final long DUMP_STALE_MS = 3 * 60 * 1000L;
 
     /** dumpSection 에 넘기는 "이번 시도가 아니다" 센티넬 (0 은 "직전 기록 없음" 이라 못 쓴다) */
     private static final long NO_ATTEMPT = -1L;
+
+    /** 잠금 카드의 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
+    private static final String LOCK_REFRESH = "구매 내역 새로고침";
 
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<LinearLayout> BODY;
@@ -56,18 +48,19 @@ public final class ScreenMacro {
 
     public static View build(MainActivity a) {
         // 화면을 보는 것만으로는 모달을 띄우지 않는다 — 잠금 카드(fillLocked)가 같은 안내를 한다.
-        // Gate.check 는 실제로 발송을 시도할 때만 부른다(sendNow · sendImagesNow · 토글).
+        // Gate.check 는 실제로 발송을 시도할 때만 부른다.
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
         try {
             fill(a, col);
         } catch (Throwable t) {
-            Log.add(a, "매크로 화면을 그리다 오류가 났어: " + t);
+            Log.add(a, "매크로 화면 구성에 실패했습니다: " + t);
         }
         return Ui.scroll(a, col);
     }
 
+    /** 탭 본문을 제자리에서 다시 그린다 (서브화면에서 값을 바꾼 뒤 요약을 맞추는 용도) */
     public static void refresh() {
         MainActivity a = (ACT == null) ? null : ACT.get();
         LinearLayout col = (BODY == null) ? null : BODY.get();
@@ -76,7 +69,7 @@ public final class ScreenMacro {
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
-            Log.add(a, "매크로 화면을 갱신하다 오류가 났어: " + t);
+            Log.add(a, "매크로 화면 갱신에 실패했습니다: " + t);
         }
     }
 
@@ -88,144 +81,309 @@ public final class ScreenMacro {
             return;
         }
         if (!Settings.canSave(a)) {
-            col.addView(Nav.note(a, "설정을 저장할 수 없는 상태야 (설정키 없음).\n"
-                    + "내정보 탭에서 라이선스를 다시 인증해줘.", Theme.RED, "내정보로 가기",
+            col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
+                    + " 내정보 탭에서 라이선스를 다시 인증하십시오.", Theme.RED, "내정보 열기",
                     new Runnable() { @Override public void run() { Nav.go(Nav.ACCOUNT); } }));
         }
 
         final Settings s = Settings.load(a);
 
-        col.addView(Ui.sub(a, "카톡 알림 답장으로 보낸다. 그 방 알림이 한 번은 와야 발송할 수 있어."));
-
-        // 예약 발송의 사진 전송은 아무도 안 보고 있을 때 실패한다 → 여기서 한 번은 눈에 걸리게 한다.
-        // 사진 카드가 접혀 있으면 카드 안의 경고 줄은 안 보이니까 맨 위에 띄우고,
-        // 펼쳐져 있으면 그 경고와 똑같은 박스가 두 번 뜨니까 생략한다.
-        if ((openBits & F_IMAGE) == 0) {
-            View warn = imgFailNote(a);
-            if (warn != null) col.addView(warn);
-        }
-
-        col.addView(Nav.gap(a, 14));
-
+        col.addView(Nav.gap(a, 6));
         col.addView(autoCard(a, s));
 
-        col.addView(Ui.sectionHeader(a, "무엇을 · 어디로", "발송 내용"));
-        col.addView(Nav.foldGroup(a, messageFold(a, s), roomsFold(a, s), cycleFold(a, s)));
+        // 예약 발송의 이미지 전송은 아무도 안 보고 있을 때 실패한다 → 토글 카드 바로 아래 1회만 띄운다
+        View warn = imgFailNote(a);
+        if (warn != null) col.addView(warn);
 
-        col.addView(Ui.sectionHeader(a, "추가 기능", "사진 · 추적 · 자동응답"));
-        col.addView(Nav.foldGroup(a, imageFold(a, s), triggerFold(a, s), replyFold(a, s),
-                limitFold(a, s)));
+        // ── 발송 내용 ──
+        col.addView(Ui.sectionHeader(a, null, "발송 내용"));
+        LinearLayout content = Ui.group(a);
+
+        String msg = msgSummary(s);
+        content.addView(Ui.navRow(a, "메시지", (msg == null) ? "설정 필요" : msg,
+                (msg == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "메시지", MacroDetail.message(a)); }
+                }));
+
+        String rooms = roomSummary(a, s);
+        content.addView(Ui.navRow(a, "대상 대화방", (rooms == null) ? "설정 필요" : rooms,
+                (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
+                }));
+
+        content.addView(Ui.navRow(a, "발송 주기", cycleSummary(s), Theme.TEXT, new Runnable() {
+            @Override public void run() { Nav.push(a, "발송 주기", MacroDetail.cycle(a)); }
+        }));
+        col.addView(content);
+
+        // ── 부가 기능 ──
+        col.addView(Ui.sectionHeader(a, null, "부가 기능"));
+        LinearLayout extra = Ui.group(a);
+
+        boolean imgOn = !Settings.IMG_NEVER.equals(s.macro.sendImages);
+        boolean imgFail = (lastFail(a) != null);
+        extra.addView(Ui.navRow(a, "이미지 첨부", imageSummary(a, s),
+                imgFail ? Theme.AMBER : (imgOn ? Theme.TEXT : Theme.DIM), new Runnable() {
+                    @Override public void run() { Nav.push(a, "이미지 첨부", MacroDetail.image(a)); }
+                }));
+
+        int trigOn = 0;
+        for (int i = 0; i < s.triggers.size(); i++) {
+            if (s.triggers.get(i).enabled) trigOn++;
+        }
+        final int trigOnN = trigOn;
+        extra.addView(Ui.navRow(a, "메시지 추적", trigSummary(s), (trigOnN > 0) ? Theme.TEXT : Theme.DIM,
+                new Runnable() {
+                    @Override public void run() { Nav.push(a, "메시지 추적", MacroDetail.triggers(a)); }
+                }));
+
+        extra.addView(Ui.navRow(a, "개인 대화 자동응답", replySummary(s),
+                s.autoreply.enabled ? Theme.TEXT : Theme.DIM, new Runnable() {
+                    @Override public void run() {
+                        Nav.push(a, "개인 대화 자동응답", MacroDetail.autoReply(a));
+                    }
+                }));
+        col.addView(extra);
+
+        // ── 제한 ──
+        col.addView(Ui.sectionHeader(a, null, "제한"));
+        LinearLayout limit = Ui.group(a);
+        limit.addView(Ui.navRow(a, "발송 제한", limitSummary(s), Theme.TEXT, new Runnable() {
+            @Override public void run() { Nav.push(a, "발송 제한", MacroDetail.limits(a)); }
+        }));
+        col.addView(limit);
+
+        // ── 즉시 발송 ──
+        final TextView send = Ui.btn(a, "즉시 발송", true);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        sp.topMargin = Theme.dp(a, 10);
+        send.setLayoutParams(sp);
+        send.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { sendNow(a, s, send); }
+        });
+        col.addView(send);
     }
 
+    /** 미구매 상태. 기능 설명 + 구매 + 구매 내역 재조회만 남긴다. */
     private static void fillLocked(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.sub(a, "매크로 기능이 아직 켜져 있지 않아."));
-        col.addView(Nav.gap(a, 14));
-        LinearLayout card = Ui.card(a);
-        card.addView(Ui.h2(a, Features.label(Features.MACRO)));
-        TextView d = Ui.sub(a, Features.descLong(Features.MACRO));
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        dp.topMargin = Theme.dp(a, 10);
-        d.setLayoutParams(dp);
-        card.addView(d);
-        card.addView(Nav.wideBtn(a, "구매하기", true, new Runnable() {
-            @Override public void run() { Gate.openBuy(a, Features.MACRO); }
-        }));
-        // 이 버튼은 이름 그대로 동작해야 한다 — 바로 /entitlements 를 다시 조회한다.
-        // (탭 이동 금지. 결과는 이 자리에서 알려주고, 켜지면 잠금 카드가 사라진다)
+        col.addView(Nav.gap(a, 6));
+        col.addView(Ui.featureCard(a, Features.label(Features.MACRO),
+                Features.descLong(Features.MACRO), Ui.State.OFF, 0L, new Runnable() {
+                    @Override public void run() { Gate.openBuy(a, Features.MACRO); }
+                }, null));
+
+        // 결제 직후 아직 안 켜진 경우 — 탭을 옮기지 않고 이 자리에서 /entitlements 를 다시 조회한다
         final TextView again = Ui.btn(a, LOCK_REFRESH, false);
         LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(MATCH, WRAP);
-        ap.topMargin = Theme.dp(a, 12);
+        ap.topMargin = Theme.dp(a, 4);
         again.setLayoutParams(ap);
         again.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Nav.refreshFeature(a, again, Features.MACRO, LOCK_REFRESH);
             }
         });
-        card.addView(again);
-        col.addView(card);
+        col.addView(again);
+        col.addView(Ui.sub(a, "결제 후 활성화까지 시간이 소요될 수 있습니다."
+                + " 활성화되지 않으면 위 버튼으로 구매 내역을 다시 조회하십시오."));
     }
 
-    /** 잠금 카드의 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
-    private static final String LOCK_REFRESH = "구매했는데 안 켜졌어 (새로고침)";
-
-    // ── 1. 자동발송 ─────────────────────────────────────────────────────────
+    // ── 자동발송 토글 카드 ──────────────────────────────────────────────────
 
     private static LinearLayout autoCard(final MainActivity a, final Settings s) {
         LinearLayout card = Ui.card(a);
 
-        final TextView nextLine = Ui.sub(a, nextText(a, s));
-        final TextView sendBtn = Ui.btn(a, "지금 한 번 보내기", false);
+        final TextView status = Ui.sub(a, statusText(a, s));
+        status.setTextColor(statusColor(a, s));
 
-        card.addView(Ui.switchRow(a, "자동발송", "정해진 주기로 대상 방에 메시지를 보낸다",
+        card.addView(Ui.switchRow(a, "자동발송",
+                "카카오톡 알림 답장으로 발송합니다. 대상 대화방의 알림이 1회 이상 수신되어야 발송이 가능합니다.",
                 s.macro.enabled, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         s.macro.enabled = v;
                         apply(a, s);
-                        nextLine.setText(nextText(a, s));
-                        Log.add(a, v ? "자동발송을 켰어" : "자동발송을 껐어");
+                        status.setText(statusText(a, s));
+                        status.setTextColor(statusColor(a, s));
+                        Log.add(a, v ? "자동발송을 사용으로 변경했습니다." : "자동발송을 미사용으로 변경했습니다.");
                     }
                 }));
         card.addView(Ui.divider(a));
-        card.addView(nextLine);
-
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        bp.topMargin = Theme.dp(a, 12);
-        sendBtn.setLayoutParams(bp);
-        sendBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendNow(a, s, sendBtn, nextLine); }
-        });
-        card.addView(sendBtn);
+        card.addView(status);
         return card;
     }
 
-    private static String nextText(MainActivity a, Settings s) {
-        if (!s.macro.enabled) return "자동발송이 꺼져 있어. 켜면 주기에 맞춰 예약된다.";
-        if (s.macro.rooms.isEmpty()) return "대상 방이 없어서 발송이 안 돼.";
-        if (s.macro.message.trim().length() == 0) return "발송 메시지가 비어있어서 발송이 안 돼.";
-        long at = 0L;
+    /** 토글 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
+    private static String statusText(MainActivity a, Settings s) {
+        if (!s.macro.enabled) return "미사용";
+        if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
+        if (s.macro.message == null || s.macro.message.trim().length() == 0) {
+            return "메시지 미설정 · 발송 보류";
+        }
+        long at;
         try {
             at = Scheduler.nextAt(a);
         } catch (Throwable t) {
             at = s.macro.nextAt;
         }
-        return "다음 발송 · " + Nav.whenRel(at);
+        String next = (at > 0) ? hm(at) : "예정 없음";
+        return "다음 발송 " + next + " · 금일 " + MainActivity.sentToday(a) + "회";
     }
 
-    /** 수동 발송 (주기와 무관하게 지금 한 번) */
-    private static void sendNow(final MainActivity a, final Settings s, final TextView btn,
-                                final TextView nextLine) {
-        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
-        if (s.macro.rooms.isEmpty()) { Ui.toast(a, "대상 방을 먼저 추가해줘"); return; }
-        final String msg = s.macro.message;
-        if (msg == null || msg.trim().length() == 0) { Ui.toast(a, "보낼 메시지를 먼저 적어줘"); return; }
+    private static int statusColor(MainActivity a, Settings s) {
+        if (!s.macro.enabled) return Theme.DIM;
+        if (s.macro.roomRefs().isEmpty()) return Theme.AMBER;
+        if (s.macro.message == null || s.macro.message.trim().length() == 0) return Theme.AMBER;
+        return Theme.SUB;
+    }
 
-        // 자동발송이 지키는 규칙(방해금지·하루 한도)을 수동 버튼도 확인한다.
-        // 무시하고 보낼 수는 있지만, 사용자가 의식적으로 넘기게 만든다.
+    // ── 값 요약 (UI_V3 4장) ─────────────────────────────────────────────────
+
+    /** 메시지 첫 줄 20자. 비어 있으면 null (호출한 쪽에서 `설정 필요` 로 그린다). */
+    private static String msgSummary(Settings s) {
+        String m = s.macro.message;
+        if (m == null || m.trim().length() == 0) return null;
+        int nl = m.indexOf('\n');
+        String line = ((nl < 0) ? m : m.substring(0, nl)).trim();
+        if (line.length() == 0) return Nav.preview(m, 20);
+        if (line.length() > 20) return line.substring(0, 20) + "…";
+        return (nl < 0) ? line : (line + "…");
+    }
+
+    /** `3개` · 계정이 2개 이상이면 `3개 · 부계정 1개 포함`. 0개면 null. */
+    static String roomSummary(MainActivity a, Settings s) {
+        List<RoomRef> rooms = s.macro.roomRefs();
+        if (rooms.isEmpty()) return null;
+        int subAcc = 0;
+        for (int i = 0; i < rooms.size(); i++) {
+            if (!rooms.get(i).isDefault()) subAcc++;
+        }
+        String v = rooms.size() + "개";
+        if (Accounts.multi(a) && subAcc > 0) v = v + " · 부계정 " + subAcc + "개 포함";
+        return v;
+    }
+
+    static String cycleSummary(Settings s) {
+        return s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분마다";
+    }
+
+    /**
+     * `안 보냄` / `3장 · 매번` / `3장 · 3회마다` / `3장 · 수동 전송만`.
+     * 전송 실패 기록이 남아 있으면 앞에 ⚠ 를 붙인다 — 상세로 들어갈 이유를 값에서 알려준다.
+     */
+    static String imageSummary(MainActivity a, Settings s) {
+        String base;
+        int n = s.macro.images.size();
+        if (Settings.IMG_NEVER.equals(s.macro.sendImages)) {
+            base = "안 보냄";
+        } else if (n == 0) {
+            base = "이미지 미선택";
+        } else {
+            base = n + "장 · " + imgModeKr(s.macro.sendImages);
+        }
+        Scheduler.ImageFail fail = lastFail(a);
+        if (fail == null) return base;
+        return "⚠ " + base;
+    }
+
+    static String trigSummary(Settings s) {
+        if (s.triggers.isEmpty()) return "미사용";
+        int on = 0;
+        for (int i = 0; i < s.triggers.size(); i++) {
+            if (s.triggers.get(i).enabled) on++;
+        }
+        if (on == 0) return s.triggers.size() + "개 · 전체 미사용";
+        return on + "개 사용";
+    }
+
+    static String replySummary(Settings s) {
+        Settings.AutoReplyCfg r = s.autoreply;
+        if (!r.enabled) return "미사용";
+        return "사용 · " + scopeKr(r.scope);
+    }
+
+    static String limitSummary(Settings s) {
+        String q = quietKr(s);
+        if ("없음".equals(q)) return "1일 " + s.macro.dailyLimit + "회";
+        return q + " 중지 · 1일 " + s.macro.dailyLimit + "회";
+    }
+
+    static String quietKr(Settings s) {
+        if (Settings.hhmm(s.macro.quietFrom) < 0 || Settings.hhmm(s.macro.quietTo) < 0) return "없음";
+        return s.macro.quietFrom + "~" + s.macro.quietTo;
+    }
+
+    static String scopeKr(String scope) {
+        if (Settings.SCOPE_UNKNOWN.equals(scope)) return "미등록 상대만";
+        if (Settings.SCOPE_EXCEPT.equals(scope)) return "특정 대화방 제외";
+        return "모든 1:1";
+    }
+
+    static String imgModeKr(String mode) {
+        if (Settings.IMG_EVERY.equals(mode)) return "매번";
+        if (Settings.IMG_EVERY_N.equals(mode)) return "N회마다";
+        if (Settings.IMG_MANUAL.equals(mode)) return "수동 전송만";
+        return "안 보냄";
+    }
+
+    // ── 즉시 발송 ───────────────────────────────────────────────────────────
+
+    private static void sendNow(final MainActivity a, final Settings s, final TextView btn) {
+        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
+
+        final List<RoomRef> rooms = targets(a, s);
+        if (rooms.isEmpty()) {
+            if (!s.macro.roomRefs().isEmpty()) {
+                Ui.toast(a, "대상 대화방이 모두 미사용 계정에 속합니다. 내정보 탭에서 대상 계정을 확인하십시오.");
+            } else {
+                Ui.toast(a, "대상 대화방을 먼저 설정하십시오.");
+            }
+            return;
+        }
+        final String msg = s.macro.message;
+        if (msg == null || msg.trim().length() == 0) {
+            Ui.toast(a, "발송 메시지를 먼저 입력하십시오.");
+            return;
+        }
+
+        // 자동발송이 지키는 규칙(방해금지·1일 한도)을 수동 발송도 먼저 확인한다.
+        // 넘길 수는 있지만 사용자가 의식적으로 넘기게 만든다.
         String why = blockedWhy(a, s);
         if (why != null) {
             final String w = why;
-            Nav.confirm(a, "그래도 보낼까?", w + "\n자동발송은 이런 때 안 보내. 지금 보내면 한도에도 같이 올라가.",
-                    "그래도 보내기", new Runnable() {
-                        @Override public void run() {
-                            Log.add(a, "수동 발송 강행 (" + w + ")");
-                            doSendNow(a, s, btn, nextLine, msg);
-                        }
-                    });
+            Nav.confirm(a, "발송 제한 상태", w + "\n자동발송은 이 조건에서 발송하지 않습니다."
+                    + " 즉시 발송은 1일 한도에 함께 집계됩니다.", "발송", new Runnable() {
+                @Override public void run() {
+                    Log.add(a, "발송 제한 상태에서 즉시 발송을 실행했습니다. (" + w + ")");
+                    doSendNow(a, s, btn, rooms, msg);
+                }
+            });
             return;
         }
-        doSendNow(a, s, btn, nextLine, msg);
+        doSendNow(a, s, btn, rooms, msg);
+    }
+
+    /** 대상 대화방 중 사용 계정에 속한 것만 (Scheduler 와 같은 규칙) */
+    private static List<RoomRef> targets(MainActivity a, Settings s) {
+        ArrayList<RoomRef> out = new ArrayList<RoomRef>();
+        List<RoomRef> all = s.macro.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid()) continue;
+            if (!s.accountOn(r.acc)) continue;
+            out.add(r);
+        }
+        return out;
     }
 
     /** 지금 보내면 자동발송 규칙에 걸리는 이유. 안 걸리면 null. */
     private static String blockedWhy(MainActivity a, Settings s) {
         try {
             if (s.macro.inQuiet(System.currentTimeMillis())) {
-                return "지금은 방해금지 시간이야 (" + quietKr(s) + ").";
+                return "현재 방해금지 시간입니다. (" + quietKr(s) + ")";
             }
             int limit = s.macro.dailyLimit;
             int sent = MainActivity.sentToday(a);
             if (limit > 0 && sent >= limit) {
-                return "오늘 " + sent + "건 보내서 하루 한도(" + limit + "건)를 다 썼어.";
+                return "금일 발송 " + sent + "회로 1일 한도(" + limit + "회)에 도달했습니다.";
             }
         } catch (Throwable t) {
             return null;
@@ -234,451 +392,159 @@ public final class ScreenMacro {
     }
 
     private static void doSendNow(final MainActivity a, final Settings s, final TextView btn,
-                                  final TextView nextLine, final String msg) {
-        Nav.busy(btn, true, "보내는 중…", "지금 한 번 보내기");
+                                 final List<RoomRef> rooms, final String msg) {
+        Nav.busy(btn, true, "발송 중…", "즉시 발송");
         int ok = 0;
         StringBuilder failed = new StringBuilder();
-        for (int i = 0; i < s.macro.rooms.size(); i++) {
-            String room = s.macro.rooms.get(i);
+        for (int i = 0; i < rooms.size(); i++) {
+            RoomRef room = rooms.get(i);
+            String label = room.label(a);
             boolean sent = false;
             try {
                 sent = KakaoListener.sendTo(a, room, msg);
             } catch (Throwable t) {
-                Log.add(a, "수동 발송 중 오류 (" + room + "): " + t);
+                Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
             }
-            if (sent) ok++;
-            else {
+            if (sent) {
+                ok++;
+            } else {
                 if (failed.length() > 0) failed.append(", ");
-                failed.append(room);
+                failed.append(label);
             }
         }
         if (ok > 0) MainActivity.countSent(a, ok);
-        Log.add(a, "수동 발송 · 성공 " + ok + "건"
+        Log.add(a, "즉시 발송 · 성공 " + ok + "건"
                 + ((failed.length() > 0) ? (" / 실패: " + failed) : ""));
-        Nav.busy(btn, false, "보내는 중…", "지금 한 번 보내기");
-        nextLine.setText(nextText(a, s));
+        Nav.busy(btn, false, "발송 중…", "즉시 발송");
 
         if (ok == 0) {
-            Ui.toast(a, "한 건도 못 보냈어. 로그를 봐줘");
+            Ui.toast(a, "발송에 실패했습니다. 활동 로그를 확인하십시오.");
         } else if (failed.length() > 0) {
-            Ui.toast(a, ok + "건 보냈어. 일부 방은 실패했어");
+            Ui.toast(a, ok + "건 발송했습니다. 일부 대화방은 실패했습니다.");
         } else {
-            Ui.toast(a, ok + "건 보냈어");
+            Ui.toast(a, ok + "건 발송했습니다.");
         }
+        refresh();
     }
 
-    // ── 2. 발송 메시지 ──────────────────────────────────────────────────────
+    // ── 이미지 선택 결과 (MainActivity.onActivityResult 에서 넘어온다) ──────
 
-    private static Nav.Fold messageFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_MSG, "발송 메시지", msgSummary(s));
-
-        final TextView prev = Ui.body(a, prevText(s.macro.message));
-        prev.setMaxLines(4);
-        prev.setEllipsize(TextUtils.TruncateAt.END);
-        prev.setBackground(Theme.round(Theme.CARD2, Theme.R_MD, Theme.LINE, 1, a));
-        int p = Theme.dp(a, 12);
-        prev.setPadding(p, p, p, p);
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        pp.topMargin = Theme.dp(a, 8);
-        prev.setLayoutParams(pp);
-        f.body.addView(prev);
-
-        f.body.addView(Nav.wideBtn(a, "메시지 수정", false, new Runnable() {
-            @Override public void run() {
-                Nav.editText(a, "발송 메시지", "여기에 보낼 내용을 적어줘", s.macro.message, true,
-                        "여러 줄도 그대로 보내진다.", new Nav.OnText() {
-                            @Override public String text(String value) {
-                                if (value == null || value.trim().length() == 0) {
-                                    return "보낼 메시지를 적어줘";
-                                }
-                                if (value.length() > 2000) return "2000자 이하로 줄여줘";
-                                s.macro.message = value;
-                                apply(a, s);
-                                prev.setText(prevText(value));
-                                f.summary(msgSummary(s));
-                                Log.add(a, "발송 메시지를 바꿨어");
-                                return null;
-                            }
-                        });
-            }
-        }));
-        return f;
-    }
-
-    private static String msgSummary(Settings s) {
-        String m = s.macro.message;
-        if (m == null || m.trim().length() == 0) return "아직 비어있어";
-        return Nav.preview(m, 48);
-    }
-
-    private static String prevText(String m) {
-        if (m == null || m.trim().length() == 0) return "(비어있어)";
-        return m;
-    }
-
-    // ── 3. 대상 방 ──────────────────────────────────────────────────────────
-
-    private static Nav.Fold roomsFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_ROOMS, "대상 방", roomSummary(s.macro.rooms));
-
-        f.body.addView(Ui.sub(a, "카톡에 보이는 방 이름과 정확히 같아야 해. 칩을 누르면 지워진다."));
-        final Nav.Flow flow = Nav.flow(a);
-        f.body.addView(flow);
-
-        final Runnable changed = new Runnable() {
-            @Override public void run() {
-                apply(a, s);
-                f.summary(roomSummary(s.macro.rooms));
-            }
-        };
-        Nav.chipEditor(flow, s.macro.rooms, Theme.ACCENT, "아직 없어", changed);
-
-        f.body.addView(Nav.wideBtn(a, "방 추가", false, new Runnable() {
-            @Override public void run() {
-                Nav.pickRooms(a, "대상 방 추가", KakaoListener.knownRooms(a), s.macro.rooms,
-                        new Nav.OnRooms() {
-                            @Override public void rooms(List<String> picked) {
-                                int added = 0;
-                                for (int i = 0; i < picked.size(); i++) {
-                                    String v = picked.get(i);
-                                    if (!s.macro.rooms.contains(v)) { s.macro.rooms.add(v); added++; }
-                                }
-                                changed.run();
-                                Nav.chipEditor(flow, s.macro.rooms, Theme.ACCENT, "아직 없어", changed);
-                                Log.add(a, "대상 방 " + added + "개를 추가했어");
-                            }
-                        });
-            }
-        }));
-        return f;
-    }
-
-    private static String roomSummary(List<String> rooms) {
-        if (rooms == null || rooms.isEmpty()) return "아직 없어 — 최소 1개는 필요해";
-        return rooms.size() + "개 · " + Nav.preview(Nav.join(rooms, ""), 40);
-    }
-
-    // ── 4. 발송 주기 ────────────────────────────────────────────────────────
-
-    private static Nav.Fold cycleFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_CYCLE, "발송 주기", cycleSummary(s));
-
-        f.body.addView(Ui.kv(a, "간격", s.macro.intervalMinMin + " ~ " + s.macro.intervalMaxMin + "분 (랜덤)"));
-        f.body.addView(Ui.kv(a, "최소 새 메시지", s.macro.minMessages + "개"));
-        f.body.addView(Ui.sub(a, "내가 마지막으로 보낸 뒤 다른 사람 메시지가 이만큼 쌓여야 보낸다. 0 이면 항상 보낸다."));
-
-        f.body.addView(Nav.wideBtn(a, "주기 수정", false, new Runnable() {
-            @Override public void run() {
-                final Nav.NumField lo = new Nav.NumField("최소 간격 (분)", "20", 1, 1440, s.macro.intervalMinMin);
-                final Nav.NumField hi = new Nav.NumField("최대 간격 (분)", "40", 1, 1440, s.macro.intervalMaxMin);
-                final Nav.NumField mm = new Nav.NumField("최소 새 메시지 수", "1", 0, 200, s.macro.minMessages);
-                Nav.editNums(a, "발송 주기", "간격 안에서 랜덤한 시각에 보낸다 (봇처럼 안 보이게).",
-                        new Nav.NumField[] { lo, hi, mm }, new Nav.OnNums() {
-                            @Override public String ok() {
-                                if (lo.value > hi.value) {
-                                    Nav.errText(hi.err, "최대 간격은 최소 간격보다 크거나 같아야 해");
-                                    return "";
-                                }
-                                s.macro.intervalMinMin = lo.value;
-                                s.macro.intervalMaxMin = hi.value;
-                                s.macro.minMessages = mm.value;
-                                apply(a, s);
-                                f.summary(cycleSummary(s));
-                                refresh();
-                                Log.add(a, "발송 주기를 바꿨어: " + cycleSummary(s));
-                                return null;
-                            }
-                        });
-            }
-        }));
-        return f;
-    }
-
-    private static String cycleSummary(Settings s) {
-        return s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분마다 · 새 메시지 "
-                + s.macro.minMessages + "개 이상";
-    }
-
-    // ── 5. 사진 첨부 ────────────────────────────────────────────────────────
-
-    private static Nav.Fold imageFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_IMAGE, "사진 첨부", imageSummary(a, s));
-
-        f.body.addView(Ui.sub(a, "최대 " + Settings.MAX_IMAGES + "장. 알림 답장으로는 사진을 못 보내서,"
-                + " 카톡 공유 화면을 접근성 권한으로 대신 눌러서 보낸다."));
-
-        View warn = imgFailNote(a);
-        if (warn != null) f.body.addView(warn);
-
-        final LinearLayout strip = new LinearLayout(a);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
-        f.body.addView(Nav.thumbStrip(a, strip));
-        paintThumbs(a, s, strip, f);
-
-        int left = Math.max(0, Settings.MAX_IMAGES - s.macro.images.size());
-        final TextView pick = Ui.btn(a, (left > 0) ? ("사진 고르기 (" + left + "장 더 가능)")
-                : "사진 고르기 (자리 없음)", false);
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        pp.topMargin = Theme.dp(a, 12);
-        pick.setLayoutParams(pp);
-        pick.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                openBits |= F_IMAGE;    // 돌아왔을 때 이 카드가 펼쳐진 채로 보이게
-                if (s.macro.images.size() >= Settings.MAX_IMAGES) {
-                    Ui.toast(a, "이미 " + Settings.MAX_IMAGES + "장이야. 지우고 다시 골라줘");
-                    return;
-                }
-                try {
-                    ImagePicker.pick(a, MainActivity.REQ_IMAGES);
-                } catch (Throwable t) {
-                    Log.add(a, "사진 선택 창을 못 열었어: " + t);
-                    Ui.toast(a, "사진 선택 창을 못 열었어");
-                }
-            }
-        });
-        f.body.addView(pick);
-
-        f.body.addView(Ui.divider(a));
-        f.body.addView(Nav.actionRow(a, "전송 모드", imgModeKr(s.macro.sendImages) + imgEveryTail(s),
-                "변경", new Runnable() {
-                    @Override public void run() { pickImgMode(a, s, f); }
-                }));
-
-        // 알림 답장으로 사진 보내기 (되면 화면이 안 움직인다).
-        // 카톡이 "이미지 받는다" 고 해놓고 실제로 무시하면 앱은 보낸 줄 알고 성공으로 보고한다 —
-        // 카톡이 올렸는지 확인할 방법이 없다. 그래서 사용자가 끌 수 있어야 한다.
-        f.body.addView(Ui.divider(a));
-        f.body.addView(Ui.switchRow(a, "알림 답장으로 보내기",
-                "되면 화면이 안 움직여. 로그엔 보냈다는데 카톡에 사진이 안 올라오면 꺼줘.",
-                ImageSender.replyImageEnabled(a), new Ui.OnToggle() {
-                    @Override public void on(boolean v) {
-                        ImageSender.setReplyImageEnabled(a, v);
-                    }
-                }));
-
-        if (Settings.IMG_EVERY_N.equals(s.macro.sendImages)) {
-            f.body.addView(Nav.actionRow(a, "몇 번마다", s.macro.imageEveryN + "번째 발송마다", "수정",
-                    new Runnable() {
-                        @Override public void run() {
-                            final Nav.NumField n = new Nav.NumField("N (번째 발송마다)", "3", 1, 100,
-                                    s.macro.imageEveryN);
-                            Nav.editNums(a, "사진 전송 간격", "예) 3 이면 3·6·9번째 발송에 사진이 붙는다.",
-                                    new Nav.NumField[] { n }, new Nav.OnNums() {
-                                        @Override public String ok() {
-                                            s.macro.imageEveryN = n.value;
-                                            apply(a, s);
-                                            refresh();
-                                            return null;
-                                        }
-                                    });
-                        }
-                    }));
+    public static void onImagesPicked(MainActivity a, int res, Intent data) {
+        if (a == null) return;
+        if (res != android.app.Activity.RESULT_OK) {
+            Log.add(a, "이미지 선택을 취소했습니다.");
+            return;
         }
-
-        boolean accOn;
-        try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
-        if (!accOn) {
-            f.body.addView(Nav.note(a, "접근성 권한이 꺼져 있어서 사진은 못 보내.\n"
-                    + "텍스트 발송은 영향 없어.", Theme.AMBER, "접근성 켜기", new Runnable() {
-                @Override public void run() { ImageSender.openSettings(a); }
-            }));
+        Settings s = Settings.load(a);
+        int space = Settings.MAX_IMAGES - s.macro.images.size();
+        if (space <= 0) {
+            Ui.toast(a, "이미지는 최대 " + Settings.MAX_IMAGES + "장까지 첨부됩니다.");
+            return;
         }
-
-        boolean ovOn;
-        try { ovOn = ImageSender.overlayOn(a); } catch (Throwable t) { ovOn = false; }
-        if (!ovOn) {
-            f.body.addView(Nav.note(a, "「다른 앱 위에 표시」 가 꺼져 있어.\n"
-                    + "지금은 앱을 보고 있을 때만 사진이 나가고, 예약 발송(화면 꺼짐)에서는 못 보내.",
-                    Theme.AMBER, "다른 앱 위에 표시 켜기", new Runnable() {
-                @Override public void run() { ImageSender.openOverlaySettings(a); }
-            }));
+        List<String> got;
+        try {
+            got = ImagePicker.onResult(a, data, space);
+        } catch (Throwable t) {
+            Log.add(a, "이미지 선택 결과를 읽지 못했습니다: " + t);
+            Ui.toast(a, "이미지를 읽지 못했습니다.");
+            return;
         }
-
-        // 사진 수동 전송은 대상 방 목록의 "첫 번째 방" 한 곳으로만 간다 → 라벨에 방 이름을 박는다
-        final String imgRoom = s.macro.rooms.isEmpty() ? "" : s.macro.rooms.get(0);
-        final TextView now = Ui.btn(a, imgLabel(imgRoom), false);
-        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
-        np.topMargin = Theme.dp(a, 12);
-        now.setLayoutParams(np);
-        now.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendImagesNow(a, s, now); }
-        });
-        f.body.addView(now);
-        if (s.macro.rooms.size() > 1) {
-            f.body.addView(Ui.sub(a, "사진 수동 전송은 대상 방 중 첫 번째 방(「" + imgRoom
-                    + "」)에만 보낸다. 다른 방에 보내려면 방 순서를 바꿔줘."));
+        if (got == null || got.isEmpty()) {
+            Ui.toast(a, "선택된 이미지가 없습니다.");
+            return;
         }
-
-        // ── 전용 폰 세팅 안내 (접어둔다 — 한 번 맞춰두면 다시 볼 일이 없다) ──
-        f.body.addView(Nav.gap(a, 14));
-        subFold(a, f.body, F_PHONE, "전용 폰 세팅 안내",
-                "화면 잠금 없음 · 충전 중 화면 켜짐 유지 · 충전기 연결", phoneSetupBody(a));
-
-        // ── 진단 ──
-        // 사진 전송은 카톡 공유창을 우리가 대신 눌러야 해서, 카톡이 화면을 바꾸면 조용히 깨진다.
-        // 그때 화면에 뭐가 있었는지 사용자가 그대로 개발자에게 보낼 수 있게 여기 버튼을 둔다.
-        f.body.addView(Nav.gap(a, 14));
-        f.body.addView(Ui.label(a, "안 될 때"));
-        f.body.addView(Ui.sub(a, "「사진 전송 진단」은 실제로 한 번 보내보면서 카톡 화면을 기록한다. "
-                + "실패하면 그 화면을 그대로 복사해서 개발자에게 보내줘 — 그게 있으면 고칠 수 있어."));
-
-        LinearLayout drow = Ui.row(a);
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        dp.topMargin = Theme.dp(a, 10);
-        drow.setLayoutParams(dp);
-
-        final TextView diag = Ui.btn(a, "사진 전송 진단", false);
-        diag.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        diag.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { runDiag(a, s, diag); }
-        });
-        drow.addView(diag);
-
-        // 버튼을 죽여놓으면 "왜 못 누르는지" 를 못 알려준다 → 항상 누를 수 있게 두고,
-        // 기록이 없으면 showDiag 가 "왜 없는지" 를 말해준다. 흐리게만 해서 힌트를 준다.
-        final long dumpAt = KakaoAccessibility.lastDumpAt(a);
-        final boolean hasAny = dumpAt > 0 || Scheduler.lastImageFail(a) != null;
-        String showLabel = !hasAny ? "진단 기록 없음"
-                : (dumpAt > 0) ? ("진단 보기 (" + agoShort(dumpAt) + ")") : "진단 보기";
-        TextView show = Ui.btn(a, showLabel, false);
-        LinearLayout.LayoutParams sp2 = new LinearLayout.LayoutParams(0, WRAP, 1f);
-        sp2.leftMargin = Theme.dp(a, 8);
-        show.setLayoutParams(sp2);
-        if (!hasAny) show.setAlpha(0.55f);
-        show.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showDiag(a); }
-        });
-        drow.addView(show);
-        f.body.addView(drow);
-
-        if (dumpAt > 0) {
-            f.body.addView(Ui.sub(a, "마지막 화면 기록: " + ago(dumpAt)));
-        } else {
-            f.body.addView(Ui.sub(a, "저장된 화면 기록은 없어. 실패했을 때만 남는다."));
+        int added = 0;
+        for (int i = 0; i < got.size(); i++) {
+            if (s.macro.addImage(got.get(i))) added++;
         }
-        return f;
+        apply(a, s);
+        Log.add(a, "첨부 이미지 " + added + "장을 추가했습니다. (총 " + s.macro.images.size() + "장)");
+        if (added < got.size()) {
+            Ui.toast(a, "이미지는 최대 " + Settings.MAX_IMAGES + "장까지 첨부됩니다.");
+        }
+        refresh();
+        MacroDetail.refresh();
     }
 
-    // ── 전용 폰 세팅 안내 ───────────────────────────────────────────────────
+    // ── 이미지 전송 실패 경고 ───────────────────────────────────────────────
 
     /**
-     * 매크로 전용 폰(평소에 안 쓰는 여분 폰) 세팅 안내.
-     * 사진 전송은 카톡 공유창을 실제로 띄워서 눌러야 해서, 화면이 꺼지거나 잠겨 있으면 그냥 못 한다.
-     * 현장 실패의 절반이 이 세 줄로 사라지니까 카드 안에 접어서 넣어둔다.
+     * 이미지 전송이 마지막에 실패했으면 경고 박스를 돌려준다. 기록이 없으면 null.
+     * 홈 화면·내정보 화면도 같은 박스를 쓴다 (null 이면 addView 하지 마라).
      */
-    private static LinearLayout phoneSetupBody(final MainActivity a) {
-        LinearLayout box = Nav.col(a);
-        box.addView(step(a, "사진 전송은 카톡을 잠깐 띄워서 보내니까 화면이 움직여. "
-                + "텍스트 발송은 화면이 안 움직여."));
-        box.addView(step(a, "1. 설정 › 잠금화면 › 화면 잠금 방식을 「없음」 으로 바꿔줘. "
-                + "잠겨 있으면 공유창을 대신 눌러줄 수가 없어."));
-        box.addView(step(a, "2. 개발자 옵션 › 「충전 중 화면 켜짐 유지」 를 켜줘. "
-                + "화면을 깨우는 단계가 없어지면 실패가 확 줄어."));
-        box.addView(step(a, "3. 충전기를 꽂아둬. 2번은 충전 중일 때만 먹고, 종일 켜두려면 어차피 필요해."));
-        box.addView(Nav.note(a, "전용 폰에서만 이렇게 해. 평소 쓰는 폰은 잠금을 없애면 위험하고, "
-                + "사진 보낼 때마다 보던 화면이 카톡으로 튄다.", Theme.AMBER, null, null));
-        return box;
-    }
+    public static View imgFailNote(final MainActivity a) {
+        Scheduler.ImageFail fail = lastFail(a);
+        if (fail == null) return null;
 
-    /** 안내 한 줄 (위 여백 포함) */
-    private static TextView step(MainActivity a, String text) {
-        TextView t = Ui.sub(a, text);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(a, 8);
-        t.setLayoutParams(lp);
-        return t;
-    }
-
-    /**
-     * 카드 안에서 쓰는 가벼운 접힘 섹션.
-     * Nav.fold 는 카드를 새로 만들기 때문에 카드 안에 넣으면 같은 색 카드가 겹쳐서 톤이 뭉개진다.
-     */
-    private static void subFold(final MainActivity a, LinearLayout into, final int bit,
-                                final String titleTxt, String summary, final LinearLayout body) {
-        final boolean open = (openBits & bit) != 0;
-
-        final TextView head = Ui.body(a, (open ? "▾ " : "▸ ") + titleTxt);
-        head.setTypeface(Typeface.DEFAULT_BOLD);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setMinimumHeight(Theme.dp(a, 48));
-        head.setClickable(true);
-        head.setFocusable(true);
-        head.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
-        Ui.press(head);
-        into.addView(head);
-
-        if (summary != null && summary.length() > 0) {
-            TextView sm = Ui.sub(a, summary);
-            sm.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
-            into.addView(sm);
-        }
-
-        body.setVisibility(open ? View.VISIBLE : View.GONE);
-        into.addView(body);
-
-        head.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                boolean now = body.getVisibility() != View.VISIBLE;
-                body.setVisibility(now ? View.VISIBLE : View.GONE);
-                if (now) openBits |= bit;
-                else openBits &= ~bit;
-                head.setText((now ? "▾ " : "▸ ") + titleTxt);
-            }
+        String room = (fail.room.length() == 0) ? "대화방 미확인" : Nav.preview(fail.room, 14);
+        String txt = "⚠ 이미지 전송에 실패했습니다.\n"
+                + dayTime(fail.at) + " · " + room + " — " + Nav.preview(fail.why, 70) + "\n"
+                + "텍스트 발송은 정상 동작합니다.";
+        return Nav.note(a, txt, Theme.RED, "진단 보기", new Runnable() {
+            @Override public void run() { showDiag(a); }
         });
     }
 
-    // ── 사진 전송 진단 ──────────────────────────────────────────────────────
+    private static Scheduler.ImageFail lastFail(MainActivity a) {
+        try {
+            return Scheduler.lastImageFail(a);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // ── 이미지 전송 진단 ────────────────────────────────────────────────────
 
     /**
-     * 첫 번째 대상 방으로 실제로 한 번 보내보고, 끝나면 결과 + 화면 기록을 보여준다.
-     * 실패했을 때 화면에 뭐가 있었는지가 제일 중요한 정보라서, 복사해서 바로 보낼 수 있게 한다.
-     *
-     * 방이 하나도 없으면 여기서 막는다 — rooms.get(0) 에 닿기 전에 끝난다.
+     * 첫 번째 대상 대화방으로 실제로 한 번 전송해 보고, 끝나면 결과 + 화면 기록을 보여준다.
+     * 실패 시점의 카카오톡 화면 구성이 가장 중요한 정보라서 그대로 복사할 수 있게 한다.
      */
-    private static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
+    static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
         if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
-        if (s.macro.rooms.isEmpty()) {
-            Nav.confirm(a, "대상 방이 없어",
-                    "진단은 실제로 한 방에 보내보는 거라 대상 방이 최소 한 개는 있어야 해.\n"
-                            + "위쪽 「대상 방」 카드에서 방을 먼저 추가해줘.",
-                    "알겠어", null);
+
+        List<RoomRef> rooms = targets(a, s);
+        if (rooms.isEmpty()) {
+            Nav.confirm(a, "대상 대화방 없음",
+                    "진단은 실제 전송을 1회 수행합니다. 대상 대화방을 1개 이상 설정하십시오.",
+                    "확인", null);
             return;
         }
         if (s.macro.images.isEmpty()) {
-            Nav.confirm(a, "고른 사진이 없어",
-                    "진단은 실제로 사진을 보내보는 거라 최소 한 장은 골라야 해.\n"
-                            + "이 카드의 「사진 고르기」 를 눌러줘.",
-                    "알겠어", null);
+            Nav.confirm(a, "이미지 없음",
+                    "진단은 실제 전송을 1회 수행합니다. 이미지를 1장 이상 선택하십시오.",
+                    "확인", null);
             return;
         }
 
         boolean accOn;
         try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
         if (!accOn) {
-            Nav.confirm(a, "접근성 권한이 필요해",
-                    "진단도 카톡 화면을 읽어야 해서 접근성 권한이 필요해. 지금 켜러 갈래?",
-                    "설정 열기", new Runnable() {
+            Nav.confirm(a, "접근성 권한 필요",
+                    "진단은 카카오톡 화면을 읽어야 하므로 접근성 권한이 필요합니다.",
+                    "권한 설정", new Runnable() {
                         @Override public void run() { ImageSender.openSettings(a); }
                     });
             return;
         }
 
-        final String room = s.macro.rooms.get(0);
+        final RoomRef room = rooms.get(0);
+        final String label = room.label(a);
         final List<String> uris = new ArrayList<String>(s.macro.images);
-        Nav.confirm(a, "진단을 돌릴까?",
-                "「" + room + "」 에 사진 " + uris.size() + "장을 실제로 보내본다. "
-                        + "성공하면 정말 전송되고, 실패하면 그때 카톡 화면을 기록해둘게.\n\n"
-                        + "카톡 공유창이 잠깐 떠서 화면이 움직여.",
+        Nav.confirm(a, "전송 진단 실행",
+                "「" + label + "」 에 이미지 " + uris.size() + "장을 실제로 전송합니다."
+                        + " 성공 시 실제 전송되며, 실패 시 카카오톡 화면 구성이 기록됩니다.\n"
+                        + "전송 중 카카오톡 공유 화면이 표시됩니다.",
                 "진단 시작", new Runnable() {
             @Override public void run() {
-                final String idle = "사진 전송 진단";
+                final String idle = "전송 진단";
                 // ★ 시작 전 화면 기록 시각을 잡아둔다. 이게 있어야 끝난 뒤에
-                //   "이번에 새로 남은 기록" 과 "옛날 기록" 을 구별할 수 있다.
+                //   "이번에 새로 남은 기록" 과 "지난 기록" 을 구별할 수 있다.
                 final long dumpBefore = dumpAtSafe(a);
                 Nav.busy(btn, true, "진단 중…", idle);
-                Log.add(a, "사진 전송 진단 시작 — 「" + room + "」");
+                Log.add(a, "이미지 전송 진단을 시작했습니다. (" + label + ")");
                 try {
-                    ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
+                    // ImageSender 에는 RoomRef.key() 를 넘긴다 — 계정까지 정확히 맞춰야 한다
+                    ImageSender.sendWithResult(a, room.key(), uris, new ImageSender.Done() {
                         @Override public void done(boolean ok, String detail) {
                             Nav.busy(btn, false, "진단 중…", idle);
                             diagResult(a, room, ok, detail, dumpBefore);
@@ -686,10 +552,11 @@ public final class ScreenMacro {
                     });
                 } catch (Throwable t) {
                     Nav.busy(btn, false, "진단 중…", idle);
-                    Scheduler.noteImageFail(a, room, "진단을 시작하지도 못했어 — " + t);
-                    Log.add(a, "진단을 시작하지 못했어: " + t);
-                    Ui.toast(a, "진단을 시작하지 못했어");
+                    Scheduler.noteImageFail(a, label, "진단을 시작하지 못했습니다. " + t);
+                    Log.add(a, "이미지 전송 진단을 시작하지 못했습니다: " + t);
+                    Ui.toast(a, "진단을 시작하지 못했습니다.");
                     refresh();
+                    MacroDetail.refresh();
                 }
             }
         });
@@ -702,26 +569,28 @@ public final class ScreenMacro {
      *        이보다 새 기록이 생겼을 때만 "이번 시도의 화면" 이라고 말한다.
      *        지난 덤프를 이번 실패 화면인 것처럼 보여주는 게 제일 나쁜 거짓말이다.
      */
-    private static void diagResult(final MainActivity a, String room, boolean ok, String detail,
+    private static void diagResult(final MainActivity a, RoomRef room, boolean ok, String detail,
                                    long dumpBefore) {
+        String label = room.label(a);
         // 결과를 기록에 반영한다 — 성공이면 지우고, 실패면 남긴다
-        if (ok) Scheduler.clearImageFail(a, room);
-        else Scheduler.noteImageFail(a, room, detail);
+        if (ok) Scheduler.clearImageFail(a, label);
+        else Scheduler.noteImageFail(a, label, detail);
 
         StringBuilder sb = new StringBuilder(2048);
-        sb.append(ok ? "■ 결과: 성공 (카톡에서 실제로 갔는지 확인해줘)" : "■ 결과: 실패").append('\n');
-        sb.append("■ 방: ").append(room).append('\n');
-        sb.append("■ 원인/상세: ").append((detail == null || detail.length() == 0) ? "(없음)" : detail).append('\n');
-        sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "켜짐" : "꺼짐")
-                .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "켜짐" : "꺼짐").append('\n');
+        sb.append(ok ? "■ 결과: 성공 (카카오톡에서 실제 전송 여부를 확인하십시오)" : "■ 결과: 실패").append('\n');
+        sb.append("■ 대화방: ").append(label).append('\n');
+        sb.append("■ 상세: ").append((detail == null || detail.length() == 0) ? "없음" : detail).append('\n');
+        sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "허용" : "비허용")
+                .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "허용" : "비허용").append('\n');
         sb.append('\n');
         sb.append(dumpSection(a, dumpBefore));
 
         final String all = sb.toString();
-        Nav.showText(a, ok ? "진단 결과 — 성공" : "진단 결과 — 실패", all, new Runnable() {
-            @Override public void run() { Nav.copy(a, "사진 전송 진단", all); }
+        Nav.showText(a, ok ? "진단 결과 · 성공" : "진단 결과 · 실패", all, new Runnable() {
+            @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
         });
         refresh();
+        MacroDetail.refresh();
     }
 
     /**
@@ -731,24 +600,23 @@ public final class ScreenMacro {
     static void showDiag(final MainActivity a) {
         final String all = diagText(a);
         long at = dumpAtSafe(a);
-        Nav.showText(a, "사진 전송 진단 (" + ((at > 0) ? (agoShort(at) + " 기록") : "화면 기록 없음") + ")",
+        Nav.showText(a, "이미지 전송 진단 (" + ((at > 0) ? (agoShort(at) + " 기록") : "화면 기록 없음") + ")",
                 all, new Runnable() {
-                    @Override public void run() { Nav.copy(a, "사진 전송 진단", all); }
+                    @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
                 });
     }
 
     /** showDiag 가 보여주는 본문. 내정보 화면의 [복사] 도 같은 글을 쓴다. */
     static String diagText(MainActivity a) {
         StringBuilder sb = new StringBuilder(2048);
-        Scheduler.ImageFail fail = null;
-        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
+        Scheduler.ImageFail fail = lastFail(a);
         if (fail == null) {
-            sb.append("■ 마지막 사진 전송 실패: 기록 없음\n")
-              .append("  (한 번도 실패하지 않았거나, 마지막 전송이 성공해서 지워졌어)\n\n");
+            sb.append("■ 마지막 이미지 전송 실패: 기록 없음\n")
+              .append("  실패 이력이 없거나, 마지막 전송이 성공하여 기록이 삭제된 상태입니다.\n\n");
         } else {
-            sb.append("■ 마지막 사진 전송 실패\n")
+            sb.append("■ 마지막 이미지 전송 실패\n")
               .append("  시각: ").append(ago(fail.at)).append('\n')
-              .append("  방: ").append(fail.room.length() == 0 ? "(모름)" : fail.room).append('\n')
+              .append("  대화방: ").append(fail.room.length() == 0 ? "미확인" : fail.room).append('\n')
               .append("  사유: ").append(fail.why).append("\n\n");
         }
         // -1 = "이번 시도" 라는 개념이 없다 (그냥 저장된 걸 보는 중)
@@ -761,7 +629,7 @@ public final class ScreenMacro {
      *
      * @param dumpBefore {@link #NO_ATTEMPT} 이면 "이번 시도" 를 주장하지 않고 언제 것인지만 밝힌다.
      *        0 이상이면 "시도 직전의 기록 시각" 이라는 뜻이고, 그보다 새 기록일 때만
-     *        "이번 시도" 라고 말한다. 아니면 "이번엔 기록이 안 남았어" 라고 못을 박는다.
+     *        "이번 시도" 라고 말한다. 아니면 "이번엔 기록이 안 남았다" 고 못을 박는다.
      *        (0 도 유효한 값이다 — "전에는 기록이 아예 없었다" 는 뜻이라 새 기록이면 이번 것이다)
      */
     private static String dumpSection(MainActivity a, long dumpBefore) {
@@ -776,22 +644,22 @@ public final class ScreenMacro {
         boolean fresh = have && attempt && at > dumpBefore;
 
         if (attempt && !fresh) {
-            sb.append("■ 이번엔 화면 기록이 안 남았어.\n")
-              .append("  카톡 공유창까지 못 갔거나, 접근성 서비스가 화면을 읽기 전에 끝난 거야.\n");
+            sb.append("■ 이번 시도의 화면 기록: 없음\n")
+              .append("  카카오톡 공유 화면에 도달하지 못했거나, 접근성 서비스가 화면을 읽기 전에 종료되었습니다.\n");
             if (have) {
                 sb.append("  ※ 아래는 ").append(agoShort(at))
-                  .append(" 에 남은 지난 기록이야 — 이번 시도와는 상관없어.\n\n")
+                  .append(" 에 남은 지난 기록이며 이번 시도와 무관합니다.\n\n")
                   .append(dump).append('\n');
             } else {
-                sb.append("  저장된 화면 기록도 아예 없어.\n");
+                sb.append("  저장된 화면 기록도 없습니다.\n");
             }
             return sb.toString();
         }
 
         if (!have) {
-            sb.append("■ 화면 기록: 없어\n")
-              .append("  실패했을 때만 남는다. 아직 실패한 적이 없거나, 접근성 권한이 꺼져 있어서\n")
-              .append("  화면을 아예 못 읽은 상태일 수 있어.\n");
+            sb.append("■ 화면 기록: 없음\n")
+              .append("  화면 기록은 전송 실패 시에만 저장됩니다. 실패 이력이 없거나,\n")
+              .append("  접근성 권한이 비활성 상태여서 화면을 읽지 못한 상태일 수 있습니다.\n");
             return sb.toString();
         }
 
@@ -800,30 +668,12 @@ public final class ScreenMacro {
         } else {
             sb.append("■ 화면 기록 — ").append(ago(at)).append('\n');
             if (System.currentTimeMillis() - at > DUMP_STALE_MS) {
-                sb.append("  ※ 이건 ").append(agoShort(at))
-                  .append(" 기록이야. 지금 화면이 아니라 그때 화면이다.\n");
+                sb.append("  ※ ").append(agoShort(at))
+                  .append(" 에 기록된 내용이며 현재 화면이 아닙니다.\n");
             }
         }
         sb.append('\n').append(dump).append('\n');
         return sb.toString();
-    }
-
-    /**
-     * 사진 전송이 마지막에 실패했으면 눈에 띄는 경고 줄을 돌려준다. 기록이 없으면 null.
-     * 홈 화면에서도 그대로 쓸 수 있게 public 으로 열어뒀다 (null 이면 addView 하지 마라).
-     */
-    public static View imgFailNote(final MainActivity a) {
-        Scheduler.ImageFail fail;
-        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
-        if (fail == null) return null;
-
-        String room = (fail.room.length() == 0) ? "방 이름 모름" : Nav.preview(fail.room, 14);
-        String txt = "사진 전송이 실패했어\n"
-                + dayTime(fail.at) + " · " + room + " — " + Nav.preview(fail.why, 70) + "\n"
-                + "텍스트 발송은 정상이야 — 사진만 안 갔어.";
-        return Nav.note(a, txt, Theme.RED, "진단 보기", new Runnable() {
-            @Override public void run() { showDiag(a); }
-        });
     }
 
     // ── 지난 시각 표기 ──────────────────────────────────────────────────────
@@ -837,11 +687,11 @@ public final class ScreenMacro {
         return Nav.when(at) + " · " + agoShort(at);
     }
 
-    /** "12분 전" (미래면 "시계가 어긋났어") */
+    /** "12분 전" (미래면 "시각 오류") */
     static String agoShort(long at) {
         if (at <= 0) return "기록 없음";
         long d = System.currentTimeMillis() - at;
-        if (d < -60000L) return "시계가 어긋났어";
+        if (d < -60000L) return "시각 오류";
         if (d < 60000L) return "방금";
         if (d < 3600000L) return (d / 60000L) + "분 전";
         if (d < 86400000L) return (d / 3600000L) + "시간 전";
@@ -850,15 +700,25 @@ public final class ScreenMacro {
 
     /** "오늘 21:30" · "어제 21:30" · "9/26 21:30" */
     static String dayTime(long at) {
-        if (at <= 0) return "시각 모름";
+        if (at <= 0) return "시각 미확인";
         try {
             int diff = dayDiff(at, System.currentTimeMillis());
-            String hm = new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date(at));
+            String hm = hm(at);
             if (diff == 0) return "오늘 " + hm;
             if (diff == 1) return "어제 " + hm;
             return new SimpleDateFormat("M/d HH:mm", Locale.KOREA).format(new Date(at));
         } catch (Throwable t) {
             return Nav.when(at);
+        }
+    }
+
+    /** "21:34" */
+    static String hm(long at) {
+        if (at <= 0) return "-";
+        try {
+            return new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date(at));
+        } catch (Throwable t) {
+            return "-";
         }
     }
 
@@ -887,864 +747,33 @@ public final class ScreenMacro {
         }
     }
 
-    /** 사진 수동 전송 버튼 라벨 (어느 방으로 가는지 보여준다) */
-    private static String imgLabel(String room) {
-        if (room == null || room.length() == 0) return "지금 사진만 보내기";
-        return "「" + Nav.preview(room, 12) + "」에 지금 사진만 보내기";
-    }
-
-    private static void paintThumbs(final MainActivity a, final Settings s,
-                                    final LinearLayout strip, final Nav.Fold f) {
-        strip.removeAllViews();
-        if (s.macro.images.isEmpty()) {
-            TextView e = Ui.sub(a, "아직 고른 사진이 없어");
-            strip.addView(e);
-            f.summary(imageSummary(a, s));
-            return;
-        }
-        for (int i = 0; i < s.macro.images.size(); i++) {
-            final String uri = s.macro.images.get(i);
-            final int no = i + 1;
-            strip.addView(Nav.thumb(a, uri, no, new Runnable() {
-                @Override public void run() {
-                    // URI 영속 권한까지 놓아주니까 되돌릴 수 없다 → 한 번 묻는다
-                    Nav.confirm(a, "사진 " + no + "번째를 지울까?", "첨부 목록에서 빼고 바로 저장해.",
-                            "지우기", new Runnable() {
-                                @Override public void run() {
-                                    s.macro.images.remove(uri);
-                                    try { ImagePicker.release(a, uri); }
-                                    catch (Throwable t) { /* 권한 해제 실패는 무해 */ }
-                                    Nav.clearThumbCache();
-                                    apply(a, s);
-                                    paintThumbs(a, s, strip, f);
-                                    Log.add(a, "첨부 사진 1장을 지웠어");
-                                }
-                            });
-                }
-            }));
-        }
-        f.summary(imageSummary(a, s));
-    }
-
-    private static void pickImgMode(final MainActivity a, final Settings s, final Nav.Fold f) {
-        String[] labels = { "안 보냄", "매번", "N번째 발송마다", "수동 전송만" };
-        String[] descs = {
-                "사진은 붙이지 않는다",
-                "발송할 때마다 사진도 같이 보낸다",
-                "정해둔 횟수마다 한 번씩만 사진을 보낸다",
-                "자동으로는 안 보내고, 버튼을 누를 때만 보낸다"
-        };
-        int sel = 0;
-        for (int i = 0; i < Settings.IMG_MODES.length; i++) {
-            if (Settings.IMG_MODES[i].equals(s.macro.sendImages)) sel = i;
-        }
-        Nav.choose(a, "사진 전송 모드", labels, descs, sel, new Nav.OnPick() {
-            @Override public void pick(int index) {
-                if (index < 0 || index >= Settings.IMG_MODES.length) return;
-                s.macro.sendImages = Settings.IMG_MODES[index];
-                apply(a, s);
-                Log.add(a, "사진 전송 모드를 「" + imgModeKr(s.macro.sendImages) + "」로 바꿨어");
-                refresh();
-            }
-        });
-    }
-
-    private static void sendImagesNow(final MainActivity a, final Settings s, final TextView btn) {
-        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
-        if (s.macro.images.isEmpty()) { Ui.toast(a, "먼저 사진을 골라줘"); return; }
-        if (s.macro.rooms.isEmpty()) { Ui.toast(a, "대상 방을 먼저 추가해줘"); return; }
-        boolean accOn;
-        try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
-        if (!accOn) {
-            Nav.confirm(a, "접근성 권한이 필요해",
-                    "사진 전송은 카톡 화면을 대신 눌러야 해서 접근성 권한이 필요해. 지금 켜러 갈래?",
-                    "설정 열기", new Runnable() {
-                        @Override public void run() { ImageSender.openSettings(a); }
-                    });
-            return;
-        }
-
-        final String room = s.macro.rooms.get(0);
-        final String idle = imgLabel(room);
-        final List<String> uris = new ArrayList<String>(s.macro.images);
-        // ★ 보내기 전 화면 기록 시각. 이게 없으면 지난 덤프를 "그때 화면" 이라고 거짓말한다.
-        final long dumpBefore = dumpAtSafe(a);
-        Nav.busy(btn, true, "보내는 중…", idle);
-        Log.add(a, "사진 " + uris.size() + "장을 「" + room + "」로 보내는 중");
-        try {
-            // 결과를 받아야 한다 — 실패했는데 "끝냈어" 라고 하면 사용자가 보낸 줄 안다.
-            ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
-                @Override public void done(boolean ok, String detail) {
-                    Nav.busy(btn, false, "보내는 중…", idle);
-                    if (ok) {
-                        Scheduler.clearImageFail(a, room);
-                        Ui.toast(a, "「" + room + "」에 사진 전송을 끝냈어. 카톡에서 확인해줘");
-                        refresh();
-                        return;
-                    }
-                    String why = (detail == null || detail.length() == 0) ? "원인 불명" : detail;
-                    Scheduler.noteImageFail(a, room, why);
-                    // 이번 시도에서 새로 남은 기록일 때만 "그때 화면을 기록해뒀어" 라고 말한다
-                    boolean freshDump = dumpAtSafe(a) > dumpBefore;
-                    if (freshDump) {
-                        Nav.confirm(a, "사진을 못 보냈어",
-                                why + "\n\n그때 카톡 화면을 기록해뒀어. 그걸 복사해서 개발자에게 보내주면 고칠 수 있어.",
-                                "진단 보기", new Runnable() {
-                                    @Override public void run() { showDiag(a); }
-                                });
-                    } else {
-                        Nav.confirm(a, "사진을 못 보냈어",
-                                why + "\n\n이번엔 화면 기록이 안 남았어 — 카톡 공유창까지 가기 전에 끝났다는 뜻이야.\n"
-                                        + "저장된 기록과 권한 상태를 같이 보여줄게.",
-                                "진단 보기", new Runnable() {
-                                    @Override public void run() { showDiag(a); }
-                                });
-                    }
-                    refresh();
-                }
-            });
-        } catch (Throwable t) {
-            Nav.busy(btn, false, "보내는 중…", idle);
-            Scheduler.noteImageFail(a, room, "전송을 시작하지도 못했어 — " + t);
-            Log.add(a, "사진 전송을 시작하지 못했어: " + t);
-            Ui.toast(a, "사진 전송을 시작하지 못했어");
-            refresh();
-        }
-    }
-
-    /** MainActivity.onActivityResult 에서 넘어온다 */
-    public static void onImagesPicked(MainActivity a, int res, Intent data) {
-        if (a == null) return;
-        if (res != android.app.Activity.RESULT_OK) {
-            Log.add(a, "사진 선택을 취소했어");
-            return;
-        }
-        Settings s = Settings.load(a);
-        int space = Settings.MAX_IMAGES - s.macro.images.size();
-        if (space <= 0) {
-            Ui.toast(a, "이미 " + Settings.MAX_IMAGES + "장이야");
-            return;
-        }
-        List<String> got;
-        try {
-            got = ImagePicker.onResult(a, data, space);
-        } catch (Throwable t) {
-            Log.add(a, "사진 선택 결과를 못 읽었어: " + t);
-            Ui.toast(a, "사진을 못 읽었어");
-            return;
-        }
-        if (got == null || got.isEmpty()) {
-            Ui.toast(a, "고른 사진이 없어");
-            return;
-        }
-        int added = 0;
-        for (int i = 0; i < got.size(); i++) {
-            if (s.macro.addImage(got.get(i))) added++;
-        }
-        apply(a, s);
-        Log.add(a, "첨부 사진 " + added + "장을 추가했어 (총 " + s.macro.images.size() + "장)");
-        if (added < got.size()) {
-            Ui.toast(a, "최대 " + Settings.MAX_IMAGES + "장까지야");
-        }
-        refresh();
-    }
+    // ── 저장 ────────────────────────────────────────────────────────────────
 
     /**
-     * 접힌 사진 카드에 보이는 한 줄.
-     * 카드가 접혀 있으면 안쪽 경고 줄이 안 보이니까, 실패 기록이 있으면 여기에도 표시를 남긴다 —
-     * 이게 없으면 사용자는 카드를 열 이유를 모른다.
-     */
-    private static String imageSummary(MainActivity a, Settings s) {
-        int n = s.macro.images.size();
-        String base = (n == 0) ? "없음" : (n + "장 · " + imgModeKr(s.macro.sendImages) + imgEveryTail(s));
-        Scheduler.ImageFail fail = null;
-        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
-        if (fail == null) return base;
-        return "⚠ 지난 사진 전송 실패 (" + agoShort(fail.at) + ") · " + base;
-    }
-
-    private static String imgModeKr(String mode) {
-        if (Settings.IMG_EVERY.equals(mode)) return "매번 보냄";
-        if (Settings.IMG_EVERY_N.equals(mode)) return "N번마다";
-        if (Settings.IMG_MANUAL.equals(mode)) return "수동만";
-        return "안 보냄";
-    }
-
-    private static String imgEveryTail(Settings s) {
-        if (!Settings.IMG_EVERY_N.equals(s.macro.sendImages)) return "";
-        return " (" + s.macro.imageEveryN + ")";
-    }
-
-    // ── 6. 메시지 추적 (트리거) ─────────────────────────────────────────────
-
-    private static Nav.Fold triggerFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_TRIG, "메시지 추적", trigSummary(s));
-
-        f.body.addView(Ui.sub(a, "정해둔 메시지가 어느 방에 올라오면 바로 답장한다. 주기 발송과 따로 돈다."));
-
-        if (s.triggers.isEmpty()) {
-            TextView e = Ui.sub(a, "아직 트리거가 없어. 아래에서 하나 만들어봐.");
-            LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(MATCH, WRAP);
-            ep.topMargin = Theme.dp(a, 10);
-            e.setLayoutParams(ep);
-            f.body.addView(e);
-        }
-        for (int i = 0; i < s.triggers.size(); i++) {
-            f.body.addView(triggerRow(a, s, s.triggers.get(i)));
-        }
-
-        f.body.addView(Nav.wideBtn(a, "새 트리거", false, new Runnable() {
-            @Override public void run() {
-                if (s.triggers.size() >= Settings.MAX_TRIGGERS) {
-                    Ui.toast(a, "트리거는 최대 " + Settings.MAX_TRIGGERS + "개까지야");
-                    return;
-                }
-                editTrigger(a, s, null);
-            }
-        }));
-        return f;
-    }
-
-    private static LinearLayout triggerRow(final MainActivity a, final Settings s,
-                                           final Settings.TriggerCfg t) {
-        LinearLayout row = Ui.row(a);
-        row.setMinimumHeight(Theme.dp(a, 56));
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        rp.topMargin = Theme.dp(a, 10);
-        row.setLayoutParams(rp);
-
-        LinearLayout left = new LinearLayout(a);
-        left.setOrientation(LinearLayout.VERTICAL);
-        left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        left.setClickable(true);
-        left.setFocusable(true);
-        left.setMinimumHeight(Theme.dp(a, 48));
-        int lp2 = Theme.dp(a, 4);
-        left.setPadding(0, lp2, 0, lp2);
-        Ui.press(left);
-
-        TextView nt = new TextView(a);
-        nt.setText(t.title());
-        nt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-        nt.setTextColor(t.enabled ? Theme.TEXT : Theme.DIM);
-        nt.setTypeface(Typeface.DEFAULT_BOLD);
-        nt.setSingleLine(true);
-        nt.setEllipsize(TextUtils.TruncateAt.END);
-        nt.setIncludeFontPadding(false);
-        left.addView(nt, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        TextView mt = Ui.sub(a, trigMeta(t));
-        mt.setMaxLines(2);
-        mt.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        mp.topMargin = Theme.dp(a, 3);
-        mt.setLayoutParams(mp);
-        left.addView(mt);
-
-        left.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { editTrigger(a, s, t); }
-        });
-        row.addView(left);
-
-        row.addView(Nav.toggle(a, t.title(), t.enabled, new Ui.OnToggle() {
-            @Override public void on(boolean v) {
-                t.enabled = v;
-                apply(a, s);
-                nt.setTextColor(v ? Theme.TEXT : Theme.DIM);
-                Log.add(a, "트리거 「" + t.title() + "」를 " + (v ? "켰어" : "껐어"));
-            }
-        }));
-        return row;
-    }
-
-    private static String trigMeta(Settings.TriggerCfg t) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(modeKr(t.mode)).append(" · 「").append(Nav.preview(t.pattern, 20)).append("」");
-        sb.append(" · 감지: ").append(t.rooms.isEmpty() ? "모든 방" : (t.rooms.size() + "개 방"));
-        sb.append(" · 보낼 곳: ").append((t.target == null || t.target.trim().length() == 0)
-                ? "감지된 방" : Nav.preview(t.target, 14));
-        return sb.toString();
-    }
-
-    private static String trigSummary(Settings s) {
-        if (s.triggers.isEmpty()) return "없음";
-        int on = 0;
-        for (int i = 0; i < s.triggers.size(); i++) if (s.triggers.get(i).enabled) on++;
-        return s.triggers.size() + "개 · " + on + "개 켜짐";
-    }
-
-    private static String modeKr(String mode) {
-        if (Settings.MODE_EXACT.equals(mode)) return "정확히";
-        if (Settings.MODE_STARTS.equals(mode)) return "시작";
-        if (Settings.MODE_REGEX.equals(mode)) return "정규식";
-        return "포함";
-    }
-
-    /** 트리거 편집 다이얼로그. old 가 null 이면 새로 만든다. */
-    private static void editTrigger(final MainActivity a, final Settings s,
-                                    final Settings.TriggerCfg old) {
-        final boolean isNew = (old == null);
-        final Settings.TriggerCfg t = isNew ? new Settings.TriggerCfg() : old;
-
-        // 다이얼로그에서 취소하면 원래 값이 살아있어야 하니까 편집값은 따로 들고 있는다
-        final String[] mode = { t.mode };
-        final boolean[] flags = { t.ignoreCase, t.fromMe, t.oncePerRoom, t.enabled };
-
-        LinearLayout body = Nav.col(a);
-
-        body.addView(fieldLabel(a, "이름 (표시용)", 0));
-        final EditText name = line(a, "예) 출석 체크", t.name);
-        body.addView(name);
-
-        body.addView(fieldLabel(a, "감지할 문자열", 14));
-        final EditText pat = line(a, "예) 출석", t.pattern);
-        body.addView(pat);
-        final TextView patErr = Nav.errLine(a);
-        body.addView(patErr);
-
-        body.addView(fieldLabel(a, "비교 방식", 14));
-        final TextView modeBtn = Ui.btn(a, modeKr(mode[0]), false);
-        modeBtn.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
-        modeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                int sel = 0;
-                for (int i = 0; i < Settings.MODES.length; i++) {
-                    if (Settings.MODES[i].equals(mode[0])) sel = i;
-                }
-                Nav.choose(a, "비교 방식", new String[] { "포함", "정확히", "시작", "정규식" },
-                        new String[] { "메시지 안에 들어있으면 감지",
-                                "메시지 전체가 똑같을 때만 감지",
-                                "메시지가 이걸로 시작할 때 감지",
-                                "정규식으로 감지 (틀리면 저장할 때 알려준다)" },
-                        sel, new Nav.OnPick() {
-                            @Override public void pick(int index) {
-                                mode[0] = Settings.MODES[index];
-                                modeBtn.setText(modeKr(mode[0]));
-                            }
-                        });
-            }
-        });
-        body.addView(modeBtn);
-
-        body.addView(fieldLabel(a, "감지할 방 (쉼표 · 비우면 모든 방)", 14));
-        final EditText rooms = line(a, "비우면 모든 방", Nav.join(t.rooms, ""));
-        body.addView(rooms);
-
-        body.addView(fieldLabel(a, "보낼 메시지", 14));
-        final EditText reply = multi(a, "{방} {이름} {메시지} {시간} 쓸 수 있어", t.reply);
-        body.addView(reply);
-        final TextView replyErr = Nav.errLine(a);
-        body.addView(replyErr);
-
-        body.addView(fieldLabel(a, "보낼 방 (비우면 감지된 방)", 14));
-        final EditText target = line(a, "비우면 감지된 방에 답장", t.target);
-        body.addView(target);
-
-        body.addView(fieldLabel(a, "랜덤 지연 (초 · 0~60)", 14));
-        final EditText delay = num(a, "0", String.valueOf(t.delayMs / 1000));
-        body.addView(delay);
-        final TextView delayErr = Nav.errLine(a);
-        body.addView(delayErr);
-
-        body.addView(fieldLabel(a, "재발동 최소 간격 (초)", 14));
-        final EditText cool = num(a, "60", String.valueOf(t.cooldownMs / 1000));
-        body.addView(cool);
-        final TextView coolErr = Nav.errLine(a);
-        body.addView(coolErr);
-
-        body.addView(Ui.divider(a));
-        body.addView(Ui.switchRow(a, "대소문자 무시", null, flags[0], new Ui.OnToggle() {
-            @Override public void on(boolean v) { flags[0] = v; }
-        }));
-        body.addView(Ui.switchRow(a, "내 메시지도 감지", "보통은 꺼둔다 (자기 말에 반응하면 무한반복 위험)",
-                flags[1], new Ui.OnToggle() {
-                    @Override public void on(boolean v) { flags[1] = v; }
-                }));
-        body.addView(Ui.switchRow(a, "방마다 1회만", "한 방에서 한 번 발동하면 더 안 보낸다",
-                flags[2], new Ui.OnToggle() {
-                    @Override public void on(boolean v) { flags[2] = v; }
-                }));
-        body.addView(Ui.switchRow(a, "사용", null, flags[3], new Ui.OnToggle() {
-            @Override public void on(boolean v) { flags[3] = v; }
-        }));
-
-        if (!isNew) {
-            TextView del = Ui.btn(a, "이 트리거 삭제", false);
-            del.setTextColor(Theme.RED);
-            LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            dp.topMargin = Theme.dp(a, 14);
-            del.setLayoutParams(dp);
-            del.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    Nav.confirm(a, "트리거를 지울까?", "「" + t.title() + "」를 지운다. 되돌릴 수 없어.",
-                            "삭제", new Runnable() {
-                                @Override public void run() {
-                                    s.removeTrigger(t.id);
-                                    try { Trigger.resetState(a, t.id); } catch (Throwable ig) { }
-                                    apply(a, s);
-                                    Log.add(a, "트리거 「" + t.title() + "」를 지웠어");
-                                    refresh();
-                                }
-                            });
-                }
-            });
-            body.addView(del);
-        }
-
-        Nav.form(a, isNew ? "새 트리거" : "트리거 편집", body, "저장", new Nav.OnSave() {
-            @Override public String save() {
-                Nav.errClear(patErr);
-                Nav.errClear(replyErr);
-                Nav.errClear(delayErr);
-                Nav.errClear(coolErr);
-
-                String p = pat.getText().toString();
-                if (p.trim().length() == 0) {
-                    Nav.errText(patErr, "감지할 문자열을 입력해줘");
-                    return "";
-                }
-                String rp = reply.getText().toString();
-                if (rp.trim().length() == 0) {
-                    Nav.errText(replyErr, "보낼 메시지를 입력해줘");
-                    return "";
-                }
-                int dsec;
-                try {
-                    dsec = Integer.parseInt(delay.getText().toString().trim());
-                } catch (Throwable e) {
-                    Nav.errText(delayErr, "숫자만 넣어줘");
-                    return "";
-                }
-                if (dsec < 0 || dsec > 60) {
-                    Nav.errText(delayErr, "0 ~ 60 사이로 넣어줘");
-                    return "";
-                }
-                int csec;
-                try {
-                    csec = Integer.parseInt(cool.getText().toString().trim());
-                } catch (Throwable e) {
-                    Nav.errText(coolErr, "숫자만 넣어줘");
-                    return "";
-                }
-                if (csec < 0 || csec > 86400) {
-                    Nav.errText(coolErr, "0 ~ 86400 사이로 넣어줘");
-                    return "";
-                }
-
-                // 검증 전용 사본으로 먼저 확인한다 (실패하면 원본이 안 더러워진다)
-                Settings.TriggerCfg probe = new Settings.TriggerCfg();
-                probe.id = t.id;
-                probe.name = name.getText().toString().trim();
-                probe.pattern = p;
-                probe.mode = mode[0];
-                probe.ignoreCase = flags[0];
-                probe.rooms = split(rooms.getText().toString());
-                probe.fromMe = flags[1];
-                probe.reply = rp;
-                probe.target = target.getText().toString().trim();
-                probe.delayMs = dsec * 1000;
-                probe.cooldownMs = csec * 1000L;
-                probe.oncePerRoom = flags[2];
-                probe.enabled = flags[3];
-
-                String bad;
-                try {
-                    bad = Trigger.validate(probe);
-                } catch (Throwable e) {
-                    bad = "트리거를 검사하다 오류가 났어: " + e.getClass().getSimpleName();
-                }
-                if (bad != null) {
-                    if (bad.contains("정규식") || bad.contains("문자열")) Nav.errText(patErr, bad);
-                    else if (bad.contains("메시지")) Nav.errText(replyErr, bad);
-                    return bad.contains("정규식") || bad.contains("문자열") || bad.contains("메시지")
-                            ? "" : bad;
-                }
-
-                t.name = probe.name;
-                t.pattern = probe.pattern;
-                t.mode = probe.mode;
-                t.ignoreCase = probe.ignoreCase;
-                t.rooms = probe.rooms;
-                t.fromMe = probe.fromMe;
-                t.reply = probe.reply;
-                t.target = probe.target;
-                t.delayMs = probe.delayMs;
-                t.cooldownMs = probe.cooldownMs;
-                t.oncePerRoom = probe.oncePerRoom;
-                t.enabled = probe.enabled;
-
-                if (isNew) {
-                    String why = s.addTrigger(t);
-                    if (why != null) return why;
-                }
-                apply(a, s);
-                Log.add(a, (isNew ? "트리거를 만들었어: " : "트리거를 고쳤어: ") + t.title());
-                refresh();
-                return null;
-            }
-        });
-    }
-
-    // ── 7. 오픈프로필 자동응답 ──────────────────────────────────────────────
-
-    private static Nav.Fold replyFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_REPLY, "오픈프로필 자동응답", replySummary(s));
-        final Settings.AutoReplyCfg r = s.autoreply;
-
-        f.body.addView(Ui.switchRow(a, "자동응답 사용", "오픈프로필로 온 1:1 톡에 정해둔 메시지를 보낸다",
-                r.enabled, new Ui.OnToggle() {
-                    @Override public void on(boolean v) {
-                        r.enabled = v;
-                        apply(a, s);
-                        f.summary(replySummary(s));
-                        Log.add(a, v ? "오픈프로필 자동응답을 켰어" : "오픈프로필 자동응답을 껐어");
-                    }
-                }));
-        f.body.addView(Ui.divider(a));
-
-        f.body.addView(Nav.actionRow(a, "응답 메시지",
-                (r.message == null || r.message.trim().length() == 0)
-                        ? "아직 비어있어 — 비우면 안 보낸다" : Nav.preview(r.message, 44),
-                "수정", new Runnable() {
-                    @Override public void run() {
-                        Nav.editText(a, "응답 메시지", "예) 안녕하세요 {이름}님, 곧 답장드릴게요",
-                                r.message, true,
-                                "{이름} {시간} {날짜} 를 쓸 수 있어. 여러 줄도 그대로 보내진다.",
-                                new Nav.OnText() {
-                                    @Override public String text(String value) {
-                                        if (value == null || value.trim().length() == 0) {
-                                            return "응답 메시지를 적어줘";
-                                        }
-                                        if (value.length() > 2000) return "2000자 이하로 줄여줘";
-                                        r.message = value;
-                                        apply(a, s);
-                                        refresh();
-                                        return null;
-                                    }
-                                });
-                    }
-                }));
-
-        f.body.addView(Nav.actionRow(a, "적용 대상", scopeKr(r.scope), "변경", new Runnable() {
-            @Override public void run() {
-                int sel = 0;
-                for (int i = 0; i < Settings.SCOPES.length; i++) {
-                    if (Settings.SCOPES[i].equals(r.scope)) sel = i;
-                }
-                Nav.choose(a, "적용 대상",
-                        new String[] { "모든 1:1", "모르는 사람만", "특정 방 제외" },
-                        new String[] { "1:1 톡이면 모두 응답",
-                                "전에 본 적 없는 상대에게만 응답",
-                                "아래 목록에 있는 방만 빼고 응답" },
-                        sel, new Nav.OnPick() {
-                            @Override public void pick(int index) {
-                                r.scope = Settings.SCOPES[index];
-                                apply(a, s);
-                                refresh();
-                            }
-                        });
-            }
-        }));
-
-        if (Settings.SCOPE_EXCEPT.equals(r.scope)) {
-            f.body.addView(Ui.label(a, "제외할 방"));
-            final Nav.Flow flow = Nav.flow(a);
-            f.body.addView(flow);
-            final Runnable changed = new Runnable() {
-                @Override public void run() { apply(a, s); }
-            };
-            Nav.chipEditor(flow, r.exceptRooms, Theme.AMBER, "아직 없어", changed);
-            f.body.addView(Nav.wideBtn(a, "제외할 방 추가", false, new Runnable() {
-                @Override public void run() {
-                    Nav.pickRooms(a, "제외할 방 추가", KakaoListener.knownRooms(a), r.exceptRooms,
-                            new Nav.OnRooms() {
-                                @Override public void rooms(List<String> picked) {
-                                    for (int i = 0; i < picked.size(); i++) {
-                                        String v = picked.get(i);
-                                        if (!r.exceptRooms.contains(v)) r.exceptRooms.add(v);
-                                    }
-                                    changed.run();
-                                    Nav.chipEditor(flow, r.exceptRooms, Theme.AMBER, "아직 없어", changed);
-                                }
-                            });
-                }
-            }));
-        }
-
-        f.body.addView(Nav.actionRow(a, "운영 시간", hoursKr(r), "수정", new Runnable() {
-            @Override public void run() {
-                final Nav.NumField from = new Nav.NumField("시작 시 (0~24)", "9", 0, 24, r.hourFrom);
-                final Nav.NumField to = new Nav.NumField("종료 시 (0~24)", "23", 0, 24, r.hourTo);
-                Nav.editNums(a, "운영 시간",
-                        "이 시간대에만 응답한다. 시작과 종료를 같게 하면 24시간 응답.\n"
-                                + "22 ~ 6 처럼 자정을 넘겨도 된다.",
-                        new Nav.NumField[] { from, to }, new Nav.OnNums() {
-                            @Override public String ok() {
-                                r.hourFrom = from.value;
-                                r.hourTo = to.value;
-                                apply(a, s);
-                                refresh();
-                                return null;
-                            }
-                        });
-            }
-        }));
-
-        f.body.addView(Nav.actionRow(a, "같은 사람 재응답 간격", Nav.dur(r.cooldownMs), "수정",
-                new Runnable() {
-                    @Override public void run() {
-                        final Nav.NumField n = new Nav.NumField("간격 (분)", "360", 0, 10080,
-                                (int) (r.cooldownMs / 60000L));
-                        Nav.editNums(a, "재응답 간격", "같은 사람에게 이 시간 안에는 다시 응답하지 않는다.",
-                                new Nav.NumField[] { n }, new Nav.OnNums() {
-                                    @Override public String ok() {
-                                        r.cooldownMs = n.value * 60000L;
-                                        apply(a, s);
-                                        refresh();
-                                        return null;
-                                    }
-                                });
-                    }
-                }));
-
-        f.body.addView(Nav.actionRow(a, "하루 최대 응답",
-                r.dailyLimit + "건 (오늘 " + AutoReply.today(a) + "건)", "수정", new Runnable() {
-                    @Override public void run() {
-                        final Nav.NumField n = new Nav.NumField("하루 최대 응답 수", "100", 1, 2000,
-                                r.dailyLimit);
-                        Nav.editNums(a, "하루 최대 응답", "자정에 0으로 초기화된다.",
-                                new Nav.NumField[] { n }, new Nav.OnNums() {
-                                    @Override public String ok() {
-                                        r.dailyLimit = n.value;
-                                        apply(a, s);
-                                        refresh();
-                                        return null;
-                                    }
-                                });
-                    }
-                }));
-
-        f.body.addView(Nav.actionRow(a, "랜덤 지연", (r.delayMaxMs <= 0) ? "없음"
-                : ("0 ~ " + (r.delayMaxMs / 1000) + "초"), "수정", new Runnable() {
-            @Override public void run() {
-                final Nav.NumField n = new Nav.NumField("최대 지연 (초)", "30", 0, 120,
-                        r.delayMaxMs / 1000);
-                Nav.editNums(a, "랜덤 지연", "바로 답하면 봇처럼 보여. 0~이 값 사이에서 랜덤하게 늦춘다.",
-                        new Nav.NumField[] { n }, new Nav.OnNums() {
-                            @Override public String ok() {
-                                r.delayMaxMs = n.value * 1000;
-                                apply(a, s);
-                                refresh();
-                                return null;
-                            }
-                        });
-            }
-        }));
-
-        f.body.addView(Ui.switchRow(a, "첫 메시지에만", "그 사람의 첫 톡에만 응답하고, 이어지는 톡은 무시",
-                r.firstOnly, new Ui.OnToggle() {
-                    @Override public void on(boolean v) {
-                        r.firstOnly = v;
-                        apply(a, s);
-                    }
-                }));
-        return f;
-    }
-
-    private static String replySummary(Settings s) {
-        Settings.AutoReplyCfg r = s.autoreply;
-        if (!r.enabled) return "꺼짐";
-        return "켜짐 · " + scopeKr(r.scope) + " · " + hoursKr(r);
-    }
-
-    private static String scopeKr(String scope) {
-        if (Settings.SCOPE_UNKNOWN.equals(scope)) return "모르는 사람만";
-        if (Settings.SCOPE_EXCEPT.equals(scope)) return "특정 방 제외";
-        return "모든 1:1";
-    }
-
-    private static String hoursKr(Settings.AutoReplyCfg r) {
-        if (r.hourFrom == r.hourTo) return "24시간";
-        if (r.hourFrom == 0 && r.hourTo == 24) return "24시간";
-        return r.hourFrom + "시 ~ " + r.hourTo + "시";
-    }
-
-    // ── 8. 발송 제한 ────────────────────────────────────────────────────────
-
-    private static Nav.Fold limitFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_LIMIT, "발송 제한", limitSummary(s));
-
-        f.body.addView(Nav.actionRow(a, "방해금지 시간", quietKr(s), "수정", new Runnable() {
-            @Override public void run() { editQuiet(a, s, f); }
-        }));
-        f.body.addView(Nav.actionRow(a, "하루 최대 발송",
-                s.macro.dailyLimit + "건 (오늘 " + MainActivity.sentToday(a) + "건)", "수정",
-                new Runnable() {
-                    @Override public void run() {
-                        final Nav.NumField n = new Nav.NumField("하루 최대 발송 수", "200", 1, 5000,
-                                s.macro.dailyLimit);
-                        Nav.editNums(a, "하루 최대 발송", "이 수를 넘으면 그날은 더 안 보낸다.",
-                                new Nav.NumField[] { n }, new Nav.OnNums() {
-                                    @Override public String ok() {
-                                        s.macro.dailyLimit = n.value;
-                                        apply(a, s);
-                                        refresh();
-                                        return null;
-                                    }
-                                });
-                    }
-                }));
-        return f;
-    }
-
-    private static void editQuiet(final MainActivity a, final Settings s, final Nav.Fold f) {
-        LinearLayout body = Nav.col(a);
-        body.addView(Ui.sub(a, "이 시간대에는 발송을 멈춘다. 둘 다 비우면 제한 없음.\n"
-                + "22:00 ~ 07:00 처럼 자정을 넘겨도 된다."));
-
-        body.addView(fieldLabel(a, "시작 (HH:mm)", 14));
-        final EditText from = line(a, "22:00", s.macro.quietFrom);
-        body.addView(from);
-        final TextView fromErr = Nav.errLine(a);
-        body.addView(fromErr);
-
-        body.addView(fieldLabel(a, "종료 (HH:mm)", 14));
-        final EditText to = line(a, "07:00", s.macro.quietTo);
-        body.addView(to);
-        final TextView toErr = Nav.errLine(a);
-        body.addView(toErr);
-
-        Nav.form(a, "방해금지 시간", body, "저장", new Nav.OnSave() {
-            @Override public String save() {
-                Nav.errClear(fromErr);
-                Nav.errClear(toErr);
-                String fv = from.getText().toString().trim();
-                String tv = to.getText().toString().trim();
-                if (fv.length() == 0 && tv.length() == 0) {
-                    s.macro.quietFrom = "";
-                    s.macro.quietTo = "";
-                    apply(a, s);
-                    f.summary(limitSummary(s));
-                    refresh();
-                    return null;
-                }
-                boolean bad = false;
-                if (Settings.hhmm(fv) < 0) { Nav.errText(fromErr, "HH:mm 으로 넣어줘 (예 22:00)"); bad = true; }
-                if (Settings.hhmm(tv) < 0) { Nav.errText(toErr, "HH:mm 으로 넣어줘 (예 07:00)"); bad = true; }
-                if (bad) return "";
-                if (Settings.hhmm(fv) == Settings.hhmm(tv)) {
-                    Nav.errText(toErr, "시작과 종료가 같으면 제한이 안 걸려");
-                    return "";
-                }
-                s.macro.quietFrom = fv;
-                s.macro.quietTo = tv;
-                apply(a, s);
-                f.summary(limitSummary(s));
-                refresh();
-                Log.add(a, "방해금지 시간을 " + fv + " ~ " + tv + " 로 맞췄어");
-                return null;
-            }
-        });
-    }
-
-    private static String quietKr(Settings s) {
-        if (Settings.hhmm(s.macro.quietFrom) < 0 || Settings.hhmm(s.macro.quietTo) < 0) return "없음";
-        return s.macro.quietFrom + " ~ " + s.macro.quietTo;
-    }
-
-    private static String limitSummary(Settings s) {
-        return "방해금지 " + quietKr(s) + " · 하루 " + s.macro.dailyLimit + "건";
-    }
-
-    // ── 공통 ────────────────────────────────────────────────────────────────
-
-    /**
-     * 설정 저장 + 알람 갱신. 값이 바뀌면 무조건 여기를 거친다.
+     * 설정 저장 + 알람 갱신. 값이 바뀌면 무조건 여기를 거친다. (서브화면도 이걸 쓴다)
      *
      * Scheduler 쪽 계약: 매크로가 켜져 있고 기능도 살아있을 때만 ensureScheduled 를 부르고,
-     * 아니면 cancel 을 부른다. 그러니 cancel 에서 "주기 발송 알람" 만 지워라 —
-     * 하트비트/부팅복구를 같은 알람에 태웠으면 그건 살려둬야 한다.
+     * 아니면 cancel 을 부른다.
      */
-    private static void apply(MainActivity a, Settings s) {
+    static void apply(MainActivity a, Settings s) {
         // Settings.save 는 설정키가 없으면 예외 없이 조용히 넘어간다 → 여기서 먼저 막고 알려준다
         if (!Settings.canSave(a)) {
-            Log.add(a, "설정을 저장하지 못했어 (설정키 없음)");
-            Ui.toast(a, "설정을 저장하지 못했어 — 내정보 탭에서 라이선스 인증부터 해줘");
-            refresh();
+            Log.add(a, "설정키가 없어 설정을 저장하지 못했습니다.");
+            Ui.toast(a, "설정을 저장하지 못했습니다. 내정보 탭에서 라이선스를 인증하십시오.");
             return;
         }
         try {
             s.save(a);
         } catch (Throwable t) {
-            Log.add(a, "설정 저장에 실패했어: " + t);
-            Ui.toast(a, "설정을 저장하지 못했어");
+            Log.add(a, "설정 저장에 실패했습니다: " + t);
+            Ui.toast(a, "설정을 저장하지 못했습니다.");
             return;
         }
         try {
             if (s.macro.enabled && License.allowed(a, Features.MACRO)) Scheduler.ensureScheduled(a);
             else Scheduler.cancel(a);
         } catch (Throwable t) {
-            Log.add(a, "발송 예약을 갱신하지 못했어: " + t);
+            Log.add(a, "발송 예약을 갱신하지 못했습니다: " + t);
         }
-    }
-
-    /** 펼침 상태를 기억하는 접이식 카드 */
-    private static Nav.Fold fold(MainActivity a, final int bit, String titleTxt, String summary) {
-        Nav.Fold f = Nav.fold(a, titleTxt, summary, (openBits & bit) != 0);
-        f.onToggle(new Ui.OnToggle() {
-            @Override public void on(boolean v) {
-                if (v) openBits |= bit;
-                else openBits &= ~bit;
-            }
-        });
-        return f;
-    }
-
-    private static TextView fieldLabel(MainActivity a, String s, int topDp) {
-        TextView t = Ui.label(a, s);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(a, topDp);
-        lp.bottomMargin = Theme.dp(a, 6);
-        t.setLayoutParams(lp);
-        return t;
-    }
-
-    private static EditText line(MainActivity a, String hint, String value) {
-        EditText e = Ui.field(a, hint);
-        e.setSingleLine(true);
-        e.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        e.setText((value == null) ? "" : value);
-        return e;
-    }
-
-    private static EditText multi(MainActivity a, String hint, String value) {
-        EditText e = Ui.field(a, hint);
-        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        e.setMinLines(3);
-        e.setMaxLines(8);
-        e.setText((value == null) ? "" : value);
-        return e;
-    }
-
-    private static EditText num(MainActivity a, String hint, String value) {
-        EditText e = Ui.field(a, hint);
-        e.setSingleLine(true);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        e.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        e.setText((value == null) ? "" : value);
-        return e;
-    }
-
-    /** "가, 나, 다" → 리스트. 빈 조각은 버린다. */
-    private static List<String> split(String s) {
-        ArrayList<String> out = new ArrayList<String>();
-        if (s == null) return out;
-        String[] parts = s.split(",");
-        for (int i = 0; i < parts.length; i++) {
-            String v = (parts[i] == null) ? "" : parts[i].trim();
-            if (v.length() == 0) continue;
-            if (!out.contains(v)) out.add(v);
-        }
-        return out;
     }
 }

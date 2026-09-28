@@ -63,7 +63,7 @@
   var BUNDLE_RATE_DEFAULT = 0.15;  // SPEC 5장 기본값. 서버가 값을 주면 그걸 쓴다.
   var BUNDLE_MIN_DEFAULT  = 3;
 
-  var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없어';
+  var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없습니다';
 
   /* ── 자동 입금확인이 꺼져 있으면(DEPOSIT_AUTO_APPROVE=0 또는 DEPOSIT_TOKEN 미설정)
         "자동으로 발급돼" 라고 약속한 문구를 전부 "관리자 확인 후 발급" 으로 바꾼다.
@@ -85,14 +85,14 @@
 
   /** 입금 후 안내 한 줄 — 자동/수동에 따라 갈린다 */
   function issueMsg(review) {
-    if (review) return '입금하면 관리자가 확인할게';
-    return AUTO_APPROVE ? '입금하면 1~2분 안에 키가 자동으로 나와' : '입금하면 관리자가 확인하고 키를 발급할게';
+    if (review) return '입금 후 관리자가 확인합니다';
+    return AUTO_APPROVE ? '입금 후 1~2분 내 키가 자동 발급됩니다' : '입금 후 관리자가 확인하여 키를 발급합니다';
   }
 
   /* 서버가 48시간 방치된 pending 주문을 자동 취소한다 (ORDER_PENDING_TTL_MS).
      접수 결과 화면과 주문 상태 페이지에서 같은 문구를 쓴다. */
-  var TTL_MSG = '48시간 안에 입금하지 않으면 주문이 자동 취소돼. 취소돼도 입금하면 관리자가 확인해줄 수 있어.';
-  var TTL_CANCELED_MSG = '자동 취소됐어 (미입금 48시간). 이미 입금했으면 관리자에게 알려줘.';
+  var TTL_MSG = '48시간 내 미입금 시 주문이 자동 취소됩니다. 취소 후 입금한 경우에도 관리자 확인이 가능합니다.';
+  var TTL_CANCELED_MSG = '미입금 48시간 경과로 자동 취소되었습니다. 이미 입금한 경우 관리자에게 문의하십시오.';
 
   var STATUS = {
     pending:  { kr: '입금 대기 중',            cls: 'warn' },
@@ -104,20 +104,20 @@
 
   /* 서버 reason 코드 → 한국어 (SPEC 3.1 표 + 웹 전용 몇 개) */
   var REASON_KR = {
-    bad_request:   '요청이 잘못됐어',
-    bad_feature:   '기능을 하나 이상 골라줘',
-    bad_plan:      '플랜을 골라줘 (1개월 / 3개월 / 1년)',
-    no_depositor:  '입금자명을 적어줘',
-    invalid_key:   '없는 키야',
-    not_found:     '찾을 수 없어',
-    revoked:       '사용 중지된 키야',
-    blocked:       '차단된 키야 (관리자에게 문의해줘)',
-    expired:       '기간이 끝났어',
-    no_entitlement:'구매한 기능이 없어',
-    device_mismatch:'다른 기기에 등록된 키야 (키 1개당 기기 1대)',
-    server_error:  '서버에서 문제가 났어. 잠시 뒤 다시 해줘',
-    rate_limited:  '요청이 너무 잦아. 조금 뒤에 다시 해줘',
-    unauthorized:  '권한이 없어'
+    bad_request:   '요청 형식이 올바르지 않습니다',
+    bad_feature:   '기능을 1개 이상 선택하십시오',
+    bad_plan:      '결제 기간을 선택하십시오 (1개월 / 3개월 / 1년)',
+    no_depositor:  '입금자명을 입력하십시오',
+    invalid_key:   '등록되지 않은 키입니다',
+    not_found:     '조회 결과가 없습니다',
+    revoked:       '사용이 중지된 키입니다',
+    blocked:       '차단된 키입니다. 관리자에게 문의하십시오',
+    expired:       '사용 기간이 만료되었습니다',
+    no_entitlement:'구매한 기능이 없습니다',
+    device_mismatch:'다른 기기에 등록된 키입니다 (키 1개당 기기 1대)',
+    server_error:  '서버 오류가 발생했습니다. 잠시 후 다시 시도하십시오',
+    rate_limited:  '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오',
+    unauthorized:  '권한이 없습니다'
   };
 
   function featOf(id) {
@@ -309,7 +309,7 @@
   function copy(text, okMsg) {
     var s = String(text || '');
     if (!s) return;
-    var done = function () { toast(okMsg || '복사했어', 'ok'); };
+    var done = function () { toast(okMsg || '복사되었습니다', 'ok'); };
     var fallback = function () {
       try {
         var ta = el('textarea', { value: s, 'aria-hidden': 'true' });
@@ -318,9 +318,9 @@
         ta.select(); ta.setSelectionRange(0, s.length);
         var ok = document.execCommand('copy');
         document.body.removeChild(ta);
-        if (ok) done(); else toast('복사가 안 돼. 길게 눌러서 직접 복사해줘', 'bad');
+        if (ok) done(); else toast('복사에 실패했습니다. 길게 눌러 직접 복사하십시오', 'bad');
       } catch (e) {
-        toast('복사가 안 돼. 길게 눌러서 직접 복사해줘', 'bad');
+        toast('복사에 실패했습니다. 길게 눌러 직접 복사하십시오', 'bad');
       }
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -330,7 +330,7 @@
 
   function copyBtn(getText, label) {
     return el('button', {
-      type: 'button', cls: 'btn sm', onclick: function () { copy(getText(), (label || '') + ' 복사했어'); }
+      type: 'button', cls: 'btn sm', onclick: function () { copy(getText(), (label || '') + ' 복사되었습니다'); }
     }, '복사');
   }
 
@@ -363,11 +363,11 @@
     var b = num(base);
     var suffix = (b !== null && v !== null && v > b) ? (v - b) : null;
     var msg = review
-      ? '같은 금액의 대기 주문이 겹쳐서 금액만으로는 구분이 안 돼. 관리자가 직접 확인할게 (최대 몇 시간). ' +
-        '입금하고 연락처로 알려주면 빨라.'
-      : '정확히 ' + won(v) + '을 보내줘' +
-        (suffix !== null ? ' · 뒷자리 ' + suffix + '원은 주문 확인용이야' : '') +
-        '. 금액이 다르면 자동 확인이 안 돼.';
+      ? '동일 금액의 대기 주문이 중복되어 금액만으로 식별이 불가합니다. 관리자가 직접 확인하며, 최대 수 시간이 소요됩니다. ' +
+        '입금 후 연락처로 통보하면 처리가 신속합니다.'
+      : '정확히 ' + won(v) + '을 입금하십시오' +
+        (suffix !== null ? ' · 뒷자리 ' + suffix + '원은 주문 확인용입니다' : '') +
+        '. 금액이 일치하지 않으면 자동 확인이 불가합니다.';
     return el('div', { cls: 'big hi' }, [
       el('div', { cls: 'k', text: '입금 금액' }),
       el('div', { cls: 'v xl mono', text: won(v) }),
@@ -378,7 +378,7 @@
       v === null ? null : el('div', { cls: 'btn-row' }, [
         el('button', {
           type: 'button', cls: 'btn sm',
-          onclick: function () { copy(digits(Math.round(v)), '금액 복사했어 (숫자만)'); }
+          onclick: function () { copy(digits(Math.round(v)), '금액이 복사되었습니다 (숫자만)'); }
         }, '금액 복사')
       ])
     ]);
@@ -402,7 +402,7 @@
     }
     o.cache = 'no-store';
     return fetch(path, o).catch(function () {
-      var e = new Error('서버에 연결 못 했어. 인터넷 확인하고 다시 해줘.');
+      var e = new Error('서버에 연결할 수 없습니다. 네트워크 상태를 확인한 후 다시 시도하십시오.');
       e.net = true;
       throw e;
     }).then(function (res) {
@@ -415,8 +415,8 @@
           var human = data ? str(pick(data, ['message', 'error'])) : '';
           if (human && /^[a-z0-9_.-]+$/i.test(human)) { if (!code) code = human; human = ''; }
           var msg = human || errKr(code) ||
-                    (res.status === 404 ? '찾을 수 없어' : '') ||
-                    ('요청이 실패했어 (HTTP ' + res.status + ')');
+                    (res.status === 404 ? '조회 결과가 없습니다' : '') ||
+                    ('요청이 실패했습니다 (HTTP ' + res.status + ')');
           var e2 = new Error(msg);
           e2.status = res.status;
           e2.code = code;
@@ -593,7 +593,7 @@
       planMount: opts.planMount,
       sumMount: opts.sumMount,
       onChange: opts.onChange || function () {},
-      cta: opts.cta || { text: '구매 신청하기', kind: 'link' },
+      cta: opts.cta || { text: '구매 신청', kind: 'link' },
       cards: {}, boxes: {}, amts: {}
     };
 
@@ -714,7 +714,7 @@
     }
 
     function goBuy() {
-      if (!self.ids.length) { toast('기능을 하나 이상 골라줘', 'bad'); return; }
+      if (!self.ids.length) { toast('기능을 1개 이상 선택하십시오', 'bad'); return; }
       location.href = buyUrl(self.ids, self.plan, '');
     }
 
@@ -744,7 +744,7 @@
 
       if (!self.ids.length) {
         self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { text: '고른 기능 없음' }),
+          el('span', { text: '선택된 기능 없음' }),
           el('span', { cls: 'v dim', text: '0원' })
         ]));
       } else if (!c.ok) {
@@ -778,14 +778,14 @@
       var need = c.min - self.ids.length;
       if (c.bundled) {
         self.sumSaved.hidden = false;
-        self.sumSaved.textContent = '✓ ' + FEATURES.length + '종 묶음 ' + Math.round(c.rate * 100) + '% 할인 적용됨 — ' + won(c.discount) + ' 아꼈어';
+        self.sumSaved.textContent = '✓ ' + FEATURES.length + '종 묶음 ' + Math.round(c.rate * 100) + '% 할인 적용 · ' + won(c.discount) + ' 할인';
         self.sumNudge.hidden = true;
       } else {
         self.sumSaved.hidden = true;
         if (self.ids.length > 0 && need > 0 && need <= FEATURES.length) {
           self.sumNudge.hidden = false;
-          self.sumNudge.textContent = need + '개만 더 고르면 ' + FEATURES.length + '종 묶음 ' +
-            Math.round(c.rate * 100) + '% 할인이 붙어';
+          self.sumNudge.textContent = need + '개 추가 선택 시 ' + FEATURES.length + '종 묶음 ' +
+            Math.round(c.rate * 100) + '% 할인 적용';
         } else self.sumNudge.hidden = true;
       }
 
@@ -810,7 +810,7 @@
 
   function pageHome() {
     var mount = $('#prods'), planMount = $('#planSeg'), sumMount = $('#sum');
-    var state = el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 불러오는 중…']);
+    var state = el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 조회 중…']);
     mount.appendChild(state);
 
     var q = qs();
@@ -819,7 +819,7 @@
       var pk = Picker({
         ids: qFeatures(q), plan: qPlan(q) || 'month',
         variant: 'cards', mount: mount, planMount: planMount, sumMount: sumMount,
-        cta: { text: '고른 기능으로 구매 신청', kind: 'link' }
+        cta: { text: '선택한 기능으로 구매 신청', kind: 'link' }
       });
       pk.build();
       var bank = $('#bankLine');
@@ -867,28 +867,28 @@
        페이지 새로고침(location.reload)은 사용자가 적어둔 입금자명·메모를 날려먹으니 쓰지 않는다. */
     function initPricing() {
       clear(mount);
-      mount.appendChild(el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 불러오는 중…']));
+      mount.appendChild(el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 조회 중…']));
       if (sumMount) sumMount.hidden = false;
       loadPrice().then(function () {
         clear(mount);
         pk = Picker({
           ids: pk ? pk.ids : qFeatures(q), plan: (pk && pk.plan) || qPlan(q) || 'month',
           variant: 'rows', mount: mount, planMount: planMount, sumMount: sumMount,
-          cta: { text: '주문 접수하기', kind: 'submit' }
+          cta: { text: '주문 접수', kind: 'submit' }
         });
         pk.build();
         var bank = $('#bankHint');
         if (bank) {
           bank.textContent = PRICE.bank
-            ? '입금 계좌 · ' + PRICE.bank + ' — 주문 접수하면 다시 보여줄게'
-            : '입금 계좌는 주문 접수 뒤에 안내할게';
+            ? '입금 계좌 · ' + PRICE.bank + ' · 주문 접수 후 재안내됩니다'
+            : '입금 계좌는 주문 접수 후 안내됩니다';
         }
       }).catch(function (e) {
         pk = null;
         clear(mount);
         mount.appendChild(el('p', { cls: 'err', text: (e && e.message) || MSG_PRICE_FAIL }));
         mount.appendChild(el('p', { cls: 'hint', style: 'margin:6px 0 10px',
-                                    text: '적어둔 내용은 그대로 남아있어. 아래 버튼만 눌러줘.' }));
+                                    text: '입력한 내용은 그대로 유지됩니다. 아래 버튼을 선택하십시오.' }));
         mount.appendChild(el('button', { type: 'button', cls: 'btn sm', onclick: initPricing }, '다시 시도'));
         if (sumMount) sumMount.hidden = true;
       });
@@ -914,13 +914,13 @@
       var key = normKey(keyIn.value);
       var bad = null;
 
-      if (!ids.length)  { setErr('feature', '기능을 하나 이상 골라줘'); bad = bad || mount; }
-      if (!dep)         { setErr('depositor', '입금자명을 적어줘'); bad = bad || depIn; }
-      if (!con)         { setErr('contact', '연락처(카톡ID 또는 전화번호)를 적어줘'); bad = bad || conIn; }
-      if (key && !KEY_RE.test(key)) { setErr('key', '키 형식이 KAKA-XXXX-XXXX-XXXX 가 아니야'); bad = bad || keyIn; }
+      if (!ids.length)  { setErr('feature', '기능을 1개 이상 선택하십시오'); bad = bad || mount; }
+      if (!dep)         { setErr('depositor', '입금자명을 입력하십시오'); bad = bad || depIn; }
+      if (!con)         { setErr('contact', '연락처(카톡ID 또는 전화번호)를 입력하십시오'); bad = bad || conIn; }
+      if (key && !KEY_RE.test(key)) { setErr('key', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력하십시오'); bad = bad || keyIn; }
       /* 아이폰 구매 → 환불 분쟁으로 이어진다. 확인 체크 없으면 접수 자체를 막는다 */
       if (androidIn && !androidIn.checked) {
-        setErr('android', '아이폰에서는 동작하지 않아. 안드로이드 기기인지 확인하고 체크해줘');
+        setErr('android', '아이폰에서는 동작하지 않습니다. 안드로이드 기기 사용 여부를 확인한 후 체크하십시오');
         bad = bad || androidIn;
       }
 
@@ -928,7 +928,7 @@
       if (ids.length && !c.ok) { setErr('feature', MSG_PRICE_FAIL); bad = bad || mount; }
 
       if (bad) {
-        toast('빠진 칸이 있어', 'bad');
+        toast('미입력 항목이 있습니다', 'bad');
         if (bad.focus) bad.focus();
         bad.scrollIntoView({ block: 'center' });
         return;
@@ -957,8 +957,8 @@
         showResult(res, ids, plan, key, c);
       }).catch(function (e) {
         btn.disabled = false;
-        btn.textContent = '주문 접수하기';
-        var msg = e.message || '주문 접수가 안 됐어';
+        btn.textContent = '주문 접수';
+        var msg = e.message || '주문 접수에 실패했습니다';
         toast(msg, 'bad');
         /* 어느 칸이 문제인지 서버 reason 으로 짚어준다 */
         if (e.code === 'invalid_key') { setErr('key', msg); keyIn.focus(); }
@@ -1000,8 +1000,8 @@
                    text: issueMsg(review) }),
         el('p', { cls: 'sub small', style: 'margin-bottom:16px',
                   text: review
-                    ? '아래 계좌로 금액을 그대로 보내줘. 이 주문은 금액만으로 구분이 안 돼서 관리자가 직접 확인해. 입금자명도 적어준 이름 그대로 해줘.'
-                    : '아래 계좌로 금액을 끝자리까지 그대로 보내줘. 금액으로 주문을 찾아서 자동으로 키를 발급해. 입금자명도 적어준 이름 그대로 해주면 확인이 더 확실해.' }),
+                    ? '아래 계좌로 표시된 금액을 정확히 입금하십시오. 이 주문은 금액만으로 식별이 불가하여 관리자가 직접 확인합니다. 입금자명도 입력한 이름과 동일하게 하십시오.'
+                    : '아래 계좌로 금액을 뒷자리까지 정확히 입금하십시오. 해당 금액으로 주문을 조회하여 키를 자동 발급합니다. 입금자명을 입력한 이름과 동일하게 하면 확인이 더 정확합니다.' }),
 
         /* 입금 금액 — 화면에서 가장 크게 (SPEC 12.1) */
         amountBlock(amt, base, review),
@@ -1018,7 +1018,7 @@
         /* 주문번호 */
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '주문번호' }),
-          el('div', { cls: 'v accent mono sm', text: id || '(응답에 주문번호가 없어)' }),
+          el('div', { cls: 'v accent mono sm', text: id || '(응답에 주문번호 없음)' }),
           el('div', { cls: 'btn-row' }, [
             id ? copyBtn(function () { return id; }, '주문번호') : null,
             link ? el('a', { cls: 'btn sm primary', href: link }, '주문 상태 보기 (자동 갱신)') : null
@@ -1035,7 +1035,7 @@
         review ? el('div', { style: 'height:12px' }) : null,
         review ? el('div', { cls: 'note warn' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
-          el('span', { text: '지금 대기 주문이 많아서 금액만으로는 구분이 안 돼. 관리자가 직접 확인할게 (최대 몇 시간) — 입금하고 연락처로 알려주면 빨라.' })
+          el('span', { text: '대기 주문이 다수여서 금액만으로 식별이 불가합니다. 관리자가 직접 확인하며 최대 수 시간이 소요됩니다. 입금 후 연락처로 통보하면 처리가 신속합니다.' })
         ]) : null,
 
         el('div', { style: 'height:16px' }),
@@ -1049,26 +1049,26 @@
       /* 토큰이 든 링크를 잃어버리면 발급된 키를 웹에서 못 본다 → 크게 안내 */
       if (link) {
         out.appendChild(el('div', { cls: 'card' }, [
-          el('p', { cls: 'eyebrow', style: 'margin-bottom:6px', text: '이 링크를 저장해둬' }),
+          el('p', { cls: 'eyebrow', style: 'margin-bottom:6px', text: '이 링크를 보관하십시오' }),
           el('p', { cls: 'sub small', style: 'margin-bottom:10px' }, [
             '발급된 키는 ', el('b', { text: '이 링크(주문번호 + 확인코드)' }),
-            '로 들어와야 보여. 카톡 나에게 보내기 같은 데 붙여놔줘.'
+            '로 접속해야 확인할 수 있습니다. 카카오톡 나에게 보내기 등에 보관하십시오.'
           ]),
           el('div', { cls: 'big' }, [
             el('div', { cls: 'k', text: '주문 상태 링크' }),
             el('div', { cls: 'v sm mono', style: 'font-size:13px;font-weight:600', text: full }),
             el('div', { cls: 'btn-row' }, [
               copyBtn(function () { return full; }, '링크'),
-              el('a', { cls: 'btn sm primary', href: link }, '열어보기' )
+              el('a', { cls: 'btn sm primary', href: link }, '열기' )
             ])
           ]),
           el('p', { cls: 'tiny dim', style: 'margin:10px 0 0',
-                    text: '이 브라우저에는 확인코드가 저장돼서, 같은 브라우저면 주문번호만으로도 다시 볼 수 있어.' })
+                    text: '확인코드가 이 브라우저에 저장되어, 동일 브라우저에서는 주문번호만으로 재조회가 가능합니다.' })
         ]));
       }
 
       window.scrollTo(0, 0);
-      toast('주문 접수됐어', 'ok');
+      toast('주문이 접수되었습니다', 'ok');
     }
   }
 
@@ -1107,15 +1107,15 @@
     if (resetBtn) resetBtn.addEventListener('click', function () {
       var k = normKey(keyIn.value);
       if (!KEY_RE.test(k)) {
-        toast('먼저 키를 입력해줘 — 문구에 키가 들어가야 처리돼', 'bad');
+        toast('키를 먼저 입력하십시오. 요청 문구에 키가 포함되어야 처리됩니다', 'bad');
         keyIn.focus();
         return;
       }
       copy('[기기 초기화 요청]\n키: ' + k +
-           '\n사유: (기기 교체 / 초기화 / 수리 중에 골라서 적어줘)' +
-           '\n연락처: (구매할 때 적은 연락처)' +
-           '\n새 기기에서 다시 활성화하려고 해. 초기화 부탁해.',
-           '요청 문구 복사했어');
+           '\n사유: (기기 교체 / 초기화 / 수리 중 선택하여 기재)' +
+           '\n연락처: (구매 시 기재한 연락처)' +
+           '\n새 기기에서 재활성화하기 위해 기기 초기화를 요청합니다.',
+           '요청 문구가 복사되었습니다');
     });
 
     form.addEventListener('submit', function (ev) {
@@ -1125,8 +1125,8 @@
       var errBox = $('#err-key');
       errBox.hidden = true;
 
-      if (!key) { errBox.textContent = '키를 입력해줘'; errBox.hidden = false; keyIn.focus(); return; }
-      if (!KEY_RE.test(key)) { errBox.textContent = '키 형식이 KAKA-XXXX-XXXX-XXXX 가 아니야'; errBox.hidden = false; keyIn.focus(); return; }
+      if (!key) { errBox.textContent = '키를 입력하십시오'; errBox.hidden = false; keyIn.focus(); return; }
+      if (!KEY_RE.test(key)) { errBox.textContent = '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력하십시오'; errBox.hidden = false; keyIn.focus(); return; }
 
       var btn = $('#lookupBtn');
       btn.disabled = true; btn.textContent = '조회 중…';
@@ -1138,11 +1138,11 @@
         .catch(function (e) {
           clear(out);
           out.appendChild(el('div', { cls: 'card' }, [
-            el('div', { cls: 'state bad', text: e.message || '조회가 안 됐어' }),
+            el('div', { cls: 'state bad', text: e.message || '조회에 실패했습니다' }),
             el('p', { cls: 'center tiny dim', style: 'margin:0',
-                      text: '키를 다시 확인해줘. 그래도 안 되면 관리자에게 문의해줘.' })
+                      text: '입력한 키를 확인하십시오. 동일한 오류가 반복되면 관리자에게 문의하십시오.' })
           ]));
-          toast(e.message || '조회가 안 됐어', 'bad');
+          toast(e.message || '조회에 실패했습니다', 'bad');
         })
         .then(function () { btn.disabled = false; btn.textContent = '조회'; });
     });
@@ -1232,7 +1232,7 @@
       (resets !== null && resets > 0) ? el('p', { cls: 'tiny dim', style: 'margin:4px 0 0', text: '기기 초기화 이력 ' + resets + '회' }) : null,
       blockedWhy ? el('p', { cls: 'err', style: 'margin:10px 0 0', text: '차단 사유 · ' + blockedWhy })
                  : (blockedOn ? el('p', { cls: 'err', style: 'margin:10px 0 0',
-                                          text: '관리자가 차단한 키야. 관리자에게 문의해줘.' }) : null)
+                                          text: '관리자가 차단한 키입니다. 관리자에게 문의하십시오.' }) : null)
     ]);
     out.appendChild(head);
 
@@ -1253,7 +1253,7 @@
 
       var notStarted = !on && !st.expiresAt && !!st.plan;   // 구매했지만 앱에서 아직 활성화 안 함
       var chip = on
-        ? el('span', { cls: 'chip ' + (left <= 7 ? 'warn' : 'ok'), text: (left <= 7 ? '만료 임박 · ' : '사용중 · ') + 'D-' + left })
+        ? el('span', { cls: 'chip ' + (left <= 7 ? 'warn' : 'ok'), text: (left <= 7 ? '만료 임박 · ' : '사용 중 · ') + 'D-' + left })
         : (notStarted ? el('span', { cls: 'chip info', text: '활성화 대기' })
                       : el('span', { cls: 'chip', text: st.expiresAt ? '만료됨' : '미구매' }));
 
@@ -1270,13 +1270,13 @@
         ]),
         bar,
         el('div', { cls: 'meta' }, [
-          el('span', { text: st.plan ? planName(st.plan) + ' 플랜' : (on ? '' : '아직 안 켜져 있어') }),
+          el('span', { text: st.plan ? planName(st.plan) + ' 플랜' : (on ? '' : '미활성') }),
           el('span', { cls: 'left', text: st.expiresAt ? '만료 ' + dateKr(st.expiresAt, true)
-                                                       : (notStarted ? '앱에 키 넣으면 기간 시작' : '') })
+                                                       : (notStarted ? '앱에 키 입력 시 기간 개시' : '') })
         ]),
         el('div', { cls: 'btn-row' }, [
           el('a', { cls: 'btn sm' + (on || notStarted ? '' : ' primary'), href: buyUrl([f.id], 'month', key) },
-             (on || notStarted) ? '연장하기' : '구매하기')
+             (on || notStarted) ? '연장' : '구매')
         ])
       ]);
       list.appendChild(row);
@@ -1287,7 +1287,7 @@
     out.appendChild(list);
 
     out.appendChild(el('p', { cls: 'tiny dim center', style: 'margin:14px 0 0',
-      text: '보안 때문에 기기 ID·세션 같은 민감한 값은 여기 안 보여줘.' }));
+      text: '보안상 기기 ID 및 세션 등 민감 정보는 표시되지 않습니다.' }));
   }
 
   /* ══════════════════ 8. 주문 상태 (/order/:id) ══════════════════ */
@@ -1340,7 +1340,7 @@
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var v = str(idIn.value).toUpperCase().replace(/[^A-Z0-9-]/g, '');
-      if (!v) { toast('주문번호를 적어줘', 'bad'); idIn.focus(); return; }
+      if (!v) { toast('주문번호를 입력하십시오', 'bad'); idIn.focus(); return; }
       var t = loadToken(v);
       location.href = '/order/' + encodeURIComponent(v) + (t ? '?t=' + encodeURIComponent(t) : '');
     });
@@ -1446,23 +1446,23 @@
       waitBox = null;
       out.hidden = false;
       out.appendChild(el('div', { cls: 'card' }, [
-        el('div', { cls: 'state bad', text: e.msg || '주문을 불러올 수 없어' }),
+        el('div', { cls: 'state bad', text: e.msg || '주문을 불러올 수 없습니다' }),
         el('div', { cls: 'center' }, [
           el('button', { type: 'button', cls: 'btn sm', onclick: function () { fetchOrder(true); } }, '다시 시도')
         ])
       ]));
       if (retrying) {
-        out.appendChild(makeWait('다시 연결을 시도하고 있어'));
+        out.appendChild(makeWait('재연결 시도 중'));
         out.appendChild(el('div', { cls: 'note', style: 'margin-top:10px' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
-          el('span', { text: '인터넷이 끊겼어도 이 탭을 열어두면 연결되는 대로 알아서 이어서 확인해. ' +
-                             '직접 새로고침 안 해도 돼.' })
+          el('span', { text: '네트워크가 끊긴 경우에도 이 탭을 열어 두면 연결 복구 시 자동으로 확인이 재개됩니다. ' +
+                             '수동 새로고침은 필요하지 않습니다.' })
         ]));
       } else if (!e.gone && timedOut) {
         out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:12px' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
-          el('span', { text: '30분 동안 연결이 안 돼서 자동 확인을 멈췄어. [다시 시도] 를 눌러줘. ' +
-                             '계속 안 되면 주문번호와 입금자명을 들고 관리자에게 문의해줘.' })
+          el('span', { text: '30분간 연결되지 않아 자동 확인을 중단했습니다. [다시 시도] 를 실행하십시오. ' +
+                             '동일 상태가 지속되면 주문번호와 입금자명을 첨부하여 관리자에게 문의하십시오.' })
         ]));
       }
       $('#findWrap').hidden = false;
@@ -1482,7 +1482,7 @@
         clear(out);
         waitBox = null;
         out.appendChild(el('div', { cls: 'card' }, [
-          el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '주문 불러오는 중…'])
+          el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '주문 조회 중…'])
         ]));
       }
 
@@ -1511,7 +1511,7 @@
         else if (!timedOut && !polling) polling = true;
 
         lastError = { msg: (e && e.status === 404) || (e && e.code === 'not_found')
-                        ? '그 주문번호를 못 찾았어' : ((e && e.message) || '주문을 불러올 수 없어'),
+                        ? '해당 주문번호를 찾을 수 없습니다' : ((e && e.message) || '주문을 불러올 수 없습니다'),
                       gone: !!gone };
 
         if (loud || gone || !everLoaded) {
@@ -1522,7 +1522,7 @@
         } else if (fails >= FAIL_WARN && !failToasted) {
           /* 폴링 실패로 토스트를 도배하지 않는다 — 연속 5회에 한 번만 */
           failToasted = true;
-          toast('상태 확인이 계속 안 되고 있어. 인터넷을 확인해줘 (되면 알아서 이어져)', 'bad');
+          toast('상태 확인이 반복 실패하고 있습니다. 네트워크 상태를 확인하십시오. 복구 시 자동으로 재개됩니다', 'bad');
         }
       }).then(function () {
         inFlight = false;
@@ -1588,7 +1588,7 @@
             copyBtn(function () { return o.issued; }, '키'),
             el('a', { cls: 'btn sm', href: '/my?key=' + encodeURIComponent(o.issued) }, '내 키 보기')
           ]),
-          el('div', { cls: 'tiny warnline', text: '앱을 열고 이 키를 입력해. 입력한 기기 1대에 고정돼.' })
+          el('div', { cls: 'tiny warnline', text: '앱에서 이 키를 입력하십시오. 입력한 기기 1대에 고정됩니다.' })
         ]) : null,
         o.issued ? el('div', { style: 'height:10px' }) : null,
 
@@ -1631,9 +1631,9 @@
 
       /* 살아있는 표시 — 폴링 중일 때만 */
       if (live && polling && !timedOut) {
-        out.appendChild(makeWait(paid ? '키 발급을 기다리고 있어'
-                                      : (o.needsReview ? '관리자 확인을 기다리고 있어'
-                                                       : '입금 확인을 기다리고 있어')));
+        out.appendChild(makeWait(paid ? '키 발급 대기 중'
+                                      : (o.needsReview ? '관리자 확인 대기 중'
+                                                       : '입금 확인 대기 중')));
       }
 
       /* 30분 초과 — 자동 확인을 멈췄다고 분명히 알린다 */
@@ -1641,35 +1641,35 @@
         out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:12px' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
           el('span', { text: paid
-            ? '30분 동안 키가 발급되지 않아서 자동 확인을 멈췄어. [상태 새로고침] 을 눌러 다시 확인해줘. ' +
-              '그대로면 주문번호를 들고 관리자에게 문의해줘.'
-            : '30분 동안 입금 확인이 안 돼서 자동 확인을 멈췄어. ' +
-              '[상태 새로고침] 을 눌러 다시 확인해줘. 금액을 정확히 보냈는데도 이러면 ' +
-              '주문번호와 입금자명을 들고 관리자에게 문의해줘.' })
+            ? '30분간 키가 발급되지 않아 자동 확인을 중단했습니다. [상태 새로고침] 으로 재확인하십시오. ' +
+              '동일 상태가 지속되면 주문번호를 첨부하여 관리자에게 문의하십시오.'
+            : '30분간 입금이 확인되지 않아 자동 확인을 중단했습니다. ' +
+              '[상태 새로고침] 으로 재확인하십시오. 금액을 정확히 입금했음에도 동일한 경우 ' +
+              '주문번호와 입금자명을 첨부하여 관리자에게 문의하십시오.' })
         ]));
       }
 
       var tip;
       if (pending) {
         tip = timedOut
-          ? '자동 확인은 멈췄어. [상태 새로고침] 을 누르면 다시 확인해.'
+          ? '자동 확인이 중단되었습니다. [상태 새로고침] 으로 재확인할 수 있습니다.'
           : (o.needsReview
-              ? '이 주문은 금액만으로 자동 구분이 안 돼서 관리자가 직접 확인할게 (최대 몇 시간). 이 화면은 계속 확인하고 있어.'
+              ? '이 주문은 금액만으로 자동 식별이 불가하여 관리자가 직접 확인합니다. 최대 수 시간이 소요되며, 이 화면은 상태를 계속 확인합니다.'
               : (AUTO_APPROVE
-                  ? '입금하면 보통 1~2분 안에 자동으로 키가 발급돼. 이 화면이 5초마다 알아서 확인하니까 그냥 열어두면 돼.'
-                  : '입금하면 관리자가 확인하고 키를 발급할게. 이 화면이 알아서 갱신되니까 그냥 열어두면 돼.'));
+                  ? '입금 후 통상 1~2분 내 키가 자동 발급됩니다. 이 화면이 5초 간격으로 상태를 확인하므로 열어 두십시오.'
+                  : '입금 후 관리자가 확인하여 키를 발급합니다. 이 화면은 자동 갱신되므로 열어 두십시오.'));
       } else if (paid) {
         tip = timedOut
-          ? '입금은 확인됐어. 자동 확인만 멈췄으니 [상태 새로고침] 을 눌러줘.'
-          : '입금 확인됐어. 키 발급만 기다리면 돼 — 이 화면이 알아서 갱신되니까 그냥 열어두면 돼.';
+          ? '입금이 확인되었습니다. 자동 확인이 중단된 상태이므로 [상태 새로고침] 을 실행하십시오.'
+          : '입금이 확인되었습니다. 키 발급을 대기하십시오. 이 화면은 자동 갱신되므로 열어 두십시오.';
       } else if (done) {
-        tip = '발급된 키를 앱에 입력하면 바로 쓸 수 있어. 키 1개는 기기 1대에만 등록돼.';
+        tip = '발급된 키를 앱에 입력하면 즉시 사용 가능합니다. 키 1개는 기기 1대에만 등록됩니다.';
       } else if (autoCanceled) {
         tip = TTL_CANCELED_MSG;
       } else if (canceled) {
-        tip = '취소된 주문이야. 다시 신청하려면 구매 페이지로 가줘.';
+        tip = '취소된 주문입니다. 재신청은 구매 페이지에서 진행하십시오.';
       } else {
-        tip = '상태를 계속 확인하고 있어. 오래 그대로면 관리자에게 문의해줘.';
+        tip = '상태를 계속 확인하고 있습니다. 장시간 변경이 없으면 관리자에게 문의하십시오.';
       }
       out.appendChild(el('div', { cls: 'note' + (pending || autoCanceled ? ' warn' : '') , style: 'margin-top:12px' }, [
         el('span', { cls: 'ic', 'aria-hidden': 'true', text: autoCanceled ? '!' : 'i' }),
@@ -1684,10 +1684,10 @@
         out.appendChild(el('div', { cls: 'card', style: 'margin-top:12px' }, [
           el('p', { cls: 'eyebrow', style: 'margin-bottom:6px', text: '다음 할 일' }),
           el('ol', { cls: 'steps' }, [
-            el('li', null, ['앱을 설치해 — APK 링크는 관리자가 안내해줘. ',
+            el('li', null, ['앱을 설치하십시오. APK 링크는 관리자가 안내합니다. ',
                             el('a', { href: '/#install' }, '설치 순서 보기')]),
-            el('li', null, ['앱을 열고 위 키를 그대로 입력해 (', el('b', { text: '안드로이드 전용' }), ').']),
-            el('li', { text: '알림 접근 권한을 켜면 발송이 시작돼. 이미지 발송은 접근성 권한도 필요해.' })
+            el('li', null, ['앱을 실행하여 위 키를 입력하십시오 (', el('b', { text: '안드로이드 전용' }), ').']),
+            el('li', { text: '알림 접근 권한을 허용하면 발송이 시작됩니다. 이미지 발송에는 접근성 권한이 추가로 필요합니다.' })
           ])
         ]));
       }
@@ -1695,7 +1695,7 @@
       if (o.needsReview && pending) {
         out.appendChild(el('div', { cls: 'note warn', style: 'margin-top:10px' }, [
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
-          el('span', { text: '입금하고 연락처로 알려주면 빨라. 금액은 알려준 그대로 보내줘.' })
+          el('span', { text: '입금 후 연락처로 통보하면 처리가 신속합니다. 금액은 안내된 그대로 입금하십시오.' })
         ]));
       }
 
@@ -1705,7 +1705,7 @@
           el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
           el('span', null, [
             '발급된 키와 입금자 정보는 ', el('b', { text: '구매 직후 받은 링크(주문번호 + 확인코드)' }),
-            '로 들어와야 보여. 링크를 잃어버렸으면 관리자에게 주문번호를 알려줘.'
+            '로 접속해야 확인할 수 있습니다. 링크를 분실한 경우 관리자에게 주문번호를 전달하십시오.'
           ])
         ]));
       }
@@ -1732,7 +1732,7 @@
     } catch (e) {
       /* 에러를 삼키지 않는다 — 사용자한테 보여준다 */
       console.error(e);
-      toast('화면을 그리다 문제가 났어: ' + (e && e.message ? e.message : e), 'bad');
+      toast('화면 렌더링 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e), 'bad');
     }
   }
 
@@ -1745,6 +1745,6 @@
   });
   window.addEventListener('unhandledrejection', function (ev) {
     var r = ev && ev.reason;
-    toast('오류: ' + ((r && r.message) || r || '알 수 없음'), 'bad');
+    toast('오류: ' + ((r && r.message) || r || '원인 미확인'), 'bad');
   });
 })();

@@ -120,7 +120,7 @@ public final class ScreenAudit implements MainActivity.Screen {
                 if (listBox == null) return;
                 listBox.removeAllViews();
                 if (!r.ok) {
-                    listBox.addView(Ui.emptyBox(a, "기록을 못 읽었어\n" + r.error));
+                    listBox.addView(Ui.emptyBox(a, "기록을 불러오지 못했습니다\n" + r.error));
                     a.fail("기록 조회", r);
                     return;
                 }
@@ -135,7 +135,7 @@ public final class ScreenAudit implements MainActivity.Screen {
                     countLabel.setText(t.toString());
                 }
                 if (arr.length() == 0) {
-                    listBox.addView(Ui.emptyBox(a, "해당 기록이 없어"));
+                    listBox.addView(Ui.emptyBox(a, "해당 조건의 기록이 없습니다"));
                     return;
                 }
                 for (int i = 0; i < arr.length(); i++) {

@@ -73,8 +73,8 @@ public final class WakeActivity extends Activity {
             // 켜진 화면이 공유창 뜨기 전에 다시 꺼지면 처음부터 헛수고다
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         } catch (Throwable t) {
-            Log.add(this, "화면을 깨우는 데 실패했어 — " + t.getClass().getSimpleName()
-                    + ". 개발자 옵션의 「충전 중 화면 켜짐 유지」 를 켜두면 이 단계가 필요 없어");
+            Log.add(this, "화면 절전 해제에 실패했습니다 (" + t.getClass().getSimpleName()
+                    + "). 개발자 옵션의 「충전 중 화면 켜짐 유지」 를 활성화하면 이 단계가 생략됩니다.");
         }
 
         final Intent run = readRun();
@@ -94,22 +94,22 @@ public final class WakeActivity extends Activity {
                         launch(run);
                     }
                     @Override public void onDismissError() {
-                        warnLock("잠금 해제 요청이 안 먹혔어");
+                        warnLock("잠금 해제 요청이 처리되지 않았습니다");
                         launch(run);          // 그래도 한 번 던져본다 — 될 기기도 있다
                     }
                     @Override public void onDismissCancelled() {
-                        warnLock("잠금 해제가 취소됐어");
+                        warnLock("잠금 해제가 취소되었습니다");
                         launch(run);
                     }
                 });
             } catch (Throwable t) {
-                warnLock("잠금 해제를 요청하다 실패했어 — " + t.getClass().getSimpleName());
+                warnLock("잠금 해제 요청에 실패했습니다 (" + t.getClass().getSimpleName() + ")");
                 launch(run);
             }
             // 콜백이 아예 안 오는 기기가 있다 → 한도 지나면 그냥 실행한다
             h.postDelayed(new Runnable() {
                 @Override public void run() {
-                    if (!launched) warnLock("잠금 해제 응답이 안 왔어");
+                    if (!launched) warnLock("잠금 해제 응답이 수신되지 않았습니다");
                     launch(run);
                 }
             }, DISMISS_WAIT_MS);
@@ -135,7 +135,7 @@ public final class WakeActivity extends Activity {
         String pkg = run.getPackage();
         if (pkg == null && run.getComponent() != null) pkg = run.getComponent().getPackageName();
         if (!"com.kakao.talk".equals(pkg)) {
-            Log.add(this, "화면 깨우기 실패 — 실행할 카톡 인텐트가 안 들어왔어");
+            Log.add(this, "화면 절전 해제 실패: 실행할 카카오톡 인텐트가 전달되지 않았습니다.");
             return null;
         }
         return run;
@@ -145,8 +145,8 @@ public final class WakeActivity extends Activity {
     private void warnLock(String why) {
         if (lockWarned) return;
         lockWarned = true;
-        Log.add(this, "잠금을 못 풀었어(" + why + ") — 설정 › 잠금화면 › 화면 잠금 방식을 "
-                + "「없음」 으로 바꿔줘. 전용 폰이면 그게 제일 확실해");
+        Log.add(this, "잠금을 해제하지 못했습니다 (" + why + "). 설정 › 잠금화면 › 화면 잠금 방식을 "
+                + "「없음」 으로 설정하십시오. 전용 기기인 경우 이 방식을 권장합니다.");
     }
 
     /** 담아온 인텐트를 딱 한 번 실행하고 끝낸다 */
@@ -163,8 +163,8 @@ public final class WakeActivity extends Activity {
             run.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(run);
         } catch (Throwable t) {
-            Log.add(this, "화면은 깨웠는데 카톡 공유창을 못 열었어 — "
-                    + t.getClass().getSimpleName() + " (카톡이 안 깔렸거나 버전이 너무 달라)");
+            Log.add(this, "화면 절전은 해제되었으나 카카오톡 공유창을 열지 못했습니다 ("
+                    + t.getClass().getSimpleName() + "). 카카오톡이 설치되지 않았거나 버전이 호환되지 않습니다.");
         }
         finish();
     }

@@ -49,7 +49,7 @@ public final class Trigger {
 
     /** 트리거 id → 마지막 발동 시각 */
     private static final ConcurrentHashMap<String, Long> CD = new ConcurrentHashMap<String, Long>();
-    /** 트리거 id → 이미 발동한 방 이름들 (oncePerRoom) */
+    /** 트리거 id → 이미 발동한 방 키들 (oncePerRoom. 값은 RoomRef.key()) */
     private static final ConcurrentHashMap<String, Set<String>> ONCE =
             new ConcurrentHashMap<String, Set<String>>();
 
@@ -102,20 +102,47 @@ public final class Trigger {
     /**
      * 알림 하나를 모든 활성 트리거에 물려본다. KakaoListener 의 BG 스레드에서 호출된다.
      *
-     * @param room   메시지가 올라온 방
+     * 내 메시지인지는 발신자와 내 카톡 프로필 이름을 비교해서 판단한다
+     * (리스너가 이미 알고 있으면 {@link #onMessage(Context, RoomRef, String, String, boolean, boolean)} 로 직접 넘겨라).
+     *
+     * @param room   메시지가 올라온 방 (계정 + 방 이름)
      * @param sender 발신자 (모르면 "")
      * @param text   본문
-     * @param fromMe 내가 보낸 메시지인가
+     * @param group  그룹방인가 (판정에는 안 쓰고 진입점 시그니처를 맞추기 위해 받는다)
      */
-    public static void onMessage(final Context c, String room, String sender, String text, boolean fromMe) {
-        if (c == null || text == null || text.length() == 0) return;
+    public static void onMessage(Context c, RoomRef room, String sender, String text, boolean group) {
+        boolean fromMe = false;
+        try {
+            String me = KakaoListener.selfName((room == null) ? null : room.acc);
+            if (sender != null && me != null && me.length() > 0 && sender.trim().equals(me)) fromMe = true;
+        } catch (Throwable t) {
+            fromMe = false;
+        }
+        onMessage(c, room, sender, text, group, fromMe);
+    }
+
+    /** 내 메시지 여부를 호출한 쪽이 알고 있을 때 쓰는 진입점 */
+    public static void onMessage(final Context c, final RoomRef room, String sender, String text,
+                                 boolean group, boolean fromMe) {
+        if (c == null || room == null || text == null || text.length() == 0) return;
         // 게이트는 여기서도 한 번 더 본다 (이 메서드가 공개 진입점이라서)
         if (!License.allowed(c, Features.MACRO)) return;
 
-        List<Settings.TriggerCfg> list = Settings.triggers(c);
+        Settings s;
+        try {
+            s = Settings.load(c);
+        } catch (Throwable t) {
+            return;
+        }
+        // 대상 계정이 아니면 아무것도 안 한다 (Settings.accounts 가 비어 있으면 모든 계정이 대상)
+        if (!s.accountOn(room.acc)) return;
+
+        List<Settings.TriggerCfg> list = s.triggers;
         if (list == null || list.isEmpty()) return;
 
-        final String r = (room == null) ? "" : room.trim();
+        final String roomKey = room.key();
+        final String roomName = room.name;
+        final String roomLabel = room.label(c);
         final String who = (sender == null) ? "" : sender.trim();
         final long now = System.currentTimeMillis();
 
@@ -126,53 +153,63 @@ public final class Trigger {
             Settings.TriggerCfg t = list.get(i);
             if (t == null || !t.enabled) continue;
             if (t.id == null || t.id.length() == 0) continue;
-            if (!t.coversRoom(r)) continue;
+            if (!t.coversRoom(room)) continue;
             if (fromMe && !t.fromMe) continue;
 
             // 정규식이 깨진 트리거는 건너뛰되 사용자에게 알린다
             if (Settings.MODE_REGEX.equals(t.mode) && compiled(t.pattern, t.ignoreCase) == null) {
                 warn(c, "regex:" + t.id,
-                        "메시지추적 「" + t.title() + "」 정규식이 잘못돼서 건너뛰었어 — 설정에서 고쳐줘");
+                        "메시지 추적 「" + t.title() + "」 정규식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
                 continue;
             }
 
             if (!matches(t, text)) continue;
 
-            // 방마다 한 번만
-            if (t.oncePerRoom && firedIn(t.id, r)) continue;
+            // 방마다 한 번만 (계정별로 따로 센다 — 키가 계정을 포함한다)
+            if (t.oncePerRoom && firedIn(t.id, roomKey)) continue;
 
             // 트리거별 쿨다운
             long cool = (t.cooldownMs < 0) ? 0L : t.cooldownMs;
             Long last = CD.get(t.id);
             if (last != null && now - last.longValue() < cool) continue;
 
-            // 보낼 곳 결정
+            // 보낼 곳 결정.
+            // target 에 방 이름만 적혀 있으면 감지된 방과 같은 계정으로 보낸다
+            // (계정 구분자가 들어있으면 그 계정을 그대로 쓴다).
             String tgt = (t.target == null) ? "" : t.target.trim();
-            final String dest = (tgt.length() > 0) ? tgt : r;
-            if (dest.length() == 0) {
+            final RoomRef dest;
+            if (tgt.length() == 0) {
+                dest = room;
+            } else if (tgt.indexOf('\u0001') >= 0) {
+                dest = RoomRef.parse(tgt);
+            } else {
+                dest = RoomRef.of(room.acc, tgt);
+            }
+            if (dest == null || !dest.valid()) {
                 warn(c, "dest:" + t.id,
-                        "메시지추적 「" + t.title() + "」 보낼 방을 못 정했어 (방 이름이 비어있음)");
+                        "메시지 추적 「" + t.title() + "」 대상 대화방이 지정되지 않아 건너뛰었습니다.");
                 continue;
             }
+            final String destLabel = dest.label(c);
             // 다른 방으로 보내는 트리거는 그 방 세션이 살아있어야 한다 (SPEC 8.4 C).
             // 쿨다운을 소모하지 않고 넘겨서, 그 방 알림이 오면 다음에 정상 발동하게 한다.
             if (tgt.length() > 0 && !KakaoListener.hasSession(dest)) {
-                warn(c, "sess:" + t.id + ":" + dest,
-                        "메시지추적 「" + t.title() + "」 대상 방 세션 없음 — 「" + dest
-                                + "」 카톡 알림이 와야 보낼 수 있어");
+                warn(c, "sess:" + t.id + ":" + dest.key(),
+                        "메시지 추적 「" + t.title() + "」 대상 대화방의 세션이 없습니다. 「" + destLabel
+                                + "」의 카카오톡 알림이 1회 수신되어야 발송이 가능합니다.");
                 continue;
             }
 
-            final String msg = t.render(r, who, text, now);
+            final String msg = t.render(roomName, who, text, now);
             if (msg == null || msg.trim().length() == 0) {
                 warn(c, "empty:" + t.id,
-                        "메시지추적 「" + t.title() + "」 보낼 메시지가 비어서 건너뛰었어");
+                        "메시지 추적 「" + t.title() + "」 발송할 메시지가 비어 있어 건너뛰었습니다.");
                 continue;
             }
 
             // 상태를 먼저 찍는다 — 지연 중에 같은 트리거가 또 걸리는 걸 막는다
             CD.put(t.id, Long.valueOf(now));
-            if (t.oncePerRoom) markFired(t.id, r);
+            if (t.oncePerRoom) markFired(t.id, roomKey);
             dirty = true;
 
             final long wait = delayOf(t.delayMs);
@@ -180,12 +217,15 @@ public final class Trigger {
             KakaoListener.post(new Runnable() {
                 @Override public void run() {
                     boolean ok = KakaoListener.sendTo(c, dest, msg);
-                    if (!ok) Log.add(c, "메시지추적 「" + name + "」 발송이 실패했어 (대상 방: " + dest + ")");
+                    if (!ok) {
+                        Log.add(c, "메시지 추적 「" + name + "」 발송에 실패했습니다. (대상 "
+                                + destLabel + ")");
+                    }
                 }
             }, wait);
 
-            Log.add(c, "메시지추적 「" + name + "」 감지 — 「" + r + "」 → 「" + dest + "」 "
-                    + (wait <= 0 ? "즉시" : (wait / 1000) + "초 뒤") + " 발송 예약");
+            Log.add(c, "메시지 추적 「" + name + "」 감지 · 「" + roomLabel + "」 → 「" + destLabel + "」 "
+                    + (wait <= 0 ? "즉시" : (wait / 1000) + "초 후") + " 발송 예약");
         }
 
         if (dirty) {
@@ -206,26 +246,27 @@ public final class Trigger {
 
     /** 문제가 없으면 null, 있으면 사용자에게 그대로 보여줄 한국어 설명. */
     public static String validate(Settings.TriggerCfg t) {
-        if (t == null) return "트리거가 비어있어";
-        if (t.pattern == null || t.pattern.trim().length() == 0) return "감지할 문자열을 입력해줘";
-        if (t.reply == null || t.reply.trim().length() == 0) return "보낼 메시지를 입력해줘";
-        if (!validMode(t.mode)) return "비교 방식이 잘못됐어 (포함·정확히·시작·정규식 중에 골라줘)";
+        if (t == null) return "규칙 내용이 비어 있습니다.";
+        if (t.pattern == null || t.pattern.trim().length() == 0) return "감지할 문자열을 입력하십시오.";
+        if (t.reply == null || t.reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
+        if (!validMode(t.mode)) return "비교 방식을 선택하십시오. (포함 · 정확히 · 시작 · 정규식)";
 
         if (Settings.MODE_REGEX.equals(t.mode)) {
             try {
                 Pattern.compile(t.pattern);
             } catch (Throwable e) {
                 String why = e.getMessage();
-                return "정규식이 잘못됐어" + ((why == null) ? "" : (" — " + why.replace('\n', ' ')));
+                return "정규식 형식이 올바르지 않습니다."
+                        + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
             }
             // 고쳐서 저장하는 경우가 많으니 "깨진 정규식" 표시를 풀어준다
             forget(t.pattern);
         }
 
-        if (t.delayMs < 0 || t.delayMs > MAX_DELAY_MS) return "지연은 0~60초 사이여야 해";
-        if (t.cooldownMs < 0) return "재발동 간격은 0 이상이어야 해";
-        if (t.rooms != null && t.rooms.size() > 50) return "방은 최대 50개까지 지정할 수 있어";
-        if (t.reply.length() > 2000) return "보낼 메시지가 너무 길어 (2000자 이하)";
+        if (t.delayMs < 0 || t.delayMs > MAX_DELAY_MS) return "지연 시간은 0~60초 범위로 입력하십시오.";
+        if (t.cooldownMs < 0) return "재발동 간격은 0 이상으로 입력하십시오.";
+        if (t.rooms != null && t.rooms.size() > 50) return "대화방은 최대 50개까지 지정됩니다.";
+        if (t.reply.length() > 2000) return "발송 메시지가 너무 깁니다. 2000자 이하로 입력하십시오.";
         return null;
     }
 
@@ -247,15 +288,38 @@ public final class Trigger {
         return (v == null) ? 0L : v.longValue();
     }
 
-    /** oncePerRoom 로 이미 발동한 방 목록 */
+    /** oncePerRoom 로 이미 발동한 방 목록 (표시용 이름. 계정이 여러 개면 계정 이름이 함께 붙는다) */
     public static List<String> firedRooms(Context c, String triggerId) {
         load(c);
         ArrayList<String> out = new ArrayList<String>();
         if (triggerId == null) return out;
         Set<String> set = ONCE.get(triggerId);
         if (set == null) return out;
-        synchronized (set) { out.addAll(set); }
+        ArrayList<String> keys = new ArrayList<String>();
+        synchronized (set) { keys.addAll(set); }
+        for (int i = 0; i < keys.size(); i++) {
+            String k = keys.get(i);
+            RoomRef r = RoomRef.parse(k);
+            out.add((r == null) ? k : r.label());
+        }
         Collections.sort(out);
+        return out;
+    }
+
+    /** oncePerRoom 로 이미 발동한 방 (RoomRef 목록) */
+    public static List<RoomRef> firedRoomRefs(Context c, String triggerId) {
+        load(c);
+        ArrayList<RoomRef> out = new ArrayList<RoomRef>();
+        if (triggerId == null) return out;
+        Set<String> set = ONCE.get(triggerId);
+        if (set == null) return out;
+        ArrayList<String> keys = new ArrayList<String>();
+        synchronized (set) { keys.addAll(set); }
+        Collections.sort(keys);
+        for (int i = 0; i < keys.size(); i++) {
+            RoomRef r = RoomRef.parse(keys.get(i));
+            if (r != null) out.add(r);
+        }
         return out;
     }
 
@@ -385,13 +449,16 @@ public final class Trigger {
                         HashSet<String> set = new HashSet<String>();
                         for (int i = 0; i < arr.length() && set.size() < MAX_ONCE_ROOMS; i++) {
                             String room = arr.optString(i, "");
-                            if (room.length() > 0) set.add(room);
+                            if (room.length() == 0) continue;
+                            // 옛 기록은 계정 구분자가 없는 방 이름이다 → 기본 계정 키로 올려준다
+                            RoomRef ref = RoomRef.parse(room);
+                            set.add((ref == null) ? room : ref.key());
                         }
                         if (!set.isEmpty()) ONCE.put(k, set);
                     }
                 }
             } catch (Throwable t) {
-                Log.add(c, "메시지추적 발동 기록이 깨져 있어서 초기화했어: " + t);
+                Log.add(c, "메시지 추적 발동 기록이 손상되어 초기화했습니다. (" + t + ")");
                 CD.clear();
                 ONCE.clear();
             }
@@ -427,7 +494,7 @@ public final class Trigger {
 
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
-            Log.add(c, "메시지추적 발동 기록을 저장하지 못했어: " + t);
+            Log.add(c, "메시지 추적 발동 기록을 저장하지 못했습니다. (" + t + ")");
         }
     }
 }

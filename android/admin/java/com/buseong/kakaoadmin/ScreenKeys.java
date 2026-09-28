@@ -145,7 +145,7 @@ public final class ScreenKeys implements MainActivity.Screen {
                 if (!r.ok) {
                     if (listBox != null) {
                         listBox.removeAllViews();
-                        listBox.addView(Ui.emptyBox(a, "목록을 못 읽었어\n" + r.error));
+                        listBox.addView(Ui.emptyBox(a, "목록을 불러오지 못했습니다\n" + r.error));
                     }
                     a.fail("키 목록", r);
                     return;
@@ -176,8 +176,8 @@ public final class ScreenKeys implements MainActivity.Screen {
 
         if (rows.isEmpty()) {
             listBox.addView(Ui.emptyBox(a, (term.length() > 0)
-                    ? "검색 결과가 없어"
-                    : "발급된 키가 없어\n위의 [새 키 발급] 을 눌러봐"));
+                    ? "검색 결과가 없습니다"
+                    : "발급된 키가 없습니다\n상단 [새 키 발급] 으로 키를 발급하십시오"));
             if (moreBtn != null) moreBtn.setVisibility(View.GONE);
             return;
         }
@@ -384,7 +384,7 @@ public final class ScreenKeys implements MainActivity.Screen {
                 rev.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         Ui.confirm(a, "기능 회수",
-                                Api.featLabel(id) + " 기능을 이 키에서 지울까?\n남은 기간도 같이 사라져. 되돌릴 수 없어.",
+                                Api.featLabel(id) + " 기능을 이 키에서 삭제합니다.\n남은 기간도 함께 소멸되며 되돌릴 수 없습니다.",
                                 "회수", true, new Runnable() {
                                     @Override public void run() {
                                         Api.revokeFeature(a, key, id, after("기능 회수", null));
@@ -469,8 +469,8 @@ public final class ScreenKeys implements MainActivity.Screen {
         reset.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.confirm(a, "기기 초기화",
-                        "이 키의 기기 고정을 풀까?\n다음 실행에서 새 기기에 다시 등록돼. 기간은 그대로 흘러가.\n"
-                                + "초기화 누적 " + lic.optInt("reset_count", 0) + "회 — 남용이면 차단을 고려해.",
+                        "이 키의 기기 고정을 해제합니다.\n다음 실행 시 새 기기에 재등록되며, 사용 기간은 계속 소진됩니다.\n"
+                                + "초기화 누적 " + lic.optInt("reset_count", 0) + "회. 반복 요청 시 차단을 검토하십시오.",
                         "초기화", true, new Runnable() {
                             @Override public void run() {
                                 Api.resetDevice(a, key, after("기기 초기화", dlg));
@@ -485,15 +485,15 @@ public final class ScreenKeys implements MainActivity.Screen {
         block.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (blocked.length() > 0) {
-                    Ui.confirm(a, "차단 해제", "이 키의 차단을 풀까?", "해제", false, new Runnable() {
+                    Ui.confirm(a, "차단 해제", "이 키의 차단을 해제합니다.", "해제", false, new Runnable() {
                         @Override public void run() { Api.block(a, key, null, after("차단 해제", dlg)); }
                     });
                 } else {
                     Ui.input(a, "차단 사유", "예: 키 공유 의심", null, false, new Ui.OnText() {
                         @Override public void text(final String s) {
-                            if (s == null || s.length() == 0) { Ui.toast(a, "사유를 적어줘"); return; }
+                            if (s == null || s.length() == 0) { Ui.toast(a, "차단 사유를 입력하십시오"); return; }
                             Ui.confirm(a, "키 차단",
-                                    "이 키를 차단할까?\n앱은 즉시 '차단된 키야' 로 막혀.\n사유: " + s,
+                                    "이 키를 차단합니다.\n대상 앱은 즉시 '차단된 라이선스 키입니다' 로 실행이 차단됩니다.\n사유: " + s,
                                     "차단", true, new Runnable() {
                                         @Override public void run() { Api.block(a, key, s, after("차단", dlg)); }
                                     });
@@ -509,12 +509,12 @@ public final class ScreenKeys implements MainActivity.Screen {
         rv.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (revoked) {
-                    Ui.confirm(a, "회수 복구", "이 키를 다시 쓸 수 있게 할까?", "복구", false, new Runnable() {
+                    Ui.confirm(a, "회수 복구", "이 키를 다시 사용 가능한 상태로 복구합니다.", "복구", false, new Runnable() {
                         @Override public void run() { Api.revoke(a, key, false, after("회수 복구", dlg)); }
                     });
                 } else {
                     Ui.confirm(a, "키 회수",
-                            "이 키를 사용 중지시킬까?\n앱은 '사용 중지된 키야' 로 막혀. 나중에 복구할 수 있어.",
+                            "이 키를 사용 중지합니다.\n대상 앱은 '사용이 중지된 라이선스 키입니다' 로 실행이 차단됩니다. 이후 복구가 가능합니다.",
                             "회수", true, new Runnable() {
                                 @Override public void run() { Api.revoke(a, key, true, after("키 회수", dlg)); }
                             });
@@ -528,7 +528,7 @@ public final class ScreenKeys implements MainActivity.Screen {
         del.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.confirm(a, "키 삭제",
-                        "이 키를 완전히 지울까?\n기능·기간·설정 백업까지 전부 사라지고 되돌릴 수 없어.\n\n" + key,
+                        "이 키를 영구 삭제합니다.\n기능·기간·설정 백업이 모두 삭제되며 되돌릴 수 없습니다.\n\n" + key,
                         "영구 삭제", true, new Runnable() {
                             @Override public void run() { Api.delete(a, key, after("키 삭제", dlg)); }
                         });
@@ -543,7 +543,7 @@ public final class ScreenKeys implements MainActivity.Screen {
 
     private void openGrant(final String key) {
         LinearLayout box = Ui.col(a);
-        box.addView(Ui.sub(a, "이미 가진 기능이면 남은 기간에 더해져. 없는 기능이면 새로 붙어."));
+        box.addView(Ui.sub(a, "보유 중인 기능은 남은 기간에 합산되고, 미보유 기능은 신규 추가됩니다."));
 
         final View[] checks = new View[Api.FEATURES.length];
         box.addView(Ui.dividerTight(a));
@@ -579,11 +579,11 @@ public final class ScreenKeys implements MainActivity.Screen {
         dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 List<String> picked = picked(checks);
-                if (picked.isEmpty()) { Ui.toast(a, "기능을 하나 이상 골라줘"); return; }
+                if (picked.isEmpty()) { Ui.toast(a, "기능을 1개 이상 선택하십시오"); return; }
                 String code = Api.PLAN_CODES[plan[0]];
                 int d = parseInt(days);
                 if ("custom".equals(code) && (d < 1 || d > 3650)) {
-                    Ui.toast(a, "일수를 1~3650 사이로 넣어줘"); return;
+                    Ui.toast(a, "일수를 1~3650 범위로 입력하십시오"); return;
                 }
                 Api.grant(a, key, picked, code, d, after("기능 추가/연장", dlg));
             }
@@ -643,15 +643,15 @@ public final class ScreenKeys implements MainActivity.Screen {
         dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 final List<String> picked = picked(checks);
-                if (picked.isEmpty()) { Ui.toast(a, "기능을 하나 이상 골라줘"); return; }
+                if (picked.isEmpty()) { Ui.toast(a, "기능을 1개 이상 선택하십시오"); return; }
                 String code = Api.PLAN_CODES[plan[0]];
                 int d = parseInt(days);
                 if ("custom".equals(code) && (d < 1 || d > 3650)) {
-                    Ui.toast(a, "일수를 1~3650 사이로 넣어줘"); return;
+                    Ui.toast(a, "일수를 1~3650 범위로 입력하십시오"); return;
                 }
                 int n = parseInt(count);
                 if (n <= 0) n = 1;
-                if (n > 100) { Ui.toast(a, "한 번에 100개까지만 발급할 수 있어"); return; }
+                if (n > 100) { Ui.toast(a, "1회 최대 100개까지 발급됩니다"); return; }
 
                 Api.create(a, picked, code, d, n,
                         text(note), text(owner), text(contact), new Api.Cb() {
@@ -682,9 +682,9 @@ public final class ScreenKeys implements MainActivity.Screen {
     private void showIssued(final List<String> keysOut) {
         LinearLayout box = Ui.col(a);
         if (keysOut.isEmpty()) {
-            box.addView(Ui.sub(a, "서버가 키를 안 돌려줬어. [키] 목록을 새로고침해서 확인해줘."));
+            box.addView(Ui.sub(a, "서버가 키를 반환하지 않았습니다. [키] 목록을 새로고침하여 확인하십시오."));
         } else {
-            box.addView(Ui.sub(a, keysOut.size() + "개 발급했어. 눌러서 하나씩 복사할 수 있어."));
+            box.addView(Ui.sub(a, keysOut.size() + "개 발급되었습니다. 항목을 누르면 개별 복사됩니다."));
             for (int i = 0; i < keysOut.size(); i++) {
                 final String k = keysOut.get(i);
                 LinearLayout row = Ui.row(a);

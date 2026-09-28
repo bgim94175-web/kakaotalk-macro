@@ -82,17 +82,17 @@ router.get('/api/price', wrap(async (req, res) => {
 router.post('/api/order', wrap(async (req, res) => {
   const b = req.body || {};
   const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, reason: 'bad_feature', error: '기능을 하나 이상 골라줘' });
+  if (!feats.length) return res.json({ ok: false, reason: 'bad_feature', error: '기능을 1개 이상 선택하십시오' });
 
   const plan = String(b.plan || '').trim();
   const q = pricing.quote(feats, plan);
   if (!q.ok) {
     return res.json({ ok: false, reason: q.reason,
-      error: q.reason === 'bad_plan' ? '플랜을 골라줘 (1개월/3개월/1년)' : '기능을 하나 이상 골라줘' });
+      error: q.reason === 'bad_plan' ? '결제 기간을 선택하십시오 (1개월/3개월/1년)' : '기능을 1개 이상 선택하십시오' });
   }
 
   const depositor = cut(b.depositor, 60);
-  if (!depositor) return res.json({ ok: false, reason: 'no_depositor', error: '입금자명을 적어줘' });
+  if (!depositor) return res.json({ ok: false, reason: 'no_depositor', error: '입금자명을 입력하십시오' });
 
   // 아이폰 확인 체크박스 — 값이 false 라도 주문을 거부하지 않는다.
   // 웹 UI 가 이미 막고 있고, 서버가 막으면 나중에 다른 경로(앱 딥링크·관리자 대행)로
@@ -103,7 +103,7 @@ router.post('/api/order', wrap(async (req, res) => {
   let targetKey = null;
   if (targetKeyRaw) {
     const lic = await db.one('SELECT key FROM licenses WHERE key=$1', [targetKeyRaw]);
-    if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '연장할 키를 못 찾았어. 키를 다시 확인해줘' });
+    if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '연장 대상 키를 찾을 수 없습니다. 키를 확인하십시오' });
     targetKey = targetKeyRaw;
   }
 
@@ -160,9 +160,9 @@ router.post('/api/order', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get('/api/order/:id', wrap(async (req, res) => {
   const id = keys.normOrderId(req.params.id);
-  if (!id) return res.json({ ok: false, reason: 'bad_request', error: '주문번호가 잘못됐어' });
+  if (!id) return res.json({ ok: false, reason: 'bad_request', error: '주문번호 형식이 올바르지 않습니다' });
   const row = await db.one('SELECT * FROM orders WHERE id=$1', [id]);
-  if (!row) return res.json({ ok: false, reason: 'not_found', error: '없는 주문이야' });
+  if (!row) return res.json({ ok: false, reason: 'not_found', error: '존재하지 않는 주문입니다' });
 
   const o = db.shapeOrder(row);
   const authed = tsEqual(req.query.t, row.token || '');
@@ -201,12 +201,12 @@ router.get('/api/order/:id', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.post('/api/lookup', wrap(async (req, res) => {
   const key = keys.normKey((req.body || {}).key);
-  if (!key) return res.json({ ok: false, reason: 'bad_request', error: '키를 입력해줘' });
+  if (!key) return res.json({ ok: false, reason: 'bad_request', error: '키를 입력하십시오' });
 
   const lic = await db.one(
     'SELECT key, plan, revoked, blocked_reason, device_id, activated_at, reset_count FROM licenses WHERE key=$1',
     [key]);
-  if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '없는 키야. 다시 확인해줘' });
+  if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '등록되지 않은 키입니다. 키를 확인하십시오' });
 
   const now = Date.now();
   const ents = await db.entitlements(key);
@@ -286,7 +286,7 @@ router.post('/api/deposit-hook',
   wrap(async (req, res) => {
     const want = String(process.env.DEPOSIT_TOKEN || '').trim();
     if (!want) {
-      return res.status(503).json({ ok: false, error: 'DEPOSIT_TOKEN 미설정 — 입금 웹훅이 꺼져 있어' });
+      return res.status(503).json({ ok: false, error: 'DEPOSIT_TOKEN 미설정 상태입니다. 입금 웹훅이 비활성 상태입니다' });
     }
     const given = req.header('x-deposit-token') || (req.query ? req.query.t : '') || '';
     if (!tsEqual(given, want)) {
@@ -308,7 +308,7 @@ router.post('/api/deposit-hook',
     text = String(text === null || text === undefined ? '' : text).trim();
     if (!source) source = String((req.query && req.query.source) || 'unknown');
     source = String(source).slice(0, 40);
-    if (!text) return res.json({ ok: true, status: 'ignored', why: '본문이 비었어' });
+    if (!text) return res.json({ ok: true, status: 'ignored', why: '본문 없음' });
     if (text.length > 4000) text = text.slice(0, 4000);
 
     const at = (atRaw > 1000000000000 && atRaw < 4000000000000) ? atRaw : Date.now();
@@ -378,7 +378,7 @@ router.post('/api/deposit-hook',
       console.error('[deposit] 자동 승인 실패 order=' + matched.id + ' → ' + (e && e.stack ? e.stack : e));
       await setStatus('ambiguous', usedAmount, matched.id);
       return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
-                        order: matched.id, why: '자동 승인 중 오류 — 관리자 확인 필요' });
+                        order: matched.id, why: '자동 승인 중 오류 발생. 관리자 확인 필요' });
     }
     if (approved.error) {
       console.error('[deposit] 자동 승인 거절 order=' + matched.id + ' → ' + approved.error);

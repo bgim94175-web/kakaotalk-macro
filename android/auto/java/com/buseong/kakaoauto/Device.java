@@ -59,7 +59,7 @@ public final class Device {
             if (id == null || id.length() == 0) {
                 id = "fb" + Crypto.randomHex(15);
                 Prefs.putStr(c, K_FALLBACK_ID, id);
-                Log.add(c, "기기 ID를 못 읽어서 임시 ID를 만들었어 — 기기를 초기화하면 재등록이 필요해");
+                Log.add(c, "기기 ID를 읽지 못해 임시 ID를 생성했습니다. 기기를 초기화하면 재등록이 필요합니다.");
             }
         }
         idCache = id;
