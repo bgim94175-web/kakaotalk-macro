@@ -172,22 +172,24 @@ public final class MacroDetail {
                 final int fc = Theme.F_MACRO;
 
                 LinearLayout hero = Ui.hero(a, fc, Icon.CLOCK, "SCHEDULE", "발송 쿨타임",
-                        "방마다 쿨타임을 지정할 수 있습니다. 지정하지 않은 방은 기본 간격을 사용합니다.");
+                        "기본 간격은 하나의 값입니다. 랜덤 쿨타임을 더할 수 있고, 보낼 방마다 따로 지정할 수 있습니다.");
                 hero.addView(Ui.heroRule(a, fc));
                 LinearLayout stats = Ui.row(a);
                 stats.setPadding(0, Theme.dp(a, 10), 0, 0);
-                stats.addView(Ui.stat(a, "기본 간격",
-                        s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분", Theme.TEXT));
-                stats.addView(Ui.stat(a, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT));
+                stats.addView(Ui.stat(a, "기본 간격", s.macro.baseText(), Theme.TEXT));
+                stats.addView(Ui.stat(a, "랜덤 쿨타임", s.macro.randomText(), Theme.TEXT));
                 hero.addView(stats);
                 col.addView(hero);
 
                 col.addView(Ui.sectionHeader(a, null, "기본"));
                 LinearLayout g = Ui.group(a);
-                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "기본 간격",
-                        s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분", Theme.TEXT,
+                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "기본 간격", s.macro.baseText(), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { editInterval(a, s); }
+                        }));
+                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "랜덤 쿨타임", s.macro.randomText(), Theme.TEXT,
+                        new Runnable() {
+                            @Override public void run() { editRandom(a, s); }
                         }));
                 g.addView(Ui.navRow(a, Icon.BUBBLE, fc, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT,
                         new Runnable() {
@@ -198,7 +200,7 @@ public final class MacroDetail {
                 col.addView(Ui.sectionHeader(a, null, "방별 쿨타임"));
                 final java.util.List<RoomRef> rooms = s.macro.roomRefs();
                 if (rooms.isEmpty()) {
-                    col.addView(Nav.note(a, "방을 먼저 선택하십시오. 선택한 방마다 쿨타임을 따로 지정할 수 있습니다.",
+                    col.addView(Nav.note(a, "보낼 방을 먼저 선택하십시오. 선택한 방마다 쿨타임을 따로 지정할 수 있습니다.",
                             Theme.ACCENT2, null, null));
                 } else {
                     LinearLayout rg = Ui.group(a);
@@ -214,26 +216,34 @@ public final class MacroDetail {
 
                 col.addView(Nav.note(a, "최소 신규 메시지는 마지막 발송 이후 상대 메시지가 지정 수량 이상 누적된"
                         + " 방에만 발송하는 조건입니다. 0은 항상 발송입니다. 방별 쿨타임을 0분으로 저장하면"
-                        + " 기본 간격을 사용합니다.", Theme.ACCENT2, null, null));
+                        + " 기본 간격과 랜덤 쿨타임을 사용합니다.", Theme.ACCENT2, null, null));
             }
         });
     }
 
     private static void editInterval(final MainActivity a, final Settings s) {
-        final Nav.NumField lo = new Nav.NumField("최소 간격 (분)", "20", 1, 1440, s.macro.intervalMinMin);
-        final Nav.NumField hi = new Nav.NumField("최대 간격 (분)", "40", 1, 1440, s.macro.intervalMaxMin);
-        Nav.editNums(a, "기본 간격", "방별 쿨타임이 없는 방은 두 값 사이의 임의 시각에 발송됩니다.",
-                new Nav.NumField[] { lo, hi }, new Nav.OnNums() {
+        final Nav.NumField n = new Nav.NumField("기본 간격 (분)", "1", 1, 1440, s.macro.baseMin);
+        Nav.editNums(a, "기본 간격", "방별 쿨타임이 없는 보낼 방은 이 간격으로 발송됩니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
-                        if (lo.value > hi.value) {
-                            Nav.errText(hi.err, "최대 간격은 최소 간격 이상으로 입력하십시오");
-                            return "";
-                        }
-                        s.macro.intervalMinMin = lo.value;
-                        s.macro.intervalMaxMin = hi.value;
+                        s.macro.baseMin = n.value;
                         save(a, s);
                         Scheduler.ensureScheduled(a);
-                        Log.add(a, "기본 간격을 " + lo.value + "~" + hi.value + "분으로 변경했습니다.");
+                        Log.add(a, "기본 간격을 ~" + n.value + "분으로 변경했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void editRandom(final MainActivity a, final Settings s) {
+        final Nav.NumField n = new Nav.NumField("랜덤 쿨타임 (분)", "0", 0, 1440, s.macro.randomMin);
+        Nav.editNums(a, "랜덤 쿨타임", "0분이면 기본 간격만 사용합니다. 1분 이상이면 기본 간격에 0분부터 이 값까지를 더합니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        s.macro.randomMin = n.value;
+                        save(a, s);
+                        Scheduler.ensureScheduled(a);
+                        Log.add(a, "랜덤 쿨타임을 " + n.value + "분으로 변경했습니다.");
                         return null;
                     }
                 });

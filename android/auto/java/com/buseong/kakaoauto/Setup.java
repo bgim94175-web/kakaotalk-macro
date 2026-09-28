@@ -98,17 +98,17 @@ public final class Setup {
                     @Override public void run() { openKakao(a); }
                 }));
 
-        if (License.allowed(c, Features.MACRO)) {
+        if (License.allowed(c, Features.MACRO) && KakaoAccount.ready(c)) {
             Settings s = Settings.load(c);
             boolean msgOk = s.macro.message != null && s.macro.message.trim().length() > 0;
             boolean roomOk = !s.macro.roomRefs().isEmpty();
-            out.add(new Step("발송 메시지 작성", "자동발송 매크로가 방에 발송할 본문입니다.",
+            out.add(new Step("발송 메시지 작성", "자동발송 매크로가 보낼 방에 발송할 본문입니다.",
                     "작성", msgOk, false, (a == null) ? null : new Runnable() {
                         @Override public void run() { Nav.push(a, "메시지", MacroDetail.message(a)); }
                     }));
-            out.add(new Step("방 선택", "자동발송 매크로가 발송할 대화방을 선택합니다.",
+            out.add(new Step("보낼 방", "자동발송 매크로가 발송할 대화방을 선택합니다.",
                     "선택", roomOk, false, (a == null) ? null : new Runnable() {
-                        @Override public void run() { Nav.push(a, "방", ScreenRooms.build(a)); }
+                        @Override public void run() { Nav.push(a, "보낼 방", ScreenRooms.build(a)); }
                     }));
         }
         return out;
@@ -144,6 +144,7 @@ public final class Setup {
     /** 인증 직후 한 번만 자동으로 연다 (필수 단계가 남아 있을 때) */
     public static void maybeFirstRun(MainActivity a) {
         if (a == null) return;
+        if (!KakaoAccount.ready(a)) return;
         if (Prefs.getBool(a, K_SHOWN, false)) return;
         Prefs.putBool(a, K_SHOWN, true);
         if (missingRequired(a) > 0) open(a);

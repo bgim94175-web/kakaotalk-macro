@@ -174,6 +174,11 @@ public final class ScreenAccount {
         // ── 카카오톡 ──
         col.addView(Ui.sectionHeader(a, null, "카카오톡"));
         LinearLayout kakao = Ui.group(a);
+        final boolean reg = KakaoAccount.ready(a);
+        kakao.addView(Ui.navRow(a, Icon.KEY, fc, "카카오 계정 등록",
+                reg ? "등록됨" : "등록 필요", reg ? Theme.OK : Theme.AMBER, new Runnable() {
+                    @Override public void run() { ScreenKakaoRegister.open(a); }
+                }));
         int accN = Accounts.count(a);
         kakao.addView(Ui.navRow(a, Icon.USERS, fc, "카카오톡 계정", accValue(a, accN),
                 (accN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {

@@ -122,7 +122,7 @@ public final class ScreenRooms {
             if (rows.get(i).selected) selected++;
         }
 
-        LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "방",
+        LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "보낼 방",
                 "선택한 대화방에 발송합니다. 대화방은 카카오톡 알림을 1회 수신하면 자동으로 감지됩니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ROOMS));
         LinearLayout stats = Ui.row(a);

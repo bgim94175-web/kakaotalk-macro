@@ -440,6 +440,11 @@ public final class License {
             android.util.Log.w("KakaoAuto", "설정키 삭제 실패", t);
         }
         for (int i = 0; i < OWN_KEYS.length; i++) Prefs.remove(app, OWN_KEYS[i]);
+        try {
+            KakaoAccount.clear(app);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "카카오 계정 등록 해제 실패", t);
+        }
         Prefs.clearCache();
         invalidate();
         try {

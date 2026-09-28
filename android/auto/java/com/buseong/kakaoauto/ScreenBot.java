@@ -61,6 +61,11 @@ public final class ScreenBot {
     private static void fill(final MainActivity a, LinearLayout col) {
         col.addView(Ui.pageHead(a, "BOTS", "봇", "방에서 알림을 받아 자동으로 응답합니다.", Theme.F_ROOMBOT));
 
+        if (!KakaoAccount.ready(a)) {
+            col.addView(ScreenKakaoRegister.prompt(a));
+            return;
+        }
+
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
                     + " 내정보 탭에서 라이선스를 다시 인증하십시오.", Theme.RED, "내정보 열기",

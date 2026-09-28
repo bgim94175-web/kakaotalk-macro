@@ -149,12 +149,13 @@ public final class Settings {
          * 구분자 없는 옛 값(방 이름만)은 기본 계정("0")으로 읽힌다.
          */
         public List<String> rooms = new ArrayList<String>();
-        /** 기본 쿨타임 최소/최대 (분). 방별 값이 없을 때 이 사이에서 임의로 잡는다. */
-        public int intervalMinMin = 20;
-        public int intervalMaxMin = 40;
+        /** 기본 발송 간격(분). 방별 값이 없을 때 이 값을 쓴다. 화면에는 ~N분 으로 표시한다. */
+        public int baseMin = 1;
+        /** 기본 간격에 더하는 랜덤 쿨타임(분). 0 이면 더하지 않는다. 실제 대기는 0분부터 이 값까지. */
+        public int randomMin = 0;
         /**
          * 방별 쿨타임(분). 키는 {@link RoomRef#key()}.
-         * 없거나 0 이면 {@link #intervalMinMin}~{@link #intervalMaxMin} 을 쓴다.
+         * 없거나 0 이면 {@link #baseMin} 에 {@link #randomMin} 을 더한 간격을 쓴다.
          */
         public Map<String, Integer> roomCooldownMin = new HashMap<String, Integer>();
         /**
@@ -241,24 +242,31 @@ public final class Settings {
         public String cooldownLabel(RoomRef room) {
             int own = cooldownMin(room);
             if (own > 0) return own + "분";
-            int lo = Math.max(1, Math.min(intervalMinMin, intervalMaxMin));
-            int hi = Math.max(lo, Math.max(intervalMinMin, intervalMaxMin));
-            if (lo == hi) return "기본 " + lo + "분";
-            return "기본 " + lo + "~" + hi + "분";
+            return baseText();
+        }
+
+        /** 기본 간격 표시. 예: ~1분 */
+        public String baseText() {
+            return "~" + Math.max(1, baseMin) + "분";
+        }
+
+        /** 랜덤 쿨타임 표시. 0분이면 더하지 않는다. */
+        public String randomText() {
+            return Math.max(0, randomMin) + "분";
         }
 
         /**
          * 이 발송 뒤에 적용할 쿨타임.
-         * 방에 값이 있으면 그 분 수, 없으면 기본 최소~최대 사이의 임의 간격.
+         * 방에 값이 있으면 그 분 수. 없으면 기본 간격에 0분부터 랜덤 쿨타임까지를 더한다.
          */
         public long cooldownMs(RoomRef room) {
             int own = cooldownMin(room);
             if (own > 0) return (long) own * 60000L;
-            int lo = Math.max(1, Math.min(intervalMinMin, intervalMaxMin));
-            int hi = Math.max(lo, Math.max(intervalMinMin, intervalMaxMin));
-            int span = hi - lo + 1;
-            int mins = lo + (int) Math.floor(Math.random() * span);
-            return (long) mins * 60000L;
+            int base = Math.max(1, baseMin);
+            int extra = 0;
+            int span = Math.max(0, randomMin);
+            if (span > 0) extra = (int) Math.floor(Math.random() * (span + 1));
+            return (long) (base + extra) * 60000L;
         }
 
         /** 목록에 없는 방의 저장값을 지운다. */
@@ -815,8 +823,8 @@ public final class Settings {
             m.put("enabled", macro.enabled);
             m.put("message", macro.message);
             m.put("rooms", arr(macro.rooms));
-            m.put("intervalMinMin", macro.intervalMinMin);
-            m.put("intervalMaxMin", macro.intervalMaxMin);
+            m.put("baseMin", macro.baseMin);
+            m.put("randomMin", macro.randomMin);
             m.put("minMessages", macro.minMessages);
             m.put("nextAt", macro.nextAt);
             m.put("sendImages", macro.sendImages);
@@ -924,9 +932,16 @@ public final class Settings {
             s.macro.enabled = m.optBoolean("enabled", s.macro.enabled);
             s.macro.message = str(m, "message", s.macro.message);
             s.macro.rooms = list(m, "rooms");
-            s.macro.intervalMinMin = clamp(m.optInt("intervalMinMin", s.macro.intervalMinMin), 1, 1440);
-            s.macro.intervalMaxMin = clamp(m.optInt("intervalMaxMin", s.macro.intervalMaxMin), 1, 1440);
-            if (s.macro.intervalMaxMin < s.macro.intervalMinMin) s.macro.intervalMaxMin = s.macro.intervalMinMin;
+            if (m.has("baseMin") || m.has("randomMin")) {
+                s.macro.baseMin = clamp(m.optInt("baseMin", s.macro.baseMin), 1, 1440);
+                s.macro.randomMin = clamp(m.optInt("randomMin", s.macro.randomMin), 0, 1440);
+            } else if (m.has("intervalMinMin") || m.has("intervalMaxMin")) {
+                int lo = clamp(m.optInt("intervalMinMin", 1), 1, 1440);
+                int hi = clamp(m.optInt("intervalMaxMin", lo), 1, 1440);
+                if (hi < lo) hi = lo;
+                s.macro.baseMin = lo;
+                s.macro.randomMin = hi - lo;
+            }
             s.macro.minMessages = clamp(m.optInt("minMessages", s.macro.minMessages), 0, 999);
             s.macro.nextAt = m.optLong("nextAt", s.macro.nextAt);
             s.macro.sendImages = oneOf(str(m, "sendImages", s.macro.sendImages), IMG_MODES, IMG_NEVER);
@@ -1031,9 +1046,11 @@ public final class Settings {
 
         s.macro.message = nz(legacyStr(c, L_MSG, ""));
         s.macro.rooms = splitLines(legacyStr(c, L_ROOMS, ""));
-        s.macro.intervalMinMin = clamp(legacyInt(c, L_INTERVAL, s.macro.intervalMinMin), 1, 1440);
-        s.macro.intervalMaxMin = clamp(legacyInt(c, L_INTERVAL_MAX, s.macro.intervalMinMin), 1, 1440);
-        if (s.macro.intervalMaxMin < s.macro.intervalMinMin) s.macro.intervalMaxMin = s.macro.intervalMinMin;
+        int lo = clamp(legacyInt(c, L_INTERVAL, s.macro.baseMin), 1, 1440);
+        int hi = clamp(legacyInt(c, L_INTERVAL_MAX, lo), 1, 1440);
+        if (hi < lo) hi = lo;
+        s.macro.baseMin = lo;
+        s.macro.randomMin = hi - lo;
         s.macro.minMessages = clamp(legacyInt(c, L_MINMSG, s.macro.minMessages), 0, 999);
         s.macro.enabled = legacyBool(c, L_ENABLED, false);
         s.macro.nextAt = legacyLong(c, L_NEXT, 0L);

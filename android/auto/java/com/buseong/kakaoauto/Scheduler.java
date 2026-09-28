@@ -563,7 +563,7 @@ public final class Scheduler {
             }
             if (others < minNeed) {
                 waiting++;
-                long retry = now + (long) Math.max(1, m.intervalMinMin) * 60000L;
+                long retry = now + (long) Math.max(1, m.baseMin) * 60000L;
                 m.setDueAt(room, retry);
                 continue;
             }

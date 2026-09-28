@@ -74,10 +74,14 @@ public final class ScreenMacro {
     private static void fill(final MainActivity a, LinearLayout col) {
         final int fc = Theme.F_MACRO;
         col.addView(Ui.pageHead(a, "AUTO SEND", "매크로",
-                "방별 쿨타임 발송 · 경쟁사 저격 · 갠톡 자동응답", fc));
+                "보낼 방별 쿨타임 발송 · 경쟁사 저격 · 갠톡 자동응답", fc));
 
         if (!License.allowed(a, Features.MACRO)) {
             fillLocked(a, col);
+            return;
+        }
+        if (!KakaoAccount.ready(a)) {
+            col.addView(ScreenKakaoRegister.prompt(a));
             return;
         }
         if (!Settings.canSave(a)) {
@@ -105,9 +109,9 @@ public final class ScreenMacro {
                 }));
 
         String rooms = roomSummary(a, s);
-        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "방", (rooms == null) ? "설정 필요" : rooms,
+        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "보낼 방", (rooms == null) ? "설정 필요" : rooms,
                 (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
-                    @Override public void run() { Nav.push(a, "방", ScreenRooms.build(a)); }
+                    @Override public void run() { Nav.push(a, "보낼 방", ScreenRooms.build(a)); }
                 }));
 
         content.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 쿨타임", cycleSummary(s), Theme.TEXT, new Runnable() {
@@ -212,7 +216,7 @@ public final class ScreenMacro {
             stats.addView(Ui.stat(a, "다음 발송", live ? hm(at) : "—", live ? fc : Theme.DIM));
             stats.addView(Ui.stat(a, "금일 발송", MainActivity.sentToday(a) + "회", Theme.TEXT));
             int rn = s.macro.roomRefs().size();
-            stats.addView(Ui.stat(a, "방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
+            stats.addView(Ui.stat(a, "보낼 방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
             hero.addView(stats);
 
             LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -236,7 +240,7 @@ public final class ScreenMacro {
     /** 머리 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
     private static String statusText(MainActivity a, Settings s) {
         if (!s.macro.enabled) return "자동발송이 꺼져 있습니다.";
-        if (s.macro.roomRefs().isEmpty()) return "방 미설정 · 발송 보류";
+        if (s.macro.roomRefs().isEmpty()) return "보낼 방 미설정 · 발송 보류";
         if (s.macro.message == null || s.macro.message.trim().length() == 0) {
             return "메시지 미설정 · 발송 보류";
         }
@@ -279,14 +283,15 @@ public final class ScreenMacro {
     }
 
     static String cycleSummary(Settings s) {
-        String base = s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분";
+        String base = s.macro.baseText();
+        if (s.macro.randomMin > 0) base = base + " · 랜덤 " + s.macro.randomMin + "분";
         int custom = 0;
         java.util.List<RoomRef> rooms = s.macro.roomRefs();
         for (int i = 0; i < rooms.size(); i++) {
             if (s.macro.cooldownMin(rooms.get(i)) > 0) custom++;
         }
-        if (custom > 0) return "기본 " + base + " · " + custom + "개 지정";
-        return base + "마다";
+        if (custom > 0) return base + " · " + custom + "개 지정";
+        return base;
     }
 
     /**
@@ -347,7 +352,7 @@ public final class ScreenMacro {
             if (!s.macro.roomRefs().isEmpty()) {
                 Ui.toast(a, "방이 모두 미사용 계정에 속합니다. 내정보 탭에서 대상 계정을 확인하십시오.");
             } else {
-                Ui.toast(a, "방을 먼저 설정하십시오.");
+                Ui.toast(a, "보낼 방을 먼저 설정하십시오.");
             }
             return;
         }

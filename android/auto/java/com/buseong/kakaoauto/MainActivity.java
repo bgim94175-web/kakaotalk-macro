@@ -316,7 +316,7 @@ public final class MainActivity extends Activity {
         LinearLayout steps = Ui.card(this);
         steps.addView(introStep(this, 1, "라이선스 인증", "구매 시 발급된 키를 입력합니다.", false));
         steps.addView(introStep(this, 2, "권한 설정", "알림 접근 · 배터리 최적화 제외를 안내에 따라 허용합니다.", true));
-        steps.addView(introStep(this, 3, "기능 설정", "메시지와 방을 정하면 백그라운드에서 동작합니다.", true));
+        steps.addView(introStep(this, 3, "기능 설정", "메시지와 보낼 방을 정하면 백그라운드에서 동작합니다.", true));
         col.addView(steps);
 
         // ── 이 기기 · 도움 ──
@@ -424,11 +424,6 @@ public final class MainActivity extends Activity {
         keyDraft = "";
         Ui.toast(this, "인증 완료");
         renderShell();
-        try {
-            Setup.maybeFirstRun(this);
-        } catch (Throwable t) {
-            Log.add(this, "시작 설정 화면을 열지 못했습니다: " + t);
-        }
     }
 
     // ── 홈 ──────────────────────────────────────────────────────────────────
@@ -470,6 +465,12 @@ public final class MainActivity extends Activity {
         wp.bottomMargin = Theme.dp(a, 8);
         who.setLayoutParams(wp);
         col.addView(who);
+
+        if (!KakaoAccount.ready(a)) {
+            col.addView(ScreenKakaoRegister.prompt(a));
+            fillUnlocked(a, col);
+            return;
+        }
 
         // ── 시작 설정 (필수 단계가 남아 있을 때만) ──
         View setup = setupCard(a);
@@ -531,6 +532,39 @@ public final class MainActivity extends Activity {
         return card;
     }
 
+    /** 계정 등록 전. 열린 기능 이름만 보여주고 설정 화면으로는 들어가지 않는다. */
+    private static void fillUnlocked(final MainActivity a, LinearLayout col) {
+        col.addView(Ui.sectionHeader(a, null, "사용 가능 기능"));
+        LinearLayout g = Ui.group(a);
+        boolean any = false;
+        for (int i = 0; i < Features.ALL.length; i++) {
+            final String id = Features.ALL[i];
+            if (!License.allowed(a, id)) continue;
+            any = true;
+            g.addView(Ui.fnRow(a, Features.color(id), Features.icon(id), Features.label(id),
+                    "등록 후 설정", Theme.SUB, "사용 가능", new Runnable() {
+                        @Override public void run() { ScreenKakaoRegister.open(a); }
+                    }));
+        }
+        if (License.allowed(a, Features.MACRO)) {
+            any = true;
+            g.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", "등록 후 설정",
+                    Theme.SUB, "사용 가능", new Runnable() {
+                        @Override public void run() { ScreenKakaoRegister.open(a); }
+                    }));
+            g.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", "등록 후 설정",
+                    Theme.SUB, "사용 가능", new Runnable() {
+                        @Override public void run() { ScreenKakaoRegister.open(a); }
+                    }));
+        }
+        if (!any) {
+            col.addView(Nav.note(a, "사용 가능한 기능이 없습니다. 내정보에서 라이선스를 확인하십시오.",
+                    Theme.ACCENT2, null, null));
+            return;
+        }
+        col.addView(g);
+    }
+
     // ── 2. 기능 ─────────────────────────────────────────────────────────────
     //  기능마다 색·아이콘이 다르다 (매크로 사파이어 · 추적 자수정 · 자동응답 아쿠아 · 관리봇 제이드 · 게임 로즈).
 
@@ -552,7 +586,7 @@ public final class MainActivity extends Activity {
         LinearLayout g = Ui.group(a);
         if (License.allowed(a, Features.MACRO)) {
             Settings s = Settings.load(a);
-            String macroV = "대상 " + s.macro.roomRefs().size() + "개 · " + ScreenMacro.cycleSummary(s);
+            String macroV = "보낼 방 " + s.macro.roomRefs().size() + "개 · " + ScreenMacro.cycleSummary(s);
             String chip = License.expiringSoon(a, Features.MACRO) ? ("D-" + License.daysLeft(a, Features.MACRO)) : null;
             g.addView(Ui.fnRow(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO), macroV,
                     Theme.SUB, chip, new Runnable() {
