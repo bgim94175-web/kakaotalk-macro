@@ -490,7 +490,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     public static void saveDump(Context c, String dump, long attemptId) {
         if (c == null) return;
         if (dump == null || dump.length() == 0) { clearDump(c); return; }
-        String d = (dump.length() > DUMP_MAX_CHARS) ? dump.substring(0, DUMP_MAX_CHARS) + "\n…여기서 잘랐어" : dump;
+        String d = (dump.length() > DUMP_MAX_CHARS) ? dump.substring(0, DUMP_MAX_CHARS) + "\n…(이하 생략)" : dump;
         Prefs.putStr(c, K_DUMP, d);
         Prefs.putLong(c, K_DUMP_AT, System.currentTimeMillis());
         Prefs.putLong(c, K_DUMP_ID, attemptId);
@@ -707,7 +707,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 default:       doVerify(sc); break;
             }
         } catch (Throwable t) {
-            note("카톡 화면 자동 조작 중 오류 — " + t.getClass().getSimpleName()
+            note("카카오톡 화면 자동 조작 중 오류 — " + t.getClass().getSimpleName()
                     + ": " + String.valueOf(t.getMessage()));
             retry();
         } finally {
@@ -865,13 +865,13 @@ public final class KakaoAccessibility extends AccessibilityService {
                 return 1;
             }
 
-            boolean ok = clickNode(row, "방 행");
+            boolean ok = clickNode(row, "대화방 행");
             if (!ok) return 0;
 
             clickedRow = true;
             clickedAt = System.currentTimeMillis();
             sawShareList = true;
-            note("공유창에서 방을 눌렀어 — " + cut(hit.name, 20)
+            note("공유창에서 대화방을 선택했습니다 — " + cut(hit.name, 20)
                     + " (매칭: " + hit.how() + ")");
             return 1;
         } finally {
@@ -886,8 +886,8 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         // (a) 채팅방으로 들어갔다 = 단건 공유형. 우리가 방을 눌렀다는 증거가 있을 때만 성공으로 본다.
         if (sc.chatInput && clickedRow && sawShareList) {
-            note("대화방 선택 후 채팅방으로 전환되었습니다. 전송된 것으로 처리합니다. 카카오톡에서 확인하십시오.");
-            finish(true, targetRoom + " · 채팅방으로 전환되었습니다. 카카오톡에서 확인하십시오.");
+            note("대화방 선택 후 대화방 화면으로 전환되었습니다. 발송된 것으로 처리합니다. 카카오톡에서 확인하십시오.");
+            finish(true, targetRoom + " · 대화방 화면으로 전환되었습니다. 카카오톡에서 확인하십시오.");
             return;
         }
 
@@ -912,7 +912,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         if ((now - clickedAt) > 2500L || sameSig >= STUCK_ROUNDS) {
             if (clickTry < MAX_CLICK_TRY) {
                 clickTry++;
-                note("방을 눌렀는데 화면이 안 바뀌었어 — 다시 눌러볼게 (" + clickTry + ")");
+                note("대화방 선택 후 화면이 전환되지 않았습니다. 재시도합니다 (" + clickTry + "회).");
                 phase = P_PICK;
                 phaseAt = now;
                 sameSig = 0;
@@ -937,7 +937,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     private void doSend(Scan sc) {
         if (sc.chatInput && clickedRow && sawShareList) {
-            finish(true, targetRoom + " · 채팅방으로 전환되었습니다. 카카오톡에서 확인하십시오.");
+            finish(true, targetRoom + " · 대화방 화면으로 전환되었습니다. 카카오톡에서 확인하십시오.");
             return;
         }
 
@@ -953,7 +953,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             if (clickNode(b.node, "전송 버튼")) {
                 sendTry++;
                 lastSendLabel = b.label;
-                note("전송 버튼 눌렀어 — 「" + cut(b.label, 20) + "」"
+                note("전송 버튼을 입력했습니다 — 「" + cut(b.label, 20) + "」"
                         + (b.id.length() > 0 ? " (" + b.id + ")" : ""));
                 phase = P_VERIFY;
                 phaseAt = System.currentTimeMillis();
@@ -1002,7 +1002,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (b == null) {
             // 우리가 전송 버튼을 실제로 누른 뒤에 그 버튼이 사라졌다 = 공유창이 진행됐다.
             // (전송을 누른 적이 없으면 여기로 오지 않는다 — doSend 에서만 넘어온다)
-            note("전송 버튼이 사라졌어 — 보내진 걸로 볼게");
+            note("전송 버튼이 화면에서 사라졌습니다. 발송된 것으로 처리합니다.");
             finish(true, targetRoom);
             return;
         }
@@ -1034,7 +1034,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             // 검색 아이콘/힌트 라벨일 수 있다. 눌러서 입력창을 띄워만 본다.
             if (sc.searchOpener != null) {
                 if (clickNode(sc.searchOpener, "검색 열기")) {
-                    note("대화방이 목록에 없어 검색을 실행했습니다.");
+                    note("목록에서 대화방을 찾지 못해 검색을 실행했습니다.");
                     return true;
                 }
             }
@@ -1066,7 +1066,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                     went = got.length() > 0 && squash(got).contains(squash(q));
                 }
             } catch (Throwable ignore) { }
-            note("대화방이 목록에 없어 검색창에 「" + q + "」 를 입력했습니다."
+            note("목록에서 대화방을 찾지 못해 검색창에 「" + q + "」 를 입력했습니다."
                     + (went ? "" : " (문자가 입력되지 않은 것으로 판단됩니다)"));
             return true;
         } catch (Throwable t) {
@@ -1090,7 +1090,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 if (!squash(t.label).equals(want)) continue;
                 tabTry = k + 1;
                 if (clickNode(t.node, "탭")) {
-                    note("「" + TAB_CHAT[k] + "」 탭을 눌러봤어");
+                    note("「" + TAB_CHAT[k] + "」 탭을 선택했습니다.");
                     return true;
                 }
                 return false;
@@ -1122,7 +1122,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         // performAction 반환값만 믿으면 안 된다.
         if (scrolls > 0 && sc.sig.equals(scrollSig)) {
             scrollDone = true;
-            note("목록 끝까지 내려봤어 (" + scrolls + "회) — 방이 안 보여");
+            note("목록 끝까지 스크롤했습니다 (" + scrolls + "회). 대화방이 표시되지 않았습니다.");
             scrollBackToTop(sc);
             return false;
         }
@@ -1132,7 +1132,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         } catch (Throwable ignore) { }
         if (!ok) {
             scrollDone = true;
-            note("목록을 더 못 내려 (" + scrolls + "회) — 방이 안 보여");
+            note("목록을 더 스크롤할 수 없습니다 (" + scrolls + "회). 대화방이 표시되지 않았습니다.");
             scrollBackToTop(sc);
             return false;
         }
@@ -1261,7 +1261,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             GestureDescription.Builder b = new GestureDescription.Builder();
             b.addStroke(new GestureDescription.StrokeDescription(p, 0L, 60L));
             boolean ok = dispatchGesture(b.build(), null, null);
-            note(what + " 를 좌표로 눌러봤어 (" + (int) cx + "," + (int) cy + ")"
+            note(what + " 좌표 탭을 실행했습니다 (" + (int) cx + "," + (int) cy + ")"
                     + (ok ? "" : " — 실패"));
             return ok;
         } catch (Throwable t) {
@@ -1285,7 +1285,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     /** 실패 + 화면 덤프 저장. detail 에 단계 정보를 반드시 같이 넘긴다. */
     private void dumpAndFail(String where) {
-        String w = (where == null || where.length() == 0) ? "카톡 화면을 못 찾았어" : where;
+        String w = (where == null || where.length() == 0) ? "카카오톡 화면을 인식하지 못했습니다." : where;
         lastWhere = w;
         long id = attempt;
         String dump;
@@ -1313,19 +1313,19 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     private String miniBody(String where, String tag) {
         StringBuilder sb = new StringBuilder(1024);
-        sb.append("=== 카톡 화면 진단(간이) ").append(stamp()).append(" ===\n");
+        sb.append("=== 카카오톡 화면 진단(간이) ").append(stamp()).append(" ===\n");
         sb.append("시도 id: ").append(attempt).append(" · 경로: ").append(tag).append('\n');
         sb.append("실패: ").append(where).append('\n');
-        sb.append("노린 방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        sb.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
         sb.append("단계: ").append(whereNow())
                 .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
                 .append(" · 전송 입력 ").append(sendTry).append("회")
                 .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
         sb.append(env(this));
         sb.append("마지막으로 본 화면: ")
-                .append(seenAt == 0 ? "없음(화면을 한 번도 못 훑었어)" : seenShape).append('\n');
-        if (seenNames.length() > 0) sb.append("그때 보였던 이름: ").append(seenNames).append('\n');
-        if (seenBtns.length() > 0) sb.append("그때 보였던 버튼: ").append(seenBtns).append('\n');
+                .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : seenShape).append('\n');
+        if (seenNames.length() > 0) sb.append("당시 확인된 이름: ").append(seenNames).append('\n');
+        if (seenBtns.length() > 0) sb.append("당시 확인된 버튼: ").append(seenBtns).append('\n');
         sb.append(notesBlock());
         sb.append("=== 끝 ===\n");
         return sb.toString();
@@ -1407,7 +1407,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         android.util.Log.i("KakaoAuto", "[공유창] " + m);
         synchronized (NOTES) {
             if (NOTES.size() < NOTES_MAX) NOTES.add(m);
-            else if (NOTES.size() == NOTES_MAX) NOTES.add("…(기록이 너무 많아서 여기서 잘랐어)");
+            else if (NOTES.size() == NOTES_MAX) NOTES.add("…(기록 한도 초과로 이하 생략)");
         }
     }
 
@@ -1447,8 +1447,8 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 지금 어느 단계에서 뭘 하고 있었나 (한 줄) */
     private static String whereNow() {
         int p = phase;
-        if (p == P_PICK) return "방 고르기 중 · 스크롤 " + scrolls + "회 · 검색 " + searchTry + "회";
-        if (p == P_AFTER) return "방을 누른 직후 반응 확인 중";
+        if (p == P_PICK) return "대화방 선택 중 · 스크롤 " + scrolls + "회 · 검색 " + searchTry + "회";
+        if (p == P_AFTER) return "대화방 선택 직후 반응 확인 중";
         if (p == P_SEND) return "전송 버튼 찾는 중";
         return "전송 버튼 누른 뒤 확인 중";
     }
@@ -2240,7 +2240,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 : (shortId(viewId(sc.searchBox)) + " " + boundsStr(sc.searchBox))).append('\n');
         out.append("검색 열기 후보: ").append(sc.searchOpener == null ? "미확인"
                 : (cut(text2(sc.searchOpener), 20) + " / " + shortId(viewId(sc.searchOpener)))).append('\n');
-        out.append("채팅방 입력창 보임: ").append(sc.chatInput ? "Y" : "N").append('\n');
+        out.append("대화방 입력창 보임: ").append(sc.chatInput ? "Y" : "N").append('\n');
 
         out.append("버튼으로 인식된 노드(입력 가능 + 문자 포함) ").append(sc.btns.size()).append("개:\n");
         for (int i = 0; i < sc.btns.size() && i < 12; i++) {
@@ -2250,14 +2250,14 @@ public final class KakaoAccessibility extends AccessibilityService {
                     .append(" prio=").append(b.prio)
                     .append(' ').append(boundsStr(b.node)).append('\n');
         }
-        out.append("방 이름처럼 보이던 글자: ")
+        out.append("대화방 이름으로 인식된 문자: ")
                 .append(roomLike(sc).length() == 0 ? "없음" : roomLike(sc)).append('\n');
-        out.append("화면에 있던 글자(중복 제거, 앞 ").append(Math.min(40, sc.leafTexts.size())).append("개):\n");
+        out.append("화면에서 수집된 문자(중복 제거, 앞 ").append(Math.min(40, sc.leafTexts.size())).append("개):\n");
         for (int i = 0; i < sc.leafTexts.size() && i < 40; i++) {
             out.append("  ").append(i + 1).append(". ").append(privacyCut(sc.leafTexts.get(i))).append('\n');
         }
         ArrayList<Hit> hits = sc.bestHits();
-        out.append("방 이름 후보: ").append(hits.size()).append("개");
+        out.append("대화방 이름 후보: ").append(hits.size()).append("개");
         for (int i = 0; i < hits.size() && i < 5; i++) {
             out.append("\n  - \"").append(cut(hits.get(i).name, 24)).append("\" (")
                     .append(hits.get(i).how()).append(") 행=").append(hits.get(i).rowKey);
@@ -2309,7 +2309,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         recycleAll(rs);
         String s = out.toString();
-        if (s.length() > DUMP_MAX_CHARS) s = s.substring(0, DUMP_MAX_CHARS) + "\n…여기서 잘랐어";
+        if (s.length() > DUMP_MAX_CHARS) s = s.substring(0, DUMP_MAX_CHARS) + "\n…(이하 생략)";
         return s;
     }
 
@@ -2317,7 +2317,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         try {
             return String.valueOf(getPackageManager().getPackageInfo(KAKAO, 0).versionName);
         } catch (Throwable t) {
-            return "모름";
+            return "확인 불가";
         }
     }
 

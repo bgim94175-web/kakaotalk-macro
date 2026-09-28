@@ -1202,7 +1202,7 @@ public final class Nav {
             body.addView(Ui.sub(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 자동으로 등록됩니다.\n"
                     + "대화방 이름을 직접 입력할 수도 있습니다. 카카오톡에 표시되는 이름과 정확히 일치해야 합니다."));
         } else {
-            TextView lb = Ui.label(a, "최근 감지된 방");
+            TextView lb = Ui.label(a, "최근 감지된 대화방");
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
             lp.bottomMargin = Theme.dp(a, 4);
             lb.setLayoutParams(lp);
@@ -1368,7 +1368,7 @@ public final class Nav {
             loadThumb(c, uri, iv, state);
         }
 
-        final String label = (no > 0) ? ("첨부 사진 " + no + "번째") : "첨부 사진";
+        final String label = (no > 0) ? ("첨부 이미지 " + no + "번째") : "첨부 이미지";
         box.setContentDescription(label);
 
         TextView x = new TextView(c);

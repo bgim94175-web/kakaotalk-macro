@@ -225,7 +225,7 @@ public final class ScreenAccount {
     /** 기능 이름 짧은 판 (행 값은 폭이 좁다) */
     private static String shortLabel(String id) {
         if (Features.MACRO.equals(id)) return "매크로";
-        if (Features.ROOMBOT.equals(id)) return "방관리봇";
+        if (Features.ROOMBOT.equals(id)) return "대화방관리봇";
         if (Features.MINIGAME.equals(id)) return "미니게임봇";
         return "기능";
     }

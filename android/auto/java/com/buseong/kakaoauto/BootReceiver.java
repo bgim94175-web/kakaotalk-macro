@@ -72,7 +72,7 @@ public final class BootReceiver extends BroadcastReceiver {
                     Scheduler.ensureHeartbeat(c);
                     Scheduler.ensureScheduled(c);
                 } catch (Throwable t) {
-                    Log.add(c, "부팅 후 예약을 되살리지 못했어: " + t);
+                    Log.add(c, "부팅 후 예약을 복구하지 못했습니다: " + t);
                 } finally {
                     try { finish.run(); } catch (Throwable ignore) { /* 위에서 이미 방어됨 */ }
                 }
@@ -84,7 +84,7 @@ public final class BootReceiver extends BroadcastReceiver {
             th.setPriority(Thread.NORM_PRIORITY);
             th.start();
         } catch (Throwable t) {
-            Log.add(c, "부팅 처리 스레드를 못 만들었어: " + t);
+            Log.add(c, "부팅 처리 스레드를 생성하지 못했습니다: " + t);
             try { finish.run(); } catch (Throwable ignore) { /* 무시 */ }
         }
     }
@@ -98,9 +98,9 @@ public final class BootReceiver extends BroadcastReceiver {
 
     private static String bootKr(String action) {
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
-            return "앱이 업데이트됐어 — 발송 예약과 라이선스 확인을 되살릴게";
+            return "앱이 업데이트되었습니다. 발송 예약과 라이선스 자동확인을 복구합니다.";
         }
-        return "기기가 켜졌어 — 발송 예약과 라이선스 확인을 되살릴게";
+        return "기기가 재시작되었습니다. 발송 예약과 라이선스 자동확인을 복구합니다.";
     }
 
     private static Context appCtx(Context c) {

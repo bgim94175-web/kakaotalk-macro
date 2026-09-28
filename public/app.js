@@ -20,9 +20,9 @@
   var FEATURES = [
     {
       id: 'macro', name: '자동발송 매크로', icon: '⚡', color: 'var(--accent)', tag: '추천',
-      desc: '방마다 주기 자동발송 + 이미지 첨부 + 메시지추적 + 오픈프로필 자동응답',
+      desc: '대화방별 주기 자동발송 + 이미지 첨부 + 메시지추적 + 오픈프로필 자동응답',
       bullets: [
-        '방별로 주기(분 단위)와 메시지를 따로 지정',
+        '대화방별로 주기(분 단위)와 메시지를 따로 지정',
         '이미지 최대 5장 첨부 발송',
         '메시지 추적 — 정해둔 문구가 올라오면 즉시 응답',
         '오픈프로필 개인톡 자동응답 (문구 직접 작성)',
@@ -30,7 +30,7 @@
       ]
     },
     {
-      id: 'roombot', name: '방 관리봇', icon: '🛡', color: 'var(--accent2)', tag: '',
+      id: 'roombot', name: '대화방 관리봇', icon: '🛡', color: 'var(--accent2)', tag: '',
       desc: '입/퇴장 인사, 금지어·도배 감지, 공지 자동안내',
       bullets: [
         '입장 / 퇴장 인사 자동 발송',
@@ -47,7 +47,7 @@
         '끝말잇기 (사전 내장, 두음법칙 처리)',
         '숫자야구 3자리 · 주사위 · 가위바위보',
         '퀴즈 50문항 내장',
-        '방별 점수 랭킹 (!랭킹)',
+        '대화방별 점수 랭킹 (!랭킹)',
         '명령 접두사 변경 · 쿨다운 / 일일 한도'
       ]
     }
@@ -916,7 +916,7 @@
 
       if (!ids.length)  { setErr('feature', '기능을 1개 이상 선택하십시오'); bad = bad || mount; }
       if (!dep)         { setErr('depositor', '입금자명을 입력하십시오'); bad = bad || depIn; }
-      if (!con)         { setErr('contact', '연락처(카톡ID 또는 전화번호)를 입력하십시오'); bad = bad || conIn; }
+      if (!con)         { setErr('contact', '연락처(카카오톡 ID 또는 전화번호)를 입력하십시오'); bad = bad || conIn; }
       if (key && !KEY_RE.test(key)) { setErr('key', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력하십시오'); bad = bad || keyIn; }
       /* 아이폰 구매 → 환불 분쟁으로 이어진다. 확인 체크 없으면 접수 자체를 막는다 */
       if (androidIn && !androidIn.checked) {

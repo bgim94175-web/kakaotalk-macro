@@ -193,7 +193,7 @@ public final class RoomBot {
             int n = bumpWarn(c, room, who, now);
             String msg = warnText(cfg, room, who, ban, n, now);
             if (send(c, cfg, room, msg, now)) {
-                Log.add(c, "방 관리봇 금지어 감지 · 「" + label + "」 " + nameOf(who)
+                Log.add(c, "대화방 관리봇 금지어 감지 · 「" + label + "」 " + nameOf(who)
                         + " (경고 " + n + "회, 단어 " + ban + ")");
             }
             return;
@@ -204,7 +204,7 @@ public final class RoomBot {
             int n = bumpWarn(c, room, who, now);
             String msg = linkText(cfg, room, who, n, now);
             if (send(c, cfg, room, msg, now)) {
-                Log.add(c, "방 관리봇 링크 감지 · 「" + label + "」 " + nameOf(who) + " (경고 " + n + "회)");
+                Log.add(c, "대화방 관리봇 링크 감지 · 「" + label + "」 " + nameOf(who) + " (경고 " + n + "회)");
             }
             return;
         }
@@ -213,7 +213,7 @@ public final class RoomBot {
         if (flood(cfg, room, who, now)) {
             String msg = floodText(cfg, room, who, now);
             if (send(c, cfg, room, msg, now)) {
-                Log.add(c, "방 관리봇 도배 감지 · 「" + label + "」 " + nameOf(who)
+                Log.add(c, "대화방 관리봇 도배 감지 · 「" + label + "」 " + nameOf(who)
                         + " (" + cfg.floodSecs + "초 " + cfg.floodCount + "개 초과)");
             }
         }
@@ -283,18 +283,18 @@ public final class RoomBot {
         String kindName = join ? "입장" : "퇴장";
         if (tpl == null || tpl.trim().length() == 0) {
             note(c, "jl:" + (join ? "w" : "l"),
-                    "방 관리봇 " + kindName + " 안내가 활성 상태이나 메시지가 비어 있습니다. 봇 탭에서 입력하십시오.");
+                    "대화방 관리봇 " + kindName + " 안내가 활성 상태이나 메시지가 비어 있습니다. 봇 탭에서 입력하십시오.");
             return;
         }
         String person = personOf(body);
         String msg = render(tpl, room.name, person, now, 0, "");
         if (msg.trim().length() == 0) {
             note(c, "jl-empty:" + (join ? "w" : "l"),
-                    "방 관리봇 " + kindName + " 안내가 치환 후 비어 있습니다. 메시지 내용을 확인하십시오.");
+                    "대화방 관리봇 " + kindName + " 안내가 치환 후 비어 있습니다. 메시지 내용을 확인하십시오.");
             return;
         }
         if (send(c, cfg, room, msg, now)) {
-            Log.add(c, "방 관리봇 " + kindName + " 안내 · 「" + room.label(c) + "」 " + nameOf(person));
+            Log.add(c, "대화방 관리봇 " + kindName + " 안내 · 「" + room.label(c) + "」 " + nameOf(person));
         }
     }
 
@@ -329,7 +329,7 @@ public final class RoomBot {
             cfg.notice = arg;
             Settings.flush(c);
             send(c, cfg, room, "공지를 등록했습니다. 「" + prefix + "공지」 로 확인할 수 있습니다.", now);
-            Log.add(c, "방 관리봇 공지 등록 · 「" + room.label(c) + "」 " + nameOf(who));
+            Log.add(c, "대화방 관리봇 공지 등록 · 「" + room.label(c) + "」 " + nameOf(who));
             return;
         }
 
@@ -350,7 +350,7 @@ public final class RoomBot {
                 target = who;
             }
             int n = warnCount(c, room, target);
-            send(c, cfg, room, nameOf(target) + "님 누적 경고 " + n + "회입니다."
+            send(c, cfg, room, nameOf(target) + "님, 누적 경고 " + n + "회입니다."
                     + (n >= ADMIN_CALL_AT ? " 관리자 확인이 필요합니다." : ""), now);
             return;
         }
@@ -362,7 +362,7 @@ public final class RoomBot {
             }
             int cleared = clearWarns(c, room);
             send(c, cfg, room, "이 대화방의 경고 기록 " + cleared + "건을 삭제했습니다.", now);
-            Log.add(c, "방 관리봇 경고 초기화 · 「" + room.label(c) + "」 " + cleared + "건 ("
+            Log.add(c, "대화방 관리봇 경고 초기화 · 「" + room.label(c) + "」 " + cleared + "건 ("
                     + nameOf(who) + ")");
             return;
         }
@@ -429,7 +429,7 @@ public final class RoomBot {
 
     public static String helpText(Context c, Settings.RoomBotCfg cfg, String prefix) {
         StringBuilder sb = new StringBuilder();
-        sb.append("[방 관리봇 명령]");
+        sb.append("[대화방 관리봇 명령]");
         sb.append("\n").append(prefix).append("공지 — 등록된 공지 확인");
         sb.append("\n").append(prefix).append("공지 내용 — 공지 등록 (관리자 전용)");
         sb.append("\n").append(prefix).append("규칙 — 대화방 규칙 확인");
@@ -446,8 +446,8 @@ public final class RoomBot {
         Settings.RoomBotCfg cfg = Settings.roombot(c);
         if (cfg == null) return "설정 확인 불가";
         if (!cfg.enabled) return "꺼짐";
-        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 대상 방 없음";
-        return "켜짐 · 방 " + cfg.rooms.size() + "개 · 금지어 " + countWords(cfg)
+        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 대상 대화방 없음";
+        return "켜짐 · 대화방 " + cfg.rooms.size() + "개 · 금지어 " + countWords(cfg)
                 + "개 · 금일 " + today(c) + "건";
     }
 
@@ -488,7 +488,7 @@ public final class RoomBot {
         String tpl = (cfg.warnMsg == null) ? "" : cfg.warnMsg.trim();
         String out;
         if (tpl.length() == 0) {
-            out = nameOf(who) + "님 금지어가 감지되었습니다. (경고 " + n + "회)";
+            out = nameOf(who) + "님, 금지어가 감지되었습니다 (경고 " + n + "회)";
         } else {
             out = render(tpl, room.name, who, now, n, ban);
             // 사용자 문구에 횟수 표시가 없으면 뒤에 붙여준다 (누적을 꼭 보여줘야 한다)
@@ -501,7 +501,7 @@ public final class RoomBot {
         String tpl = (cfg.linkMsg == null) ? "" : cfg.linkMsg.trim();
         String out;
         if (tpl.length() == 0) {
-            out = nameOf(who) + "님 링크 및 초대링크 공유는 금지되어 있습니다. (경고 " + n + "회)";
+            out = nameOf(who) + "님, 링크 및 초대링크 공유는 금지되어 있습니다 (경고 " + n + "회)";
         } else {
             out = render(tpl, room.name, who, now, n, "");
             if (!tpl.contains("{횟수}")) out = out + " (경고 " + n + "회)";
@@ -512,7 +512,7 @@ public final class RoomBot {
     private static String floodText(Settings.RoomBotCfg cfg, RoomRef room, String who, long now) {
         String tpl = (cfg.floodMsg == null) ? "" : cfg.floodMsg.trim();
         if (tpl.length() == 0) {
-            return nameOf(who) + "님 연속 발송을 자제하십시오. (" + cfg.floodSecs + "초 "
+            return nameOf(who) + "님, 연속 발송을 자제하십시오 (" + cfg.floodSecs + "초 "
                     + cfg.floodCount + "개 초과)";
         }
         return render(tpl, room.name, who, now, 0, "");
@@ -742,12 +742,12 @@ public final class RoomBot {
             load(c);
             rollDay(now);
             if (limit > 0 && sentToday >= limit) {
-                note(c, "limit", "방 관리봇 일일 한도(" + limit + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
+                note(c, "limit", "대화방 관리봇 일일 한도(" + limit + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
                 return false;
             }
             Long last = LAST_BOT.get(rk);
             if (last != null && now - last.longValue() < ROOM_COOLDOWN_MS) {
-                note(c, "cool:" + rk, "방 관리봇 「" + label + "」 쿨다운("
+                note(c, "cool:" + rk, "대화방 관리봇 「" + label + "」 쿨다운("
                         + (ROOM_COOLDOWN_MS / 1000) + "초) 중이므로 1건을 건너뛰었습니다.");
                 return false;
             }
@@ -762,7 +762,7 @@ public final class RoomBot {
                 if (sentToday > 0) sentToday = sentToday - 1;
                 save(c);
             }
-            Log.add(c, "방 관리봇 발송에 실패했습니다. 「" + label + "」");
+            Log.add(c, "대화방 관리봇 발송에 실패했습니다. 「" + label + "」");
         }
         return ok;
     }
@@ -971,7 +971,7 @@ public final class RoomBot {
             }
             trimWarns();
         } catch (Throwable t) {
-            Log.add(c, "방 관리봇 기록이 손상되어 초기화했습니다. (" + t + ")");
+            Log.add(c, "대화방 관리봇 기록이 손상되어 초기화했습니다. (" + t + ")");
             WARNS.clear();
             WARN_AT.clear();
             sentToday = 0;
@@ -1000,7 +1000,7 @@ public final class RoomBot {
             o.put("warnAt", a);
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
-            Log.add(c, "방 관리봇 기록을 저장하지 못했습니다. (" + t + ")");
+            Log.add(c, "대화방 관리봇 기록을 저장하지 못했습니다. (" + t + ")");
         }
     }
 }

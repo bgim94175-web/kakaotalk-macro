@@ -65,8 +65,8 @@ public final class ImagePicker {
             a.startActivityForResult(i, requestCode);
             return;
         } catch (Throwable t) {
-            Log.add(a, "사진 선택창(문서 선택)을 못 열었어 — " + t.getClass().getSimpleName()
-                    + ". 다른 방식으로 다시 해볼게");
+            Log.add(a, "이미지 선택창(문서 선택)을 열지 못했습니다 (" + t.getClass().getSimpleName()
+                    + "). 다른 방식으로 재시도합니다.");
         }
 
         // 폴백: ACTION_GET_CONTENT. 이걸로 받은 URI 는 영속화가 안 되는 기기도 있어서
@@ -77,9 +77,9 @@ public final class ImagePicker {
         g.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         g.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
-            a.startActivityForResult(Intent.createChooser(g, "사진 고르기"), requestCode);
+            a.startActivityForResult(Intent.createChooser(g, "이미지 선택"), requestCode);
         } catch (Throwable t2) {
-            Log.add(a, "사진 선택창을 아예 못 열었어 — " + t2.getClass().getSimpleName());
+            Log.add(a, "이미지 선택창을 열지 못했습니다 — 대체 방식도 실패 (" + t2.getClass().getSimpleName() + ").");
             Ui.toast(a, "이미지 선택창을 열지 못했습니다.");
         }
     }
@@ -145,7 +145,7 @@ public final class ImagePicker {
         try {
             c.getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable t) {
-            Log.add(c, "사진 권한 고정 실패 — " + shortUri(u.toString()) + " ("
+            Log.add(c, "이미지 접근 권한 고정 실패 — " + shortUri(u.toString()) + " ("
                     + t.getClass().getSimpleName() + "). 앱 재시작 후 이미지를 다시 선택해야 할 수 있습니다.");
         }
     }
@@ -157,7 +157,7 @@ public final class ImagePicker {
             c.getContentResolver().releasePersistableUriPermission(
                     Uri.parse(uri.trim()), Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable t) {
-            Log.add(c, "사진 권한 해제 실패 — " + shortUri(uri) + " (" + t.getClass().getSimpleName() + ")");
+            Log.add(c, "이미지 접근 권한 해제 실패 — " + shortUri(uri) + " (" + t.getClass().getSimpleName() + ")");
         }
     }
 
@@ -194,7 +194,7 @@ public final class ImagePicker {
             in = null;
 
             if (probe.outWidth <= 0 || probe.outHeight <= 0) {
-                Log.add(c, "사진 크기를 못 읽었어 — " + shortUri(uri));
+                Log.add(c, "이미지 크기를 읽지 못했습니다 — " + shortUri(uri));
                 return null;
             }
 
@@ -203,10 +203,10 @@ public final class ImagePicker {
             in = cr.openInputStream(u);
             if (in == null) return null;
             Bitmap bm = BitmapFactory.decodeStream(in, null, opt);
-            if (bm == null) Log.add(c, "사진을 못 열었어 — " + shortUri(uri));
+            if (bm == null) Log.add(c, "이미지를 열지 못했습니다 — " + shortUri(uri));
             return bm;
         } catch (Throwable t) {
-            Log.add(c, "썸네일 실패 — " + shortUri(uri) + " (" + t.getClass().getSimpleName() + ")");
+            Log.add(c, "썸네일 생성 실패 — " + shortUri(uri) + " (" + t.getClass().getSimpleName() + ")");
             return null;
         } finally {
             close(in);
@@ -272,7 +272,7 @@ public final class ImagePicker {
 
     /** 목록에 곁들일 파일명. 못 읽으면 URI 꼬리표라도 돌려준다. 절대 null 아님. */
     public static String displayName(Context c, String uri) {
-        if (uri == null || uri.trim().length() == 0) return "사진";
+        if (uri == null || uri.trim().length() == 0) return "이미지";
         String u = uri.trim();
         if (c == null) return shortUri(u);
         Cursor cur = null;

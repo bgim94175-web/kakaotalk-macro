@@ -25,7 +25,7 @@ public final class Gate {
         try {
             ok = License.allowed(a, feature);
         } catch (Throwable t) {
-            Log.add(a, "라이선스 확인 중 오류가 났어: " + t);
+            Log.add(a, "라이선스 확인 중 오류가 발생했습니다: " + t);
             ok = false;
         }
         if (ok) return true;

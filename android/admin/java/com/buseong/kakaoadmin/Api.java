@@ -357,7 +357,7 @@ public final class Api {
 
     public static String featLabel(String id) {
         if ("macro".equals(id)) return "자동발송 매크로";
-        if ("roombot".equals(id)) return "방 관리봇";
+        if ("roombot".equals(id)) return "대화방 관리봇";
         if ("minigame".equals(id)) return "미니게임봇";
         return (id == null) ? "" : id;
     }
@@ -365,13 +365,13 @@ public final class Api {
     /** 목록 칩에 쓰는 짧은 이름 */
     public static String featShort(String id) {
         if ("macro".equals(id)) return "매크로";
-        if ("roombot".equals(id)) return "방관리";
+        if ("roombot".equals(id)) return "대화방관리";
         if ("minigame".equals(id)) return "미니게임";
         return (id == null) ? "" : id;
     }
 
     public static String featDesc(String id) {
-        if ("macro".equals(id)) return "방별 주기 자동발송 · 이미지 첨부 · 메시지추적 · 오픈프로필 자동응답";
+        if ("macro".equals(id)) return "대화방별 주기 자동발송 · 이미지 첨부 · 메시지추적 · 오픈프로필 자동응답";
         if ("roombot".equals(id)) return "입/퇴장 인사, 금지어 감지, 도배 감지, 공지 자동안내";
         if ("minigame".equals(id)) return "끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹";
         return "";

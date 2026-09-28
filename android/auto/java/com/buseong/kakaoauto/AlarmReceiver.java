@@ -52,7 +52,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
             pr = goAsync();
         } catch (Throwable t) {
             // goAsync 가 안 되면(이론상 없음) 그래도 일은 해야 한다 — 스레드만 띄우고 끝낸다
-            Log.add(c, "알람을 비동기로 못 받았어: " + t);
+            Log.add(c, "알람을 비동기로 수신하지 못했습니다: " + t);
             spawn(c, beat, null);
             return;
         }
@@ -90,7 +90,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
                         Scheduler.runDue(c);
                     }
                 } catch (Throwable t) {
-                    Log.add(c, "알람 처리 중 오류가 났어: " + t);
+                    Log.add(c, "알람 처리 중 오류가 발생했습니다: " + t);
                 } finally {
                     if (finish != null) {
                         try { finish.run(); } catch (Throwable ignore) { /* 위에서 이미 방어됨 */ }
@@ -105,7 +105,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
             th.start();
         } catch (Throwable t) {
             // 스레드조차 못 만드는 상황. 조용히 버리지 말고 로그는 남긴다.
-            Log.add(c, "알람 처리 스레드를 못 만들었어: " + t);
+            Log.add(c, "알람 처리 스레드를 생성하지 못했습니다: " + t);
             if (finish != null) {
                 try { finish.run(); } catch (Throwable ignore) { /* 무시 */ }
             }

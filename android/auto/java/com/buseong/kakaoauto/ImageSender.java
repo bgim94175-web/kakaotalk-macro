@@ -183,8 +183,8 @@ public final class ImageSender {
         main().post(new Runnable() {
             @Override public void run() {
                 if (QUEUE.size() >= MAX_QUEUE) {
-                    Log.add(c, "이미지 전송 대기열이 꽉 찼어(" + MAX_QUEUE + "건) — " + room2 + " 건은 버렸어");
-                    fire(onDone, false, "전송 대기열이 꽉 찼어");
+                    Log.add(c, "이미지 전송 대기열이 한도(" + MAX_QUEUE + "건)에 도달했습니다. 대화방 " + room2 + " 건은 취소되었습니다.");
+                    fire(onDone, false, "전송 대기열이 한도에 도달했습니다.");
                     return;
                 }
                 seq++;
@@ -228,7 +228,7 @@ public final class ImageSender {
                 if (cn != null && pkg.equals(cn.getPackageName()) && cls.equals(cn.getClassName())) return true;
             }
         } catch (Throwable t) {
-            Log.add(c, "접근성 권한 상태를 못 읽었어 — " + t.getClass().getSimpleName());
+            Log.add(c, "접근성 권한 상태를 확인하지 못했습니다 — " + t.getClass().getSimpleName());
         }
         return false;
     }
@@ -331,8 +331,8 @@ public final class ImageSender {
      */
     public static void setReplyImageEnabled(Context c, boolean on) {
         Prefs.putBool(c, K_REPLY_IMG_OFF, !on);
-        Log.add(c, on ? "사진을 알림 답장으로 보내기 — 켰어 (화면이 안 움직여)"
-                      : "사진을 알림 답장으로 보내기 — 껐어 (공유창을 열어서 보낼게)");
+        Log.add(c, on ? "이미지를 알림 답장으로 발송 — 활성화 (화면 조작이 발생하지 않습니다)"
+                      : "이미지를 알림 답장으로 발송 — 비활성화 (공유창을 통해 발송합니다)");
     }
 
     public static boolean replyImageReady(Context c, String room) {
@@ -443,11 +443,12 @@ public final class ImageSender {
         // EXTRA_STREAM 만 넣으면 읽기 권한이 카톡으로 안 넘어가는 기기가 있다.
         // ClipData 에도 같은 URI 를 실어야 FLAG_GRANT_READ_URI_PERMISSION 이 실제로 먹는다.
         try {
-            ClipData cd = ClipData.newUri(j.app.getContentResolver(), "사진", list.get(0));
+            ClipData cd = ClipData.newUri(j.app.getContentResolver(), "이미지", list.get(0));
             for (int k = 1; k < list.size(); k++) cd.addItem(new ClipData.Item(list.get(k)));
             i.setClipData(cd);
         } catch (Throwable t) {
-            Log.add(j.app, "사진 권한 전달 준비 실패 — " + t.getClass().getSimpleName() + " (그냥 보내볼게)");
+            Log.add(j.app, "이미지 접근 권한 전달 준비에 실패했습니다 — " + t.getClass().getSimpleName()
+                    + " (권한 전달 없이 발송을 시도합니다)");
         }
 
         // 화면이 꺼져 있거나 잠겨 있으면 공유창이 못 뜬다. 전용 폰이니까 깨워도 된다.
@@ -455,7 +456,7 @@ public final class ImageSender {
         final boolean ready = screenReady(j.app);
         j.woke = !ready;
         if (!ready) {
-            Log.add(j.app, "화면이 " + screenState(j.app) + " — 먼저 깨우고 공유창을 띌게");
+            Log.add(j.app, "화면 상태: " + screenState(j.app) + ". 절전 해제 후 공유창을 실행합니다.");
         }
 
         try {
@@ -659,7 +660,7 @@ public final class ImageSender {
             }
             return (out.length() == 0) ? "없음" : out.toString();
         } catch (Throwable t) {
-            return "못 읽었어 — " + t.getClass().getSimpleName();
+            return "조회 실패 — " + t.getClass().getSimpleName();
         }
     }
 

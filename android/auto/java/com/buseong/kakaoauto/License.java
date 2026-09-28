@@ -397,7 +397,7 @@ public final class License {
                         saveTick(app, p.o, false);
                         ok = true;
                         reason = "";
-                        Log.add(app, "기능 상태를 새로 받았어 · " + featSummary(app));
+                        Log.add(app, "기능 상태를 갱신했습니다 · " + featSummary(app));
                     } else {
                         reason = p.fail;
                         applyFail(app, reason, k);

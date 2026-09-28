@@ -108,7 +108,7 @@ public final class App extends Application {
         }
 
         // Log.add 는 안에서 commit 한다 — 죽는 중에도 남는다
-        Log.add(c, "앱이 죽었어: " + head);
+        Log.add(c, "앱이 비정상 종료되었습니다: " + head);
     }
 
     // ── 마지막 크래시 조회 (내정보 탭에서 보여주면 된다) ───────────────────────
@@ -145,12 +145,12 @@ public final class App extends Application {
                 try {
                     Settings.load(c);
                 } catch (Throwable t) {
-                    Log.add(c, "설정을 미리 읽지 못했어: " + t);
+                    Log.add(c, "설정을 사전 로드하지 못했습니다: " + t);
                 }
                 try {
                     Scheduler.ensureScheduled(c);
                 } catch (Throwable t) {
-                    Log.add(c, "발송 예약을 확인하지 못했어: " + t);
+                    Log.add(c, "발송 예약을 확인하지 못했습니다: " + t);
                 }
             }
         };
@@ -160,7 +160,7 @@ public final class App extends Application {
             th.start();
         } catch (Throwable t) {
             // 스레드를 못 만들면 그 자리에서라도 설정은 읽어둔다
-            Log.add(c, "초기화 스레드를 못 만들었어: " + t);
+            Log.add(c, "초기화 스레드를 생성하지 못했습니다: " + t);
             try { Settings.load(c); } catch (Throwable ignore) { /* 위 로그로 충분 */ }
         }
     }
@@ -183,7 +183,7 @@ public final class App extends Application {
             pw.flush();
             return sw.toString();
         } catch (Throwable t) {
-            return "(스택트레이스를 못 읽었어: " + t + ")";
+            return "(스택트레이스를 읽지 못했습니다: " + t + ")";
         } finally {
             try { pw.close(); } catch (Throwable ignore) { /* 무시 */ }
         }

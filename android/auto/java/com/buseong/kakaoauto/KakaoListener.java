@@ -436,7 +436,7 @@ public final class KakaoListener extends NotificationListenerService {
                     RoomBot.onMessage(ctx, m.ref, m.sender, m.text, m.group);
                 }
             } catch (Throwable t) {
-                Log.add(ctx, "방 관리봇 처리 중 오류: " + t);
+                Log.add(ctx, "대화방 관리봇 처리 중 오류: " + t);
             }
             try {
                 if (License.allowed(ctx, Features.MINIGAME)) {
@@ -623,7 +623,7 @@ public final class KakaoListener extends NotificationListenerService {
             //     다르면 단체방. (내가 마지막으로 말한 경우에도 상대 이름으로 판정해야 맞다)
             m.group = !m.room.equals(soleOther);
             m.groupRank = RANK_MESSAGES;
-            m.why = m.group ? "방이름≠발신자(messages)" : "방이름=발신자(messages)";
+            m.why = m.group ? "대화방 이름≠발신자(messages)" : "대화방 이름=발신자(messages)";
         } else if (convo.length() > 0 && title.length() > 0 && !convo.equals(title)) {
             // (4) conversationTitle(방)과 title(발신자)이 다르면 단체방
             m.group = true;
@@ -634,7 +634,7 @@ public final class KakaoListener extends NotificationListenerService {
             //     namePrefix 를 조여놨으니 "시간 : 3시" 같은 1:1 본문은 여기 안 걸린다.
             m.group = true;
             m.groupRank = RANK_HEURISTIC;
-            m.why = "본문 접두 발신자(" + prefixName + ")≠방이름";
+            m.why = "본문 접두 발신자(" + prefixName + ")≠대화방 이름";
         } else {
             // (6) 근거가 하나도 없다 → 1:1 로 추정하되 근거 세기는 0 이다.
             //     같은 방에서 전에 단체방 근거를 본 적이 있으면 handle() 이 그룹으로 되돌린다.
