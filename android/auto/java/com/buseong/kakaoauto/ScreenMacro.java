@@ -24,19 +24,13 @@ import java.util.Locale;
  * 값 요약 규칙(UI_V3 4장): 미설정은 AMBER 로 `설정 필요`, 꺼진 기능은 DIM, 켜진 기능은 TEXT.
  * 색만 봐도 지금 손을 대야 하는 행이 어디인지 판단된다.
  *
- * 진단(사진 전송 실패 기록·화면 기록) 관련 도구는 내정보 탭도 같이 쓰므로 이 클래스에 남겨둔다.
+ * 이미지 전송 실패 기록 보기는 홈·내정보 탭도 같이 쓰므로 이 클래스에 남겨둔다.
  */
 public final class ScreenMacro {
     private ScreenMacro() {}
 
     private static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
-
-    /** 화면 기록이 이보다 오래됐으면 "지난 기록" 이라고 못을 박는다 */
-    private static final long DUMP_STALE_MS = 3 * 60 * 1000L;
-
-    /** dumpSection 에 넘기는 "이번 시도가 아니다" 센티넬 (0 은 "직전 기록 없음" 이라 못 쓴다) */
-    private static final long NO_ATTEMPT = -1L;
 
     /** 잠금 카드의 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
     private static final String LOCK_REFRESH = "구매 내역 새로고침";
@@ -65,16 +59,22 @@ public final class ScreenMacro {
         MainActivity a = (ACT == null) ? null : ACT.get();
         LinearLayout col = (BODY == null) ? null : BODY.get();
         if (a == null || col == null || a.isFinishing()) return;
+        int keep = Theme.accent();
         try {
+            Theme.setAccent(Nav.tabColor(Nav.MACRO));
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
             Log.add(a, "매크로 화면 갱신에 실패했습니다: " + t);
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
     private static void fill(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.title(a, "매크로"));
+        final int fc = Theme.F_MACRO;
+        col.addView(Ui.pageHead(a, "AUTO SEND", "매크로",
+                "대화방별 주기 발송 · 메시지 추적 · 개인 대화 자동응답", fc));
 
         if (!License.allowed(a, Features.MACRO)) {
             fillLocked(a, col);
@@ -88,7 +88,6 @@ public final class ScreenMacro {
 
         final Settings s = Settings.load(a);
 
-        col.addView(Nav.gap(a, 6));
         col.addView(autoCard(a, s));
 
         // 예약 발송의 이미지 전송은 아무도 안 보고 있을 때 실패한다 → 토글 카드 바로 아래 1회만 띄운다
@@ -100,45 +99,43 @@ public final class ScreenMacro {
         LinearLayout content = Ui.group(a);
 
         String msg = msgSummary(s);
-        content.addView(Ui.navRow(a, "메시지", (msg == null) ? "설정 필요" : msg,
+        content.addView(Ui.navRow(a, Icon.BUBBLE, fc, "메시지", (msg == null) ? "설정 필요" : msg,
                 (msg == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "메시지", MacroDetail.message(a)); }
                 }));
 
         String rooms = roomSummary(a, s);
-        content.addView(Ui.navRow(a, "대상 대화방", (rooms == null) ? "설정 필요" : rooms,
+        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", (rooms == null) ? "설정 필요" : rooms,
                 (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
                 }));
 
-        content.addView(Ui.navRow(a, "발송 주기", cycleSummary(s), Theme.TEXT, new Runnable() {
+        content.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 주기", cycleSummary(s), Theme.TEXT, new Runnable() {
             @Override public void run() { Nav.push(a, "발송 주기", MacroDetail.cycle(a)); }
         }));
-        col.addView(content);
-
-        // ── 부가 기능 ──
-        col.addView(Ui.sectionHeader(a, null, "부가 기능"));
-        LinearLayout extra = Ui.group(a);
 
         boolean imgOn = !Settings.IMG_NEVER.equals(s.macro.sendImages);
         boolean imgFail = (lastFail(a) != null);
-        extra.addView(Ui.navRow(a, "이미지 첨부", imageSummary(a, s),
+        content.addView(Ui.navRow(a, Icon.IMAGE, fc, "이미지 첨부", imageSummary(a, s),
                 imgFail ? Theme.AMBER : (imgOn ? Theme.TEXT : Theme.DIM), new Runnable() {
                     @Override public void run() { Nav.push(a, "이미지 첨부", MacroDetail.image(a)); }
                 }));
+        col.addView(content);
 
+        // ── 반응형 발송 (기능마다 색이 다르다) ──
+        col.addView(Ui.sectionHeader(a, null, "반응형 발송"));
+        LinearLayout extra = Ui.group(a);
         int trigOn = 0;
         for (int i = 0; i < s.triggers.size(); i++) {
             if (s.triggers.get(i).enabled) trigOn++;
         }
-        final int trigOnN = trigOn;
-        extra.addView(Ui.navRow(a, "메시지 추적", trigSummary(s), (trigOnN > 0) ? Theme.TEXT : Theme.DIM,
-                new Runnable() {
+        extra.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "메시지 추적", trigSummary(s),
+                (trigOn > 0) ? Theme.SUB : Theme.DIM, (trigOn > 0) ? "사용 중" : null, new Runnable() {
                     @Override public void run() { Nav.push(a, "메시지 추적", MacroDetail.triggers(a)); }
                 }));
-
-        extra.addView(Ui.navRow(a, "개인 대화 자동응답", replySummary(s),
-                s.autoreply.enabled ? Theme.TEXT : Theme.DIM, new Runnable() {
+        extra.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "개인 대화 자동응답", replySummary(s),
+                s.autoreply.enabled ? Theme.SUB : Theme.DIM, s.autoreply.enabled ? "사용 중" : null,
+                new Runnable() {
                     @Override public void run() {
                         Nav.push(a, "개인 대화 자동응답", MacroDetail.autoReply(a));
                     }
@@ -148,7 +145,7 @@ public final class ScreenMacro {
         // ── 제한 ──
         col.addView(Ui.sectionHeader(a, null, "제한"));
         LinearLayout limit = Ui.group(a);
-        limit.addView(Ui.navRow(a, "발송 제한", limitSummary(s), Theme.TEXT, new Runnable() {
+        limit.addView(Ui.navRow(a, Icon.GAUGE, fc, "발송 제한", limitSummary(s), Theme.TEXT, new Runnable() {
             @Override public void run() { Nav.push(a, "발송 제한", MacroDetail.limits(a)); }
         }));
         col.addView(limit);
@@ -166,8 +163,7 @@ public final class ScreenMacro {
 
     /** 미구매 상태. 기능 설명 + 구매 + 구매 내역 재조회만 남긴다. */
     private static void fillLocked(final MainActivity a, LinearLayout col) {
-        col.addView(Nav.gap(a, 6));
-        col.addView(Ui.featureCard(a, Features.label(Features.MACRO),
+        col.addView(Ui.featureCard(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO),
                 Features.descLong(Features.MACRO), Ui.State.OFF, 0L, new Runnable() {
                     @Override public void run() { Gate.openBuy(a, Features.MACRO); }
                 }, null));
@@ -183,49 +179,78 @@ public final class ScreenMacro {
             }
         });
         col.addView(again);
-        col.addView(Ui.sub(a, "결제 후 활성화까지 시간이 소요될 수 있습니다."
-                + " 활성화되지 않으면 위 버튼으로 구매 내역을 다시 조회하십시오."));
+        TextView note = Ui.sub(a, "결제 후 활성화까지 시간이 소요될 수 있습니다."
+                + " 활성화되지 않으면 위 버튼으로 구매 내역을 다시 조회하십시오.");
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
+        np.topMargin = Theme.dp(a, 10);
+        note.setLayoutParams(np);
+        col.addView(note);
     }
 
-    // ── 자동발송 토글 카드 ──────────────────────────────────────────────────
+    // ── 자동발송 머리 카드 ──────────────────────────────────────────────────
 
-    private static LinearLayout autoCard(final MainActivity a, final Settings s) {
-        LinearLayout card = Ui.card(a);
+    /** 자동발송 토글 + 다음 발송 · 금일 발송 · 대상 대화방. 홈도 같은 카드를 쓴다. */
+    static LinearLayout autoCard(final MainActivity a, final Settings s) {
+        final int fc = Theme.F_MACRO;
+        int keep = Theme.accent();
+        Theme.setAccent(fc);
+        try {
+            LinearLayout hero = Ui.hero(a, fc, Icon.SEND, "AUTO SEND", "자동발송",
+                    "카카오톡 알림 답장으로 발송합니다. 대상 대화방의 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+            hero.addView(Ui.heroRule(a, fc));
 
-        final TextView status = Ui.sub(a, statusText(a, s));
-        status.setTextColor(statusColor(a, s));
+            final TextView status = Ui.sub(a, statusText(a, s));
+            status.setTextColor(statusColor(a, s));
 
-        card.addView(Ui.switchRow(a, "자동발송",
-                "카카오톡 알림 답장으로 발송합니다. 대상 대화방의 알림이 1회 이상 수신되어야 발송이 가능합니다.",
-                s.macro.enabled, new Ui.OnToggle() {
-                    @Override public void on(boolean v) {
-                        s.macro.enabled = v;
-                        apply(a, s);
-                        status.setText(statusText(a, s));
-                        status.setTextColor(statusColor(a, s));
-                        Log.add(a, v ? "자동발송을 사용으로 변경했습니다." : "자동발송을 미사용으로 변경했습니다.");
-                    }
-                }));
-        card.addView(Ui.divider(a));
-        card.addView(status);
-        return card;
+            hero.addView(Ui.switchRow(a, s.macro.enabled ? "사용 중" : "사용 안 함", null,
+                    s.macro.enabled, new Ui.OnToggle() {
+                        @Override public void on(boolean v) {
+                            s.macro.enabled = v;
+                            apply(a, s);
+                            Log.add(a, v ? "자동발송을 사용으로 변경했습니다." : "자동발송을 미사용으로 변경했습니다.");
+                            refresh();
+                            MainActivity.refreshHome();
+                        }
+                    }));
+
+            LinearLayout stats = Ui.row(a);
+            stats.setPadding(0, Theme.dp(a, 12), 0, Theme.dp(a, 4));
+            long at = nextAtSafe(a, s);
+            boolean live = s.macro.enabled && at > 0 && statusColor(a, s) == Theme.SUB;
+            stats.addView(Ui.stat(a, "다음 발송", live ? hm(at) : "—", live ? fc : Theme.DIM));
+            stats.addView(Ui.stat(a, "금일 발송", MainActivity.sentToday(a) + "회", Theme.TEXT));
+            int rn = s.macro.roomRefs().size();
+            stats.addView(Ui.stat(a, "대상 대화방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
+            hero.addView(stats);
+
+            LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(MATCH, WRAP);
+            stp.topMargin = Theme.dp(a, 10);
+            status.setLayoutParams(stp);
+            hero.addView(status);
+            return hero;
+        } finally {
+            Theme.setAccent(keep);
+        }
     }
 
-    /** 토글 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
+    private static long nextAtSafe(MainActivity a, Settings s) {
+        try {
+            return Scheduler.nextAt(a);
+        } catch (Throwable t) {
+            return s.macro.nextAt;
+        }
+    }
+
+    /** 머리 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
     private static String statusText(MainActivity a, Settings s) {
-        if (!s.macro.enabled) return "미사용";
+        if (!s.macro.enabled) return "자동발송이 꺼져 있습니다.";
         if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
         if (s.macro.message == null || s.macro.message.trim().length() == 0) {
             return "메시지 미설정 · 발송 보류";
         }
-        long at;
-        try {
-            at = Scheduler.nextAt(a);
-        } catch (Throwable t) {
-            at = s.macro.nextAt;
-        }
+        long at = nextAtSafe(a, s);
         String next = (at > 0) ? hm(at) : "예정 없음";
-        return "다음 발송 " + next + " · 금일 " + MainActivity.sentToday(a) + "회";
+        return "다음 발송 " + next + " · " + cycleSummary(s);
     }
 
     private static int statusColor(MainActivity a, Settings s) {
@@ -480,8 +505,8 @@ public final class ScreenMacro {
         String txt = "⚠ 이미지 전송에 실패했습니다.\n"
                 + dayTime(fail.at) + " · " + room + " — " + Nav.preview(fail.why, 70) + "\n"
                 + "텍스트 발송은 정상 동작합니다.";
-        return Nav.note(a, txt, Theme.RED, "진단 보기", new Runnable() {
-            @Override public void run() { showDiag(a); }
+        return Nav.note(a, txt, Theme.RED, "기록 보기", new Runnable() {
+            @Override public void run() { showFail(a); }
         });
     }
 
@@ -493,189 +518,29 @@ public final class ScreenMacro {
         }
     }
 
-    // ── 이미지 전송 진단 ────────────────────────────────────────────────────
+    // ── 이미지 전송 기록 ────────────────────────────────────────────────────
 
-    /**
-     * 첫 번째 대상 대화방으로 실제로 한 번 전송해 보고, 끝나면 결과 + 화면 기록을 보여준다.
-     * 실패 시점의 카카오톡 화면 구성이 가장 중요한 정보라서 그대로 복사할 수 있게 한다.
-     */
-    static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
-        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
-
-        List<RoomRef> rooms = targets(a, s);
-        if (rooms.isEmpty()) {
-            Nav.confirm(a, "대상 대화방 없음",
-                    "진단은 실제 전송을 1회 수행합니다. 대상 대화방을 1개 이상 설정하십시오.",
-                    "확인", null);
-            return;
-        }
-        if (s.macro.images.isEmpty()) {
-            Nav.confirm(a, "이미지 없음",
-                    "진단은 실제 전송을 1회 수행합니다. 이미지를 1장 이상 선택하십시오.",
-                    "확인", null);
-            return;
-        }
-
-        boolean accOn;
-        try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
-        if (!accOn) {
-            Nav.confirm(a, "접근성 권한 필요",
-                    "진단은 카카오톡 화면을 읽어야 하므로 접근성 권한이 필요합니다.",
-                    "권한 설정", new Runnable() {
-                        @Override public void run() { ImageSender.openSettings(a); }
-                    });
-            return;
-        }
-
-        final RoomRef room = rooms.get(0);
-        final String label = room.label(a);
-        final List<String> uris = new ArrayList<String>(s.macro.images);
-        Nav.confirm(a, "전송 진단 실행",
-                "「" + label + "」 에 이미지 " + uris.size() + "장을 실제로 전송합니다."
-                        + " 성공 시 실제 전송되며, 실패 시 카카오톡 화면 구성이 기록됩니다.\n"
-                        + "전송 중 카카오톡 공유 화면이 표시됩니다.",
-                "진단 시작", new Runnable() {
-            @Override public void run() {
-                final String idle = "전송 진단";
-                // ★ 시작 전 화면 기록 시각을 잡아둔다. 이게 있어야 끝난 뒤에
-                //   "이번에 새로 남은 기록" 과 "지난 기록" 을 구별할 수 있다.
-                final long dumpBefore = dumpAtSafe(a);
-                Nav.busy(btn, true, "진단 중…", idle);
-                Log.add(a, "이미지 전송 진단을 시작했습니다. (" + label + ")");
-                try {
-                    // ★ RoomRef 를 그대로 넘긴다. key() 를 넘기면 계정 구분자가 붙은 문자열이
-                    //   카톡 화면 매칭에 쓰여 어떤 텍스트와도 일치하지 않는다.
-                    ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
-                        @Override public void done(boolean ok, String detail) {
-                            Nav.busy(btn, false, "진단 중…", idle);
-                            diagResult(a, room, ok, detail, dumpBefore);
-                        }
-                    });
-                } catch (Throwable t) {
-                    Nav.busy(btn, false, "진단 중…", idle);
-                    Scheduler.noteImageFail(a, label, "진단을 시작하지 못했습니다. " + t);
-                    Log.add(a, "이미지 전송 진단을 시작하지 못했습니다: " + t);
-                    Ui.toast(a, "진단을 시작하지 못했습니다.");
-                    refresh();
-                    MacroDetail.refresh();
-                }
-            }
+    /** 마지막 이미지 전송 실패 기록 (복사 가능). 전송 방식과 무관하게 Scheduler 기록만 보여준다. */
+    static void showFail(final MainActivity a) {
+        final String all = failText(a);
+        Nav.showText(a, "이미지 전송 기록", all, new Runnable() {
+            @Override public void run() { Nav.copy(a, "이미지 전송 기록", all); }
         });
     }
 
-    /**
-     * 진단 결과 + 화면 기록을 한 창에 보여준다 (복사 가능 · 스크롤 됨).
-     *
-     * @param dumpBefore 진단을 시작하기 <b>전</b>의 화면 기록 시각 (기록이 없었으면 0).
-     *        이보다 새 기록이 생겼을 때만 "이번 시도의 화면" 이라고 말한다.
-     *        지난 덤프를 이번 실패 화면인 것처럼 보여주는 게 제일 나쁜 거짓말이다.
-     */
-    private static void diagResult(final MainActivity a, RoomRef room, boolean ok, String detail,
-                                   long dumpBefore) {
-        String label = room.label(a);
-        // 결과를 기록에 반영한다 — 성공이면 지우고, 실패면 남긴다
-        if (ok) Scheduler.clearImageFail(a, label);
-        else Scheduler.noteImageFail(a, label, detail);
-
-        StringBuilder sb = new StringBuilder(2048);
-        sb.append(ok ? "■ 결과: 성공 (카카오톡에서 실제 전송 여부를 확인하십시오)" : "■ 결과: 실패").append('\n');
-        sb.append("■ 대화방: ").append(label).append('\n');
-        sb.append("■ 상세: ").append((detail == null || detail.length() == 0) ? "없음" : detail).append('\n');
-        sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "허용" : "비허용")
-                .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "허용" : "비허용").append('\n');
-        sb.append('\n');
-        sb.append(dumpSection(a, dumpBefore));
-
-        final String all = sb.toString();
-        Nav.showText(a, ok ? "진단 결과 · 성공" : "진단 결과 · 실패", all, new Runnable() {
-            @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
-        });
-        refresh();
-        MacroDetail.refresh();
-    }
-
-    /**
-     * 저장된 진단(마지막 실패 기록 + 화면 기록) 보기.
-     * 이건 "이번 시도" 라는 개념이 없으니 <b>언제 남은 기록인지</b>를 맨 위에 박는다.
-     */
-    static void showDiag(final MainActivity a) {
-        final String all = diagText(a);
-        long at = dumpAtSafe(a);
-        Nav.showText(a, "이미지 전송 진단 (" + ((at > 0) ? (agoShort(at) + " 기록") : "화면 기록 없음") + ")",
-                all, new Runnable() {
-                    @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
-                });
-    }
-
-    /** showDiag 가 보여주는 본문. 내정보 화면의 [복사] 도 같은 글을 쓴다. */
-    static String diagText(MainActivity a) {
-        StringBuilder sb = new StringBuilder(2048);
+    static String failText(MainActivity a) {
         Scheduler.ImageFail fail = lastFail(a);
         if (fail == null) {
-            sb.append("■ 마지막 이미지 전송 실패: 기록 없음\n")
-              .append("  실패 이력이 없거나, 마지막 전송이 성공하여 기록이 삭제된 상태입니다.\n\n");
-        } else {
-            sb.append("■ 마지막 이미지 전송 실패\n")
-              .append("  시각: ").append(ago(fail.at)).append('\n')
-              .append("  대화방: ").append(fail.room.length() == 0 ? "미확인" : fail.room).append('\n')
-              .append("  사유: ").append(fail.why).append("\n\n");
+            return "■ 마지막 이미지 전송 실패: 기록 없음\n"
+                 + "  실패 이력이 없거나, 마지막 전송이 성공하여 기록이 삭제된 상태입니다.\n";
         }
-        // -1 = "이번 시도" 라는 개념이 없다 (그냥 저장된 걸 보는 중)
-        sb.append(dumpSection(a, NO_ATTEMPT));
-        return sb.toString();
+        return "■ 마지막 이미지 전송 실패\n"
+             + "  시각: " + ago(fail.at) + "\n"
+             + "  대화방: " + (fail.room.length() == 0 ? "미확인" : fail.room) + "\n"
+             + "  사유: " + fail.why + "\n";
     }
 
-    /**
-     * 화면 기록 부분을 글로 만든다.
-     *
-     * @param dumpBefore {@link #NO_ATTEMPT} 이면 "이번 시도" 를 주장하지 않고 언제 것인지만 밝힌다.
-     *        0 이상이면 "시도 직전의 기록 시각" 이라는 뜻이고, 그보다 새 기록일 때만
-     *        "이번 시도" 라고 말한다. 아니면 "이번엔 기록이 안 남았다" 고 못을 박는다.
-     *        (0 도 유효한 값이다 — "전에는 기록이 아예 없었다" 는 뜻이라 새 기록이면 이번 것이다)
-     */
-    private static String dumpSection(MainActivity a, long dumpBefore) {
-        long at = dumpAtSafe(a);
-        String dump;
-        try { dump = KakaoAccessibility.lastDump(a); } catch (Throwable t) { dump = ""; }
-        if (dump == null) dump = "";
-
-        StringBuilder sb = new StringBuilder(1024);
-        boolean have = at > 0 && dump.length() > 0;
-        boolean attempt = dumpBefore >= 0;
-        boolean fresh = have && attempt && at > dumpBefore;
-
-        if (attempt && !fresh) {
-            sb.append("■ 이번 시도의 화면 기록: 없음\n")
-              .append("  카카오톡 공유 화면에 도달하지 못했거나, 접근성 서비스가 화면을 읽기 전에 종료되었습니다.\n");
-            if (have) {
-                sb.append("  ※ 아래는 ").append(agoShort(at))
-                  .append(" 에 남은 지난 기록이며 이번 시도와 무관합니다.\n\n")
-                  .append(dump).append('\n');
-            } else {
-                sb.append("  저장된 화면 기록도 없습니다.\n");
-            }
-            return sb.toString();
-        }
-
-        if (!have) {
-            sb.append("■ 화면 기록: 없음\n")
-              .append("  화면 기록은 전송 실패 시에만 저장됩니다. 실패 이력이 없거나,\n")
-              .append("  접근성 권한이 비활성 상태여서 화면을 읽지 못한 상태일 수 있습니다.\n");
-            return sb.toString();
-        }
-
-        if (fresh) {
-            sb.append("■ 화면 기록 (이번 시도) — ").append(ago(at)).append('\n');
-        } else {
-            sb.append("■ 화면 기록 — ").append(ago(at)).append('\n');
-            if (System.currentTimeMillis() - at > DUMP_STALE_MS) {
-                sb.append("  ※ ").append(agoShort(at))
-                  .append(" 에 기록된 내용이며 현재 화면이 아닙니다.\n");
-            }
-        }
-        sb.append('\n').append(dump).append('\n');
-        return sb.toString();
-    }
+    static boolean hasFail(MainActivity a) { return lastFail(a) != null; }
 
     // ── 지난 시각 표기 ──────────────────────────────────────────────────────
     //  Nav.whenRel 은 "12분 뒤" 처럼 미래용이다. 과거 시각을 넣으면 전부 "곧" 이 나와서
@@ -736,16 +601,6 @@ public final class ScreenMacro {
         c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         return c.getTimeInMillis();
-    }
-
-    /** 화면 기록 시각. 접근성 쪽에서 예외가 나도 UI 가 죽지 않게 감싼다. */
-    static long dumpAtSafe(MainActivity a) {
-        try {
-            long at = KakaoAccessibility.lastDumpAt(a);
-            return (at < 0) ? 0L : at;
-        } catch (Throwable t) {
-            return 0L;
-        }
     }
 
     // ── 저장 ────────────────────────────────────────────────────────────────
