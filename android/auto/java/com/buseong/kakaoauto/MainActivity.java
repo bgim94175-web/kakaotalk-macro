@@ -169,31 +169,20 @@ public final class MainActivity extends Activity {
     // ── 잠금화면 ─────────────────────────────────────────────────────────────
 
     private View buildLock(License.State s) {
-        Theme.setAccent(Theme.GOLD);
+        Theme.setAccent(Theme.PRIMARY);
         final LinearLayout col = Ui.screen(this);
-        col.setPadding(Theme.dp(this, 22), Theme.dp(this, 40), Theme.dp(this, 22), Theme.dp(this, 40));
+        col.setPadding(Theme.dp(this, 16), Theme.dp(this, 24), Theme.dp(this, 16), Theme.dp(this, 32));
 
-        // ── 브랜드 머리 ──
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
-        brand.setGravity(Gravity.CENTER_HORIZONTAL);
-        brand.addView(monogram(this, 76));
-        TextView eb = Ui.eyebrow(this, "KAKAO AUTO · BUSINESS", Theme.GOLD);
-        eb.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams ebp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        ebp.topMargin = Theme.dp(this, 18);
-        brand.addView(eb, ebp);
-        TextView name = Ui.title(this, "카톡 오토");
-        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f);
-        name.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(WRAP, WRAP);
-        np.topMargin = Theme.dp(this, 6);
-        brand.addView(name, np);
-        TextView lead = Ui.sub(this, "카카오톡 대화방 운영을 위한 백그라운드 자동화");
-        lead.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.topMargin = Theme.dp(this, 6);
-        brand.addView(lead, lp);
+        TextView name = Ui.title(this, "라이선스 인증");
+        brand.addView(name);
+        TextView lead = Ui.sub(this, "라이선스 키 1개당 기기 1대가 등록됩니다.");
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        lp.topMargin = Theme.dp(this, 4);
+        lp.bottomMargin = Theme.dp(this, 16);
+        lead.setLayoutParams(lp);
+        brand.addView(lead);
         col.addView(brand, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         // ── 기능 3종 (기능마다 색이 다르다) ──
@@ -361,45 +350,22 @@ public final class MainActivity extends Activity {
         return Ui.scroll(this, col);
     }
 
-    /** 골드 테두리 원 안의 세리프 K */
-    static View monogram(Context c, int sizeDp) {
-        FrameLayout f = new FrameLayout(c);
-        f.setBackground(Theme.ring(Theme.fade(Theme.GOLD, 0.10f), Theme.fade(Theme.GOLD, 0.55f), c));
-        TextView k = new TextView(c);
-        k.setText("K");
-        k.setTypeface(Theme.serif());
-        k.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeDp * 0.42f);
-        k.setTextColor(Theme.GOLD_HI);
-        k.setGravity(Gravity.CENTER);
-        k.setIncludeFontPadding(false);
-        f.addView(k, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
-        int n = Theme.dp(c, sizeDp);
-        f.setLayoutParams(new LinearLayout.LayoutParams(n, n));
-        f.setContentDescription("카톡 오토");
-        return f;
-    }
-
     private static View featChip(Context c, int color, int glyph, String label) {
         LinearLayout l = new LinearLayout(c);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setGravity(Gravity.CENTER_HORIZONTAL);
-        l.setBackground(Theme.sheen(Theme.fade(color, 0.12f), Theme.fade(color, 0.03f), Theme.R_LG,
-                Theme.fade(color, 0.26f), c));
-        int p = Theme.dp(c, 12);
-        l.setPadding(p, Theme.dp(c, 14), p, Theme.dp(c, 12));
-        View ic = Ui.icon(c, glyph, color, 22);
-        l.addView(ic);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        l.setBackground(Theme.round(Theme.CARD, Theme.R_SM, 0, 0, c));
+        int p = Theme.dp(c, 8);
+        l.setPadding(p, p, p, p);
+        l.addView(Ui.accentBar(c, color, 14));
         TextView t = new TextView(c);
         t.setText(label);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         t.setTextColor(Theme.TEXT);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setGravity(Gravity.CENTER);
+        t.setTypeface(Typeface.SANS_SERIF);
         t.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        tp.topMargin = Theme.dp(c, 8);
-        l.addView(t, tp);
+        t.setSingleLine(true);
+        l.addView(t);
         return l;
     }
 
@@ -418,12 +384,12 @@ public final class MainActivity extends Activity {
         r.setLayoutParams(lp);
         TextView n = new TextView(c);
         n.setText(String.valueOf(no));
-        n.setTypeface(Theme.serif());
+        n.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         n.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-        n.setTextColor(Theme.GOLD);
+        n.setTextColor(Theme.PRIMARY);
         n.setGravity(Gravity.CENTER);
         n.setIncludeFontPadding(false);
-        n.setBackground(Theme.ring(0x00000000, Theme.fade(Theme.GOLD, 0.5f), c));
+        n.setBackground(Theme.round(Theme.CARD2, Theme.R_SM, 0, 0, c));
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(Theme.dp(c, 26), Theme.dp(c, 26));
         nlp.rightMargin = Theme.dp(c, 12);
         r.addView(n, nlp);
@@ -505,34 +471,14 @@ public final class MainActivity extends Activity {
     }
 
     private static void fillHome(final MainActivity a, LinearLayout col) {
-        // ── 브랜드 머리 ──
-        LinearLayout head = Ui.row(a);
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        hp.topMargin = Theme.dp(a, 10);
-        hp.bottomMargin = Theme.dp(a, 18);
-        head.setLayoutParams(hp);
-        LinearLayout ht = new LinearLayout(a);
-        ht.setOrientation(LinearLayout.VERTICAL);
-        ht.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        ht.addView(Ui.eyebrow(a, "KAKAO AUTO", Theme.GOLD));
-        TextView title = Ui.title(a, greeting());
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        tp.topMargin = Theme.dp(a, 6);
-        title.setLayoutParams(tp);
-        ht.addView(title);
+        col.addView(Ui.pageHead(a, null, "홈", null, Theme.F_HOME));
         TextView who = Ui.sub(a, Device.deviceName() + " · " + activeSummary(a));
         who.setSingleLine(true);
         who.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        wp.topMargin = Theme.dp(a, 4);
+        wp.bottomMargin = Theme.dp(a, 8);
         who.setLayoutParams(wp);
-        ht.addView(who);
-        head.addView(ht);
-        View mono = monogram(a, 44);
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(a, 44), Theme.dp(a, 44));
-        mp.leftMargin = Theme.dp(a, 12);
-        head.addView(mono, mp);
-        col.addView(head);
+        col.addView(who);
 
         // ── 시작 설정 (필수 단계가 남아 있을 때만) ──
         View setup = setupCard(a);
@@ -556,14 +502,6 @@ public final class MainActivity extends Activity {
 
         col.addView(Ui.sectionHeader(a, null, "최근 활동"));
         col.addView(logCard(a));
-    }
-
-    private static String greeting() {
-        int h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
-        if (h < 5) return "편안한 밤입니다";
-        if (h < 12) return "좋은 아침입니다";
-        if (h < 18) return "좋은 오후입니다";
-        return "편안한 저녁입니다";
     }
 
     // ── 1. 시작 설정 카드 ───────────────────────────────────────────────────
@@ -690,7 +628,7 @@ public final class MainActivity extends Activity {
                 lrp.topMargin = Theme.dp(a, (i == 0) ? 0 : 10);
                 lr.setLayoutParams(lrp);
                 View dot = new View(a);
-                dot.setBackground(Theme.circle((i == 0) ? Theme.GOLD : Theme.LINE2, a));
+                dot.setBackground(Theme.circle((i == 0) ? Theme.PRIMARY : Theme.LINE2, a));
                 LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 5), Theme.dp(a, 5));
                 dp.rightMargin = Theme.dp(a, 10);
                 lr.addView(dot, dp);

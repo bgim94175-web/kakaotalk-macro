@@ -87,37 +87,24 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < screens.length; i++) { screens[i] = null; loaded[i] = false; }
         tab = 0;
 
-        Theme.setAccent(Theme.GOLD);
+        Theme.setAccent(Theme.PRIMARY);
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER_VERTICAL);
-        body.setPadding(Theme.dp(this, 22), Theme.dp(this, 36), Theme.dp(this, 22), Theme.dp(this, 36));
+        body.setPadding(Theme.dp(this, 16), Theme.dp(this, 24), Theme.dp(this, 16), Theme.dp(this, 24));
         body.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
-        brand.setGravity(Gravity.CENTER_HORIZONTAL);
-        brand.addView(monogram(this, 68));
-        TextView eb = Ui.eyebrow(this, "KAKAO ADMIN CONSOLE", Theme.GOLD);
-        eb.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams ebp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        ebp.topMargin = Theme.dp(this, 18);
-        brand.addView(eb, ebp);
         TextView t = Ui.title(this, "관리자 로그인");
-        t.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        tp.topMargin = Theme.dp(this, 6);
-        brand.addView(t, tp);
+        brand.addView(t);
         TextView lead = Ui.sub(this, "라이선스 키 · 주문 · 보안 기록을 관리합니다.");
-        lead.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams lp0 = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp0.topMargin = Theme.dp(this, 4);
-        lp0.bottomMargin = Theme.dp(this, 24);
+        lp0.bottomMargin = Theme.dp(this, 16);
         brand.addView(lead, lp0);
         body.addView(brand, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -248,21 +235,16 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout top = Ui.row(this);
-        View mono = monogram(this, 36);
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(this, 36), Theme.dp(this, 36));
-        mp.rightMargin = Theme.dp(this, 12);
-        top.addView(mono, mp);
 
         LinearLayout nameCol = new LinearLayout(this);
         nameCol.setOrientation(LinearLayout.VERTICAL);
         nameCol.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        nameCol.addView(Ui.eyebrow(this, "KAKAO ADMIN", Theme.GOLD));
         TextView name = new TextView(this);
-        name.setText("카톡 오토 관리자");
+        name.setText("관리자");
         name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f);
         name.setTextColor(Theme.TEXT);
-        name.setTypeface(Theme.serif());
+        name.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -270,7 +252,7 @@ public final class MainActivity extends Activity {
         nameCol.addView(name, np);
         top.addView(nameCol);
 
-        TextView refresh = Ui.btnSm(this, "새로고침", Theme.GOLD, false);
+        TextView refresh = Ui.btnSm(this, "새로고침", Theme.PRIMARY, false);
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         refresh.setLayoutParams(rp);
@@ -463,25 +445,6 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed() {
         if (content != null && tab != 0) { goTab(0); return; }
         super.onBackPressed();
-    }
-
-    /** 골드 테두리 원 안의 세리프 "K" (로그인 · 헤더 표식) */
-    static View monogram(android.content.Context c, int sizeDp) {
-        FrameLayout f = new FrameLayout(c);
-        f.setBackground(Theme.ring(Theme.mix(Theme.BG, Theme.GOLD, 0.10f), Theme.fade(Theme.GOLD, 0.55f), c));
-        int n = Theme.dp(c, sizeDp);
-        f.setLayoutParams(new LinearLayout.LayoutParams(n, n));
-        TextView k = new TextView(c);
-        k.setText("K");
-        k.setTextColor(Theme.GOLD_HI);
-        k.setTypeface(Theme.serif());
-        k.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, n * 0.44f);
-        k.setIncludeFontPadding(false);
-        k.setGravity(Gravity.CENTER);
-        f.addView(k, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        f.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        return f;
     }
 
     private void mt(View v, int dp) {

@@ -54,7 +54,6 @@ public final class Nav {
     public static final int ACCOUNT = 3;
 
     private static final String[] TAB_NAMES = { "홈", "매크로", "봇", "내정보" };
-    private static final int[] TAB_ICONS = { Icon.HOME, Icon.SEND, Icon.BOT, Icon.PERSON };
     private static final int[] TAB_COLORS = { Theme.F_HOME, Theme.F_MACRO, Theme.F_ROOMBOT, Theme.F_ACCOUNT };
 
     /** 탭별 기능 색 (탭 화면의 스위치·버튼·머리말이 이 색을 따른다) */
@@ -111,24 +110,19 @@ public final class Nav {
             item.setContentDescription(TAB_NAMES[i]);
             Ui.press(item);
 
-            // 0: 아이콘 알약 (선택 시 기능 색 옅게 채움), 1: 이름
-            FrameLayout pill = new FrameLayout(a);
-            android.widget.ImageView ic = new android.widget.ImageView(a);
-            ic.setImageDrawable(new Icon(TAB_ICONS[i], Theme.DIM));
-            FrameLayout.LayoutParams icp = new FrameLayout.LayoutParams(Theme.dp(a, 22), Theme.dp(a, 22));
-            icp.gravity = Gravity.CENTER;
-            pill.addView(ic, icp);
-            item.addView(pill, new LinearLayout.LayoutParams(Theme.dp(a, 56), Theme.dp(a, 30)));
+            // 0: 선택 표시 막대, 1: 이름
+            View mark = new View(a);
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 3));
+            mp.bottomMargin = Theme.dp(a, 6);
+            item.addView(mark, mp);
 
             TextView name = new TextView(a);
             name.setText(TAB_NAMES[i]);
-            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
             name.setIncludeFontPadding(false);
             name.setGravity(Gravity.CENTER);
-            name.setLetterSpacing(0.04f);
-            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(WRAP, WRAP);
-            np.topMargin = Theme.dp(a, 4);
-            item.addView(name, np);
+            name.setTypeface(Typeface.SANS_SERIF);
+            item.addView(name, new LinearLayout.LayoutParams(WRAP, WRAP));
 
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { go(idx); }
@@ -290,10 +284,13 @@ public final class Nav {
         row.setMinimumHeight(Theme.dp(a, 58));
         row.setPadding(Theme.dp(a, 4), Theme.dp(a, 4), Theme.dp(a, 16), Theme.dp(a, 4));
 
-        android.widget.ImageView back = new android.widget.ImageView(a);
-        back.setImageDrawable(new Icon(Icon.BACK, Theme.TEXT));
-        int bp = Theme.dp(a, 13);
-        back.setPadding(bp, bp, bp, bp);
+        TextView back = new TextView(a);
+        back.setText("‹");
+        back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        back.setTextColor(Theme.TEXT);
+        back.setGravity(Gravity.CENTER);
+        back.setTypeface(Typeface.SANS_SERIF);
+        back.setIncludeFontPadding(false);
         back.setContentDescription("뒤로");
         back.setClickable(true);
         back.setFocusable(true);
@@ -305,10 +302,9 @@ public final class Nav {
 
         TextView t = new TextView(a);
         t.setText((title == null) ? "" : title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17.5f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
         t.setTextColor(Theme.TEXT);
-        t.setTypeface(Theme.serif());
-        t.setLetterSpacing(-0.01f);
+        t.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         t.setIncludeFontPadding(false);
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.END);
@@ -317,16 +313,13 @@ public final class Nav {
         row.addView(t, tp);
 
         View dot = new View(a);
-        dot.setBackground(Theme.circle(col, a));
-        row.addView(dot, new LinearLayout.LayoutParams(Theme.dp(a, 6), Theme.dp(a, 6)));
+        dot.setBackground(Theme.round(col, 2, 0, 0, a));
+        row.addView(dot, new LinearLayout.LayoutParams(Theme.dp(a, 3), Theme.dp(a, 14)));
 
         barCol.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
 
-        // 기능 색이 가운데서 번지는 헤어라인
         View line = new View(a);
-        line.setBackground(new android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] { Theme.fade(col, 0.55f), Theme.fade(col, 0.12f), Theme.LINE }));
+        line.setBackgroundColor(Theme.LINE);
         barCol.addView(line, new LinearLayout.LayoutParams(MATCH, Math.max(1, Theme.dp(a, 1))));
         return barCol;
     }
@@ -388,19 +381,12 @@ public final class Nav {
             boolean on = (i == cur);
             int col = tabColor(i);
             View pv = item.getChildAt(0);
-            pv.setBackground(on ? Theme.pill(Theme.fade(col, 0.16f), 0, item.getContext()) : null);
-            if (pv instanceof ViewGroup && ((ViewGroup) pv).getChildCount() > 0) {
-                View iv = ((ViewGroup) pv).getChildAt(0);
-                if (iv instanceof android.widget.ImageView) {
-                    android.graphics.drawable.Drawable d = ((android.widget.ImageView) iv).getDrawable();
-                    if (d instanceof Icon) ((Icon) d).setColor(on ? col : Theme.DIM);
-                }
-            }
+            pv.setBackground(on ? Theme.round(col, 2, 0, 0, item.getContext()) : null);
             View nv = item.getChildAt(1);
             if (nv instanceof TextView) {
                 TextView t = (TextView) nv;
                 t.setTextColor(on ? Theme.TEXT : Theme.DIM);
-                t.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                t.setTypeface(on ? Typeface.create("sans-serif", Typeface.BOLD) : Typeface.SANS_SERIF);
             }
         }
     }
@@ -1191,8 +1177,8 @@ public final class Nav {
             Ui.press(r);
 
             View dot = new View(a);
-            dot.setBackground(on ? Theme.ring(Theme.accent(), Theme.fade(Theme.accent(), 0.4f), a)
-                                 : Theme.pill(0x00000000, Theme.LINE2, a));
+            dot.setBackground(on ? Theme.circle(Theme.PRIMARY, a)
+                                 : Theme.ring(0x00000000, Theme.LINE2, a));
             LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
             dp.rightMargin = Theme.dp(a, 12);
             r.addView(dot, dp);
@@ -1203,7 +1189,7 @@ public final class Nav {
             TextView lt = new TextView(a);
             lt.setText(labels[i]);
             lt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-            lt.setTextColor(on ? Theme.accent() : Theme.TEXT);
+            lt.setTextColor(on ? Theme.PRIMARY : Theme.TEXT);
             lt.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             lt.setIncludeFontPadding(false);
             tcol.addView(lt, new LinearLayout.LayoutParams(MATCH, WRAP));
@@ -1284,7 +1270,7 @@ public final class Nav {
                 @Override public void onClick(View v) {
                     checked[idx] = !checked[idx];
                     box.setBackground(checked[idx]
-                            ? Theme.round(Theme.accent(), Theme.R_SM, 0, 0, v.getContext())
+                            ? Theme.round(Theme.PRIMARY, Theme.R_SM, 0, 0, v.getContext())
                             : Theme.round(0x00000000, Theme.R_SM, Theme.LINE2, 1, v.getContext()));
                 }
             });

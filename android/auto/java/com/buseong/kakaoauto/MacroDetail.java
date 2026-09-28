@@ -1,5 +1,6 @@
 package com.buseong.kakaoauto;
 
+import android.graphics.Typeface;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -254,8 +255,8 @@ public final class MacroDetail {
                 cntRow.setLayoutParams(crp);
                 TextView big = new TextView(a);
                 big.setText(have + " / " + Settings.MAX_IMAGES);
-                big.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 22f);
-                big.setTypeface(Theme.serif());
+                big.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f);
+                big.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
                 big.setTextColor(have > 0 ? Theme.TEXT : Theme.DIM);
                 big.setIncludeFontPadding(false);
                 cntRow.addView(big);
