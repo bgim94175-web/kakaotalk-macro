@@ -24,16 +24,26 @@ public final class EngineException extends Exception {
         switch (code) {
             case "not_packaged": return "이 기기용 카카오 엔진이 앱에 포함되어 있지 않습니다.";
             case "engine_start_failed": return "카카오 엔진을 시작하지 못했습니다. (" + getMessage() + ")";
-            case "engine_died": return "카카오 엔진이 중단되었습니다. 다음 발송에서 다시 시작합니다.";
-            case "timeout": return "카카오 서버 응답 시간이 초과되었습니다.";
-            case "not_linked": return "카카오 계정이 연결되어 있지 않습니다.";
-            case "kicked": return "다른 기기가 같은 로그인 슬롯을 사용하여 연결이 해제되었습니다. 카카오 계정을 다시 연결하십시오.";
-            case "reauth_required": return "저장된 카카오 로그인이 만료되었습니다. 카카오 계정을 다시 연결하십시오.";
+            case "engine_died": return "카카오 엔진이 중단되었습니다. (" + detailOrCode() + ")";
+            case "timeout": return "카카오 서버 응답 시간이 초과되었습니다. (" + detailOrCode() + ")";
+            case "not_linked": return "카카오 계정이 연결되어 있지 않습니다. (" + detailOrCode() + ")";
+            case "kicked": return "다른 기기가 같은 로그인 슬롯을 사용하여 연결이 해제되었습니다. (" + detailOrCode() + ")";
+            case "reauth_required": return "저장된 카카오 로그인이 만료되었습니다. (" + detailOrCode() + ")";
             case "rejected": return "카카오 서버가 전송을 거부했습니다. (" + getMessage() + ")";
             case "undelivered":
-                return "카카오 응답에 메시지 번호가 없어 대화방에 전달되지 않았습니다.";
+                return "카카오 응답에 메시지 번호가 없어 대화방에 전달되지 않았습니다. (" + detailOrCode() + ")";
             case "network": return "네트워크 연결을 확인하십시오. (" + getMessage() + ")";
-            default: return getMessage();
+            default:
+                String raw = getMessage();
+                if (raw == null || raw.length() == 0) return code;
+                return raw;
         }
+    }
+
+    /** 라이브러리·카카오가 준 문장. 코드와 같으면 코드만 보여 준다. */
+    private String detailOrCode() {
+        String raw = getMessage();
+        if (raw == null || raw.length() == 0 || raw.equals(code)) return code;
+        return raw;
     }
 }

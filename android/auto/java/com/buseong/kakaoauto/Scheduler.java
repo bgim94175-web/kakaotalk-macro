@@ -562,13 +562,7 @@ public final class Scheduler {
                 final String imgLabel = label;
                 final boolean wantImages = m.imagesThisTime(seq);
                 try {
-                    if (wantImages && ImageSender.blockedInBackground(c, imgRoom, m.images)) {
-                        // 공유창도 안 뜨고 채팅방 첨부 경로의 재료도 없는 백그라운드 상태다.
-                        // 매 주기 같은 실패를 되풀이하는 대신 텍스트만 보내고 이 사실을 하루 1회만 알린다.
-                        // (images 를 같이 넘기는 이유: 채팅방 첨부 경로는 공유창과 무관하게 동작하므로
-                        //  "공유창 불가 확정" 만으로 이미지를 포기하면 실제로 되는 경로를 스스로 닫는다.)
-                        noteImageSkipped(c, imgLabel);
-                    } else if (wantImages) {
+                    if (wantImages) {
                         // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
                         //   여기서 결과를 기록하지 않으면 사진이 안 갔다는 걸 사용자가 영원히 모른다.
                         ImageSender.sendWithResult(c, imgRoom, m.images, new ImageSender.Done() {

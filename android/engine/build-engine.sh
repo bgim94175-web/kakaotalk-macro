@@ -78,6 +78,33 @@ have_lib="$(node -p "require('$HERE/node_modules/agent-messenger/package.json').
 [ "$want_lib" = "$have_lib" ] || die "agent-messenger 버전이 다르다 (package.json $want_lib / 설치 $have_lib). npm ci 를 다시 해줘."
 grep -q "agent-messenger@${want_lib}'" "$HERE/src/main.mjs" || die "src/main.mjs 의 LIB 상수를 agent-messenger@${want_lib} 로 맞춰줘."
 
+# agent-messenger 2.38.0 encodes CHECKIN userId with Number(), so ids above
+# 2^31-1 become a BSON double and the LOCO session never comes up. POST file
+# size is a JS number (int32) while SHIP sends the same size as an int64.
+# Both stay library calls; only the BSON type is corrected. Idempotent.
+python3 - "$HERE/node_modules/agent-messenger/dist/src/platforms/kakaotalk" <<'PY' || die "LOCO BSON 타입 보정 실패"
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+session = root / "protocol/session.js"
+media = root / "protocol/media-uploader.js"
+st = session.read_text()
+old_user = "userId: Number(userId),"
+new_user = "userId: Long.fromString(String(userId)),"
+if old_user in st:
+    st = st.replace(old_user, new_user, 1)
+elif new_user not in st:
+    raise SystemExit("CHECKIN userId site missing")
+session.write_text(st)
+mt = media.read_text()
+old_size = "s: totalSize,"
+new_size = "s: Long.fromNumber(totalSize),"
+if old_size in mt:
+    mt = mt.replace(old_size, new_size, 1)
+elif new_size not in mt:
+    raise SystemExit("POST size site missing")
+media.write_text(mt)
+PY
+
 mkdir -p "$OUT/assets/engine"
 #  주석·공백을 빼고 순수 ASCII 로 만든다 (1MB → 770KB, 기기에서 파싱할 양이 준다).
 #  식별자는 줄이지 않는다 (기기 로그의 스택 트레이스를 읽을 수 있게). 라이선스 고지는 NOTICE.txt 에 있다.

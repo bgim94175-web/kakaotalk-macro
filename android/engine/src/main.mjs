@@ -285,8 +285,11 @@ function status() {
 // ── rooms ───────────────────────────────────────────────────────────────────
 
 function wireChat(ch) {
+  // chat_id must stay a decimal string. A JSON number above 2^53 drops bits and
+  // the photo is then shipped to the wrong room.
+  const chatId = typeof ch.chat_id === 'string' ? ch.chat_id : realLogId(ch.chat_id)
   return {
-    chat_id: ch.chat_id,
+    chat_id: chatId,
     kind: classifyKakaoChat(ch),
     type: ch.type,
     title: ch.title || null,
@@ -362,10 +365,17 @@ function realLogId(v) {
 }
 
 function sendOutcome(res, kind) {
+  const raw = res && res.log_id != null ? String(res.log_id) : ''
   const logId = realLogId(res && res.log_id)
   const status = res && res.status_code != null ? res.status_code : '?'
-  if (!res || res.success !== true || !logId) {
-    throw new EngineError('undelivered', `no message id (status ${status})`, {
+  const accepted = !!(res && res.success === true)
+  if (!res || !accepted || !logId) {
+    const why = !res
+      ? 'empty Kakao response'
+      : !accepted
+        ? `Kakao rejected the image (status ${status}, log_id ${raw || 'none'})`
+        : `Kakao returned no message id (status ${status}, log_id ${raw || 'none'})`
+    throw new EngineError('undelivered', why, {
       serverStatus: typeof (res && res.status_code) === 'number' ? res.status_code : undefined,
     })
   }
@@ -373,14 +383,20 @@ function sendOutcome(res, kind) {
 }
 
 async function sendText(p) {
-  const chatId = need(p, 'chat_id')
+  const chatId = needChatId(p)
   const text = need(p, 'text')
   const res = await withSession((c) => c.sendMessage(chatId, text))
   return sendOutcome(res, 'text')
 }
 
-async function sendImages(p) {
+function needChatId(p) {
   const chatId = need(p, 'chat_id')
+  if (!/^[1-9][0-9]*$/.test(chatId)) throw new EngineError('bad_request', `invalid chat id ${chatId}`)
+  return chatId
+}
+
+async function sendImages(p) {
+  const chatId = needChatId(p)
   const paths = Array.isArray(p.paths) ? p.paths.filter((x) => typeof x === 'string' && x) : []
   if (paths.length < 1 || paths.length > MAX_IMAGES) {
     throw new EngineError('bad_request', `need 1-${MAX_IMAGES} images, got ${paths.length}`)
@@ -391,14 +407,24 @@ async function sendImages(p) {
     if (data.byteLength === 0 || data.byteLength > MAX_IMAGE_BYTES) {
       throw new EngineError('bad_request', `image ${i + 1} is empty or larger than 20 MB`)
     }
-    const ext = (paths[i].split('.').pop() || 'jpg').toLowerCase()
-    photos.push({ data: new Uint8Array(data), filename: `photo-${i + 1}.${ext}` })
+    // ImagePrep always writes JPEG. The library routes on the filename extension
+    // (sendPhoto vs sendMultiPhoto) and reads width/height from the bytes.
+    photos.push({ data, filename: `photo-${i + 1}.jpg` })
   }
+  // Open the LOCO session first so a login/check-in failure is reported as itself,
+  // not as a missing photo message id. sendPhoto / sendMultiPhoto then run the
+  // library upload (SHIP+POST+COMPLETE, or MSHIP+MPOST+FORWARD). No local WRITE.
   if (photos.length === 1) {
-    const res = await withSession((c) => c.sendPhoto(chatId, photos[0].data, photos[0].filename))
+    const res = await withSession(async (c) => {
+      await c.acquireSession()
+      return c.sendPhoto(chatId, photos[0].data, photos[0].filename)
+    })
     return sendOutcome(res, 'photo')
   }
-  const res = await withSession((c) => c.sendMultiPhoto(chatId, photos))
+  const res = await withSession(async (c) => {
+    await c.acquireSession()
+    return c.sendMultiPhoto(chatId, photos)
+  })
   return sendOutcome(res, 'multiphoto')
 }
 

@@ -17,8 +17,8 @@ import java.util.concurrent.Executors;
 /**
  * 발송 흐름(ImageSender · Scheduler)이 엔진을 쓰는 입구.
  *
- * 연결된 방(= {@link RoomLinks} 에 확인된 chat_id 가 있고 카카오 계정이 READY)이면 엔진으로 보내고,
- * 아니면 호출부가 기존 경로(알림 답장 · 접근성)를 그대로 쓴다.
+ * 이미지는 연결된 방(= {@link RoomLinks} 에 확인된 chat_id 가 있고 카카오 계정이 READY)일 때만
+ * 엔진으로 보낸다. 아니면 {@link #unavailableReason} 을 기록하고 끝낸다. 카카오톡 화면은 열지 않는다.
  */
 public final class EngineSend {
     private EngineSend() {}
@@ -32,7 +32,41 @@ public final class EngineSend {
     public static boolean handles(Context c, RoomRef ref) {
         if (c == null || ref == null || !ref.valid()) return false;
         if (!Engine.ready(c)) return false;
-        return RoomLinks.chatIdFor(c, ref) != null;
+        return realChatId(RoomLinks.chatIdFor(c, ref));
+    }
+
+    /**
+     * 엔진으로 보내지 못할 때 이미지 전송 기록에 남길 이유.
+     * 카카오톡을 여는 대신 이 문장을 실패로 보여 준다.
+     */
+    public static String unavailableReason(Context c, RoomRef ref) {
+        if (c == null) return "앱 컨텍스트가 없습니다.";
+        if (!Engine.packaged(c)) return "이 기기용 카카오 엔진이 앱에 포함되어 있지 않습니다.";
+        KakaoEngine.Status st = Engine.get(c).status();
+        if (st.link == KakaoEngine.Link.KICKED) {
+            return "다른 기기가 같은 로그인 슬롯을 사용하여 연결이 해제되었습니다. 카카오 계정을 다시 연결하십시오.";
+        }
+        if (st.link == KakaoEngine.Link.REAUTH) {
+            return "저장된 카카오 로그인이 만료되었습니다. 카카오 계정을 다시 연결하십시오.";
+        }
+        if (st.link != KakaoEngine.Link.READY) {
+            return "카카오 계정이 연결되어 있지 않습니다. 내정보에서 카카오 계정을 연결하십시오.";
+        }
+        String id = (ref == null) ? null : RoomLinks.chatIdFor(c, ref);
+        if (id != null && id.length() > 0 && !realChatId(id)) {
+            return "연결된 카카오 방 번호가 올바르지 않습니다. (" + id + ") 내정보에서 방을 다시 연결하십시오.";
+        }
+        return "이 대화방은 카카오 방과 연결되어 있지 않습니다. 내정보 › 카카오 계정 직접 연결에서 이 방을 연결한 뒤 다시 보내십시오.";
+    }
+
+    /** 양의 십진 방 번호만 발송 대상이다. 빈 값과 {@code "0"} 은 연결이 아니다. */
+    private static boolean realChatId(String id) {
+        if (id == null || id.length() == 0 || id.charAt(0) == '0') return false;
+        for (int i = 0; i < id.length(); i++) {
+            char ch = id.charAt(i);
+            if (ch < '0' || ch > '9') return false;
+        }
+        return true;
     }
 
     /**
@@ -57,7 +91,8 @@ public final class EngineSend {
                     // 로컬 대기열에 넣은 것, 또는 메시지 번호가 없는 카카오 응답은 성공이 아니다.
                     // 여기서 실패하면 알림 답장으로 넘어가지 않는다 — 그 경로는 접수만으로 성공을 보고한다.
                     if (r == null || !NodeEngine.isMessageId(r.logId)) {
-                        throw new EngineException("undelivered", "missing log_id");
+                        throw new EngineException("undelivered",
+                                "missing log_id (got " + (r == null ? "null" : r.logId) + ")");
                     }
                     ok = true;
                     detail = ("multiphoto".equals(r.kind) ? "묶음 사진 " + files.size() + "장" : "사진 1장")
