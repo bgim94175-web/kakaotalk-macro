@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 런처 아이콘 전경 : 말풍선 + 번개 (민트).
+<!-- 런처 아이콘 전경 : 말풍선 + 번개 (샴페인 골드).
      적응형 아이콘 안전영역(54,54 중심 반지름 33) 안에 선 굵기까지 포함해서 들어간다. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -9,12 +9,12 @@
     <!-- 말풍선 -->
     <path
         android:pathData="M42,32h24a12,12 0 0 1 12,12v14a12,12 0 0 1 -12,12h-11l-12,10v-10h-1a12,12 0 0 1 -12,-12v-14a12,12 0 0 1 12,-12z"
-        android:strokeColor="#FF3DDC97"
+        android:strokeColor="#FFD4B27A"
         android:strokeWidth="5"
         android:strokeLineJoin="round"
         android:strokeLineCap="round" />
     <!-- 번개 : 자동 발송 -->
     <path
         android:pathData="M58,39l-13,15h8l-3,12 13,-16h-9z"
-        android:fillColor="#FF3DDC97" />
+        android:fillColor="#FFD4B27A" />
 </vector>
