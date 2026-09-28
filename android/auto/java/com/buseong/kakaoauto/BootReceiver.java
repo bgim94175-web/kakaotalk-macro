@@ -71,6 +71,8 @@ public final class BootReceiver extends BroadcastReceiver {
                     // 하트비트가 먼저다 — 라이선스 확인이 살아나야 기능 게이트가 제대로 열린다
                     Scheduler.ensureHeartbeat(c);
                     Scheduler.ensureScheduled(c);
+                    com.buseong.kakaoauto.engine.LocoInbox.ensure(c);
+                    com.buseong.kakaoauto.engine.LocoInbox.poll(c);
                 } catch (Throwable t) {
                     Log.add(c, "부팅 후 예약을 복구하지 못했습니다: " + t);
                 } finally {

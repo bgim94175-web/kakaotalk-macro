@@ -761,6 +761,7 @@ public final class Settings {
         Settings s = cached;
         if (s == null) s = load(c);
         if (s != null) s.save(c);
+        try { com.buseong.kakaoauto.engine.LocoInbox.ensure(c); } catch (Throwable ignore) { }
     }
 
     /** 라이선스 인증 직후 호출: 설정키가 생겼으니 옛 평문 설정을 옮기고 암호화 저장해둔다. */

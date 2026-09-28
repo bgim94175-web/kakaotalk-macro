@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 
 import com.buseong.kakaoauto.ImageSender;
+import com.buseong.kakaoauto.KakaoAccount;
 import com.buseong.kakaoauto.Log;
 import com.buseong.kakaoauto.RoomRef;
 
@@ -31,7 +32,7 @@ public final class EngineSend {
     /** 이 방을 엔진으로 보낼 수 있나 (네트워크 없음) */
     public static boolean handles(Context c, RoomRef ref) {
         if (c == null || ref == null || !ref.valid()) return false;
-        if (!Engine.ready(c)) return false;
+        if (!KakaoAccount.ready(c) || !Engine.ready(c)) return false;
         return realChatId(RoomLinks.chatIdFor(c, ref));
     }
 
@@ -49,8 +50,8 @@ public final class EngineSend {
         if (st.link == KakaoEngine.Link.REAUTH) {
             return "저장된 카카오 로그인이 만료되었습니다. 카카오 계정을 다시 연결하십시오.";
         }
-        if (st.link != KakaoEngine.Link.READY) {
-            return "카카오 계정이 연결되어 있지 않습니다. 내정보에서 카카오 계정을 연결하십시오.";
+        if (!KakaoAccount.ready(c) || st.link != KakaoEngine.Link.READY) {
+            return "카카오 계정이 등록되어 있지 않습니다. 계정을 등록하고 카카오톡에서 인증을 마치십시오.";
         }
         String id = (ref == null) ? null : RoomLinks.chatIdFor(c, ref);
         if (id != null && id.length() > 0 && !realChatId(id)) {

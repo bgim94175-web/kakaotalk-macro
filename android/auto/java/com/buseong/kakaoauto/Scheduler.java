@@ -528,22 +528,14 @@ public final class Scheduler {
             return;
         }
 
-        // 6) 알림 읽기 권한 — 없으면 알림 답장으로는 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다).
-        //    카카오 계정으로 직접 보낼 수 있는 방이 하나라도 있으면 그 방들만으로 계속한다.
-        final boolean listenerOn = KakaoListener.listenerBound();
-        if (!listenerOn) {
-            List<RoomRef> viaEngine = new ArrayList<RoomRef>();
-            for (int i = 0; i < rooms.size(); i++) {
-                if (EngineSend.handles(c, rooms.get(i))) viaEngine.add(rooms.get(i));
-            }
-            rooms = viaEngine;
+        // 6) 등록된 카카오 계정의 LOCO 세션으로만 보낸다. 알림 답장은 쓰지 않는다.
+        List<RoomRef> viaEngine = new ArrayList<RoomRef>();
+        for (int i = 0; i < rooms.size(); i++) {
+            if (EngineSend.handles(c, rooms.get(i))) viaEngine.add(rooms.get(i));
         }
-        if (!listenerOn && rooms.isEmpty()) {
-            if (KakaoListener.connected(c)) {
-                Log.add(c, "알림 리스너가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
-            } else {
-                Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
-            }
+        rooms = viaEngine;
+        if (rooms.isEmpty()) {
+            Log.add(c, "등록한 카카오 계정으로 보낼 수 있는 대화방이 없습니다. 계정을 등록하고 대화방을 연결하십시오.");
             deferOpenRooms(c, s, now);
             return;
         }
@@ -569,14 +561,10 @@ public final class Scheduler {
             long due = m.dueAt(room);
             if (due > now) continue;
 
-            // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 minNeed 개 이상 쌓인 방에만 보낸다
-            // 카카오 방과 연결된 방은 서버의 실제 대화 기록으로 센다 (알림은 앱이 켜진 뒤 받은 것만 안다)
-            final boolean viaEngine = EngineSend.handles(c, room);
-            int others = viaEngine ? EngineSend.othersSinceMine(c, room) : -1;
-            if (others < 0) try {
-                others = KakaoListener.othersSinceMine(room);
-            } catch (Throwable t) {
-                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. (" + t + ")");
+            // 내 마지막 발송 뒤 남의 새 메시지는 LOCO 기록으로만 센다.
+            int others = EngineSend.othersSinceMine(c, room);
+            if (others < 0) {
+                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. " + EngineSend.unavailableReason(c, room));
             }
             if (others < minNeed) {
                 waiting++;
@@ -587,10 +575,8 @@ public final class Scheduler {
 
             boolean sent = false;
             try {
-                // 알림 답장 세션이 있으면 그걸로 보내고(기존 경로), 없는 방은 카카오 계정으로 직접 보낸다
-                if (listenerOn && KakaoListener.hasSession(room)) sent = KakaoListener.sendTo(c, room, msg);
-                if (!sent && viaEngine) sent = EngineSend.sendText(c, room, msg);
-                if (!sent && !viaEngine && listenerOn) sent = KakaoListener.sendTo(c, room, msg);
+                sent = EngineSend.sendText(c, room, msg);
+                if (!sent) Log.add(c, "「" + label + "」 " + EngineSend.unavailableReason(c, room));
             } catch (Throwable t) {
                 Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }

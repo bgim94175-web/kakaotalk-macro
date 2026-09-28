@@ -21,6 +21,7 @@ final class NodeEngine implements KakaoEngine {
     private static final long T_CONFIRM = 120000L;
     private static final long T_ROOMS = 90000L;
     private static final long T_ACTIVITY = 30000L;
+    private static final long T_RECENT = 30000L;
     private static final long T_TEXT = 30000L;
     private static final long T_IMAGES = 240000L;
     /** 엔진 쪽 LOCO 세션을 쉬게 두는 시간. 매크로 주기(기본 20~40분)보다 길게 잡아 세션을 재사용한다 */
@@ -253,6 +254,29 @@ final class NodeEngine implements KakaoEngine {
             throw new EngineException("bad_request", String.valueOf(t));
         }
         return sendResult(session("send.text", p, T_TEXT));
+    }
+
+    @Override public java.util.List<Inbound> recent(String chatId, String sinceLogId) throws EngineException {
+        offMain();
+        JSONObject p = new JSONObject();
+        try {
+            p.put("chat_id", chatId);
+            if (sinceLogId != null && sinceLogId.length() > 0) p.put("since_log_id", sinceLogId);
+            p.put("count", 20);
+        } catch (Throwable ignore) { }
+        JSONObject r = session("chat.recent", p, T_RECENT);
+        ArrayList<Inbound> out = new ArrayList<Inbound>();
+        JSONArray a = r.optJSONArray("messages");
+        if (a == null) return out;
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject o = a.optJSONObject(i);
+            if (o == null) continue;
+            String id = o.optString("log_id", "");
+            if (!isMessageId(id)) continue;
+            out.add(new Inbound(id, o.optString("author_name", ""), o.optString("message", ""),
+                    o.optBoolean("mine"), toMillis(o.optLong("sent_at"))));
+        }
+        return out;
     }
 
     @Override public ChatActivity activity(String chatId) throws EngineException {

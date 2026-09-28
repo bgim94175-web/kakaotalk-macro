@@ -177,6 +177,25 @@ public interface KakaoEngine {
 
     ChatActivity activity(String chatId) throws EngineException;
 
+    /** 연결된 방에 새로 올라온 메시지. sinceLogId 보다 큰 것만. 알림이 아니라 LOCO 기록이다. */
+    final class Inbound {
+        public final String logId;
+        public final String authorName;
+        public final String text;
+        public final boolean mine;
+        public final long sentAt;
+
+        public Inbound(String logId, String authorName, String text, boolean mine, long sentAt) {
+            this.logId = logId == null ? "" : logId;
+            this.authorName = authorName == null ? "" : authorName;
+            this.text = text == null ? "" : text;
+            this.mine = mine;
+            this.sentAt = sentAt;
+        }
+    }
+
+    java.util.List<Inbound> recent(String chatId, String sinceLogId) throws EngineException;
+
     void addListener(Listener l);
 
     void removeListener(Listener l);

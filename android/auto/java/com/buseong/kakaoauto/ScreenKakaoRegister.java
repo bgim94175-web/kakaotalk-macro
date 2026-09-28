@@ -209,7 +209,9 @@ public final class ScreenKakaoRegister {
                 fail(a, "확인 시간 초과", "인증코드가 만료되었습니다. 처음부터 다시 로그인하십시오.");
                 return;
             default:
-                fail(a, "로그인하지 못했습니다", s.message);
+                String why = (s == null || s.message == null) ? "" : s.message.trim();
+                if (why.length() == 0) why = "카카오 서버가 실패 원인을 주지 않았습니다.";
+                fail(a, "로그인하지 못했습니다", why);
         }
     }
 
@@ -339,7 +341,17 @@ public final class ScreenKakaoRegister {
     }
 
     private static void finishRegistered(MainActivity a, String account) {
+        if (!com.buseong.kakaoauto.engine.Engine.ready(a)) {
+            String err = "";
+            try { err = com.buseong.kakaoauto.engine.Engine.get(a).status().lastError; } catch (Throwable ignore) { }
+            if (err == null || err.trim().length() == 0) {
+                err = "카카오 세션이 저장되지 않았습니다. 다시 로그인하십시오.";
+            }
+            fail(a, "등록하지 못했습니다", err);
+            return;
+        }
         KakaoAccount.complete(a, account);
+        try { com.buseong.kakaoauto.engine.LocoInbox.ensure(a); } catch (Throwable ignore) { }
         Ui.toast(a, "카카오 계정을 등록했습니다.");
         refresh();
         try { Nav.reload(); } catch (Throwable t) { /* 탭은 다음에 다시 그린다 */ }
@@ -369,6 +381,7 @@ public final class ScreenKakaoRegister {
                     Log.add(a, "카카오 연결 해제에 실패했습니다: " + t);
                 }
                 KakaoAccount.clear(a);
+                try { com.buseong.kakaoauto.engine.LocoInbox.ensure(a); } catch (Throwable ignore) { }
                 Log.add(a, "카카오 계정 등록을 해제했습니다.");
                 Ui.toast(a, "등록을 해제했습니다.");
                 refresh();

@@ -193,10 +193,9 @@ public final class Trigger {
             final String destLabel = dest.label(c);
             // 다른 방으로 보내는 트리거는 그 방 세션이 살아있어야 한다 (SPEC 8.4 C).
             // 쿨다운을 소모하지 않고 넘겨서, 그 방 알림이 오면 다음에 정상 발동하게 한다.
-            if (tgt.length() > 0 && !KakaoListener.hasSession(dest)) {
+            if (!com.buseong.kakaoauto.engine.EngineSend.handles(c, dest)) {
                 warn(c, "sess:" + t.id + ":" + dest.key(),
-                        "경쟁사 저격 「" + t.title() + "」 방의 세션이 없습니다. 「" + destLabel
-                                + "」의 카카오톡 알림이 1회 수신되어야 발송이 가능합니다.");
+                        "경쟁사 저격 「" + t.title() + "」 " + com.buseong.kakaoauto.engine.EngineSend.unavailableReason(c, dest));
                 continue;
             }
 
@@ -216,7 +215,7 @@ public final class Trigger {
             final String name = t.title();
             KakaoListener.post(new Runnable() {
                 @Override public void run() {
-                    boolean ok = KakaoListener.sendTo(c, dest, msg);
+                    boolean ok = com.buseong.kakaoauto.engine.EngineSend.sendText(c, dest, msg);
                     if (!ok) {
                         Log.add(c, "경쟁사 저격 「" + name + "」 발송에 실패했습니다. (대상 "
                                 + destLabel + ")");

@@ -185,20 +185,20 @@ public final class ScreenMacro {
 
     // ── 자동발송 머리 카드 ──────────────────────────────────────────────────
 
-    /** 자동발송 토글 + 다음 발송 · 금일 발송 · 방. 홈도 같은 카드를 쓴다. */
+    /** 자동발송 토글 + 다음 발송 · 보낼 방. 홈도 같은 카드를 쓴다. */
     static LinearLayout autoCard(final MainActivity a, final Settings s) {
         final int fc = Theme.F_MACRO;
         int keep = Theme.accent();
         Theme.setAccent(fc);
         try {
             LinearLayout hero = Ui.hero(a, fc, Icon.SEND, "AUTO SEND", "자동발송",
-                    "카카오톡 알림 답장으로 발송합니다. 방의 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+                    "등록한 카카오 계정으로 발송합니다. 연결된 대화방에만 전송됩니다.");
             hero.addView(Ui.heroRule(a, fc));
 
             final TextView status = Ui.sub(a, statusText(a, s));
             status.setTextColor(statusColor(a, s));
 
-            hero.addView(Ui.switchRow(a, s.macro.enabled ? "사용 중" : "사용 안 함", null,
+            hero.addView(Ui.switchRow(a, s.macro.enabled ? "매크로 켜짐" : "매크로 꺼짐", null,
                     s.macro.enabled, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
                             s.macro.enabled = v;
@@ -214,7 +214,6 @@ public final class ScreenMacro {
             long at = nextAtSafe(a, s);
             boolean live = s.macro.enabled && at > 0 && statusColor(a, s) == Theme.SUB;
             stats.addView(Ui.stat(a, "다음 발송", live ? hm(at) : "—", live ? fc : Theme.DIM));
-            stats.addView(Ui.stat(a, "금일 발송", MainActivity.sentToday(a) + "회", Theme.TEXT));
             int rn = s.macro.roomRefs().size();
             stats.addView(Ui.stat(a, "보낼 방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
             hero.addView(stats);
@@ -237,7 +236,7 @@ public final class ScreenMacro {
         }
     }
 
-    /** 머리 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
+    /** 머리 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 주기 요약`. */
     private static String statusText(MainActivity a, Settings s) {
         if (!s.macro.enabled) return "자동발송이 꺼져 있습니다.";
         if (s.macro.roomRefs().isEmpty()) return "보낼 방 미설정 · 발송 보류";
@@ -381,37 +380,50 @@ public final class ScreenMacro {
     private static void doSendNow(final MainActivity a, final Settings s, final TextView btn,
                                  final List<RoomRef> rooms, final String msg) {
         Nav.busy(btn, true, "발송 중…", "즉시 발송");
-        int ok = 0;
-        StringBuilder failed = new StringBuilder();
-        for (int i = 0; i < rooms.size(); i++) {
-            RoomRef room = rooms.get(i);
-            String label = room.label(a);
-            boolean sent = false;
-            try {
-                sent = KakaoListener.sendTo(a, room, msg);
-            } catch (Throwable t) {
-                Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int ok = 0;
+                StringBuilder failed = new StringBuilder();
+                for (int i = 0; i < rooms.size(); i++) {
+                    RoomRef room = rooms.get(i);
+                    String label = room.label(a);
+                    boolean sent = false;
+                    try {
+                        if (!com.buseong.kakaoauto.engine.EngineSend.handles(a, room)) {
+                            Log.add(a, "「" + label + "」 " + com.buseong.kakaoauto.engine.EngineSend.unavailableReason(a, room));
+                        } else {
+                            sent = com.buseong.kakaoauto.engine.EngineSend.sendText(a, room, msg);
+                        }
+                    } catch (Throwable t) {
+                        Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
+                    }
+                    if (sent) {
+                        ok++;
+                    } else {
+                        if (failed.length() > 0) failed.append(", ");
+                        failed.append(label);
+                    }
+                }
+                if (ok > 0) MainActivity.countSent(a, ok);
+                Log.add(a, "즉시 발송 · 성공 " + ok + "건"
+                        + ((failed.length() > 0) ? (" / 실패: " + failed) : ""));
+                final int done = ok;
+                final boolean partial = failed.length() > 0;
+                a.runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        Nav.busy(btn, false, "발송 중…", "즉시 발송");
+                        if (done == 0) {
+                            Ui.toast(a, "발송에 실패했습니다. 활동 로그를 확인하십시오.");
+                        } else if (partial) {
+                            Ui.toast(a, done + "건 발송했습니다. 일부 대화방은 실패했습니다.");
+                        } else {
+                            Ui.toast(a, done + "건 발송했습니다.");
+                        }
+                        refresh();
+                    }
+                });
             }
-            if (sent) {
-                ok++;
-            } else {
-                if (failed.length() > 0) failed.append(", ");
-                failed.append(label);
-            }
-        }
-        if (ok > 0) MainActivity.countSent(a, ok);
-        Log.add(a, "즉시 발송 · 성공 " + ok + "건"
-                + ((failed.length() > 0) ? (" / 실패: " + failed) : ""));
-        Nav.busy(btn, false, "발송 중…", "즉시 발송");
-
-        if (ok == 0) {
-            Ui.toast(a, "발송에 실패했습니다. 활동 로그를 확인하십시오.");
-        } else if (failed.length() > 0) {
-            Ui.toast(a, ok + "건 발송했습니다. 일부 대화방은 실패했습니다.");
-        } else {
-            Ui.toast(a, ok + "건 발송했습니다.");
-        }
-        refresh();
+        }, "macro-send-now").start();
     }
 
     // ── 이미지 선택 결과 (MainActivity.onActivityResult 에서 넘어온다) ──────

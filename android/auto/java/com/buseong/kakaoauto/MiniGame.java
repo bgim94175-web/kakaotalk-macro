@@ -904,7 +904,7 @@ public final class MiniGame {
             remember(rk, msg, now);
             save(c);
         }
-        boolean ok = KakaoListener.sendTo(c, r, msg);
+        boolean ok = com.buseong.kakaoauto.engine.EngineSend.sendText(c, r, msg);
         if (!ok) {
             synchronized (MiniGame.class) {
                 if (sentToday > 0) sentToday = sentToday - 1;

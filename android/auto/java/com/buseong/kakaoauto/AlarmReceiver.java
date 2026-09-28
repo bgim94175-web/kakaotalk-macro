@@ -1,5 +1,7 @@
 package com.buseong.kakaoauto;
 
+import com.buseong.kakaoauto.engine.LocoInbox;
+
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -39,8 +41,9 @@ public final class AlarmReceiver extends BroadcastReceiver {
         final String action = (intent == null || intent.getAction() == null) ? "" : intent.getAction();
         final boolean fire = Scheduler.ACTION_FIRE.equals(action);
         final boolean beat = Scheduler.ACTION_HEARTBEAT.equals(action);
+        final boolean inbox = LocoInbox.ACTION.equals(action);
 
-        if (!fire && !beat) {
+        if (!fire && !beat && !inbox) {
             // 우리 알람이 아니다. 빈 action 도 여기서 막는다 — 예전엔 이게 발송으로 흘러들어갔다.
             android.util.Log.w("KakaoAuto", "우리 알람이 아니라서 무시했어: "
                     + (action.length() == 0 ? "(액션 없음)" : action));
@@ -53,7 +56,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
         } catch (Throwable t) {
             // goAsync 가 안 되면(이론상 없음) 그래도 일은 해야 한다 — 스레드만 띄우고 끝낸다
             Log.add(c, "알람을 비동기로 수신하지 못했습니다: " + t);
-            spawn(c, beat, null);
+            spawn(c, beat, inbox, null);
             return;
         }
 
@@ -76,15 +79,17 @@ public final class AlarmReceiver extends BroadcastReceiver {
             android.util.Log.w("KakaoAuto", "브로드캐스트 타임아웃을 못 걸었어", t);
         }
 
-        spawn(c, beat, finish);
+        spawn(c, beat, inbox, finish);
     }
 
     /** 실제 일은 전부 이 스레드에서. 어떤 경우에도 finish 는 불린다. */
-    private static void spawn(final Context c, final boolean beat, final Runnable finish) {
+    private static void spawn(final Context c, final boolean beat, final boolean inbox, final Runnable finish) {
         Runnable body = new Runnable() {
             @Override public void run() {
                 try {
-                    if (beat) {
+                    if (inbox) {
+                        LocoInbox.poll(c);
+                    } else if (beat) {
                         Scheduler.runHeartbeat(c);
                     } else {
                         Scheduler.runDue(c);
@@ -100,7 +105,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
         };
 
         try {
-            Thread th = new Thread(body, beat ? "alarm-heartbeat" : "alarm-fire");
+            Thread th = new Thread(body, inbox ? "alarm-inbox" : (beat ? "alarm-heartbeat" : "alarm-fire"));
             th.setPriority(Thread.NORM_PRIORITY);
             th.start();
         } catch (Throwable t) {

@@ -312,6 +312,44 @@ async function chatsList(p) {
   return { chats: chats.map(wireChat) }
 }
 
+function cmpLog(a, b) {
+  try {
+    const x = BigInt(a)
+    const y = BigInt(b)
+    return x < y ? -1 : x > y ? 1 : 0
+  } catch {
+    return a < b ? -1 : a > b ? 1 : 0
+  }
+}
+
+// Newer messages in one linked room. The app polls this instead of reading notifications.
+// since_log_id is exclusive. author ids stay strings so values above 2^53 are not rounded.
+async function chatRecent(p) {
+  const chatId = needChatId(p)
+  const since = typeof p.since_log_id === 'string' ? p.since_log_id : ''
+  const count = Math.max(5, Math.min(40, Number(p.count) || 20))
+  const msgs = await withSession((c) => c.getMessages(chatId, { count }))
+  const self = creds ? String(creds.user_id) : ''
+  const out = []
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]
+    const logId = realLogId(m && m.log_id)
+    if (!logId) continue
+    if (since && cmpLog(logId, since) <= 0) continue
+    const authorId = m.author_id == null ? '' : String(m.author_id)
+    out.push({
+      log_id: logId,
+      author_id: authorId,
+      author_name: m.author_name || '',
+      message: typeof m.message === 'string' ? m.message : '',
+      sent_at: m.sent_at || 0,
+      mine: self.length > 0 && authorId === self,
+    })
+  }
+  out.sort((a, b) => cmpLog(a.log_id, b.log_id))
+  return { messages: out }
+}
+
 // How many messages from other people arrived after our own last message
 // (the macro's "only post again after N new messages" rule).
 async function chatActivity(p) {
@@ -444,6 +482,7 @@ const handlers = {
   'session.close': sessionClose,
   'chats.list': chatsList,
   'chat.activity': chatActivity,
+  'chat.recent': chatRecent,
   'send.text': sendText,
   'send.images': sendImages,
 }

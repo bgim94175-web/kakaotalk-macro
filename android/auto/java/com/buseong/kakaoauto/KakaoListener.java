@@ -419,66 +419,8 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 트리거 / 자동응답 / 봇으로 넘긴다. BG 스레드에서만 호출된다. */
     private static void dispatch(Context ctx, Msg m) {
-        // 계정 레지스트리 갱신 (Prefs 를 쓰니까 알림 콜백이 아니라 여기서 한다)
-        try {
-            Accounts.seen(ctx, m.acc, m.selfName);
-        } catch (Throwable t) {
-            Log.add(ctx, "카카오톡 계정 기록 중 오류: " + t);
-        }
-
-        // 판정 근거 로그는 여기서 남긴다 (Log.add 가 Prefs 를 동기로 쓰니까 메인 스레드에서 안 부른다)
-        whyLog(ctx, m);
-
-        // 매크로(트리거·자동응답)
-        try {
-            if (License.allowed(ctx, Features.MACRO)) {
-                try {
-                    // 그룹 여부·내 메시지 여부를 여기서 이미 판정했으니 둘 다 넘긴다
-                    Trigger.onMessage(ctx, m.ref, m.sender, m.text, m.group, m.fromMe);
-                } catch (Throwable t) {
-                    Log.add(ctx, "경쟁사 저격 처리 중 오류: " + t);
-                }
-                // 자동응답은 1:1 전용이다. 여기서 group==false 를 한 번 더 확인한다.
-                if (!m.group && !m.fromMe && safeForAutoReply(ctx, m)) {
-                    try {
-                        AutoReply.onDirectMessage(ctx, m.ref, m.sender, m.text);
-                    } catch (Throwable t) {
-                        Log.add(ctx, "자동응답 처리 중 오류: " + t);
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            Log.add(ctx, "매크로 사용 권한 확인 실패: " + t);
-        }
-
-        // 봇은 내 메시지에 반응하면 자기 말에 자기가 답하는 루프가 생긴다 → 내 메시지는 안 넘긴다
-        if (!m.fromMe) {
-            try {
-                if (License.allowed(ctx, Features.ROOMBOT)) {
-                    RoomBot.onMessage(ctx, m.ref, m.sender, m.text, m.group);
-                }
-            } catch (Throwable t) {
-                Log.add(ctx, "대화방 관리봇 처리 중 오류: " + t);
-            }
-            try {
-                if (License.allowed(ctx, Features.MINIGAME)) {
-                    MiniGame.onMessage(ctx, m.ref, m.sender, m.text, m.group);
-                }
-            } catch (Throwable t) {
-                Log.add(ctx, "미니게임봇 처리 중 오류: " + t);
-            }
-        }
-
-        // 방 캐시는 **디스패치 뒤에** 넣는다.
-        // 자동응답의 "모르는 사람만" 판정이 isKnownRoom() 을 쓰기 때문에,
-        // 먼저 캐시하면 처음 온 사람도 이미 아는 방으로 잡혀서 판정이 항상 거짓이 된다.
-        // 방 목록(방 관리 화면)에는 **믿을 수 있는 방 이름만** 넣는다.
-        // 단체방인데 title 밖에 못 읽은 경우를 넣으면 목록에 멤버 이름이 쌓인다.
-        if (m.roomTrusted) {
-            remember(ctx, m.ref, m.group, m.at);
-        } else {
-            roomSrcWarn(ctx, m);
-        }
+        // 수신·발송·계정 자동 연결은 등록된 카카오 계정의 LOCO 세션만 쓴다.
+        // 알림으로 계정을 만들거나 기능을 돌리지 않는다.
     }
 
     // ── 파싱 ──────────────────────────────────────────────────────────────────
@@ -1129,12 +1071,18 @@ public final class KakaoListener extends NotificationListenerService {
      * 우리가 확인할 방법이 없다. 그래서 호출자가 어느 경로로 보냈는지 로그에 꼭 남겨야 한다.
      */
     public static boolean sendImageTo(Context ctx, String room, Uri uri) {
-        return sendImageTo(ctx, RoomRef.parse(room), uri, lookup(room));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 이미지를 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     /** 계정까지 지정해서 보내는 버전 */
     public static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri) {
-        return sendImageTo(ctx, ref, uri, findSession(ref, false));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 이미지를 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     private static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri, Session s) {
@@ -1352,7 +1300,10 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 구버전 저장값 호환용이다. */
     public static boolean sendTo(Context ctx, String room, String text) {
-        return sendTo(ctx, RoomRef.parse(room), text, lookup(room));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     /**
@@ -1365,8 +1316,10 @@ public final class KakaoListener extends NotificationListenerService {
      * (여러 계정에 같은 이름이 있으면 findSession 이 null 을 돌려주므로 오발송은 없다).
      */
     public static boolean sendTo(Context ctx, RoomRef ref, String text) {
-        boolean crossAcc = (ref != null && ref.isDefault());
-        return sendTo(ctx, ref, text, findSession(ref, crossAcc));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
