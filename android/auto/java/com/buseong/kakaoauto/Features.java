@@ -38,7 +38,7 @@ public final class Features {
 
     /** 한 줄 설명 (카드용) */
     public static String desc(String id) {
-        if (MACRO.equals(id)) return "대화방별 주기 자동발송 · 이미지 첨부 · 메시지추적 · 오픈프로필 자동응답";
+        if (MACRO.equals(id)) return "보낼 방별 쿨타임 발송 · 이미지 첨부 · 경쟁사 저격 · 갠톡 자동응답";
         if (ROOMBOT.equals(id)) return "입/퇴장 인사, 금지어 감지, 도배 감지, 공지 자동안내";
         if (MINIGAME.equals(id)) return "끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹";
         return "";
@@ -47,10 +47,10 @@ public final class Features {
     /** 여러 줄 설명 (구매 유도 다이얼로그용) */
     public static String descLong(String id) {
         if (MACRO.equals(id)) {
-            return "· 대화방별로 다른 메시지를 정해진 주기로 자동 발송\n"
+            return "· 방마다 쿨타임을 정해 자동 발송\n"
                  + "· 이미지 최대 5장 첨부 발송\n"
-                 + "· 특정 메시지가 올라오면 즉시 반응 (메시지 추적)\n"
-                 + "· 오픈프로필로 온 개인톡에 자동응답";
+                 + "· 특정 메시지가 올라오면 즉시 반응 (경쟁사 저격)\n"
+                 + "· 개인톡에 자동응답 (갠톡 자동응답)";
         }
         if (ROOMBOT.equals(id)) {
             return "· 입장/퇴장 인사 자동 발송\n"
@@ -68,10 +68,18 @@ public final class Features {
 
     /** 기능별 대표색 (칩·아이콘 색을 통일하려고) */
     public static int color(String id) {
-        if (MACRO.equals(id)) return Theme.ACCENT;
-        if (ROOMBOT.equals(id)) return Theme.ACCENT2;
-        if (MINIGAME.equals(id)) return Theme.VIOLET;
+        if (MACRO.equals(id)) return Theme.F_MACRO;
+        if (ROOMBOT.equals(id)) return Theme.F_ROOMBOT;
+        if (MINIGAME.equals(id)) return Theme.F_MINIGAME;
         return Theme.SUB;
+    }
+
+    /** 기능별 아이콘 (Icon 글리프) */
+    public static int icon(String id) {
+        if (MACRO.equals(id)) return Icon.SEND;
+        if (ROOMBOT.equals(id)) return Icon.SHIELD;
+        if (MINIGAME.equals(id)) return Icon.DICE;
+        return Icon.SPARK;
     }
 
     /** 구매 웹 기본주소. 끝의 "/" 와 "/buy" 는 떼서 돌려준다. */

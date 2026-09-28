@@ -836,7 +836,7 @@ public final class MiniGame {
         Settings.MiniGameCfg cfg = Settings.minigame(c);
         if (cfg == null) return "설정 확인 불가";
         if (!cfg.enabled) return "꺼짐";
-        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 대상 대화방 없음";
+        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 방 없음";
         int n = 0;
         for (int i = 0; i < Settings.GAMES.length; i++) if (cfg.gameOn(Settings.GAMES[i])) n++;
         return "켜짐 · 대화방 " + cfg.rooms.size() + "개 · 게임 " + n + "종 · 금일 " + today(c) + "건";

@@ -48,6 +48,8 @@ public final class ScreenKeys implements MainActivity.Screen {
         if (rootView != null) return rootView;
 
         LinearLayout page = Ui.screen(a);
+        page.addView(Ui.hero(a, Theme.F_KEYS, Icon.KEY, "LICENSE KEYS", "라이선스 키",
+                "발급 · 기간 연장 · 기기 초기화 · 회수를 관리합니다."));
 
         // 검색
         LinearLayout searchRow = Ui.row(a);
@@ -64,7 +66,7 @@ public final class ScreenKeys implements MainActivity.Screen {
         });
         searchRow.addView(search);
 
-        TextView go = Ui.btnSm(a, "검색", Theme.PRIMARY, true);
+        TextView go = Ui.btnSm(a, "검색", Theme.F_KEYS, true);
         LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         gp.leftMargin = Theme.dp(a, 8);
@@ -77,7 +79,7 @@ public final class ScreenKeys implements MainActivity.Screen {
         page.addView(searchRow);
 
         // 새 키 발급
-        TextView create = Ui.btn(a, "＋  새 키 발급", true);
+        TextView create = Ui.btn(a, "새 키 발급", true);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cp.topMargin = Theme.dp(a, 10);
@@ -87,13 +89,14 @@ public final class ScreenKeys implements MainActivity.Screen {
         });
         page.addView(create);
 
-        countLabel = Ui.label(a, "");
+        LinearLayout countRow = Ui.dotLabel(a, "");
+        countLabel = Ui.dotLabelText(countRow);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Theme.dp(a, 18);
+        lp.topMargin = Theme.dp(a, 20);
         lp.bottomMargin = Theme.dp(a, 8);
-        countLabel.setLayoutParams(lp);
-        page.addView(countLabel);
+        countRow.setLayoutParams(lp);
+        page.addView(countRow);
 
         listBox = Ui.col(a);
         page.addView(listBox);
@@ -194,6 +197,10 @@ public final class ScreenKeys implements MainActivity.Screen {
 
         // 1줄: 키 + 상태
         LinearLayout r1 = Ui.row(a);
+        View kic = Ui.icon(a, Icon.KEY, Theme.fade(Theme.F_KEYS, 0.9f), 15);
+        LinearLayout.LayoutParams kip = new LinearLayout.LayoutParams(Theme.dp(a, 15), Theme.dp(a, 15));
+        kip.rightMargin = Theme.dp(a, 8);
+        r1.addView(kic, kip);
         TextView kv = Ui.monoLine(a, key, 13.5f, Theme.TEXT);
         kv.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));

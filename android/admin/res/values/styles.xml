@@ -1,31 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 사용자앱과 같은 다크 토큰. 강조색만 바이올렛. -->
+<!-- 사용자앱과 같은 밝은 업무용 테마. -->
 <resources>
-    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#FF0B0F14</item>
-        <item name="android:colorBackground">#FF0B0F14</item>
-        <item name="android:statusBarColor">#FF0B0F14</item>
-        <item name="android:navigationBarColor">#FF0B0F14</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorPrimary">#FF0B0F14</item>
-        <item name="android:colorPrimaryDark">#FF0B0F14</item>
-        <item name="android:colorAccent">#FFA78BFA</item>
-        <item name="android:textColorPrimary">#FFEAF0F7</item>
-        <item name="android:textColorSecondary">#FF93A2B5</item>
-        <item name="android:textColorHint">#FF5E6E82</item>
-        <item name="android:textColorHighlight">#66A78BFA</item>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF2F4F6</item>
+        <item name="android:colorBackground">#FFF2F4F6</item>
+        <item name="android:statusBarColor">#FFF2F4F6</item>
+        <item name="android:navigationBarColor">#FFFFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:colorPrimary">#FF3182F6</item>
+        <item name="android:colorPrimaryDark">#FF1B64DA</item>
+        <item name="android:colorAccent">#FF3182F6</item>
+        <item name="android:textColorPrimary">#FF191F28</item>
+        <item name="android:textColorSecondary">#FF4E5968</item>
+        <item name="android:textColorHint">#FF8B95A1</item>
+        <item name="android:textColorHighlight">#663182F6</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
     </style>
 
-    <!-- 다이얼로그용 (Ui.dialog 이 이 스타일로 AlertDialog 를 만든다) -->
-    <style name="AppDialog" parent="@android:style/Theme.Material.Dialog.Alert">
-        <item name="android:windowBackground">#FF151D29</item>
-        <item name="android:colorBackground">#FF151D29</item>
-        <item name="android:colorAccent">#FFA78BFA</item>
-        <item name="android:textColorPrimary">#FFEAF0F7</item>
-        <item name="android:textColorSecondary">#FF93A2B5</item>
+    <style name="AppDialog" parent="@android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowBackground">#FFFFFFFF</item>
+        <item name="android:colorBackground">#FFFFFFFF</item>
+        <item name="android:colorAccent">#FF3182F6</item>
+        <item name="android:textColorPrimary">#FF191F28</item>
+        <item name="android:textColorSecondary">#FF4E5968</item>
     </style>
 </resources>

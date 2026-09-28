@@ -1,23 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 관리자앱 런처 아이콘 전경 : 방패 + 열쇠구멍 (바이올렛).
-     적응형 아이콘 안전영역(54,54 중심 반지름 33) 안에 선 굵기까지 포함해서 들어간다. -->
+<!-- 런처 전경 : 흰 방패. 안전영역 안. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 방패 -->
     <path
-        android:pathData="M54,28l21,8v15c0,13 -8,23 -21,29c-13,-6 -21,-16 -21,-29v-15z"
-        android:strokeColor="#FFA78BFA"
-        android:strokeWidth="5"
-        android:strokeLineJoin="round"
-        android:strokeLineCap="round" />
-    <!-- 열쇠구멍 -->
-    <path
-        android:pathData="M54,46m-6,0a6,6 0 1,0 12,0a6,6 0 1,0 -12,0"
-        android:fillColor="#FFA78BFA" />
-    <path
-        android:pathData="M51,51h6l2,13h-10z"
-        android:fillColor="#FFA78BFA" />
+        android:pathData="M54,30l18,7v14c0,12 -7,21 -18,26c-11,-5 -18,-14 -18,-26v-14z"
+        android:fillColor="#FFFFFFFF" />
 </vector>

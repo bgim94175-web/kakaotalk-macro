@@ -514,7 +514,7 @@ public final class KakaoAccessibility extends AccessibilityService {
      *   → btn_send 의 enabled 가 Y 가 될 때까지 대기 → 탭
      * </pre>
      *
-     * @param room       대상 대화방 (진단·세션 조회용. 화면 매칭에는 {@code ref.name} 만 쓴다.
+     * @param room       방 (진단·세션 조회용. 화면 매칭에는 {@code ref.name} 만 쓴다.
      *                   {@code key()} 를 이름으로 쓰면 "0␁이름" 이 화면에서 절대 안 맞는다 — 문서 7장)
      * @param photoDescs ImageSender 가 만들어 넘기는 <b>사진 desc 후보 목록</b>
      *                   (형식: {@code "사진, 9월 28일 오전 8:20"}). 공백만 무시하고
@@ -547,7 +547,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 sb.append("시도 id: ").append(id).append(" · 전송 흐름: ").append(flowName()).append('\n');
                 sb.append(a11yBlock(ctx));
                 sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
-                sb.append("대상 대화방: \"").append(name).append("\"\n");
+                sb.append("방: \"").append(name).append("\"\n");
                 sb.append(attachBlock());
                 sb.append(env(ctx));
                 sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
@@ -1109,7 +1109,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private void doPick(Scan sc) {
         final String room = targetRoom;
         if (room == null || room.length() == 0) {
-            finish(false, "대상 대화방 이름이 비어 있습니다.");
+            finish(false, "방 이름이 비어 있습니다.");
             return;
         }
         markShareList(sc);
@@ -1465,7 +1465,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         int selectedTotal = 0;
         /** rv_media 밖에 있어 대상에서 제외한 「사진, …」 노드 수 (대화 내용의 사진 말풍선 등) */
         int outsideMedia = 0;
-        /** 대상 대화방 이름을 화면 글자에서 봤나 (검증이 아니라 <b>확인용</b> 표시다) */
+        /** 방 이름을 화면 글자에서 봤나 (검증이 아니라 <b>확인용</b> 표시다) */
         boolean roomNameSeen = false;
         int nodes = 0;
         boolean truncated = false;
@@ -1631,7 +1631,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                         }
                     }
 
-                    // 대상 대화방 이름이 화면에 보이나 — 이 흐름은 방을 검증하지 않으므로
+                    // 방 이름이 화면에 보이나 — 이 흐름은 방을 검증하지 않으므로
                     // 진단에 "확인됨/확인되지 않음" 만 남긴다 (대화방 제목 id 는 미확보 — 문서 8장).
                     if (vis && !a.roomNameSeen && roomS.length() >= 2 && tx.length() > 0) {
                         String txS = squash(tx);
@@ -2244,7 +2244,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         boolean[] g = gotDescs;
         sb.append("첨부 시트: ").append(sawSheet ? "확인됨" : "확인되지 않음")
                 .append(sheetShape.length() == 0 ? "" : (" · " + sheetShape)).append('\n');
-        sb.append("※ 이 흐름은 열려 있는 채팅방이 대상 대화방인지 검증하지 않습니다")
+        sb.append("※ 이 흐름은 열려 있는 채팅방이 지정한 방인지 검증하지 않습니다")
                 .append(" (대화방 제목 view id 미확보 — 문서 8장). 대상 채팅방을 여는 것은 호출 측 책임입니다.\n");
         sb.append("첨부 메뉴 항목: ").append(menuSeen.length() == 0 ? "확인되지 않음" : menuSeen)
                 .append(menuPhotoTapped ? " · 「사진」 입력함" : "").append('\n');
@@ -2577,7 +2577,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 .append(" · 전송 흐름: ").append(flowName()).append('\n');
         sb.append(a11yBlock(this));
         sb.append("실패: ").append(where).append('\n');
-        sb.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        sb.append("방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
         if (mode == M_ATTACH) {
             // 첨부 흐름은 대화방 이름이 아니라 사진 desc 대조가 핵심이다
             sb.append(attachBlock());
@@ -2887,7 +2887,7 @@ public final class KakaoAccessibility extends AccessibilityService {
      */
     private static String openIntentState() {
         String k = targetKey;
-        if (k == null || k.length() == 0) return "확인 불가(대상 대화방 없음)";
+        if (k == null || k.length() == 0) return "확인 불가(방 없음)";
         try {
             // 저장값을 그대로 넘긴다 — 구분자가 있으면 그 계정에서, 없으면 구버전 경로로 찾는다
             return KakaoListener.hasOpenIntent(k)
@@ -3769,7 +3769,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private String buildAttachDump(String where) {
         final StringBuilder out = new StringBuilder(4096);
         dumpHead(out, where);
-        out.append("대상 대화방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
+        out.append("방: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
         String key = (targetKey == null) ? "" : targetKey;
         if (!key.equals((targetRoom == null) ? "" : targetRoom)) {
             out.append("  설정 저장값: \"").append(vis(key))

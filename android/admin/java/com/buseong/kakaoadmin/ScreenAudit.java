@@ -39,6 +39,8 @@ public final class ScreenAudit implements MainActivity.Screen {
         if (rootView != null) return rootView;
 
         LinearLayout page = Ui.screen(a);
+        page.addView(Ui.hero(a, Theme.F_AUDIT, Icon.SHIELD, "SECURITY AUDIT", "보안 기록",
+                "활성화 · 초기화 · 주문 · 보안 경보를 시간순으로 기록합니다. 경보는 적색으로 표시됩니다."));
 
         View seg = Ui.segment(a, Api.AUDIT_KIND_LABELS, 0, new Ui.OnPick() {
             @Override public void pick(int i) { kindIdx = i; load(); }
@@ -63,7 +65,7 @@ public final class ScreenAudit implements MainActivity.Screen {
         });
         searchRow.addView(keyField);
 
-        TextView go = Ui.btnSm(a, "조회", Theme.PRIMARY, true);
+        TextView go = Ui.btnSm(a, "조회", Theme.F_AUDIT, true);
         LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         gp.leftMargin = Theme.dp(a, 8);
@@ -75,13 +77,14 @@ public final class ScreenAudit implements MainActivity.Screen {
         searchRow.addView(go);
         page.addView(searchRow);
 
-        countLabel = Ui.label(a, "");
+        LinearLayout countRow = Ui.dotLabel(a, "");
+        countLabel = Ui.dotLabelText(countRow);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Theme.dp(a, 18);
+        lp.topMargin = Theme.dp(a, 20);
         lp.bottomMargin = Theme.dp(a, 8);
-        countLabel.setLayoutParams(lp);
-        page.addView(countLabel);
+        countRow.setLayoutParams(lp);
+        page.addView(countRow);
 
         listBox = Ui.col(a);
         page.addView(listBox);
@@ -159,6 +162,10 @@ public final class ScreenAudit implements MainActivity.Screen {
         }
 
         LinearLayout r1 = Ui.row(a);
+        View kd = Ui.icon(a, color == Theme.RED ? Icon.WARN : Icon.SHIELD, color, 14);
+        LinearLayout.LayoutParams kdp = new LinearLayout.LayoutParams(Theme.dp(a, 14), Theme.dp(a, 14));
+        kdp.rightMargin = Theme.dp(a, 8);
+        r1.addView(kd, kdp);
         TextView tm = Ui.hint(a, Ui.fmtSec(o.optLong("at", 0)));
         tm.setTypeface(android.graphics.Typeface.MONOSPACE);
         tm.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f);

@@ -446,7 +446,7 @@ public final class RoomBot {
         Settings.RoomBotCfg cfg = Settings.roombot(c);
         if (cfg == null) return "설정 확인 불가";
         if (!cfg.enabled) return "꺼짐";
-        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 대상 대화방 없음";
+        if (cfg.rooms == null || cfg.rooms.isEmpty()) return "설정 필요 · 방 없음";
         return "켜짐 · 대화방 " + cfg.rooms.size() + "개 · 금지어 " + countWords(cfg)
                 + "개 · 금일 " + today(c) + "건";
     }

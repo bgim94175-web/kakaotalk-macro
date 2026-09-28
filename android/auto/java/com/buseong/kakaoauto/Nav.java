@@ -54,6 +54,12 @@ public final class Nav {
     public static final int ACCOUNT = 3;
 
     private static final String[] TAB_NAMES = { "홈", "매크로", "봇", "내정보" };
+    private static final int[] TAB_COLORS = { Theme.F_HOME, Theme.F_MACRO, Theme.F_ROOMBOT, Theme.F_ACCOUNT };
+
+    /** 탭별 기능 색 (탭 화면의 스위치·버튼·머리말이 이 색을 따른다) */
+    public static int tabColor(int tab) {
+        return (tab >= 0 && tab < TAB_COLORS.length) ? TAB_COLORS[tab] : Theme.GOLD;
+    }
 
     private static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
@@ -66,6 +72,8 @@ public final class Nav {
 
     /** 올라가 있는 서브화면들 (아래 → 위). 비어있으면 탭 화면을 보고 있는 것이다. */
     private static final ArrayList<View> SUBS = new ArrayList<View>();
+    /** SUBS 와 짝. 각 서브화면을 만들 때의 기능 색 (닫고 돌아가면 되돌린다) */
+    private static final ArrayList<Integer> SUB_ACCENTS = new ArrayList<Integer>();
 
     /** 지금 보고 있는 탭 */
     public static int current() { return cur; }
@@ -80,7 +88,7 @@ public final class Nav {
 
         LinearLayout barRoot = new LinearLayout(a);
         barRoot.setOrientation(LinearLayout.VERTICAL);
-        barRoot.setBackgroundColor(Theme.CARD);
+        barRoot.setBackgroundColor(Theme.BG2);
 
         View top = new View(a);
         top.setBackgroundColor(Theme.LINE);
@@ -88,7 +96,7 @@ public final class Nav {
 
         LinearLayout row = new LinearLayout(a);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, Theme.dp(a, 6), 0, Theme.dp(a, 8));
+        row.setPadding(Theme.dp(a, 8), Theme.dp(a, 8), Theme.dp(a, 8), Theme.dp(a, 10));
         barRoot.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         for (int i = 0; i < TAB_NAMES.length; i++) {
@@ -96,22 +104,25 @@ public final class Nav {
             LinearLayout item = new LinearLayout(a);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setMinimumHeight(Theme.dp(a, 48));
+            item.setMinimumHeight(Theme.dp(a, 52));
             item.setClickable(true);
             item.setFocusable(true);
+            item.setContentDescription(TAB_NAMES[i]);
             Ui.press(item);
+
+            // 0: 선택 표시 막대, 1: 이름
+            View mark = new View(a);
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 3));
+            mp.bottomMargin = Theme.dp(a, 6);
+            item.addView(mark, mp);
 
             TextView name = new TextView(a);
             name.setText(TAB_NAMES[i]);
-            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
             name.setIncludeFontPadding(false);
             name.setGravity(Gravity.CENTER);
+            name.setTypeface(Typeface.SANS_SERIF);
             item.addView(name, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-            View dot = new View(a);
-            LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 4), Theme.dp(a, 4));
-            dp.topMargin = Theme.dp(a, 5);
-            item.addView(dot, dp);
 
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { go(idx); }
@@ -124,6 +135,7 @@ public final class Nav {
         BAR = new WeakReference<LinearLayout>(row);
         BAR_ROOT = new WeakReference<View>(barRoot);
         SUBS.clear();           // 셸을 다시 만들면 예전 서브화면은 이미 사라졌다
+        SUB_ACCENTS.clear();
         barRoot.setVisibility(View.VISIBLE);
         paintBar();
         return barRoot;
@@ -137,6 +149,8 @@ public final class Nav {
         if (tab < 0 || tab > ACCOUNT) tab = HOME;
         cur = tab;
         SUBS.clear();           // 탭을 옮기면 서브화면 스택은 초기화된다
+        SUB_ACCENTS.clear();
+        Theme.setAccent(tabColor(tab));
         setBarVisible(true);
         paintBar();
 
@@ -163,18 +177,24 @@ public final class Nav {
         try {
             // 탭 화면과 그 위에 쌓인 서브화면을 같이 갱신한다.
             // 시스템 설정(권한 등)을 다녀온 뒤 서브화면만 옛 상태로 남는 문제가 있었다.
+            // 탭 화면은 탭 색으로 다시 채우고, 서브화면(Pane)은 각자 기억한 색으로 채운다
+            Theme.setAccent(tabColor(cur));
             if (cur == HOME) MainActivity.refreshHome();
             else if (cur == MACRO) { ScreenMacro.refresh(); MacroDetail.refresh(); }
             else if (cur == BOT) { ScreenBot.refresh(); BotDetail.refresh(); }
             else ScreenAccount.refresh();
+            Setup.refresh();
         } catch (Throwable t) {
             Log.add(a, "화면 갱신 실패: " + t);
+        } finally {
+            restoreAccent();
         }
     }
 
     /** 잠금화면으로 돌아갈 때 참조를 끊는다 (액티비티 누수 방지) */
     public static void detach() {
         SUBS.clear();
+        SUB_ACCENTS.clear();
         ACT = null;
         HOST = null;
         BAR = null;
@@ -215,6 +235,7 @@ public final class Nav {
             return;
         }
         SUBS.add(wrap);
+        SUB_ACCENTS.add(Integer.valueOf(Theme.accent()));
         setBarVisible(false);
 
         // 전환은 알파 페이드만 (밀고 당기는 애니메이션은 라이브러리 없이 하면 더 어색하다)
@@ -230,13 +251,21 @@ public final class Nav {
     public static boolean pop() {
         if (SUBS.isEmpty()) return false;
         View top = SUBS.remove(SUBS.size() - 1);
+        if (!SUB_ACCENTS.isEmpty()) SUB_ACCENTS.remove(SUB_ACCENTS.size() - 1);
         try {
             if (top.getParent() instanceof ViewGroup) ((ViewGroup) top.getParent()).removeView(top);
         } catch (Throwable t) {
             Log.add(top.getContext(), "서브화면 닫기 실패: " + t);
         }
         if (SUBS.isEmpty()) setBarVisible(true);
+        restoreAccent();
         return true;
+    }
+
+    /** 지금 맨 위에 보이는 화면의 기능 색으로 되돌린다 */
+    private static void restoreAccent() {
+        if (!SUB_ACCENTS.isEmpty()) Theme.setAccent(SUB_ACCENTS.get(SUB_ACCENTS.size() - 1).intValue());
+        else Theme.setAccent(tabColor(cur));
     }
 
     /** 서브화면에 있는가 (탭바 숨김 판단) */
@@ -244,6 +273,7 @@ public final class Nav {
 
     /** 서브화면 상단 바: `‹ 제목`. 뒤로 영역은 48dp 정사각. */
     private static LinearLayout subBar(final MainActivity a, String title) {
+        final int col = Theme.accent();
         LinearLayout barCol = new LinearLayout(a);
         barCol.setOrientation(LinearLayout.VERTICAL);
         barCol.setBackgroundColor(Theme.BG);
@@ -251,14 +281,15 @@ public final class Nav {
         LinearLayout row = new LinearLayout(a);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(Theme.dp(a, 56));
+        row.setMinimumHeight(Theme.dp(a, 58));
         row.setPadding(Theme.dp(a, 4), Theme.dp(a, 4), Theme.dp(a, 16), Theme.dp(a, 4));
 
         TextView back = new TextView(a);
         back.setText("‹");
-        back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
+        back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         back.setTextColor(Theme.TEXT);
         back.setGravity(Gravity.CENTER);
+        back.setTypeface(Typeface.SANS_SERIF);
         back.setIncludeFontPadding(false);
         back.setContentDescription("뒤로");
         back.setClickable(true);
@@ -271,16 +302,19 @@ public final class Nav {
 
         TextView t = new TextView(a);
         t.setText((title == null) ? "" : title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
         t.setTextColor(Theme.TEXT);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setLetterSpacing(-0.01f);
+        t.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         t.setIncludeFontPadding(false);
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, WRAP, 1f);
         tp.leftMargin = Theme.dp(a, 2);
         row.addView(t, tp);
+
+        View dot = new View(a);
+        dot.setBackground(Theme.round(col, 2, 0, 0, a));
+        row.addView(dot, new LinearLayout.LayoutParams(Theme.dp(a, 3), Theme.dp(a, 14)));
 
         barCol.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
 
@@ -345,15 +379,15 @@ public final class Nav {
             LinearLayout item = (LinearLayout) child;
             if (item.getChildCount() < 2) continue;
             boolean on = (i == cur);
-            View nv = item.getChildAt(0);
+            int col = tabColor(i);
+            View pv = item.getChildAt(0);
+            pv.setBackground(on ? Theme.round(col, 2, 0, 0, item.getContext()) : null);
+            View nv = item.getChildAt(1);
             if (nv instanceof TextView) {
                 TextView t = (TextView) nv;
-                t.setTextColor(on ? Theme.ACCENT : Theme.DIM);
-                t.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                t.setTextColor(on ? Theme.TEXT : Theme.DIM);
+                t.setTypeface(on ? Typeface.create("sans-serif", Typeface.BOLD) : Typeface.SANS_SERIF);
             }
-            View dot = item.getChildAt(1);
-            dot.setBackground(on ? Theme.circle(Theme.ACCENT, item.getContext()) : null);
-            dot.setVisibility(on ? View.VISIBLE : View.INVISIBLE);
         }
     }
 
@@ -619,7 +653,7 @@ public final class Nav {
     public static LinearLayout note(Context c, String text, int color, String btnLabel, final Runnable onTap) {
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(Theme.round(Theme.fade(color, 0.10f), Theme.R_MD, Theme.fade(color, 0.24f), 1, c));
+        box.setBackground(Theme.sheen(Theme.fade(color, 0.13f), Theme.fade(color, 0.05f), Theme.R_MD, Theme.fade(color, 0.28f), c));
         int p = Theme.dp(c, 14);
         box.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -636,6 +670,7 @@ public final class Nav {
         if (btnLabel != null && btnLabel.length() > 0) {
             TextView b = Ui.btn(c, btnLabel, false);
             b.setTextColor(color);
+            b.setBackground(Theme.round(Theme.fade(color, 0.10f), Theme.R_MD, Theme.fade(color, 0.35f), 1, c));
             LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
             bp.topMargin = Theme.dp(c, 12);
             b.setLayoutParams(bp);
@@ -1142,8 +1177,8 @@ public final class Nav {
             Ui.press(r);
 
             View dot = new View(a);
-            dot.setBackground(on ? Theme.pill(Theme.ACCENT, 0, a)
-                                 : Theme.pill(0x00000000, Theme.LINE2, a));
+            dot.setBackground(on ? Theme.circle(Theme.PRIMARY, a)
+                                 : Theme.ring(0x00000000, Theme.LINE2, a));
             LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
             dp.rightMargin = Theme.dp(a, 12);
             r.addView(dot, dp);
@@ -1154,7 +1189,7 @@ public final class Nav {
             TextView lt = new TextView(a);
             lt.setText(labels[i]);
             lt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-            lt.setTextColor(on ? Theme.ACCENT : Theme.TEXT);
+            lt.setTextColor(on ? Theme.PRIMARY : Theme.TEXT);
             lt.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             lt.setIncludeFontPadding(false);
             tcol.addView(lt, new LinearLayout.LayoutParams(MATCH, WRAP));
@@ -1235,7 +1270,7 @@ public final class Nav {
                 @Override public void onClick(View v) {
                     checked[idx] = !checked[idx];
                     box.setBackground(checked[idx]
-                            ? Theme.round(Theme.ACCENT, Theme.R_SM, 0, 0, v.getContext())
+                            ? Theme.round(Theme.PRIMARY, Theme.R_SM, 0, 0, v.getContext())
                             : Theme.round(0x00000000, Theme.R_SM, Theme.LINE2, 1, v.getContext()));
                 }
             });

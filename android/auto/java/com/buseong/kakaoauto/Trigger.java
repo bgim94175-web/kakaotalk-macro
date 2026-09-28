@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * 메시지 추적 = 키워드 트리거 엔진 (SPEC 8.4 C).
+ * 경쟁사 저격 = 키워드 트리거 엔진 (SPEC 8.4 C).
  *
  * 규칙 모델은 {@link Settings.TriggerCfg} 다. 이 클래스는 **판정 + 실행**만 한다.
  *   판정 순서: 활성 → 방 필터 → 내 메시지 필터 → 패턴 매칭 → 1회발동/쿨다운 → 치환 → 랜덤 지연 → 발송
@@ -159,7 +159,7 @@ public final class Trigger {
             // 정규식이 깨진 트리거는 건너뛰되 사용자에게 알린다
             if (Settings.MODE_REGEX.equals(t.mode) && compiled(t.pattern, t.ignoreCase) == null) {
                 warn(c, "regex:" + t.id,
-                        "메시지 추적 「" + t.title() + "」 정규식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
+                        "경쟁사 저격 「" + t.title() + "」 정규식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
                 continue;
             }
 
@@ -187,7 +187,7 @@ public final class Trigger {
             }
             if (dest == null || !dest.valid()) {
                 warn(c, "dest:" + t.id,
-                        "메시지 추적 「" + t.title() + "」 대상 대화방이 지정되지 않아 건너뛰었습니다.");
+                        "경쟁사 저격 「" + t.title() + "」 방이 지정되지 않아 건너뛰었습니다.");
                 continue;
             }
             final String destLabel = dest.label(c);
@@ -195,7 +195,7 @@ public final class Trigger {
             // 쿨다운을 소모하지 않고 넘겨서, 그 방 알림이 오면 다음에 정상 발동하게 한다.
             if (tgt.length() > 0 && !KakaoListener.hasSession(dest)) {
                 warn(c, "sess:" + t.id + ":" + dest.key(),
-                        "메시지 추적 「" + t.title() + "」 대상 대화방의 세션이 없습니다. 「" + destLabel
+                        "경쟁사 저격 「" + t.title() + "」 방의 세션이 없습니다. 「" + destLabel
                                 + "」의 카카오톡 알림이 1회 수신되어야 발송이 가능합니다.");
                 continue;
             }
@@ -203,7 +203,7 @@ public final class Trigger {
             final String msg = t.render(roomName, who, text, now);
             if (msg == null || msg.trim().length() == 0) {
                 warn(c, "empty:" + t.id,
-                        "메시지 추적 「" + t.title() + "」 발송할 메시지가 비어 있어 건너뛰었습니다.");
+                        "경쟁사 저격 「" + t.title() + "」 발송할 메시지가 비어 있어 건너뛰었습니다.");
                 continue;
             }
 
@@ -218,13 +218,13 @@ public final class Trigger {
                 @Override public void run() {
                     boolean ok = KakaoListener.sendTo(c, dest, msg);
                     if (!ok) {
-                        Log.add(c, "메시지 추적 「" + name + "」 발송에 실패했습니다. (대상 "
+                        Log.add(c, "경쟁사 저격 「" + name + "」 발송에 실패했습니다. (대상 "
                                 + destLabel + ")");
                     }
                 }
             }, wait);
 
-            Log.add(c, "메시지 추적 「" + name + "」 감지 · 「" + roomLabel + "」 → 「" + destLabel + "」 "
+            Log.add(c, "경쟁사 저격 「" + name + "」 감지 · 「" + roomLabel + "」 → 「" + destLabel + "」 "
                     + (wait <= 0 ? "즉시" : (wait / 1000) + "초 후") + " 발송 예약");
         }
 
@@ -458,7 +458,7 @@ public final class Trigger {
                     }
                 }
             } catch (Throwable t) {
-                Log.add(c, "메시지 추적 발동 기록이 손상되어 초기화했습니다. (" + t + ")");
+                Log.add(c, "경쟁사 저격 발동 기록이 손상되어 초기화했습니다. (" + t + ")");
                 CD.clear();
                 ONCE.clear();
             }
@@ -494,7 +494,7 @@ public final class Trigger {
 
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
-            Log.add(c, "메시지 추적 발동 기록을 저장하지 못했습니다. (" + t + ")");
+            Log.add(c, "경쟁사 저격 발동 기록을 저장하지 못했습니다. (" + t + ")");
         }
     }
 }

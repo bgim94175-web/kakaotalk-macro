@@ -1,66 +1,87 @@
 package com.buseong.kakaoadmin;
 
 import android.content.Context;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 
 /**
- * 디자인 토큰. 사용자앱(KakaoAuto)의 Theme 과 **값이 완전히 같다** — 패키지만 다르다.
- * 다른 점은 하나뿐: 관리자앱은 주 액센트를 VIOLET 으로 쓴다(PRIMARY), 민트(ACCENT)는 보조.
- *
- * 화면 코드에 색상 리터럴(0xFF...)을 직접 박지 마라. 톤이 깨진다.
+ * 디자인 토큰 (UI v4b · docs/UI_V4.md). 사용자앱과 같은 밝은 업무용 톤.
+ * 스위치·주 버튼·체크는 {@link #PRIMARY}. 탭 색(F_*)은 칩·왼쪽 막대에만 쓴다.
  */
 public final class Theme {
     private Theme() {}
 
-    // ── 배경 계층 (어두운 데서 밝은 쪽으로)
-    public static final int BG    = 0xFF0B0F14;
-    public static final int BG2   = 0xFF111823;
-    public static final int CARD  = 0xFF151D29;
-    public static final int CARD2 = 0xFF1B2533;
+    public static final int BG    = 0xFFF2F4F6;
+    public static final int BG2   = 0xFFFFFFFF;
+    public static final int CARD  = 0xFFFFFFFF;
+    public static final int CARD2 = 0xFFF2F4F6;
 
-    // ── 보더 (흰색 알파)
-    public static final int LINE  = 0x14FFFFFF;
-    public static final int LINE2 = 0x22FFFFFF;
+    public static final int LINE  = 0xFFE5E8EB;
+    public static final int LINE2 = 0xFFD1D6DB;
 
-    // ── 글자
-    public static final int TEXT = 0xFFEAF0F7;
-    public static final int SUB  = 0xFF93A2B5;
-    public static final int DIM  = 0xFF5E6E82;
+    public static final int TEXT = 0xFF191F28;
+    public static final int SUB  = 0xFF4E5968;
+    public static final int DIM  = 0xFF8B95A1;
 
-    // ── 액센트 (사용자앱과 같은 값)
-    public static final int ACCENT  = 0xFF3DDC97;
-    public static final int ACCENT2 = 0xFF2BB4F0;
-    public static final int AMBER   = 0xFFFFC65C;
-    public static final int RED     = 0xFFFF6B6B;
-    public static final int VIOLET  = 0xFFA78BFA;
-    public static final int ON_ACCENT = 0xFF07130D;
+    public static final int PRIMARY = 0xFF3182F6;
+    public static final int GOLD    = PRIMARY;
+    public static final int GOLD_HI = TEXT;
+    /** 정상 · 활성 */
+    public static final int ACCENT  = 0xFF087F5B;
+    public static final int ACCENT2 = 0xFF4E5968;
+    public static final int AMBER   = 0xFFE67700;
+    public static final int RED     = 0xFFE03131;
+    public static final int VIOLET  = 0xFF5F3DC4;
+    public static final int ON_ACCENT = 0xFFFFFFFF;
 
-    // ── 관리자앱 주색 (사용자앱과 구분하려고 바이올렛)
-    public static final int PRIMARY    = VIOLET;
-    public static final int ON_PRIMARY = 0xFF170B2E;
+    public static final int ON_PRIMARY = 0xFFFFFFFF;
 
-    // ── 라운드 반경 (dp)
-    public static final int R_SM = 10;
-    public static final int R_MD = 14;
-    public static final int R_LG = 20;
-    public static final int R_XL = 26;
+    public static final int F_KEYS     = PRIMARY;
+    public static final int F_ORDERS   = 0xFF087F5B;
+    public static final int F_DEPOSIT  = 0xFF0B7285;
+    public static final int F_AUDIT    = 0xFF5F3DC4;
+    public static final int F_SETTINGS = 0xFF495057;
 
-    /** dp → px */
+    public static final int P_MACRO    = 0xFF1B64DA;
+    public static final int P_ROOMBOT  = 0xFF087F5B;
+    public static final int P_MINIGAME = 0xFFC2255C;
+
+    public static int feature(String id) {
+        if ("macro".equals(id)) return P_MACRO;
+        if ("roombot".equals(id)) return P_ROOMBOT;
+        if ("minigame".equals(id)) return P_MINIGAME;
+        return ACCENT2;
+    }
+
+    public static final int R_SM = 4;
+    public static final int R_MD = 8;
+    public static final int R_LG = 8;
+    public static final int R_XL = 12;
+
+    private static int accent = PRIMARY;
+
+    public static int accent() { return accent; }
+
+    public static void setAccent(int color) { accent = (color == 0) ? PRIMARY : color; }
+
+    /** 굵은 산세리프. 세리프는 쓰지 않는다. */
+    public static Typeface serif() {
+        return Typeface.create("sans-serif", Typeface.BOLD);
+    }
+
     public static int dp(Context c, float v) {
         if (c == null || c.getResources() == null) return (int) (v * 3f + 0.5f);
         return (int) (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
                 c.getResources().getDisplayMetrics()) + 0.5f);
     }
 
-    /** sp → px (글자 크기는 setTextSize(COMPLEX_UNIT_SP,..) 를 쓰고, 이건 여백 계산용) */
     public static int sp(Context c, float v) {
         if (c == null || c.getResources() == null) return (int) (v * 3f + 0.5f);
         return (int) (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v,
                 c.getResources().getDisplayMetrics()) + 0.5f);
     }
 
-    /** 라운드 사각형. strokeColor 0 또는 strokeDp 0 이면 보더 없음. */
     public static GradientDrawable round(int fill, int radiusDp, int strokeColor, int strokeDp, Context c) {
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.RECTANGLE);
@@ -70,7 +91,11 @@ public final class Theme {
         return g;
     }
 
-    /** 완전 둥근 pill. stroke 0 이면 보더 없음. */
+    /** 단색 면. 그라데이션은 그리지 않는다. */
+    public static GradientDrawable sheen(int from, int to, int radiusDp, int strokeColor, Context c) {
+        return round(to, radiusDp, 0, 0, c);
+    }
+
     public static GradientDrawable pill(int fill, int stroke, Context c) {
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.RECTANGLE);
@@ -80,7 +105,6 @@ public final class Theme {
         return g;
     }
 
-    /** 원형 (토글 노브, 점 표시 등) */
     public static GradientDrawable circle(int fill, Context c) {
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
@@ -88,11 +112,25 @@ public final class Theme {
         return g;
     }
 
-    /** 색을 지정한 불투명도로 낮춘다. ratio 0~1 */
+    public static GradientDrawable ring(int fill, int stroke, Context c) {
+        GradientDrawable g = circle(fill, c);
+        if (stroke != 0) g.setStroke(Math.max(1, dp(c, 1)), stroke);
+        return g;
+    }
+
     public static int fade(int color, float ratio) {
         if (ratio < 0f) ratio = 0f;
         if (ratio > 1f) ratio = 1f;
         int a = (int) (((color >>> 24) & 0xFF) * ratio + 0.5f);
         return (a << 24) | (color & 0x00FFFFFF);
+    }
+
+    public static int mix(int a, int b, float t) {
+        if (t < 0f) t = 0f;
+        if (t > 1f) t = 1f;
+        int r = (int) (((a >> 16) & 0xFF) * (1 - t) + ((b >> 16) & 0xFF) * t + 0.5f);
+        int g = (int) (((a >> 8) & 0xFF) * (1 - t) + ((b >> 8) & 0xFF) * t + 0.5f);
+        int bl = (int) ((a & 0xFF) * (1 - t) + (b & 0xFF) * t + 0.5f);
+        return 0xFF000000 | (r << 16) | (g << 8) | bl;
     }
 }

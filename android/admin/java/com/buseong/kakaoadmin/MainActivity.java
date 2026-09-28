@@ -31,6 +31,8 @@ public final class MainActivity extends Activity {
     }
 
     private static final String[] TABS = { "키", "주문", "기록", "설정" };
+    private static final int[] TAB_GLYPHS = { Icon.KEY, Icon.RECEIPT, Icon.SHIELD, Icon.GEAR };
+    private static final int[] TAB_COLORS = { Theme.F_KEYS, Theme.F_ORDERS, Theme.F_AUDIT, Theme.F_SETTINGS };
 
     private FrameLayout root;
     private FrameLayout content;
@@ -85,31 +87,27 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < screens.length; i++) { screens[i] = null; loaded[i] = false; }
         tab = 0;
 
+        Theme.setAccent(Theme.PRIMARY);
+
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER_VERTICAL);
-        body.setPadding(Theme.dp(this, 22), Theme.dp(this, 40), Theme.dp(this, 22), Theme.dp(this, 40));
+        body.setPadding(Theme.dp(this, 16), Theme.dp(this, 24), Theme.dp(this, 16), Theme.dp(this, 24));
         body.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // 로고 자리 — 바이올렛 점 + 이름
-        LinearLayout brand = Ui.row(this);
-        View dot = new View(this);
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(this, 10), Theme.dp(this, 10));
-        dp.rightMargin = Theme.dp(this, 9);
-        dot.setLayoutParams(dp);
-        dot.setBackground(Theme.circle(Theme.PRIMARY, this));
-        brand.addView(dot);
-        brand.addView(Ui.label(this, "KAKAO ADMIN"));
-        body.addView(brand);
-
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
         TextView t = Ui.title(this, "관리자 로그인");
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+        brand.addView(t);
+        TextView lead = Ui.sub(this, "라이선스 키 · 주문 · 보안 기록을 관리합니다.");
+        LinearLayout.LayoutParams lp0 = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        tp.topMargin = Theme.dp(this, 10);
-        tp.bottomMargin = Theme.dp(this, 18);
-        t.setLayoutParams(tp);
-        body.addView(t);
+        lp0.topMargin = Theme.dp(this, 4);
+        lp0.bottomMargin = Theme.dp(this, 16);
+        brand.addView(lead, lp0);
+        body.addView(brand, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout card = Ui.card(this);
 
@@ -179,10 +177,11 @@ public final class MainActivity extends Activity {
         body.addView(card);
 
         LinearLayout foot = Ui.card(this);
-        foot.addView(Ui.label(this, "안내"));
+        foot.setBackground(Theme.round(Theme.BG2, Theme.R_LG, Theme.LINE, 1, this));
+        foot.addView(Ui.cardHead(this, Icon.LOCK, Theme.GOLD, "접속 안내"));
         TextView ft = Ui.sub(this, "비밀번호는 서버(Render)의 ADMIN_PASSWORD 환경변수 값입니다.\n"
                 + "서버가 절전 상태인 경우 최초 요청에 20초 이상 소요될 수 있습니다. 응답이 없으면 다시 시도하십시오.");
-        mt(ft, 8);
+        mt(ft, 10);
         foot.addView(ft);
         body.addView(foot);
 
@@ -231,28 +230,27 @@ public final class MainActivity extends Activity {
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setBackgroundColor(Theme.BG);
-        head.setPadding(Theme.dp(this, 20), Theme.dp(this, 14), Theme.dp(this, 20), Theme.dp(this, 10));
+        head.setPadding(Theme.dp(this, 20), Theme.dp(this, 16), Theme.dp(this, 20), Theme.dp(this, 6));
         head.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout top = Ui.row(this);
-        View dot = new View(this);
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(this, 8), Theme.dp(this, 8));
-        dp.rightMargin = Theme.dp(this, 8);
-        dot.setLayoutParams(dp);
-        dot.setBackground(Theme.circle(Theme.PRIMARY, this));
-        top.addView(dot);
 
-        TextView name = new TextView(this);
-        name.setText("카톡 오토 관리자");
-        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 17f);
-        name.setTextColor(Theme.TEXT);
-        name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        name.setLetterSpacing(-0.01f);
-        name.setIncludeFontPadding(false);
-        name.setLayoutParams(new LinearLayout.LayoutParams(0,
+        LinearLayout nameCol = new LinearLayout(this);
+        nameCol.setOrientation(LinearLayout.VERTICAL);
+        nameCol.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        top.addView(name);
+        TextView name = new TextView(this);
+        name.setText("관리자");
+        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f);
+        name.setTextColor(Theme.TEXT);
+        name.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
+        name.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        np.topMargin = Theme.dp(this, 4);
+        nameCol.addView(name, np);
+        top.addView(nameCol);
 
         TextView refresh = Ui.btnSm(this, "새로고침", Theme.PRIMARY, false);
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
@@ -267,7 +265,7 @@ public final class MainActivity extends Activity {
         statsRow = Ui.row(this);
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sp.topMargin = Theme.dp(this, 12);
+        sp.topMargin = Theme.dp(this, 14);
         statsRow.setLayoutParams(sp);
         paintStats();
         head.addView(statsRow);
@@ -295,12 +293,12 @@ public final class MainActivity extends Activity {
 
         LinearLayout items = new LinearLayout(this);
         items.setOrientation(LinearLayout.HORIZONTAL);
-        items.setPadding(Theme.dp(this, 8), Theme.dp(this, 2), Theme.dp(this, 8), Theme.dp(this, 6));
+        items.setPadding(Theme.dp(this, 8), Theme.dp(this, 4), Theme.dp(this, 8), Theme.dp(this, 6));
         items.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         for (int i = 0; i < TABS.length; i++) {
             final int idx = i;
-            LinearLayout b = Ui.tabButton(this, TABS[i], i == tab);
+            LinearLayout b = Ui.tabButton(this, TAB_GLYPHS[i], TABS[i], TAB_COLORS[i], i == tab);
             b.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { goTab(idx); }
             });
@@ -319,17 +317,7 @@ public final class MainActivity extends Activity {
         if (!(itemsV instanceof LinearLayout)) return;
         LinearLayout items = (LinearLayout) itemsV;
         for (int i = 0; i < items.getChildCount() && i < TABS.length; i++) {
-            View b = items.getChildAt(i);
-            if (!(b instanceof LinearLayout) || ((LinearLayout) b).getChildCount() < 2) continue;
-            boolean active = (i == tab);
-            View dot = ((LinearLayout) b).getChildAt(0);
-            dot.setBackground(Theme.circle(active ? Theme.PRIMARY : 0x00000000, this));
-            View lb = ((LinearLayout) b).getChildAt(1);
-            if (lb instanceof TextView) {
-                ((TextView) lb).setTextColor(active ? Theme.TEXT : Theme.DIM);
-                ((TextView) lb).setTypeface(active
-                        ? android.graphics.Typeface.DEFAULT_BOLD : android.graphics.Typeface.DEFAULT);
-            }
+            Ui.paintTab(items.getChildAt(i), TAB_COLORS[i], i == tab);
         }
     }
 
@@ -337,6 +325,7 @@ public final class MainActivity extends Activity {
     public void goTab(int i) {
         if (i < 0 || i >= screens.length || content == null) return;
         tab = i;
+        Theme.setAccent(TAB_COLORS[i]);
         paintTabBar();
         Screen s = screens[i];
         if (s == null) return;
@@ -366,6 +355,7 @@ public final class MainActivity extends Activity {
         if (tab < 0 || tab >= screens.length) return;
         Screen s = screens[tab];
         if (s == null) return;
+        Theme.setAccent(TAB_COLORS[tab]);
         try { s.reload(); }
         catch (Throwable t) { App.log(this, TABS[tab] + " 새로고침 실패: " + t); }
     }
@@ -409,10 +399,10 @@ public final class MainActivity extends Activity {
         long pendingN   = (s == null) ? 0 : s.optLong("pending_orders", 0);
         String pending  = (s == null) ? "–" : Ui.num(pendingN);
 
-        LinearLayout t1 = Ui.statTile(this, "총 키", total, Theme.TEXT);
-        LinearLayout t2 = Ui.statTile(this, "활성", active, Theme.ACCENT);
-        LinearLayout t3 = Ui.statTile(this, "7일내 만료", expiring, Theme.AMBER);
-        LinearLayout t4 = Ui.statTile(this, "대기 주문", pending, pendingN > 0 ? Theme.PRIMARY : Theme.SUB);
+        LinearLayout t1 = Ui.statTile(this, Icon.KEY, "총 키", total, Theme.GOLD_HI);
+        LinearLayout t2 = Ui.statTile(this, Icon.CHECK, "활성", active, Theme.ACCENT);
+        LinearLayout t3 = Ui.statTile(this, Icon.CLOCK, "7일내 만료", expiring, Theme.AMBER);
+        LinearLayout t4 = Ui.statTile(this, Icon.RECEIPT, "대기 주문", pending, pendingN > 0 ? Theme.F_ORDERS : Theme.SUB);
 
         tileGoes(t1, 0); tileGoes(t2, 0); tileGoes(t3, 0); tileGoes(t4, 1);
 
