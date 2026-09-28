@@ -67,6 +67,22 @@
             </intent-filter>
         </activity>
 
+        <!-- 화면 깨우기 전용 투명 액티비티.
+             화면이 꺼져 있거나 잠겨 있으면 카톡 공유창이 못 뜬다. 이 앱은 매크로 전용 폰에서
+             도니까 깨워도 된다 — 켜고 잠금 해제를 요청한 다음 공유 인텐트를 실행하고 바로 사라진다.
+             theme 은 투명(배경이 안 보인다), noHistory 로 백스택에 안 남고,
+             excludeFromRecents 로 최근 앱 목록에도 안 뜬다.
+             exported=false : 우리 앱만 부른다 (인텐트를 실어 주는 통로라 절대 열어두면 안 된다). -->
+        <activity
+            android:name=".WakeActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+
         <!-- 카톡 알림 파싱 + RemoteInput 발송 -->
         <service
             android:name=".KakaoListener"

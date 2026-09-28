@@ -12,8 +12,12 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 매크로 화면. 자동발송 · 메시지 · 대상 방 · 주기 · 사진 첨부 · 메시지 추적 · 오픈프로필 자동응답.
@@ -35,7 +39,15 @@ public final class ScreenMacro {
     private static final int F_TRIG = 1 << 4;
     private static final int F_REPLY = 1 << 5;
     private static final int F_LIMIT = 1 << 6;
+    /** 사진 카드 안의 "전용 폰 세팅" 접힘 섹션 */
+    private static final int F_PHONE = 1 << 7;
     private static int openBits = 0;
+
+    /** 화면 기록이 이보다 오래됐으면 "지난 기록" 이라고 못을 박는다 */
+    private static final long DUMP_STALE_MS = 3 * 60 * 1000L;
+
+    /** dumpSection 에 넘기는 "이번 시도가 아니다" 센티넬 (0 은 "직전 기록 없음" 이라 못 쓴다) */
+    private static final long NO_ATTEMPT = -1L;
 
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<LinearLayout> BODY;
@@ -84,6 +96,15 @@ public final class ScreenMacro {
         final Settings s = Settings.load(a);
 
         col.addView(Ui.sub(a, "카톡 알림 답장으로 보낸다. 그 방 알림이 한 번은 와야 발송할 수 있어."));
+
+        // 예약 발송의 사진 전송은 아무도 안 보고 있을 때 실패한다 → 여기서 한 번은 눈에 걸리게 한다.
+        // 사진 카드가 접혀 있으면 카드 안의 경고 줄은 안 보이니까 맨 위에 띄우고,
+        // 펼쳐져 있으면 그 경고와 똑같은 박스가 두 번 뜨니까 생략한다.
+        if ((openBits & F_IMAGE) == 0) {
+            View warn = imgFailNote(a);
+            if (warn != null) col.addView(warn);
+        }
+
         col.addView(Nav.gap(a, 14));
 
         col.addView(autoCard(a, s));
@@ -381,10 +402,13 @@ public final class ScreenMacro {
     // ── 5. 사진 첨부 ────────────────────────────────────────────────────────
 
     private static Nav.Fold imageFold(final MainActivity a, final Settings s) {
-        final Nav.Fold f = fold(a, F_IMAGE, "사진 첨부", imageSummary(s));
+        final Nav.Fold f = fold(a, F_IMAGE, "사진 첨부", imageSummary(a, s));
 
         f.body.addView(Ui.sub(a, "최대 " + Settings.MAX_IMAGES + "장. 알림 답장으로는 사진을 못 보내서,"
                 + " 카톡 공유 화면을 접근성 권한으로 대신 눌러서 보낸다."));
+
+        View warn = imgFailNote(a);
+        if (warn != null) f.body.addView(warn);
 
         final LinearLayout strip = new LinearLayout(a);
         strip.setOrientation(LinearLayout.HORIZONTAL);
@@ -418,6 +442,18 @@ public final class ScreenMacro {
         f.body.addView(Nav.actionRow(a, "전송 모드", imgModeKr(s.macro.sendImages) + imgEveryTail(s),
                 "변경", new Runnable() {
                     @Override public void run() { pickImgMode(a, s, f); }
+                }));
+
+        // 알림 답장으로 사진 보내기 (되면 화면이 안 움직인다).
+        // 카톡이 "이미지 받는다" 고 해놓고 실제로 무시하면 앱은 보낸 줄 알고 성공으로 보고한다 —
+        // 카톡이 올렸는지 확인할 방법이 없다. 그래서 사용자가 끌 수 있어야 한다.
+        f.body.addView(Ui.divider(a));
+        f.body.addView(Ui.switchRow(a, "알림 답장으로 보내기",
+                "되면 화면이 안 움직여. 로그엔 보냈다는데 카톡에 사진이 안 올라오면 꺼줘.",
+                ImageSender.replyImageEnabled(a), new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        ImageSender.setReplyImageEnabled(a, v);
+                    }
                 }));
 
         if (Settings.IMG_EVERY_N.equals(s.macro.sendImages)) {
@@ -473,6 +509,11 @@ public final class ScreenMacro {
                     + "」)에만 보낸다. 다른 방에 보내려면 방 순서를 바꿔줘."));
         }
 
+        // ── 전용 폰 세팅 안내 (접어둔다 — 한 번 맞춰두면 다시 볼 일이 없다) ──
+        f.body.addView(Nav.gap(a, 14));
+        subFold(a, f.body, F_PHONE, "전용 폰 세팅 안내",
+                "화면 잠금 없음 · 충전 중 화면 켜짐 유지 · 충전기 연결", phoneSetupBody(a));
+
         // ── 진단 ──
         // 사진 전송은 카톡 공유창을 우리가 대신 눌러야 해서, 카톡이 화면을 바꾸면 조용히 깨진다.
         // 그때 화면에 뭐가 있었는지 사용자가 그대로 개발자에게 보낼 수 있게 여기 버튼을 둔다.
@@ -493,34 +534,123 @@ public final class ScreenMacro {
         });
         drow.addView(diag);
 
+        // 버튼을 죽여놓으면 "왜 못 누르는지" 를 못 알려준다 → 항상 누를 수 있게 두고,
+        // 기록이 없으면 showDiag 가 "왜 없는지" 를 말해준다. 흐리게만 해서 힌트를 준다.
         final long dumpAt = KakaoAccessibility.lastDumpAt(a);
-        TextView show = Ui.btn(a, (dumpAt > 0) ? "화면 진단 보기" : "화면 진단 없음", false);
+        final boolean hasAny = dumpAt > 0 || Scheduler.lastImageFail(a) != null;
+        String showLabel = !hasAny ? "진단 기록 없음"
+                : (dumpAt > 0) ? ("진단 보기 (" + agoShort(dumpAt) + ")") : "진단 보기";
+        TextView show = Ui.btn(a, showLabel, false);
         LinearLayout.LayoutParams sp2 = new LinearLayout.LayoutParams(0, WRAP, 1f);
         sp2.leftMargin = Theme.dp(a, 8);
         show.setLayoutParams(sp2);
-        show.setEnabled(dumpAt > 0);
+        if (!hasAny) show.setAlpha(0.55f);
         show.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showDump(a); }
+            @Override public void onClick(View v) { showDiag(a); }
         });
         drow.addView(show);
         f.body.addView(drow);
 
         if (dumpAt > 0) {
-            f.body.addView(Ui.sub(a, "마지막 화면 진단: " + Nav.whenRel(dumpAt)));
+            f.body.addView(Ui.sub(a, "마지막 화면 기록: " + ago(dumpAt)));
+        } else {
+            f.body.addView(Ui.sub(a, "저장된 화면 기록은 없어. 실패했을 때만 남는다."));
         }
         return f;
+    }
+
+    // ── 전용 폰 세팅 안내 ───────────────────────────────────────────────────
+
+    /**
+     * 매크로 전용 폰(평소에 안 쓰는 여분 폰) 세팅 안내.
+     * 사진 전송은 카톡 공유창을 실제로 띄워서 눌러야 해서, 화면이 꺼지거나 잠겨 있으면 그냥 못 한다.
+     * 현장 실패의 절반이 이 세 줄로 사라지니까 카드 안에 접어서 넣어둔다.
+     */
+    private static LinearLayout phoneSetupBody(final MainActivity a) {
+        LinearLayout box = Nav.col(a);
+        box.addView(step(a, "사진 전송은 카톡을 잠깐 띄워서 보내니까 화면이 움직여. "
+                + "텍스트 발송은 화면이 안 움직여."));
+        box.addView(step(a, "1. 설정 › 잠금화면 › 화면 잠금 방식을 「없음」 으로 바꿔줘. "
+                + "잠겨 있으면 공유창을 대신 눌러줄 수가 없어."));
+        box.addView(step(a, "2. 개발자 옵션 › 「충전 중 화면 켜짐 유지」 를 켜줘. "
+                + "화면을 깨우는 단계가 없어지면 실패가 확 줄어."));
+        box.addView(step(a, "3. 충전기를 꽂아둬. 2번은 충전 중일 때만 먹고, 종일 켜두려면 어차피 필요해."));
+        box.addView(Nav.note(a, "전용 폰에서만 이렇게 해. 평소 쓰는 폰은 잠금을 없애면 위험하고, "
+                + "사진 보낼 때마다 보던 화면이 카톡으로 튄다.", Theme.AMBER, null, null));
+        return box;
+    }
+
+    /** 안내 한 줄 (위 여백 포함) */
+    private static TextView step(MainActivity a, String text) {
+        TextView t = Ui.sub(a, text);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        lp.topMargin = Theme.dp(a, 8);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /**
+     * 카드 안에서 쓰는 가벼운 접힘 섹션.
+     * Nav.fold 는 카드를 새로 만들기 때문에 카드 안에 넣으면 같은 색 카드가 겹쳐서 톤이 뭉개진다.
+     */
+    private static void subFold(final MainActivity a, LinearLayout into, final int bit,
+                                final String titleTxt, String summary, final LinearLayout body) {
+        final boolean open = (openBits & bit) != 0;
+
+        final TextView head = Ui.body(a, (open ? "▾ " : "▸ ") + titleTxt);
+        head.setTypeface(Typeface.DEFAULT_BOLD);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setMinimumHeight(Theme.dp(a, 48));
+        head.setClickable(true);
+        head.setFocusable(true);
+        head.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+        Ui.press(head);
+        into.addView(head);
+
+        if (summary != null && summary.length() > 0) {
+            TextView sm = Ui.sub(a, summary);
+            sm.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            into.addView(sm);
+        }
+
+        body.setVisibility(open ? View.VISIBLE : View.GONE);
+        into.addView(body);
+
+        head.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                boolean now = body.getVisibility() != View.VISIBLE;
+                body.setVisibility(now ? View.VISIBLE : View.GONE);
+                if (now) openBits |= bit;
+                else openBits &= ~bit;
+                head.setText((now ? "▾ " : "▸ ") + titleTxt);
+            }
+        });
     }
 
     // ── 사진 전송 진단 ──────────────────────────────────────────────────────
 
     /**
-     * 첫 번째 대상 방으로 실제로 한 번 보내보고, 끝나면 결과 + 화면 덤프를 보여준다.
+     * 첫 번째 대상 방으로 실제로 한 번 보내보고, 끝나면 결과 + 화면 기록을 보여준다.
      * 실패했을 때 화면에 뭐가 있었는지가 제일 중요한 정보라서, 복사해서 바로 보낼 수 있게 한다.
+     *
+     * 방이 하나도 없으면 여기서 막는다 — rooms.get(0) 에 닿기 전에 끝난다.
      */
     private static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
         if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
-        if (s.macro.images.isEmpty()) { Ui.toast(a, "먼저 사진을 골라줘"); return; }
-        if (s.macro.rooms.isEmpty()) { Ui.toast(a, "대상 방을 먼저 추가해줘"); return; }
+        if (s.macro.rooms.isEmpty()) {
+            Nav.confirm(a, "대상 방이 없어",
+                    "진단은 실제로 한 방에 보내보는 거라 대상 방이 최소 한 개는 있어야 해.\n"
+                            + "위쪽 「대상 방」 카드에서 방을 먼저 추가해줘.",
+                    "알겠어", null);
+            return;
+        }
+        if (s.macro.images.isEmpty()) {
+            Nav.confirm(a, "고른 사진이 없어",
+                    "진단은 실제로 사진을 보내보는 거라 최소 한 장은 골라야 해.\n"
+                            + "이 카드의 「사진 고르기」 를 눌러줘.",
+                    "알겠어", null);
+            return;
+        }
 
         boolean accOn;
         try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
@@ -537,30 +667,47 @@ public final class ScreenMacro {
         final List<String> uris = new ArrayList<String>(s.macro.images);
         Nav.confirm(a, "진단을 돌릴까?",
                 "「" + room + "」 에 사진 " + uris.size() + "장을 실제로 보내본다. "
-                        + "성공하면 정말 전송되고, 실패하면 그때 카톡 화면을 기록해둘게.",
+                        + "성공하면 정말 전송되고, 실패하면 그때 카톡 화면을 기록해둘게.\n\n"
+                        + "카톡 공유창이 잠깐 떠서 화면이 움직여.",
                 "진단 시작", new Runnable() {
             @Override public void run() {
                 final String idle = "사진 전송 진단";
+                // ★ 시작 전 화면 기록 시각을 잡아둔다. 이게 있어야 끝난 뒤에
+                //   "이번에 새로 남은 기록" 과 "옛날 기록" 을 구별할 수 있다.
+                final long dumpBefore = dumpAtSafe(a);
                 Nav.busy(btn, true, "진단 중…", idle);
                 Log.add(a, "사진 전송 진단 시작 — 「" + room + "」");
                 try {
                     ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
                         @Override public void done(boolean ok, String detail) {
                             Nav.busy(btn, false, "진단 중…", idle);
-                            diagResult(a, room, ok, detail);
+                            diagResult(a, room, ok, detail, dumpBefore);
                         }
                     });
                 } catch (Throwable t) {
                     Nav.busy(btn, false, "진단 중…", idle);
+                    Scheduler.noteImageFail(a, room, "진단을 시작하지도 못했어 — " + t);
                     Log.add(a, "진단을 시작하지 못했어: " + t);
                     Ui.toast(a, "진단을 시작하지 못했어");
+                    refresh();
                 }
             }
         });
     }
 
-    /** 진단 결과 + 화면 덤프를 한 창에 보여준다 (복사 가능) */
-    private static void diagResult(final MainActivity a, String room, boolean ok, String detail) {
+    /**
+     * 진단 결과 + 화면 기록을 한 창에 보여준다 (복사 가능 · 스크롤 됨).
+     *
+     * @param dumpBefore 진단을 시작하기 <b>전</b>의 화면 기록 시각 (기록이 없었으면 0).
+     *        이보다 새 기록이 생겼을 때만 "이번 시도의 화면" 이라고 말한다.
+     *        지난 덤프를 이번 실패 화면인 것처럼 보여주는 게 제일 나쁜 거짓말이다.
+     */
+    private static void diagResult(final MainActivity a, String room, boolean ok, String detail,
+                                   long dumpBefore) {
+        // 결과를 기록에 반영한다 — 성공이면 지우고, 실패면 남긴다
+        if (ok) Scheduler.clearImageFail(a, room);
+        else Scheduler.noteImageFail(a, room, detail);
+
         StringBuilder sb = new StringBuilder(2048);
         sb.append(ok ? "■ 결과: 성공 (카톡에서 실제로 갔는지 확인해줘)" : "■ 결과: 실패").append('\n');
         sb.append("■ 방: ").append(room).append('\n');
@@ -568,13 +715,8 @@ public final class ScreenMacro {
         sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "켜짐" : "꺼짐")
                 .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "켜짐" : "꺼짐").append('\n');
         sb.append('\n');
+        sb.append(dumpSection(a, dumpBefore));
 
-        String dump = KakaoAccessibility.lastDump(a);
-        if (dump == null || dump.length() == 0) {
-            sb.append("(화면 진단이 없어 — 공유창 자체가 안 떴거나 성공했을 때는 안 남는다)\n");
-        } else {
-            sb.append(dump);
-        }
         final String all = sb.toString();
         Nav.showText(a, ok ? "진단 결과 — 성공" : "진단 결과 — 실패", all, new Runnable() {
             @Override public void run() { Nav.copy(a, "사진 전송 진단", all); }
@@ -582,17 +724,167 @@ public final class ScreenMacro {
         refresh();
     }
 
-    /** 마지막 화면 진단 보기 (지우기 포함) */
-    private static void showDump(final MainActivity a) {
-        final String dump = KakaoAccessibility.lastDump(a);
-        if (dump == null || dump.length() == 0) {
-            Ui.toast(a, "저장된 화면 진단이 없어");
-            return;
-        }
-        Nav.showText(a, "화면 진단 (" + Nav.whenRel(KakaoAccessibility.lastDumpAt(a)) + ")",
-                dump, new Runnable() {
-                    @Override public void run() { Nav.copy(a, "화면 진단", dump); }
+    /**
+     * 저장된 진단(마지막 실패 기록 + 화면 기록) 보기.
+     * 이건 "이번 시도" 라는 개념이 없으니 <b>언제 남은 기록인지</b>를 맨 위에 박는다.
+     */
+    static void showDiag(final MainActivity a) {
+        final String all = diagText(a);
+        long at = dumpAtSafe(a);
+        Nav.showText(a, "사진 전송 진단 (" + ((at > 0) ? (agoShort(at) + " 기록") : "화면 기록 없음") + ")",
+                all, new Runnable() {
+                    @Override public void run() { Nav.copy(a, "사진 전송 진단", all); }
                 });
+    }
+
+    /** showDiag 가 보여주는 본문. 내정보 화면의 [복사] 도 같은 글을 쓴다. */
+    static String diagText(MainActivity a) {
+        StringBuilder sb = new StringBuilder(2048);
+        Scheduler.ImageFail fail = null;
+        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
+        if (fail == null) {
+            sb.append("■ 마지막 사진 전송 실패: 기록 없음\n")
+              .append("  (한 번도 실패하지 않았거나, 마지막 전송이 성공해서 지워졌어)\n\n");
+        } else {
+            sb.append("■ 마지막 사진 전송 실패\n")
+              .append("  시각: ").append(ago(fail.at)).append('\n')
+              .append("  방: ").append(fail.room.length() == 0 ? "(모름)" : fail.room).append('\n')
+              .append("  사유: ").append(fail.why).append("\n\n");
+        }
+        // -1 = "이번 시도" 라는 개념이 없다 (그냥 저장된 걸 보는 중)
+        sb.append(dumpSection(a, NO_ATTEMPT));
+        return sb.toString();
+    }
+
+    /**
+     * 화면 기록 부분을 글로 만든다.
+     *
+     * @param dumpBefore {@link #NO_ATTEMPT} 이면 "이번 시도" 를 주장하지 않고 언제 것인지만 밝힌다.
+     *        0 이상이면 "시도 직전의 기록 시각" 이라는 뜻이고, 그보다 새 기록일 때만
+     *        "이번 시도" 라고 말한다. 아니면 "이번엔 기록이 안 남았어" 라고 못을 박는다.
+     *        (0 도 유효한 값이다 — "전에는 기록이 아예 없었다" 는 뜻이라 새 기록이면 이번 것이다)
+     */
+    private static String dumpSection(MainActivity a, long dumpBefore) {
+        long at = dumpAtSafe(a);
+        String dump;
+        try { dump = KakaoAccessibility.lastDump(a); } catch (Throwable t) { dump = ""; }
+        if (dump == null) dump = "";
+
+        StringBuilder sb = new StringBuilder(1024);
+        boolean have = at > 0 && dump.length() > 0;
+        boolean attempt = dumpBefore >= 0;
+        boolean fresh = have && attempt && at > dumpBefore;
+
+        if (attempt && !fresh) {
+            sb.append("■ 이번엔 화면 기록이 안 남았어.\n")
+              .append("  카톡 공유창까지 못 갔거나, 접근성 서비스가 화면을 읽기 전에 끝난 거야.\n");
+            if (have) {
+                sb.append("  ※ 아래는 ").append(agoShort(at))
+                  .append(" 에 남은 지난 기록이야 — 이번 시도와는 상관없어.\n\n")
+                  .append(dump).append('\n');
+            } else {
+                sb.append("  저장된 화면 기록도 아예 없어.\n");
+            }
+            return sb.toString();
+        }
+
+        if (!have) {
+            sb.append("■ 화면 기록: 없어\n")
+              .append("  실패했을 때만 남는다. 아직 실패한 적이 없거나, 접근성 권한이 꺼져 있어서\n")
+              .append("  화면을 아예 못 읽은 상태일 수 있어.\n");
+            return sb.toString();
+        }
+
+        if (fresh) {
+            sb.append("■ 화면 기록 (이번 시도) — ").append(ago(at)).append('\n');
+        } else {
+            sb.append("■ 화면 기록 — ").append(ago(at)).append('\n');
+            if (System.currentTimeMillis() - at > DUMP_STALE_MS) {
+                sb.append("  ※ 이건 ").append(agoShort(at))
+                  .append(" 기록이야. 지금 화면이 아니라 그때 화면이다.\n");
+            }
+        }
+        sb.append('\n').append(dump).append('\n');
+        return sb.toString();
+    }
+
+    /**
+     * 사진 전송이 마지막에 실패했으면 눈에 띄는 경고 줄을 돌려준다. 기록이 없으면 null.
+     * 홈 화면에서도 그대로 쓸 수 있게 public 으로 열어뒀다 (null 이면 addView 하지 마라).
+     */
+    public static View imgFailNote(final MainActivity a) {
+        Scheduler.ImageFail fail;
+        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
+        if (fail == null) return null;
+
+        String room = (fail.room.length() == 0) ? "방 이름 모름" : Nav.preview(fail.room, 14);
+        String txt = "사진 전송이 실패했어\n"
+                + dayTime(fail.at) + " · " + room + " — " + Nav.preview(fail.why, 70) + "\n"
+                + "텍스트 발송은 정상이야 — 사진만 안 갔어.";
+        return Nav.note(a, txt, Theme.RED, "진단 보기", new Runnable() {
+            @Override public void run() { showDiag(a); }
+        });
+    }
+
+    // ── 지난 시각 표기 ──────────────────────────────────────────────────────
+    //  Nav.whenRel 은 "12분 뒤" 처럼 미래용이다. 과거 시각을 넣으면 전부 "곧" 이 나와서
+    //  일주일 전 덤프가 방금 것처럼 보인다. 그래서 과거 표기는 여기서 따로 만든다.
+    //  내정보 화면도 같은 표기를 써야 해서 패키지 안에 열어둔다.
+
+    /** "9/27(토) 21:05 · 12분 전" */
+    static String ago(long at) {
+        if (at <= 0) return "기록 없음";
+        return Nav.when(at) + " · " + agoShort(at);
+    }
+
+    /** "12분 전" (미래면 "시계가 어긋났어") */
+    static String agoShort(long at) {
+        if (at <= 0) return "기록 없음";
+        long d = System.currentTimeMillis() - at;
+        if (d < -60000L) return "시계가 어긋났어";
+        if (d < 60000L) return "방금";
+        if (d < 3600000L) return (d / 60000L) + "분 전";
+        if (d < 86400000L) return (d / 3600000L) + "시간 전";
+        return (d / 86400000L) + "일 전";
+    }
+
+    /** "오늘 21:30" · "어제 21:30" · "9/26 21:30" */
+    static String dayTime(long at) {
+        if (at <= 0) return "시각 모름";
+        try {
+            int diff = dayDiff(at, System.currentTimeMillis());
+            String hm = new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date(at));
+            if (diff == 0) return "오늘 " + hm;
+            if (diff == 1) return "어제 " + hm;
+            return new SimpleDateFormat("M/d HH:mm", Locale.KOREA).format(new Date(at));
+        } catch (Throwable t) {
+            return Nav.when(at);
+        }
+    }
+
+    /** 자정 기준으로 며칠 전인지 (미래면 음수) */
+    private static int dayDiff(long then, long now) {
+        return (int) ((midnight(now) - midnight(then)) / 86400000L);
+    }
+
+    private static long midnight(long ms) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(ms);
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    /** 화면 기록 시각. 접근성 쪽에서 예외가 나도 UI 가 죽지 않게 감싼다. */
+    static long dumpAtSafe(MainActivity a) {
+        try {
+            long at = KakaoAccessibility.lastDumpAt(a);
+            return (at < 0) ? 0L : at;
+        } catch (Throwable t) {
+            return 0L;
+        }
     }
 
     /** 사진 수동 전송 버튼 라벨 (어느 방으로 가는지 보여준다) */
@@ -607,7 +899,7 @@ public final class ScreenMacro {
         if (s.macro.images.isEmpty()) {
             TextView e = Ui.sub(a, "아직 고른 사진이 없어");
             strip.addView(e);
-            f.summary(imageSummary(s));
+            f.summary(imageSummary(a, s));
             return;
         }
         for (int i = 0; i < s.macro.images.size(); i++) {
@@ -631,7 +923,7 @@ public final class ScreenMacro {
                 }
             }));
         }
-        f.summary(imageSummary(s));
+        f.summary(imageSummary(a, s));
     }
 
     private static void pickImgMode(final MainActivity a, final Settings s, final Nav.Fold f) {
@@ -675,6 +967,8 @@ public final class ScreenMacro {
         final String room = s.macro.rooms.get(0);
         final String idle = imgLabel(room);
         final List<String> uris = new ArrayList<String>(s.macro.images);
+        // ★ 보내기 전 화면 기록 시각. 이게 없으면 지난 덤프를 "그때 화면" 이라고 거짓말한다.
+        final long dumpBefore = dumpAtSafe(a);
         Nav.busy(btn, true, "보내는 중…", idle);
         Log.add(a, "사진 " + uris.size() + "장을 「" + room + "」로 보내는 중");
         try {
@@ -683,28 +977,38 @@ public final class ScreenMacro {
                 @Override public void done(boolean ok, String detail) {
                     Nav.busy(btn, false, "보내는 중…", idle);
                     if (ok) {
+                        Scheduler.clearImageFail(a, room);
                         Ui.toast(a, "「" + room + "」에 사진 전송을 끝냈어. 카톡에서 확인해줘");
                         refresh();
                         return;
                     }
                     String why = (detail == null || detail.length() == 0) ? "원인 불명" : detail;
-                    boolean hasDump = KakaoAccessibility.lastDump(a).length() > 0;
-                    if (hasDump) {
+                    Scheduler.noteImageFail(a, room, why);
+                    // 이번 시도에서 새로 남은 기록일 때만 "그때 화면을 기록해뒀어" 라고 말한다
+                    boolean freshDump = dumpAtSafe(a) > dumpBefore;
+                    if (freshDump) {
                         Nav.confirm(a, "사진을 못 보냈어",
                                 why + "\n\n그때 카톡 화면을 기록해뒀어. 그걸 복사해서 개발자에게 보내주면 고칠 수 있어.",
-                                "화면 진단 보기", new Runnable() {
-                                    @Override public void run() { showDump(a); }
+                                "진단 보기", new Runnable() {
+                                    @Override public void run() { showDiag(a); }
                                 });
                     } else {
-                        Ui.toast(a, "사진을 못 보냈어 — " + why);
+                        Nav.confirm(a, "사진을 못 보냈어",
+                                why + "\n\n이번엔 화면 기록이 안 남았어 — 카톡 공유창까지 가기 전에 끝났다는 뜻이야.\n"
+                                        + "저장된 기록과 권한 상태를 같이 보여줄게.",
+                                "진단 보기", new Runnable() {
+                                    @Override public void run() { showDiag(a); }
+                                });
                     }
                     refresh();
                 }
             });
         } catch (Throwable t) {
             Nav.busy(btn, false, "보내는 중…", idle);
+            Scheduler.noteImageFail(a, room, "전송을 시작하지도 못했어 — " + t);
             Log.add(a, "사진 전송을 시작하지 못했어: " + t);
             Ui.toast(a, "사진 전송을 시작하지 못했어");
+            refresh();
         }
     }
 
@@ -745,10 +1049,18 @@ public final class ScreenMacro {
         refresh();
     }
 
-    private static String imageSummary(Settings s) {
+    /**
+     * 접힌 사진 카드에 보이는 한 줄.
+     * 카드가 접혀 있으면 안쪽 경고 줄이 안 보이니까, 실패 기록이 있으면 여기에도 표시를 남긴다 —
+     * 이게 없으면 사용자는 카드를 열 이유를 모른다.
+     */
+    private static String imageSummary(MainActivity a, Settings s) {
         int n = s.macro.images.size();
-        if (n == 0) return "없음";
-        return n + "장 · " + imgModeKr(s.macro.sendImages) + imgEveryTail(s);
+        String base = (n == 0) ? "없음" : (n + "장 · " + imgModeKr(s.macro.sendImages) + imgEveryTail(s));
+        Scheduler.ImageFail fail = null;
+        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
+        if (fail == null) return base;
+        return "⚠ 지난 사진 전송 실패 (" + agoShort(fail.at) + ") · " + base;
     }
 
     private static String imgModeKr(String mode) {

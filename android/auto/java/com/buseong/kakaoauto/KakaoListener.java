@@ -5,6 +5,7 @@ import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -33,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 다른 클래스가 쓰는 공개 API
  *   boolean      sendTo(ctx, room, text)      — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
+ *   Set&lt;String&gt; imageTypesFor(room)          — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
+ *   boolean      sendImageTo(ctx, room, uri)  — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
  *   int          othersSinceMine(room)        — 내 마지막 발송 뒤 남이 올린 메시지 수 (도배 방지 판정)
  *   List<String> knownRooms() / knownRooms(ctx) — 최근 감지된 방 이름 (설정 화면 방 선택용, 최대 50개)
  *   boolean      hasSession(room) / isKnownRoom(room) / connected(ctx)
@@ -104,6 +107,13 @@ public final class KakaoListener extends NotificationListenerService {
         public volatile PendingIntent pending;
         /** 그 액션에 달린 RemoteInput 들 (결과 키가 여기 있다) */
         public volatile RemoteInput[] inputs;
+        /**
+         * 그 답장창이 받아주는 데이터 타입들 (RemoteInput.getAllowedDataTypes() 의 합집합).
+         * 카톡이 여기에 이미지 MIME 을 걸어놨으면 <b>알림 답장만으로 사진을 보낼 수 있다</b> —
+         * 공유창을 안 열어도 되니까 화면이 아예 안 움직인다. 비어 있으면 못 보낸다.
+         * 항상 수정 불가 Set 으로만 넣는다 (밖에 그대로 내주니까).
+         */
+        public volatile java.util.Set<String> dataTypes = java.util.Collections.emptySet();
         /** 내가 이 방으로 마지막으로 보낸 시각 */
         public volatile long lastMine;
         /** 내 마지막 발송 뒤 남이 올린 메시지 수 */
@@ -287,6 +297,9 @@ public final class KakaoListener extends NotificationListenerService {
         if (r != null) {
             s.pending = r.pending;
             s.inputs = r.inputs;
+            s.dataTypes = r.dataTypes;
+            // 사진을 알림 답장으로 보낼 수 있나 — 이 앱이 살아있는 동안 딱 한 번만 알려준다
+            probeImageOnce(ctxOrApp(), r.dataTypes);
         }
         s.lastAt = m.at;
 
@@ -845,6 +858,8 @@ public final class KakaoListener extends NotificationListenerService {
     private static final class Reply {
         PendingIntent pending;
         RemoteInput[] inputs;
+        /** 이 액션의 RemoteInput 들이 받아주는 데이터 타입 합집합 (수정 불가 Set) */
+        java.util.Set<String> dataTypes = java.util.Collections.emptySet();
     }
 
     /** 알림의 액션들 중 자유 입력이 가능한 RemoteInput 액션을 찾는다 */
@@ -860,12 +875,236 @@ public final class KakaoListener extends NotificationListenerService {
             Reply r = new Reply();
             r.pending = a.actionIntent;
             r.inputs = ris;
+            r.dataTypes = collectDataTypes(ris);
             for (int j = 0; j < ris.length; j++) {
                 if (ris[j] != null && ris[j].getAllowFreeFormInput()) return r;  // 이게 답장창이다
             }
             if (any == null) any = r;
         }
         return any;
+    }
+
+    /** RemoteInput 들이 허용한 데이터 타입을 다 모은다 (없으면 빈 Set) */
+    private static java.util.Set<String> collectDataTypes(RemoteInput[] ris) {
+        if (ris == null || ris.length == 0) return java.util.Collections.emptySet();
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        for (int i = 0; i < ris.length; i++) {
+            if (ris[i] == null) continue;
+            java.util.Set<String> t;
+            try {
+                t = ris[i].getAllowedDataTypes();
+            } catch (Throwable ignore) {
+                continue;   // 기종에 따라 없을 수 있다. 없으면 없는 거다.
+            }
+            if (t == null || t.isEmpty()) continue;
+            Iterator<String> it = t.iterator();
+            while (it.hasNext()) {
+                String s = it.next();
+                if (s == null) continue;
+                s = s.trim();
+                if (s.length() > 0) out.add(s);
+            }
+        }
+        if (out.isEmpty()) return java.util.Collections.emptySet();
+        return java.util.Collections.unmodifiableSet(out);
+    }
+
+    // ── 알림 답장에 사진 붙이기 (공유창·접근성 없이 보내는 경로) ────────────────
+    //
+    //  안드로이드는 알림 답장에 이미지를 실어 보내는 공식 경로를 API 26 부터 갖고 있다.
+    //  단 **보내는 앱(카톡)이 RemoteInput.Builder.setAllowDataType("image/*", true) 로
+    //  허용해둬야만** 된다. 허용 여부는 런타임에 getAllowedDataTypes() 로만 알 수 있다.
+    //  되면 화면이 아예 안 움직인다 → 공유창 경로(접근성 조작)를 전부 안 써도 된다.
+
+    /** 이 프로세스에서 사진 첨부 가능 여부를 이미 로그에 남겼나 (0=아직 · 1=가능 · 2=불가) */
+    private static volatile int imageProbed = 0;
+
+    /**
+     * 카톡 알림에서 답장창을 처음 봤을 때 "사진을 알림 답장으로 보낼 수 있나" 를 딱 한 번 로그에 남긴다.
+     * <b>이 한 줄이 다음 방향을 정한다</b> — 사용자가 이걸 보고 알려줘야 우리가 경로를 확정할 수 있다.
+     * 판정이 바뀌면(카톡 업데이트 등) 그때 한 번 더 남긴다. 그 외에는 도배하지 않는다.
+     */
+    private static void probeImageOnce(final Context ctx, final java.util.Set<String> types) {
+        final java.util.Set<String> img = imageOnly(types);
+        final int want = img.isEmpty() ? 2 : 1;
+        if (imageProbed == want) return;
+        synchronized (KakaoListener.class) {
+            if (imageProbed == want) return;
+            imageProbed = want;
+        }
+        final String raw = (types == null || types.isEmpty())
+                ? "(카톡이 데이터 타입을 하나도 안 걸어놨어)" : types.toString();
+        // Log.add 는 Prefs 를 동기로 쓴다 → 알림 콜백(메인 스레드)에서 직접 부르면 안 된다
+        post(new Runnable() {
+            @Override public void run() {
+                if (want == 1) {
+                    Log.add(ctx, "카톡이 알림 답장에 사진 첨부를 허용해 — 화면 안 움직이고 보낼 수 있어"
+                            + " · 허용 타입: " + img);
+                } else {
+                    Log.add(ctx, "카톡이 알림 답장에 사진을 안 받아 — 공유창을 열어서 보내야 해(화면이 잠깐 움직여)"
+                            + " · 카톡이 선언한 타입: " + raw);
+                }
+            }
+        }, 0);
+    }
+
+    /** 데이터 타입 중 사진에 쓸 수 있는 것만 골라낸다 (image/ 로 시작하는 것과 와일드카드) */
+    private static java.util.Set<String> imageOnly(java.util.Set<String> types) {
+        if (types == null || types.isEmpty()) return java.util.Collections.emptySet();
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        Iterator<String> it = types.iterator();
+        while (it.hasNext()) {
+            String s = it.next();
+            if (s == null) continue;
+            String t = s.trim();
+            if (t.length() == 0) continue;
+            String low = t.toLowerCase(java.util.Locale.US);
+            if (low.equals("*/*") || low.startsWith("image/")) out.add(t);
+        }
+        if (out.isEmpty()) return java.util.Collections.emptySet();
+        return java.util.Collections.unmodifiableSet(out);
+    }
+
+    /**
+     * 그 방의 알림 답장창이 받아주는 <b>사진</b> MIME 들. 비어 있으면 이 경로로는 못 보낸다.
+     * 세션이 죽어 있으면(그 방 알림을 아직 못 봤거나 알림이 치워졌으면) 빈 Set 이다.
+     */
+    public static java.util.Set<String> imageTypesFor(String room) {
+        if (room == null) return java.util.Collections.emptySet();
+        String r = room.trim();
+        if (r.length() == 0) return java.util.Collections.emptySet();
+        Session s = findSession(r);
+        if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
+            return java.util.Collections.emptySet();
+        }
+        return imageOnly(s.dataTypes);
+    }
+
+    /**
+     * 그 방의 알림 답장창에 <b>사진 한 장</b>을 실어 보낸다.
+     * 공유창도 접근성도 안 쓴다 — 화면이 아예 안 움직인다.
+     *
+     * {@code Map<String,Uri>} 는 MIME 하나당 URI 하나라서 <b>한 번에 한 장</b>이다.
+     * 여러 장은 호출자가 이걸 장수만큼 순서대로 부른다.
+     *
+     * true 는 "카톡에 넘기는 것까지 성공" 이라는 뜻이다 — 카톡이 실제로 올렸는지는
+     * 우리가 확인할 방법이 없다. 그래서 호출자가 어느 경로로 보냈는지 로그에 꼭 남겨야 한다.
+     */
+    public static boolean sendImageTo(Context ctx, String room, Uri uri) {
+        String r = (room == null) ? "" : room.trim();
+        if (ctx == null || r.length() == 0 || uri == null) return false;
+
+        Session s = findSession(r);
+        if (s == null) {
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 방 세션이 없어(그 방 카톡 알림이 와야 보낼 수 있어)");
+            return false;
+        }
+        PendingIntent pi = s.pending;
+        RemoteInput[] inputs = s.inputs;
+        if (pi == null || inputs == null || inputs.length == 0) {
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 답장창이 없어(카톡 알림이 다시 와야 해)");
+            return false;
+        }
+        if (!bound) {
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 알림 읽기 권한이 꺼져 있어 — 설정에서 켜줘");
+            return false;
+        }
+
+        String mime = null;
+        try { mime = ctx.getContentResolver().getType(uri); } catch (Throwable ignore) { }
+        if (mime == null || mime.trim().length() == 0) mime = "image/jpeg";
+        mime = mime.trim();
+
+        // 카톡이 선언한 문자열을 **그대로** 키로 써야 카톡이 찾아낼 수 있다 ("image/*" 선언에
+        // "image/jpeg" 키로 넣으면 카톡 쪽 조회가 빗나간다).
+        String key = matchType(s.dataTypes, mime);
+        RemoteInput target = inputFor(inputs, key);
+        if (key == null || target == null) {
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 카톡이 알림 답장에서 이 사진 타입(" + mime + ")을 안 받아");
+            return false;
+        }
+
+        try {
+            Intent filled = new Intent();
+            java.util.HashMap<String, Uri> data = new java.util.HashMap<String, Uri>(2);
+            data.put(key, uri);
+            RemoteInput.addDataResultToIntent(target, filled, data);
+
+            // addDataResultToIntent 가 ClipData 를 자기 용도로 덮어쓴다 →
+            // 글 발송처럼 ClipData 에 URI 를 실어서 권한을 넘기는 방법은 여기서는 못 쓴다.
+            // 그래서 카톡에 읽기 권한을 직접 준다. **보낸 뒤 바로 회수하면 안 된다** —
+            // 카톡은 업로드할 때(한참 뒤에) 이 URI 를 읽는다.
+            try {
+                ctx.grantUriPermission(KAKAO, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Throwable t) {
+                Log.add(ctx, "사진 읽기 권한을 카톡에 못 넘겼어 — "
+                        + t.getClass().getSimpleName() + " (그래도 보내볼게)");
+            }
+            filled.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            if (Build.VERSION.SDK_INT >= 28) {
+                // 카톡이 "사람이 직접 보낸 답장" 으로 인식하게 출처를 붙인다.
+                // (addDataResultToIntent 뒤에 불러야 데이터 결과가 안 지워진다)
+                RemoteInput.setResultsSource(filled, RemoteInput.SOURCE_FREE_FORM_INPUT);
+            }
+
+            pi.send(ctx, 0, filled);
+
+            s.lastMine = System.currentTimeMillis();
+            s.othersSinceMine = 0;
+            return true;
+        } catch (PendingIntent.CanceledException e) {
+            // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
+            s.pending = null;
+            s.inputs = null;
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 답장창이 만료됐어(카톡 알림이 다시 와야 해)");
+            return false;
+        } catch (Throwable t) {
+            Log.add(ctx, "사진 답장 실패: 「" + r + "」 " + t);
+            return false;
+        }
+    }
+
+    /** 카톡이 선언한 타입 중에서 이 사진에 쓸 키를 고른다. 쓸 게 없으면 null. */
+    private static String matchType(java.util.Set<String> allowed, String mime) {
+        if (allowed == null || allowed.isEmpty() || mime == null) return null;
+        String want = mime.trim().toLowerCase(java.util.Locale.US);
+        String star = null, anyImage = null, anyAll = null;
+        Iterator<String> it = allowed.iterator();
+        while (it.hasNext()) {
+            String s = it.next();
+            if (s == null) continue;
+            String t = s.trim();
+            if (t.length() == 0) continue;
+            String low = t.toLowerCase(java.util.Locale.US);
+            if (low.equals(want)) return t;                      // 정확히 일치 — 제일 안전
+            if (low.equals("image/*")) star = t;
+            else if (low.equals("*/*")) anyAll = t;
+            else if (low.startsWith("image/") && anyImage == null) anyImage = t;
+        }
+        if (star != null) return star;
+        if (anyImage != null) return anyImage;   // 타입이 좀 달라도 카톡은 URI 를 읽는다
+        return anyAll;
+    }
+
+    /** 그 타입을 허용하는 RemoteInput 을 찾는다 (결과 키가 그 안에 있다) */
+    private static RemoteInput inputFor(RemoteInput[] inputs, String type) {
+        if (inputs == null || type == null) return null;
+        for (int i = 0; i < inputs.length; i++) {
+            RemoteInput ri = inputs[i];
+            if (ri == null) continue;
+            String key = ri.getResultKey();
+            if (key == null || key.length() == 0) continue;
+            java.util.Set<String> t;
+            try { t = ri.getAllowedDataTypes(); } catch (Throwable ignore) { continue; }
+            if (t == null) continue;
+            Iterator<String> it = t.iterator();
+            while (it.hasNext()) {
+                String s = it.next();
+                if (s != null && type.equals(s.trim())) return ri;
+            }
+        }
+        return null;
     }
 
     // ── 발송 ──────────────────────────────────────────────────────────────────

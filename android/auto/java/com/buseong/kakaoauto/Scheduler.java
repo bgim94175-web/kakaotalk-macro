@@ -60,6 +60,17 @@ public final class Scheduler {
     /** 누적 발송 카운터. EVERY_N("N번째 발송마다") 이미지 첨부 판정에 쓴다. */
     private static final String K_SEQ = "sched_seq";
 
+    // ── 마지막 사진 전송 실패 기록 ────────────────────────────────────────────
+    //  예약 발송의 사진 전송은 아무도 화면을 안 보고 있을 때 돌아간다. 그래서 실패를
+    //  여기 안 남기면 사용자는 영원히 모른다 — 활동 로그는 200줄 링버퍼라 금방 밀려난다.
+    //  평문 Prefs 에 둔다: 설정키가 없는 상태(재인증 전)에서도 경고는 떠야 하니까.
+    private static final String K_IMG_FAIL_AT = "img_fail_at";
+    private static final String K_IMG_FAIL_ROOM = "img_fail_room";
+    private static final String K_IMG_FAIL_WHY = "img_fail_why";
+
+    /** 사유 문구가 아무리 길어도 이만큼만 보관한다 (경고 줄 한 줄에 들어갈 만큼) */
+    private static final int IMG_FAIL_WHY_MAX = 300;
+
     /** 다음 하트비트 예정 시각 (평문 Prefs — 설정키가 없어도 읽혀야 한다) */
     private static final String K_HB_NEXT = "sched_hb_next";
 
@@ -513,12 +524,29 @@ public final class Scheduler {
 
                 // 이미지 첨부 (EVERY / EVERY_N). NEVER·MANUAL 은 imagesThisTime 이 false 를 준다.
                 int seq = bumpSeq(c);
+                final String imgRoom = room;
                 try {
                     if (m.imagesThisTime(seq)) {
-                        ImageSender.send(c, room, m.images, null);
+                        // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
+                        //   여기서 결과를 기록하지 않으면 사진이 안 갔다는 걸 사용자가 영원히 모른다.
+                        ImageSender.sendWithResult(c, imgRoom, m.images, new ImageSender.Done() {
+                            @Override public void done(boolean ok, String detail) {
+                                if (ok) {
+                                    clearImageFail(c, imgRoom);
+                                    Log.add(c, "「" + imgRoom + "」 사진 전송을 끝냈어");
+                                } else {
+                                    noteImageFail(c, imgRoom, detail);
+                                    Log.add(c, "「" + imgRoom + "」 사진 전송 실패 — "
+                                            + ((detail == null || detail.length() == 0)
+                                               ? "원인 불명" : detail));
+                                }
+                                refreshUi();
+                            }
+                        });
                     }
                 } catch (Throwable t) {
-                    Log.add(c, "「" + room + "」 사진 전송을 시작하지 못했어: " + t);
+                    noteImageFail(c, imgRoom, "전송을 시작하지도 못했어 — " + t);
+                    Log.add(c, "「" + imgRoom + "」 사진 전송을 시작하지 못했어: " + t);
                 }
 
                 if (i < rooms.size() - 1) gap();
@@ -537,6 +565,86 @@ public final class Scheduler {
         if (failed.length() > 0) sb.append(" / 실패: ").append(failed);
         if (left > 0) sb.append(" / 시간이 모자라 ").append(left).append("개 방은 다음 주기로");
         Log.add(c, sb.toString());
+    }
+
+    // ── 마지막 사진 전송 실패 기록 (공개 API) ─────────────────────────────────
+
+    /**
+     * 마지막으로 실패한 사진 전송 한 건. {@link #lastImageFail} 이 돌려준다.
+     * 성공하면 {@link #clearImageFail} 로 지워진다 — 그래서 이게 null 이 아니면
+     * "지금도 안 고쳐진 실패" 라고 봐도 된다.
+     */
+    public static final class ImageFail {
+        /** 실패한 시각 (0 이 아니다) */
+        public final long at;
+        /** 어느 방에 보내려던 거였나 ("" 면 모름) */
+        public final String room;
+        /** 왜 실패했나 (사람이 읽는 한 줄) */
+        public final String why;
+
+        ImageFail(long at, String room, String why) {
+            this.at = at;
+            this.room = (room == null) ? "" : room;
+            this.why = (why == null || why.length() == 0) ? "원인 불명" : why;
+        }
+    }
+
+    /** 마지막 사진 전송 실패 기록. 없으면 null. */
+    public static ImageFail lastImageFail(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return null;
+        long at = Prefs.getLong(c, K_IMG_FAIL_AT, 0L);
+        if (at <= 0) return null;
+        return new ImageFail(at, Prefs.getStr(c, K_IMG_FAIL_ROOM, ""),
+                Prefs.getStr(c, K_IMG_FAIL_WHY, ""));
+    }
+
+    /**
+     * 사진 전송 실패를 기록한다. 예약 발송·수동 전송·진단이 전부 이걸 부른다.
+     * 마지막 한 건만 보관한다 (사용자가 알아야 하는 건 "지금 안 되고 있다" 는 사실이다).
+     */
+    public static void noteImageFail(Context ctx, String room, String why) {
+        Context c = app(ctx);
+        if (c == null) return;
+        String w = (why == null) ? "" : why.trim();
+        if (w.length() == 0) w = "원인 불명";
+        if (w.length() > IMG_FAIL_WHY_MAX) w = w.substring(0, IMG_FAIL_WHY_MAX) + "…";
+        try {
+            Prefs.putLong(c, K_IMG_FAIL_AT, System.currentTimeMillis());
+            Prefs.putStr(c, K_IMG_FAIL_ROOM, (room == null) ? "" : room);
+            Prefs.putStr(c, K_IMG_FAIL_WHY, w);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 남겼어", t);
+        }
+    }
+
+    /** 실패 기록을 무조건 지운다 (사용자가 "지우기" 를 누른 경우). */
+    public static void clearImageFail(Context ctx) {
+        clearImageFail(ctx, null);
+    }
+
+    /**
+     * 실패 기록을 지운다.
+     *
+     * @param room null 이면 무조건 지운다. 방 이름을 주면 <b>그 방 실패였을 때만</b> 지운다.
+     *        방을 따지는 이유: 한 주기에 여러 방으로 보내는데, 뒷방이 성공했다고
+     *        앞방의 실패 기록을 덮어버리면 사용자는 앞방이 안 간 걸 영원히 모른다.
+     */
+    public static void clearImageFail(Context ctx, String room) {
+        Context c = app(ctx);
+        if (c == null) return;
+        if (room != null) {
+            ImageFail cur = lastImageFail(c);
+            if (cur == null) return;
+            if (!cur.room.trim().equals(room.trim())) return;
+        }
+        try {
+            Prefs.remove(c, K_IMG_FAIL_AT);
+            Prefs.remove(c, K_IMG_FAIL_ROOM);
+            Prefs.remove(c, K_IMG_FAIL_WHY);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 지웠어", t);
+        }
     }
 
     // ── 알람 배선 ─────────────────────────────────────────────────────────────
@@ -758,15 +866,20 @@ public final class Scheduler {
         }
     }
 
-    /** 홈 화면이 떠 있으면 숫자를 갱신해준다 (UI 건드리는 거라 메인 스레드로 넘긴다) */
+    /**
+     * 앱이 떠 있으면 <b>보고 있는 탭</b>을 갱신해준다 (UI 건드리는 거라 메인 스레드로 넘긴다).
+     *
+     * 홈만 갱신하면 안 된다 — 사진 전송 실패 경고는 매크로 탭 사진 카드에도 뜨는데,
+     * 사용자가 그 탭을 보고 있는 동안 실패하면 다시 들어올 때까지 아무 변화가 없다.
+     */
     private static void refreshUi() {
         try {
             new Handler(Looper.getMainLooper()).post(new Runnable() {
                 @Override public void run() {
                     try {
-                        MainActivity.refreshHome();
+                        Nav.reload();
                     } catch (Throwable t) {
-                        android.util.Log.w("KakaoAuto", "홈 갱신 실패", t);
+                        android.util.Log.w("KakaoAuto", "화면 갱신 실패", t);
                     }
                 }
             });

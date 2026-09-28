@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 카톡 공유/첨부 UI 만 건드린다. 다른 앱은 읽지 않는다. -->
+<!-- 카톡 공유/첨부 UI 만 건드린다. 다른 앱은 읽지 않는다.
+
+     ※ 배포 주의: canPerformGestures 는 v2.0 에서 새로 추가한 "능력(capability)" 이다.
+       능력이 늘어난 접근성 서비스는 안드로이드가 사용자에게 다시 동의를 받아야 하는 경우가 있어서,
+       덮어쓰기 업데이트 뒤에 <b>설정 › 접근성 › 카톡 오토 를 껐다 다시 켜야</b> 좌표 탭 폴백이 살아난다.
+       (안 켜도 ACTION_CLICK 경로는 그대로 돌아간다 — 좌표 탭만 못 쓴다.
+        지금 상태는 앱 로그와 화면 진단의 "좌표 탭 가능(canPerformGestures)" 줄로 확인한다) -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
     android:packageNames="com.kakao.talk"

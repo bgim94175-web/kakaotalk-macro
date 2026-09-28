@@ -23,6 +23,8 @@ public final class ScreenAccount {
 
     private static final int F_ADV = 1;
     private static final int F_LOG = 1 << 1;
+    /** 사진 전송 진단 기록 카드 */
+    private static final int F_DIAG = 1 << 2;
     private static int openBits = 0;
 
     private static WeakReference<MainActivity> ACT;
@@ -60,6 +62,10 @@ public final class ScreenAccount {
     private static void fill(final MainActivity a, LinearLayout col) {
         col.addView(Ui.title(a, "내정보"));
 
+        // 문제가 생겼을 때 제일 먼저 오는 화면이니까, 조용히 실패한 사진 전송은 여기서도 알려준다
+        View imgWarn = ScreenMacro.imgFailNote(a);
+        if (imgWarn != null) col.addView(imgWarn);
+
         final License.State st = License.state(a);
 
         col.addView(licenseCard(a, st));
@@ -70,8 +76,9 @@ public final class ScreenAccount {
         col.addView(Ui.sectionHeader(a, "기기", "이 기기 정보"));
         col.addView(deviceCard(a, st));
 
-        col.addView(advFold(a).card);
-        col.addView(logFold(a).card);
+        // 진단·고급·로그는 성격이 같다(안 될 때 여는 것) → 카드 하나로 묶는다
+        col.addView(Ui.sectionHeader(a, "안 될 때", "진단 기록 · 고급 · 로그"));
+        col.addView(Nav.foldGroup(a, diagFold(a), advFold(a), logFold(a)));
 
         col.addView(signOutBtn(a));
         col.addView(footer(a));
@@ -315,6 +322,92 @@ public final class ScreenAccount {
                 return null;
             }
         });
+    }
+
+    // ── 사진 전송 진단 기록 ─────────────────────────────────────────────────
+
+    /**
+     * 카톡 공유창을 접근성으로 조작하는 경로는 카톡이 화면을 바꾸면 조용히 깨진다.
+     * 그때 화면에 뭐가 있었는지를 한 덩어리로 보관해서, 사용자가 그대로 개발자에게 보낼 수 있게 한다.
+     * 지우는 버튼이 여기 있다 — 매크로 화면은 "보기" 만 하고, 정리는 내정보에서 한다.
+     */
+    private static Nav.Fold diagFold(final MainActivity a) {
+        final long at = ScreenMacro.dumpAtSafe(a);
+        Scheduler.ImageFail fail = null;
+        try { fail = Scheduler.lastImageFail(a); } catch (Throwable t) { fail = null; }
+
+        String sum;
+        if (fail != null) sum = "실패 기록 있음 · " + ScreenMacro.agoShort(fail.at);
+        else if (at > 0) sum = "화면 기록 1건 · " + ScreenMacro.agoShort(at);
+        else sum = "기록 없음";
+
+        final Nav.Fold f = fold(a, F_DIAG, "사진 전송 진단 기록", sum);
+
+        f.body.addView(Ui.sub(a, "사진 전송이 실패했을 때 카톡 화면에 뭐가 있었는지 한 덩어리로 보관해. "
+                + "개발자한테 그대로 보내주면 추측 없이 고칠 수 있어. "
+                + "여기 남는 건 화면에 보이던 글자·버튼 이름이야 — 대화 내용을 따로 모으진 않아."));
+
+        f.body.addView(Ui.kv(a, "마지막 실패", (fail == null) ? "없음" : ScreenMacro.ago(fail.at)));
+        if (fail != null) {
+            f.body.addView(Ui.kv(a, "실패한 방", fail.room.length() == 0 ? "(모름)" : Nav.preview(fail.room, 16)));
+            f.body.addView(Ui.kv(a, "사유", Nav.preview(fail.why, 40)));
+        }
+        f.body.addView(Ui.kv(a, "화면 기록", (at > 0) ? ScreenMacro.ago(at) : "없음"));
+
+        LinearLayout btns = Ui.row(a);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        bp.topMargin = Theme.dp(a, 12);
+        btns.setLayoutParams(bp);
+
+        TextView view = Ui.btn(a, "보기", false);
+        view.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        view.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { ScreenMacro.showDiag(a); }
+        });
+        btns.addView(view);
+
+        TextView copy = Ui.btn(a, "복사", false);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, WRAP, 1f);
+        cp.leftMargin = Theme.dp(a, 8);
+        copy.setLayoutParams(cp);
+        copy.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Nav.copy(a, "사진 전송 진단", ScreenMacro.diagText(a));
+            }
+        });
+        btns.addView(copy);
+
+        final boolean hasAny = (at > 0) || (fail != null);
+        TextView clear = Ui.btn(a, "지우기", false);
+        clear.setTextColor(Theme.RED);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, WRAP, 1f);
+        lp.leftMargin = Theme.dp(a, 8);
+        clear.setLayoutParams(lp);
+        if (!hasAny) clear.setAlpha(0.55f);
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (!hasAny) { Ui.toast(a, "지울 기록이 없어"); return; }
+                Nav.confirm(a, "진단 기록을 지울까?",
+                        "저장된 카톡 화면 기록과 마지막 실패 기록을 같이 지운다. 되돌릴 수 없어.\n"
+                                + "개발자에게 아직 안 보냈으면 먼저 [복사] 해두고 지워줘.",
+                        "지우기", new Runnable() {
+                            @Override public void run() {
+                                try {
+                                    KakaoAccessibility.clearDump(a);
+                                } catch (Throwable t) {
+                                    Log.add(a, "화면 기록을 못 지웠어: " + t);
+                                }
+                                Scheduler.clearImageFail(a);
+                                Log.add(a, "사진 전송 진단 기록을 지웠어");
+                                Ui.toast(a, "진단 기록을 지웠어");
+                                refresh();
+                            }
+                        });
+            }
+        });
+        btns.addView(clear);
+        f.body.addView(btns);
+        return f;
     }
 
     // ── 로그 ────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 package com.buseong.kakaoauto;
 
+import android.app.KeyguardManager;
 import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Context;
@@ -7,22 +8,36 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * 이미지 1~5장 전송 오케스트레이션.
+ * 이미지 1~5장 전송 오케스트레이션. 경로가 두 개다.
  *
- * 흐름:
+ * <h3>경로 A — 알림 답장에 사진 첨부 (화면이 아예 안 움직인다)</h3>
+ * 카톡이 알림 답장 {@code RemoteInput} 에 이미지 데이터 타입을 허용해뒀으면
+ * ({@link KakaoListener#imageTypesFor}) 공유창도 접근성도 안 쓰고 그냥 실어 보낸다.
+ * MIME 하나당 URI 하나라서 <b>한 장씩 순서대로</b> 보낸다.
+ * 되는지 안 되는지는 기기/카톡 버전마다 다르니 <b>런타임에 확인해서 로그로 알려준다.</b>
+ *
+ * <h3>경로 B — 공유창 + 접근성 조작 (화면이 잠깐 움직인다)</h3>
  *   1. 살아있는 URI 만 최대 5장 고른다
  *   2. {@link KakaoAccessibility#arm} 으로 "다음 카톡 공유창에서 이 방 골라라" 예약
- *   3. ACTION_SEND_MULTIPLE 로 카톡 공유창을 띈다
+ *   3. 화면이 꺼져 있거나 잠겨 있으면 {@link WakeActivity} 를 거쳐, 아니면 바로
+ *      ACTION_SEND_MULTIPLE 로 카톡 공유창을 띈다
  *   4. 접근성 서비스가 방 탭 → 전송 탭 → 콜백으로 결과 알림
  *   5. 40초 안에 아무 신호 없으면 예약 풀고 실패 처리
  *
  * 한 번에 한 건만 돌린다(카톡 공유창이 겹치면 둘 다 망한다). 겹쳐 들어온 요청은 줄 세워서 순서대로.
  * 어느 스레드에서 불러도 된다 — 내부 상태는 전부 메인 루퍼에서만 만진다.
+ *
+ * 실패하면 <b>어느 단계에서 왜</b> 를 반드시 남긴다. 공유창이 뜨기 전에 죽는 경로는 접근성 쪽
+ * 화면 덤프가 없으니까 여기서 최소 진단을 만들어 같은 자리에 저장한다({@link #diag}).
  */
 public final class ImageSender {
     private ImageSender() {}
@@ -36,10 +51,19 @@ public final class ImageSender {
     /** 연속 전송 사이 숨 고르기 (카톡 공유창이 닫힐 시간) */
     private static final long GAP_MS = 1500L;
 
+    /** 알림 답장으로 사진을 연달아 보낼 때 사이 간격 (너무 빠르면 카톡이 순서를 뒤집거나 흘린다) */
+    private static final long REPLY_GAP_MS = 1500L;
+
     /** 대기열에 이보다 많이 쌓이면 새 요청을 버린다 */
     private static final int MAX_QUEUE = 5;
 
     private static final String KAKAO = "com.kakao.talk";
+
+    /** 화면이 꺼지고 잠겨 있어서 못 보낸 경우의 안내 (전용 폰이면 잠금을 없애는 게 정답이다) */
+    private static final String LOCK_HELP =
+            "화면이 꺼져 있고 잠금이 걸려 있어서 사진을 못 보냈어 — "
+            + "설정 › 잠금화면 › 화면 잠금 방식을 「없음」 으로 바꾸고, "
+            + "개발자 옵션의 「충전 중 화면 켜짐 유지」 를 켜줘";
 
     // ── 상태 (메인 스레드에서만 접근) ────────────────────────────────────────
     private static final ArrayList<Job> QUEUE = new ArrayList<Job>();
@@ -60,6 +84,11 @@ public final class ImageSender {
         final String room;
         final ArrayList<String> uris;
         final Done onDone;
+
+        /** 공유창을 띄우려고 WakeActivity 로 화면을 깨웠나 (진단에 쓴다) */
+        volatile boolean woke = false;
+        /** 공유 인텐트를 던진 시각 (0 = 아직) */
+        volatile long launchedAt = 0L;
 
         Job(long id, Context app, String room, ArrayList<String> uris, Done onDone) {
             this.id = id;
@@ -132,17 +161,21 @@ public final class ImageSender {
             Log.add(c, "사진은 " + MAX + "장까지야 — 앞 " + ok.size() + "장만 보낼게");
         }
 
-        if (!accessibilityOn(c)) {
-            Log.add(c, "접근성 권한이 꺼져 있어서 이미지 전송을 못 했어 — "
-                    + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 켜줘");
-            fire(onDone, false, "접근성 권한이 꺼져 있어");
-            return;
-        }
-        if (!overlayOn(c)) {
-            // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
-            // 다만 예약 발송(백그라운드)에서는 100% 실패하므로 확실히 알려준다.
-            Log.add(c, "「다른 앱 위에 표시」 권한이 꺼져 있어 — 앱을 보고 있을 때는 될 수 있지만, "
-                    + "예약 발송(화면 꺼진 상태)에서는 카톡 공유창이 안 떠. 설정에서 켜줘");
+        // 알림 답장으로 사진을 보낼 수 있는 방이면 접근성·오버레이·화면 상태가 전부 필요 없다.
+        // 그래서 그 경우에는 여기서 막지 않는다 (막으면 제일 좋은 경로를 스스로 닫는 셈이다).
+        if (!replyImageReady(c, r)) {
+            if (!accessibilityOn(c)) {
+                Log.add(c, "접근성 권한이 꺼져 있어서 이미지 전송을 못 했어 — "
+                        + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 켜줘");
+                fire(onDone, false, "접근성 권한이 꺼져 있어");
+                return;
+            }
+            if (!overlayOn(c)) {
+                // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
+                // 다만 예약 발송(백그라운드)에서는 100% 실패하므로 확실히 알려준다.
+                Log.add(c, "「다른 앱 위에 표시」 권한이 꺼져 있어 — 앱을 보고 있을 때는 될 수 있지만, "
+                        + "예약 발송(화면 꺼진 상태)에서는 카톡 공유창이 안 떠. 설정에서 켜줘");
+            }
         }
 
         final String room2 = r;
@@ -268,14 +301,122 @@ public final class ImageSender {
     }
 
     private static void start(final Job j) {
+        // 경로 A 를 먼저 본다 — 되면 화면이 아예 안 움직인다.
+        if (replyImageReady(j.app, j.room)) {
+            sendByReply(j, 0, 0);
+            return;
+        }
+        startShare(j);
+    }
+
+    // ── 경로 A: 알림 답장에 사진 첨부 ──────────────────────────────────────────
+
+    /**
+     * 이 방에 알림 답장으로 사진을 보낼 수 있나.
+     * 알림 읽기 권한이 붙어 있고, 그 방 세션이 살아있고, 카톡이 이미지 타입을 허용해둬야 한다.
+     */
+    /** 알림 답장 사진 경로를 사용자가 껐나 (Prefs 평문 키) */
+    private static final String K_REPLY_IMG_OFF = "reply_img_off";
+
+    /** 알림 답장으로 사진 보내기가 켜져 있나 (기본 켜짐) */
+    public static boolean replyImageEnabled(Context c) {
+        return !Prefs.getBool(c, K_REPLY_IMG_OFF, false);
+    }
+
+    /**
+     * 알림 답장 사진 경로를 켜고 끈다.
+     * 카톡이 "이미지 받는다" 고 선언해놓고 실제로는 무시하는 경우가 있을 수 있는데,
+     * 그러면 앱은 보낸 줄 알고 성공으로 보고한다(카톡이 올렸는지 확인할 API 가 없다).
+     * 사용자가 "로그엔 보냈다는데 카톡엔 안 올라왔다" 를 발견하면 이걸 꺼서 공유창 경로로 되돌린다.
+     */
+    public static void setReplyImageEnabled(Context c, boolean on) {
+        Prefs.putBool(c, K_REPLY_IMG_OFF, !on);
+        Log.add(c, on ? "사진을 알림 답장으로 보내기 — 켰어 (화면이 안 움직여)"
+                      : "사진을 알림 답장으로 보내기 — 껐어 (공유창을 열어서 보낼게)");
+    }
+
+    public static boolean replyImageReady(Context c, String room) {
+        try {
+            if (!replyImageEnabled(c)) return false;
+            if (!KakaoListener.listenerBound()) return false;
+            java.util.Set<String> types = KakaoListener.imageTypesFor(room);
+            return types != null && !types.isEmpty();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 사진을 한 장씩 알림 답장으로 보낸다. 메인 스레드에서만 돈다.
+     *
+     * 한 장도 못 보냈으면 공유창 경로로 폴백한다. 이미 몇 장 나갔으면 폴백하지 않는다 —
+     * 공유창으로 다시 보내면 나간 장이 중복된다(그게 더 나쁘다).
+     *
+     * 카톡이 실제로 올렸는지는 확인할 방법이 없으니 <b>어느 경로로 보냈는지 로그에 남긴다.</b>
+     */
+    private static void sendByReply(final Job j, final int idx, final int sent) {
+        if (current == null || current.id != j.id) return;   // 이미 끝난 건
+
+        if (idx >= j.uris.size()) {
+            Log.add(j.app, "사진 " + sent + "장을 알림 답장으로 보냈어 — 방: " + j.room
+                    + " · 화면은 하나도 안 움직였어. 카톡에서 사진이 진짜 올라갔는지 눈으로 확인해줘 — "
+                    + "안 올라갔으면 알려줘(그러면 공유창 경로로 되돌린다)");
+            finish(j.id, true, "알림 답장으로 " + sent + "장 보냈어(화면 안 움직임) — 카톡에서 올라갔는지 확인해줘");
+            return;
+        }
+
+        Uri u = null;
+        try { u = Uri.parse(j.uris.get(idx)); } catch (Throwable ignore) { }
+
+        boolean ok = (u != null) && KakaoListener.sendImageTo(j.app, j.room, u);
+        if (!ok) {
+            if (sent == 0) {
+                Log.add(j.app, "알림 답장으로는 사진을 못 넘겼어 — 공유창 경로로 바꿔서 해볼게"
+                        + "(화면이 잠깐 움직여)");
+                startShare(j);
+                return;
+            }
+            Log.add(j.app, "알림 답장으로 " + sent + "/" + j.uris.size() + "장만 보냈어 — 방: " + j.room
+                    + ". 남은 " + (j.uris.size() - sent) + "장은 직접 다시 보내줘"
+                    + "(공유창으로 다시 안 보낸다 — 이미 나간 장이 중복되니까)");
+            diag(j, "알림 답장 " + (idx + 1) + "번째 장에서 실패", 0L, "앞 " + sent + "장은 이미 나갔어");
+            finish(j.id, false, "알림 답장으로 " + sent + "장만 보냈어 — 남은 건 다시 보내줘");
+            return;
+        }
+
+        final int next = sent + 1;
+        main().postDelayed(new Runnable() {
+            @Override public void run() { sendByReply(j, idx + 1, next); }
+        }, REPLY_GAP_MS);
+    }
+
+    // ── 경로 B: 공유창 + 접근성 조작 ──────────────────────────────────────────
+
+    private static void startShare(final Job j) {
+        // 여기까지 왔으면 접근성이 반드시 필요하다.
+        // (대기열에 들어갈 때는 알림 답장 경로가 살아있어서 접근성 검사를 안 했을 수 있고,
+        //  그 사이 세션이 죽어서 이리로 떨어지기도 한다. 그때 40초를 통째로 버리면 안 된다.)
+        if (!accessibilityOn(j.app)) {
+            diag(j, "공유창 경로가 필요한데 접근성 권한이 꺼져 있어", 0L,
+                    "알림 답장 경로도 못 쓰는 상태였어 — 둘 다 막혀서 보낼 방법이 없다");
+            Log.add(j.app, "사진 전송 실패: 공유창 경로가 필요한데 접근성 권한이 꺼져 있어 — "
+                    + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 켜줘");
+            finish(j.id, false, "접근성 권한이 꺼져 있어");
+            return;
+        }
+
         // 결과 콜백을 먼저 꽂아두고 공유창을 띈다 (순서 바뀌면 빠른 응답을 놓친다)
+        //  ★ ctx(j.app)를 반드시 같이 넘긴다. 접근성 설정은 켜져 있는데 서비스가 실제로는
+        //    안 붙어 있는 상태(업데이트 직후·시스템이 죽인 뒤)가 현장에서 제일 흔한 실패인데,
+        //    ctx 없이 부르면 arm 쪽 안내 로그가 Log.add(null) 로 사라지고 그 시점 덤프도 안 남는다.
+        //    = 사용자가 받는 단서가 0 이 된다. 진단이 틀리게 도는 것보다 없는 게 더 나쁘다.
         KakaoAccessibility.arm(j.room, TIMEOUT_MS, new KakaoAccessibility.Result() {
             @Override public void done(final boolean ok, final String detail) {
                 main().post(new Runnable() {
                     @Override public void run() { finish(j.id, ok, detail); }
                 });
             }
-        });
+        }, j.app);
 
         Intent i = new Intent(Intent.ACTION_SEND_MULTIPLE);
         i.setType("image/*");
@@ -289,9 +430,13 @@ public final class ImageSender {
             } catch (Throwable ignore) { }
         }
         if (list.isEmpty()) {
+            // 공유창을 띄우기도 전에 죽는다 → 접근성 덤프가 없다. 최소 진단이라도 남긴다.
+            diag(j, "사진 주소(URI) 파싱 실패 — 공유 인텐트를 만들지도 못했어", 0L,
+                    "첨부 " + j.uris.size() + "개가 전부 Uri.parse 에서 깨졌어");
             KakaoAccessibility.disarm();
-            Log.add(j.app, "이미지 전송 실패 — 사진 주소가 깨졌어");
-            finish(j.id, false, "사진 주소가 깨졌어");
+            Log.add(j.app, "이미지 전송 실패 — 사진 주소가 깨졌어 · 진단을 남겼어"
+                    + "(매크로 › 사진 첨부 › 화면 진단 보기)");
+            finish(j.id, false, "사진 주소가 깨졌어 — 진단을 남겼어(매크로 › 사진 첨부 › 화면 진단 보기)");
             return;
         }
         i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, list);
@@ -306,31 +451,56 @@ public final class ImageSender {
             Log.add(j.app, "사진 권한 전달 준비 실패 — " + t.getClass().getSimpleName() + " (그냥 보내볼게)");
         }
 
+        // 화면이 꺼져 있거나 잠겨 있으면 공유창이 못 뜬다. 전용 폰이니까 깨워도 된다.
+        // 이미 켜져 있고 안 잠겨 있으면 바로 띈다 — 필요 없는 단계는 그 자체가 실패 지점이다.
+        final boolean ready = screenReady(j.app);
+        j.woke = !ready;
+        if (!ready) {
+            Log.add(j.app, "화면이 " + screenState(j.app) + " — 먼저 깨우고 공유창을 띌게");
+        }
+
         try {
-            j.app.startActivity(i);
+            j.app.startActivity(ready ? i : WakeActivity.wrap(j.app, i));
         } catch (Throwable t) {
+            diag(j, ready ? "공유창 startActivity 실패" : "화면 깨우기(WakeActivity) startActivity 실패",
+                    0L, t.getClass().getSimpleName());
             KakaoAccessibility.disarm();
-            Log.add(j.app, "카톡 공유창을 못 열었어 — 카톡이 안 깔렸거나 버전이 너무 달라 ("
-                    + t.getClass().getSimpleName() + ")");
-            finish(j.id, false, "카톡 공유창을 못 열었어");
+            if (ready) {
+                Log.add(j.app, "카톡 공유창을 못 열었어 — 카톡이 안 깔렸거나 버전이 너무 달라 ("
+                        + t.getClass().getSimpleName() + ") · 진단을 남겼어");
+                finish(j.id, false, "카톡 공유창을 못 열었어 — 진단을 남겼어(매크로 › 사진 첨부 › 화면 진단 보기)");
+            } else {
+                Log.add(j.app, LOCK_HELP + " (" + t.getClass().getSimpleName() + ")");
+                finish(j.id, false, "화면이 꺼져 있고 잠금이 걸려 있어서 못 보냈어 — 잠금을 「없음」 으로 바꿔줘");
+            }
             return;
         }
 
-        Log.add(j.app, "사진 " + list.size() + "장 공유창 열었어 — 방: " + j.room + " (최대 "
-                + (TIMEOUT_MS / 1000) + "초 기다릴게)");
+        j.launchedAt = System.currentTimeMillis();
+        Log.add(j.app, "사진 " + list.size() + "장 공유창 열었어 — 방: " + j.room
+                + (ready ? "" : " (화면 깨우고서)") + " (최대 " + (TIMEOUT_MS / 1000) + "초 기다릴게)");
 
         // 6초 안에 카톡 화면을 한 번도 못 봤으면 공유창 자체가 안 뜬 거다 (백그라운드 차단이 대표 원인).
-        final long launchedAt = System.currentTimeMillis();
+        final long launchedAt = j.launchedAt;
         main().postDelayed(new Runnable() {
             @Override public void run() {
                 if (current == null || current.id != j.id) return;
                 if (KakaoAccessibility.sawKakaoSince(launchedAt)) return;   // 떴다 — 계속 기다린다
+                // 깨우기를 시도했는데 아직도 준비가 안 됐으면 보안 잠금이 범인이다
+                boolean stillLocked = j.woke && !screenReady(j.app);
+                String why;
+                if (stillLocked) {
+                    why = LOCK_HELP;
+                } else if (!overlayOn(j.app)) {
+                    why = "「다른 앱 위에 표시」 권한이 꺼져 있어서 안드로이드가 공유창을 막았어 — "
+                            + "설정 › 애플리케이션 › 카톡 오토 › 다른 앱 위에 표시 를 켜줘";
+                } else {
+                    why = "카톡이 공유 요청을 무시했어 — 카톡을 최신 버전으로 업데이트해봐";
+                }
+                // 접근성은 아직 armed 로 기다리는 중이라 자기 덤프를 안 남겼다 → 우리가 남긴다
+                diag(j, "공유창이 6초 안에 안 떴어 (카톡 화면을 한 번도 못 봄)", launchedAt, why);
                 KakaoAccessibility.disarm();
-                String why = overlayOn(j.app)
-                        ? "카톡이 공유 요청을 무시했어 — 카톡을 최신 버전으로 업데이트해봐"
-                        : "「다른 앱 위에 표시」 권한이 꺼져 있어서 안드로이드가 공유창을 막았어 — "
-                          + "설정 › 애플리케이션 › 카톡 오토 › 다른 앱 위에 표시 를 켜줘";
-                Log.add(j.app, "사진 전송 실패: 카톡 공유창이 안 떴어. " + why);
+                Log.add(j.app, "사진 전송 실패: 카톡 공유창이 안 떴어. " + why + " · 진단을 남겼어");
                 finish(j.id, false, "카톡 공유창이 안 떴어 — " + why);
             }
         }, 6000L);
@@ -338,6 +508,10 @@ public final class ImageSender {
         main().postDelayed(new Runnable() {
             @Override public void run() {
                 if (current == null || current.id != j.id) return;   // 이미 끝났다
+                // 접근성이 우리보다 먼저 포기하고 화면 덤프를 남겼으면 그걸 덮어쓰지 않는다
+                // (그쪽 덤프가 훨씬 자세하다). 아무것도 안 남겼을 때만 우리 요약을 넣는다.
+                diag(j, "시간 초과(" + (TIMEOUT_MS / 1000) + "초) — 접근성 서비스가 아무 신호도 안 줬어",
+                        launchedAt, "접근성이 자기 덤프도 못 남겼어 = 서비스가 안 붙었거나 죽었을 가능성이 커");
                 KakaoAccessibility.disarm();
                 Log.add(j.app, "이미지 전송 시간 초과(" + (TIMEOUT_MS / 1000)
                         + "초) — 카톡 공유창에서 방을 못 골랐어. 접근성 권한과 방 이름을 확인해줘");
@@ -345,6 +519,149 @@ public final class ImageSender {
                         + "접근성 권한을 껐다 켜보고 다시 해봐");
             }
         }, TIMEOUT_MS);
+    }
+
+    // ── 화면 상태 ────────────────────────────────────────────────────────────
+
+    /**
+     * 공유창을 바로 띄울 수 있는 화면 상태인가 (켜져 있고 + 잠금이 안 걸려 있고).
+     * 못 읽으면 <b>준비된 걸로 본다</b> — 확실하지도 않은데 깨우기 단계를 끼워 넣으면
+     * 그 단계 자체가 새 실패 지점이 된다.
+     */
+    public static boolean screenReady(Context c) {
+        if (c == null) return false;
+        boolean on = true;
+        try {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) on = pm.isInteractive();
+        } catch (Throwable ignore) { }
+        if (!on) return false;
+        try {
+            KeyguardManager km = (KeyguardManager) c.getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null && km.isKeyguardLocked()) return false;
+        } catch (Throwable ignore) { }
+        return true;
+    }
+
+    /** 화면 상태를 사람 말로 (로그·진단용) */
+    private static String screenState(Context c) {
+        String on = "?", lock = "?";
+        try {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) on = pm.isInteractive() ? "켜짐" : "꺼짐";
+        } catch (Throwable ignore) { }
+        try {
+            KeyguardManager km = (KeyguardManager) c.getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null) {
+                lock = km.isKeyguardLocked()
+                        ? ("잠김" + (km.isDeviceSecure() ? "(보안 잠금 — 못 풀어)" : "(보안 잠금 아님 — 풀 수 있어)"))
+                        : "안 잠김";
+            }
+        } catch (Throwable ignore) { }
+        return on + " · 잠금 " + lock;
+    }
+
+    // ── 최소 진단 (공유창이 뜨기 전에 죽는 경로용) ────────────────────────────
+
+    /**
+     * 덤프가 안 남는 실패 경로를 메운다.
+     * 공유창이 뜨기도 전에 죽으면 접근성 쪽 화면 덤프가 아예 없어서 사용자가 받을 단서가 0 이 된다.
+     * 그래서 "무슨 단계에서 · 화면 상태 · 접근성 연결 상태 · 다른 접근성 앱" 만이라도 같은 자리에 남긴다.
+     *
+     * @param since 0 이 아니면, 접근성이 그 시각 이후에 이미 자기 덤프를 남겼으면 <b>건드리지 않는다</b>.
+     *              그쪽이 훨씬 자세한데 우리 요약으로 덮으면 진단이 후퇴한다.
+     */
+    private static void diag(Job j, String step, long since, String extra) {
+        if (j == null || j.app == null) return;
+        try {
+            if (since > 0L && KakaoAccessibility.lastDumpAt(j.app) >= since) return;
+            KakaoAccessibility.saveDump(j.app, buildDiag(j, step, extra));
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "사진 전송 진단을 못 남겼어", t);
+        }
+    }
+
+    private static String buildDiag(Job j, String step, String extra) {
+        StringBuilder b = new StringBuilder(1024);
+        String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
+        b.append("=== 사진 전송 진단 ").append(now).append(" ===\n");
+        b.append("※ 공유창이 뜨기 전(또는 접근성이 아무 말도 못 한 채) 실패했어.\n");
+        b.append("   그래서 화면 뷰 트리는 없다 — 아래 항목만으로 원인을 좁혀야 해.\n");
+        b.append("단계: ").append(step).append('\n');
+        if (extra != null && extra.length() > 0) b.append("힌트: ").append(extra).append('\n');
+        b.append("노린 방: \"").append(j.room).append("\" · 사진 ").append(j.uris.size()).append("장\n");
+        b.append("화면: ").append(screenState(j.app))
+                .append(" · 깨우기: ").append(j.woke ? "시도함(WakeActivity)" : "안 함(이미 켜져 있었어)")
+                .append('\n');
+        b.append("공유 인텐트 던진 시각: ")
+                .append(j.launchedAt == 0L ? "못 던졌어"
+                        : (new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(j.launchedAt))
+                           + " (" + ((System.currentTimeMillis() - j.launchedAt) / 1000) + "초 전)"))
+                .append('\n');
+        b.append("접근성 서비스 붙음: ").append(yn(KakaoAccessibility.connected()))
+                .append(" · 설정에 허용됨: ").append(yn(accessibilityOn(j.app)))
+                .append(" · 노리던 방: \"").append(safe(KakaoAccessibility.armedRoom())).append("\"\n");
+        b.append("다른 앱 위에 표시: ").append(yn(overlayOn(j.app))).append('\n');
+        b.append("알림 읽기 권한: 설정 허용 ").append(yn(KakaoListener.connected(j.app)))
+                .append(" · 실제 연결 ").append(yn(KakaoListener.listenerBound())).append('\n');
+        b.append("알림 답장 사진 첨부: ");
+        try {
+            java.util.Set<String> t = KakaoListener.imageTypesFor(j.room);
+            b.append((t == null || t.isEmpty()) ? "불가(카톡이 이미지 타입을 안 걸었거나 방 세션이 없어)"
+                    : ("가능 " + t));
+        } catch (Throwable t) {
+            b.append("확인 실패 — ").append(t.getClass().getSimpleName());
+        }
+        b.append('\n');
+        b.append("카톡 설치: ").append(kakaoInfo(j.app)).append('\n');
+        b.append("기기: ").append(android.os.Build.MANUFACTURER).append(' ')
+                .append(android.os.Build.MODEL).append(" · 안드로이드 ")
+                .append(android.os.Build.VERSION.RELEASE)
+                .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        b.append("켜져 있는 접근성 앱 (우리 것 빼고): ").append(otherAccessibility(j.app)).append('\n');
+        b.append("\n이 내용을 그대로 복사해서 보내줘 (매크로 › 사진 첨부 › 화면 진단 보기).\n");
+        return b.toString();
+    }
+
+    private static String yn(boolean v) { return v ? "Y" : "N"; }
+
+    private static String safe(String v) { return (v == null) ? "" : v; }
+
+    /** 카톡 설치 여부 + 버전 */
+    private static String kakaoInfo(Context c) {
+        try {
+            android.content.pm.PackageInfo pi =
+                    c.getPackageManager().getPackageInfo(KAKAO, 0);
+            return "있음 v" + pi.versionName;
+        } catch (Throwable t) {
+            return "없음(또는 조회 불가) — " + t.getClass().getSimpleName();
+        }
+    }
+
+    /**
+     * 우리 것 말고 켜져 있는 접근성 앱들.
+     * 다른 접근성 앱이 카톡 화면을 같이 만지면 클릭이 서로 엉켜서 원인 없이 실패한다 —
+     * 현장에서 자주 나오는데 로그만 보면 절대 모르는 항목이다.
+     */
+    private static String otherAccessibility(Context c) {
+        try {
+            String flat = android.provider.Settings.Secure.getString(c.getContentResolver(),
+                    android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (flat == null || flat.trim().length() == 0) return "없음";
+            String mine = c.getPackageName();
+            StringBuilder out = new StringBuilder();
+            String[] parts = flat.split(":");
+            for (int i = 0; i < parts.length; i++) {
+                String p = (parts[i] == null) ? "" : parts[i].trim();
+                if (p.length() == 0) continue;
+                if (p.startsWith(mine + "/")) continue;   // 우리 것은 위에서 따로 적었다
+                if (out.length() > 0) out.append(", ");
+                out.append(p);
+            }
+            return (out.length() == 0) ? "없음" : out.toString();
+        } catch (Throwable t) {
+            return "못 읽었어 — " + t.getClass().getSimpleName();
+        }
     }
 
     /** 한 건 마무리. 같은 건에 대해 두 번 불려도 두 번째는 무시된다. */
