@@ -486,8 +486,8 @@ public final class ScreenKakaoLink {
         LinearLayout body = Nav.col(a);
         int ph = Theme.dp(a, 22);
         body.setPadding(ph, Theme.dp(a, 6), ph, Theme.dp(a, 12));
-        body.addView(Ui.sub(a, "휴대폰 카카오톡에 표시되는 기기 연결 요청에서 아래 코드를 확인하십시오."
-                + " 확인하면 자동으로 다음 단계로 진행합니다."));
+        body.addView(Ui.sub(a, "아래 코드를 카카오톡의 기기 연결 요청에 입력하십시오."
+                + " 이 앱에는 코드를 입력하지 않습니다. 확인이 끝나면 자동으로 다음 단계로 진행합니다."));
         TextView code = new TextView(a);
         code.setText(spaced(first.passcode));
         code.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -507,7 +507,7 @@ public final class ScreenKakaoLink {
         body.addView(left);
 
         final boolean[] gone = { false };
-        final AlertDialog d = Ui.dialog(a, "휴대폰에서 확인")
+        final AlertDialog d = Ui.dialog(a, "카카오톡에 입력")
                 .setView(body)
                 .setCancelable(false)
                 .setNegativeButton("취소", new android.content.DialogInterface.OnClickListener() {
