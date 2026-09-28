@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+#  온디바이스 카카오 엔진 빌드 (build.sh 가 auto 모듈을 만들 때 부른다)
+#
+#  만드는 것:
+#    <출력>/assets/engine/main.js         agent-messenger(kakaotalk) + 엔진 스크립트 한 파일 번들
+#    <출력>/assets/engine/NOTICE.txt      번들에 들어간 오픈소스 고지
+#    <출력>/lib/<abi>/libnode.so          nodejs-mobile 런타임 (Node 18)
+#    <출력>/lib/<abi>/libc++_shared.so    libnode 가 필요로 하는 C++ 런타임 (NDK)
+#    <출력>/lib/<abi>/libkmnode.so        libnode 를 프로세스로 띄우는 실행파일 (launcher/kmnode.c)
+#
+#  사용법:  build-engine.sh <출력 디렉토리> <안드로이드 SDK 경로>
+#  환경변수:
+#    ENGINE_ABIS   포함할 ABI (기본 "arm64-v8a armeabi-v7a"). 에뮬레이터 시험용: "arm64-v8a x86_64"
+#    ANDROID_NDK_HOME / ANDROID_NDK_ROOT   NDK 경로 (없으면 <SDK>/ndk/ 의 최신 버전)
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+NODEJS_MOBILE_VERSION="18.20.4"
+NODEJS_MOBILE_SHA256="bd7321eaa1a7602fbe0bb87302df2d79d87835cf4363fbdd17c350dbb485c2af"
+NODEJS_MOBILE_URL="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v${NODEJS_MOBILE_VERSION}/nodejs-mobile-v${NODEJS_MOBILE_VERSION}-android.zip"
+MIN_API=26
+
+OUT="${1:?출력 디렉토리를 넘겨줘}"
+SDK="${2:-}"
+ABIS="${ENGINE_ABIS:-arm64-v8a armeabi-v7a}"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE="$HERE/../.cache"
+
+C_OK=$'\033[1;32m'; C_ER=$'\033[1;31m'; C_IN=$'\033[1;36m'; C_0=$'\033[0m'
+step() { printf '%s▸ %s%s\n' "$C_IN" "$*" "$C_0"; }
+ok()   { printf '%s✔ %s%s\n' "$C_OK" "$*" "$C_0"; }
+die()  { printf '%b✘ %b%b\n' "$C_ER" "$*" "$C_0" >&2; exit 1; }
+
+# ── NDK 찾기 ────────────────────────────────────────────────────────────────
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+if [ -z "$NDK" ] || [ ! -d "$NDK/toolchains" ]; then
+  NDK=""
+  if [ -n "$SDK" ] && [ -d "$SDK/ndk" ]; then
+    v="$(ls -1 "$SDK/ndk" 2>/dev/null | sort -V | tail -n 1 || true)"
+    [ -n "$v" ] && NDK="$SDK/ndk/$v"
+  fi
+fi
+[ -n "$NDK" ] && [ -d "$NDK/toolchains/llvm/prebuilt" ] || die "안드로이드 NDK 를 못 찾았어.
+   sdkmanager \"ndk;27.2.12479018\" 로 설치하거나 ANDROID_NDK_HOME 을 지정해줘.
+   엔진 없이 빌드하려면: ENGINE=0 ./build.sh auto"
+HOST_TAG="$(ls -1 "$NDK/toolchains/llvm/prebuilt" | head -n 1)"
+TC="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
+[ -x "$TC/bin/clang" ] || die "NDK clang 이 없어: $TC/bin/clang"
+
+command -v node >/dev/null 2>&1 || die "node 가 없어. 엔진 번들에는 Node.js 18 이상이 필요해 (빌드 PC 기준)."
+command -v npm  >/dev/null 2>&1 || die "npm 이 없어."
+
+# ── 1. nodejs-mobile 런타임 받기 (버전 고정 + SHA-256 확인) ──────────────────
+mkdir -p "$CACHE"
+ZIP="$CACHE/nodejs-mobile-v${NODEJS_MOBILE_VERSION}-android.zip"
+RT="$CACHE/nodejs-mobile-v${NODEJS_MOBILE_VERSION}"
+if [ ! -f "$ZIP" ]; then
+  step "nodejs-mobile v${NODEJS_MOBILE_VERSION} 받기"
+  curl -fsSL --retry 3 -o "$ZIP.tmp" "$NODEJS_MOBILE_URL" || die "nodejs-mobile 다운로드 실패: $NODEJS_MOBILE_URL"
+  mv "$ZIP.tmp" "$ZIP"
+fi
+got="$(sha256sum "$ZIP" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+[ "$got" = "$NODEJS_MOBILE_SHA256" ] || { rm -f "$ZIP"; die "nodejs-mobile 해시 불일치 (받은 값 $got). 다시 실행해줘."; }
+if [ ! -d "$RT/bin" ]; then
+  rm -rf "$RT"; mkdir -p "$RT"
+  unzip -q "$ZIP" -d "$RT" || die "nodejs-mobile 압축 해제 실패"
+fi
+
+# ── 2. 엔진 스크립트 번들 ────────────────────────────────────────────────────
+step "엔진 번들 : agent-messenger → main.js"
+if [ ! -d "$HERE/node_modules/agent-messenger" ] || [ "$HERE/package-lock.json" -nt "$HERE/node_modules/.package-lock.json" ]; then
+  ( cd "$HERE" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null ) || die "엔진 의존성 설치(npm ci) 실패"
+fi
+want_lib="$(node -p "require('$HERE/package.json').dependencies['agent-messenger']")"
+have_lib="$(node -p "require('$HERE/node_modules/agent-messenger/package.json').version")"
+[ "$want_lib" = "$have_lib" ] || die "agent-messenger 버전이 다르다 (package.json $want_lib / 설치 $have_lib). npm ci 를 다시 해줘."
+grep -q "agent-messenger@${want_lib}'" "$HERE/src/main.mjs" || die "src/main.mjs 의 LIB 상수를 agent-messenger@${want_lib} 로 맞춰줘."
+
+mkdir -p "$OUT/assets/engine"
+( cd "$HERE" && npx --no-install esbuild src/main.mjs --bundle --platform=node --target=node18 \
+    --format=cjs --legal-comments=eof --log-level=warning --outfile="$OUT/assets/engine/main.js" ) \
+  || die "엔진 번들 실패"
+cp "$HERE/NOTICE.txt" "$OUT/assets/engine/NOTICE.txt"
+ok "main.js ($(du -h "$OUT/assets/engine/main.js" | cut -f1))"
+
+# ── 3. ABI 별 네이티브 파일 ──────────────────────────────────────────────────
+for abi in $ABIS; do
+  case "$abi" in
+    arm64-v8a)   triple=aarch64-linux-android;   cc_target=aarch64-linux-android$MIN_API ;;
+    armeabi-v7a) triple=arm-linux-androideabi;   cc_target=armv7a-linux-androideabi$MIN_API ;;
+    x86_64)      triple=x86_64-linux-android;    cc_target=x86_64-linux-android$MIN_API ;;
+    *) die "지원하지 않는 ABI: $abi (arm64-v8a · armeabi-v7a · x86_64)" ;;
+  esac
+  src_node="$RT/bin/$abi/libnode.so"
+  src_cxx="$TC/sysroot/usr/lib/$triple/libc++_shared.so"
+  [ -f "$src_node" ] || die "nodejs-mobile 에 $abi 런타임이 없어: $src_node"
+  [ -f "$src_cxx" ]  || die "NDK 에 $abi libc++_shared.so 가 없어: $src_cxx"
+
+  dst="$OUT/lib/$abi"
+  mkdir -p "$dst"
+  step "네이티브 : $abi"
+  cp "$src_node" "$dst/libnode.so"
+  cp "$src_cxx" "$dst/libc++_shared.so"
+  "$TC/bin/clang" --target="$cc_target" -O2 -fPIE -pie \
+      -o "$dst/libkmnode.so" "$HERE/launcher/kmnode.c" \
+      -L"$dst" -lnode -Wl,-rpath,'$ORIGIN' -Wl,--build-id=sha1 \
+    || die "$abi 런처 컴파일 실패"
+  "$TC/bin/llvm-strip" --strip-unneeded "$dst/libkmnode.so"
+done
+ok "엔진 준비 완료 (ABI: $ABIS)"

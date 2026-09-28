@@ -8,6 +8,7 @@ npm-debug.log*
 android/out/
 android/gen/
 android/build/
+android/.cache/
 *.apk.idsig
 
 # 로그 / OS 쓰레기
