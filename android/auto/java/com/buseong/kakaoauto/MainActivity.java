@@ -26,7 +26,7 @@ import java.util.Locale;
 /**
  * 앱 셸.
  *  - 인증 안 됐으면 잠금화면(키 입력)만 보여준다.
- *  - 인증됐으면 하단 탭바 4개 + 홈(대시보드).
+ *  - 인증됐으면 하단 탭바 4개 + 홈(대시보드). 첫 인증 직후에는 시작 설정(Setup)을 한 번 띄운다.
  *
  * 홈은 여기 안에 있다 (별도 파일 안 만든다). 탭 전환·화면 조립은 Nav 가 맡는다.
  */
@@ -34,7 +34,6 @@ public final class MainActivity extends Activity {
 
     /** 매크로 화면의 사진 고르기 결과를 받는 요청 코드 */
     public static final int REQ_IMAGES = 9101;
-    private static final int REQ_NOTI_PERM = 9102;
 
     /** 하트비트는 앱에 들어올 때마다 때리지 말고 10분에 한 번만 */
     private static final long HB_MIN_MS = 10 * 60 * 1000L;
@@ -58,8 +57,6 @@ public final class MainActivity extends Activity {
     /** 잠금화면에서 입력 중이던 키 (앱을 잠깐 벗어나도 날아가지 않게 들고 있는다) */
     private String keyDraft = "";
 
-    /** 홈 상태 카드의 새로고침 버튼 라벨 */
-    private static final String HOME_REFRESH = "구매 내역 새로고침";
 
     // 홈 화면 갱신용
     private static WeakReference<MainActivity> HOME_ACT;
@@ -73,7 +70,6 @@ public final class MainActivity extends Activity {
             root = new FrameLayout(this);
             root.setBackgroundColor(Theme.BG);
             setContentView(root, new FrameLayout.LayoutParams(MATCH, MATCH));
-            askNotificationPermission();
         } catch (Throwable t) {
             Log.add(this, "앱 화면 구성에 실패했습니다: " + t);
         }
@@ -112,6 +108,13 @@ public final class MainActivity extends Activity {
         HOME_ACT = null;
         HOME_BODY = null;
         super.onDestroy();
+    }
+
+    @Override public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(req, perms, res);
+        if (req == Setup.REQ_POST_NOTI) {
+            try { Nav.reload(); } catch (Throwable t) { Log.add(this, "화면 갱신에 실패했습니다: " + t); }
+        }
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
@@ -166,16 +169,46 @@ public final class MainActivity extends Activity {
     // ── 잠금화면 ─────────────────────────────────────────────────────────────
 
     private View buildLock(License.State s) {
+        Theme.setAccent(Theme.GOLD);
         final LinearLayout col = Ui.screen(this);
-        col.setPadding(Theme.dp(this, 20), Theme.dp(this, 28), Theme.dp(this, 20), Theme.dp(this, 40));
+        col.setPadding(Theme.dp(this, 22), Theme.dp(this, 40), Theme.dp(this, 22), Theme.dp(this, 40));
 
-        col.addView(Ui.title(this, "카톡 오토"));
-        TextView lead = Ui.sub(this, "라이선스 키 1개당 기기 1대만 등록됩니다.\n키를 입력하고 인증하면 사용할 수 있습니다.");
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        // ── 브랜드 머리 ──
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        brand.setGravity(Gravity.CENTER_HORIZONTAL);
+        brand.addView(monogram(this, 76));
+        TextView eb = Ui.eyebrow(this, "KAKAO AUTO · BUSINESS", Theme.GOLD);
+        eb.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ebp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        ebp.topMargin = Theme.dp(this, 18);
+        brand.addView(eb, ebp);
+        TextView name = Ui.title(this, "카톡 오토");
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f);
+        name.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(WRAP, WRAP);
+        np.topMargin = Theme.dp(this, 6);
+        brand.addView(name, np);
+        TextView lead = Ui.sub(this, "카카오톡 대화방 운영을 위한 백그라운드 자동화");
+        lead.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
         lp.topMargin = Theme.dp(this, 6);
-        lp.bottomMargin = Theme.dp(this, 18);
-        lead.setLayoutParams(lp);
-        col.addView(lead);
+        brand.addView(lead, lp);
+        col.addView(brand, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        // ── 기능 3종 (기능마다 색이 다르다) ──
+        LinearLayout feats = Ui.row(this);
+        LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        fp.topMargin = Theme.dp(this, 24);
+        fp.bottomMargin = Theme.dp(this, 22);
+        feats.setLayoutParams(fp);
+        for (int i = 0; i < Features.ALL.length; i++) {
+            String id = Features.ALL[i];
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, WRAP, 1f);
+            if (i > 0) cp.leftMargin = Theme.dp(this, 8);
+            feats.addView(featChip(this, Features.color(id), Features.icon(id), shortName(id)), cp);
+        }
+        col.addView(feats);
 
         boolean locked = (s != null) && s.locked;
         if (locked) {
@@ -209,17 +242,18 @@ public final class MainActivity extends Activity {
             col.addView(box);
         }
 
-        // 키 입력 카드
-        LinearLayout card = Ui.card(this);
-        card.addView(Ui.label(this, "라이선스 키"));
+        // ── 키 입력 카드 ──
+        LinearLayout card = Ui.hero(this, Theme.GOLD, Icon.KEY, "LICENSE", "라이선스 인증",
+                "라이선스 키 1개당 기기 1대가 등록됩니다.");
 
         LinearLayout inRow = Ui.row(this);
         LinearLayout.LayoutParams irp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        irp.topMargin = Theme.dp(this, 8);
+        irp.topMargin = Theme.dp(this, 16);
         inRow.setLayoutParams(irp);
 
         final EditText keyField = Ui.field(this, "KAKA-XXXX-XXXX-XXXX");
         keyField.setSingleLine(true);
+        keyField.setTypeface(Typeface.MONOSPACE);
         keyField.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         keyField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -289,27 +323,35 @@ public final class MainActivity extends Activity {
         card.addView(go);
         col.addView(card);
 
-        // 기기 정보 카드
+        // ── 시작 순서 ──
+        col.addView(Ui.sectionHeader(this, null, "시작 순서"));
+        LinearLayout steps = Ui.card(this);
+        steps.addView(introStep(this, 1, "라이선스 인증", "구매 시 발급된 키를 입력합니다.", false));
+        steps.addView(introStep(this, 2, "권한 설정", "알림 접근 · 배터리 최적화 제외를 안내에 따라 허용합니다.", true));
+        steps.addView(introStep(this, 3, "기능 설정", "메시지와 대상 대화방을 정하면 백그라운드에서 동작합니다.", true));
+        col.addView(steps);
+
+        // ── 이 기기 · 도움 ──
+        col.addView(Ui.sectionHeader(this, null, "이 기기"));
         LinearLayout dev = Ui.card(this);
-        dev.addView(Ui.label(this, "이 기기"));
         dev.addView(Ui.kv(this, "기기명", Device.deviceName()));
         dev.addView(Ui.kv(this, "기기 ID", shortId(Device.deviceId(this))));
         col.addView(dev);
 
-        col.addView(Nav.note(this, "라이선스 키는 최초 인증한 기기에 등록됩니다.\n"
-                + "기기를 변경한 경우 관리자에게 기기 초기화를 요청하면 새 기기에서 다시 인증할 수 있습니다.",
-                Theme.ACCENT2, "초기화 요청", new Runnable() {
+        LinearLayout help = Ui.group(this);
+        help.addView(Ui.navRow(this, Icon.GEAR, Theme.ACCENT2, "기기 초기화 요청", "기기 변경 시", Theme.SUB,
+                new Runnable() {
                     @Override public void run() { Gate.openMy(MainActivity.this); }
                 }));
-
-        col.addView(Nav.note(this, "라이선스 키가 없는 경우 구매가 필요합니다.\n"
-                + "매크로 · 대화방 관리봇 · 미니게임봇을 개별로 구매할 수 있습니다.",
-                Theme.ACCENT, "구매하기", new Runnable() {
+        help.addView(Ui.navRow(this, Icon.COIN, Theme.GOLD, "라이선스 구매", "기능별 구매", Theme.SUB,
+                new Runnable() {
                     @Override public void run() { Gate.openBuy(MainActivity.this, Features.MACRO); }
                 }));
+        col.addView(help);
 
         TextView ver = Ui.sub(this, "버전 " + Device.appVersionName(this)
                 + " (" + Device.appVersion(this) + ")");
+        ver.setTextColor(Theme.DIM);
         ver.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(MATCH, WRAP);
         vp.topMargin = Theme.dp(this, 20);
@@ -317,6 +359,91 @@ public final class MainActivity extends Activity {
         col.addView(ver);
 
         return Ui.scroll(this, col);
+    }
+
+    /** 골드 테두리 원 안의 세리프 K */
+    static View monogram(Context c, int sizeDp) {
+        FrameLayout f = new FrameLayout(c);
+        f.setBackground(Theme.ring(Theme.fade(Theme.GOLD, 0.10f), Theme.fade(Theme.GOLD, 0.55f), c));
+        TextView k = new TextView(c);
+        k.setText("K");
+        k.setTypeface(Theme.serif());
+        k.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeDp * 0.42f);
+        k.setTextColor(Theme.GOLD_HI);
+        k.setGravity(Gravity.CENTER);
+        k.setIncludeFontPadding(false);
+        f.addView(k, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        int n = Theme.dp(c, sizeDp);
+        f.setLayoutParams(new LinearLayout.LayoutParams(n, n));
+        f.setContentDescription("카톡 오토");
+        return f;
+    }
+
+    private static View featChip(Context c, int color, int glyph, String label) {
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setGravity(Gravity.CENTER_HORIZONTAL);
+        l.setBackground(Theme.sheen(Theme.fade(color, 0.12f), Theme.fade(color, 0.03f), Theme.R_LG,
+                Theme.fade(color, 0.26f), c));
+        int p = Theme.dp(c, 12);
+        l.setPadding(p, Theme.dp(c, 14), p, Theme.dp(c, 12));
+        View ic = Ui.icon(c, glyph, color, 22);
+        l.addView(ic);
+        TextView t = new TextView(c);
+        t.setText(label);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        t.setTextColor(Theme.TEXT);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setGravity(Gravity.CENTER);
+        t.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        tp.topMargin = Theme.dp(c, 8);
+        l.addView(t, tp);
+        return l;
+    }
+
+    private static String shortName(String id) {
+        if (Features.MACRO.equals(id)) return "자동발송";
+        if (Features.ROOMBOT.equals(id)) return "관리봇";
+        if (Features.MINIGAME.equals(id)) return "미니게임";
+        return Features.label(id);
+    }
+
+    private static View introStep(Context c, int no, String title, String desc, boolean gap) {
+        LinearLayout r = new LinearLayout(c);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        if (gap) lp.topMargin = Theme.dp(c, 14);
+        r.setLayoutParams(lp);
+        TextView n = new TextView(c);
+        n.setText(String.valueOf(no));
+        n.setTypeface(Theme.serif());
+        n.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        n.setTextColor(Theme.GOLD);
+        n.setGravity(Gravity.CENTER);
+        n.setIncludeFontPadding(false);
+        n.setBackground(Theme.ring(0x00000000, Theme.fade(Theme.GOLD, 0.5f), c));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(Theme.dp(c, 26), Theme.dp(c, 26));
+        nlp.rightMargin = Theme.dp(c, 12);
+        r.addView(n, nlp);
+        LinearLayout txt = new LinearLayout(c);
+        txt.setOrientation(LinearLayout.VERTICAL);
+        txt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        TextView t = new TextView(c);
+        t.setText(title);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        t.setTextColor(Theme.TEXT);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setIncludeFontPadding(false);
+        txt.addView(t);
+        TextView d = Ui.sub(c, desc);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        dp.topMargin = Theme.dp(c, 4);
+        d.setLayoutParams(dp);
+        txt.addView(d);
+        r.addView(txt);
+        return r;
     }
 
     /** 인증 성공 직후 처리: 설정키 확보 → 설정 이관 → 알람 복구 → 탭 화면으로 */
@@ -340,6 +467,11 @@ public final class MainActivity extends Activity {
         keyDraft = "";
         Ui.toast(this, "인증 완료");
         renderShell();
+        try {
+            Setup.maybeFirstRun(this);
+        } catch (Throwable t) {
+            Log.add(this, "시작 설정 화면을 열지 못했습니다: " + t);
+        }
     }
 
     // ── 홈 ──────────────────────────────────────────────────────────────────
@@ -360,27 +492,58 @@ public final class MainActivity extends Activity {
         MainActivity a = (HOME_ACT == null) ? null : HOME_ACT.get();
         LinearLayout col = (HOME_BODY == null) ? null : HOME_BODY.get();
         if (a == null || col == null || a.isFinishing()) return;
+        int keep = Theme.accent();
         try {
+            Theme.setAccent(Nav.tabColor(Nav.HOME));
             col.removeAllViews();
             fillHome(a, col);
         } catch (Throwable t) {
             Log.add(a, "홈 화면 갱신에 실패했습니다: " + t);
+        } finally {
+            Theme.setAccent(keep);
         }
     }
 
     private static void fillHome(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.title(a, "홈"));
-
+        // ── 브랜드 머리 ──
+        LinearLayout head = Ui.row(a);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        hp.topMargin = Theme.dp(a, 10);
+        hp.bottomMargin = Theme.dp(a, 18);
+        head.setLayoutParams(hp);
+        LinearLayout ht = new LinearLayout(a);
+        ht.setOrientation(LinearLayout.VERTICAL);
+        ht.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        ht.addView(Ui.eyebrow(a, "KAKAO AUTO", Theme.GOLD));
+        TextView title = Ui.title(a, greeting());
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        tp.topMargin = Theme.dp(a, 6);
+        title.setLayoutParams(tp);
+        ht.addView(title);
         TextView who = Ui.sub(a, Device.deviceName() + " · " + activeSummary(a));
+        who.setSingleLine(true);
+        who.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(MATCH, WRAP);
         wp.topMargin = Theme.dp(a, 4);
-        wp.bottomMargin = Theme.dp(a, 14);
         who.setLayoutParams(wp);
-        col.addView(who);
+        ht.addView(who);
+        head.addView(ht);
+        View mono = monogram(a, 44);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(a, 44), Theme.dp(a, 44));
+        mp.leftMargin = Theme.dp(a, 12);
+        head.addView(mono, mp);
+        col.addView(head);
 
-        col.addView(statusCard(a));
+        // ── 시작 설정 (필수 단계가 남아 있을 때만) ──
+        View setup = setupCard(a);
+        if (setup != null) col.addView(setup);
 
-        // 예약 발송의 이미지 전송 실패는 아무도 보고 있지 않을 때 일어난다 → 상태 카드 바로 아래 1회만
+        // ── 자동발송 ──
+        if (License.allowed(a, Features.MACRO)) {
+            col.addView(ScreenMacro.autoCard(a, Settings.load(a)));
+        }
+
+        // 예약 발송의 이미지 전송 실패는 아무도 보고 있지 않을 때 일어난다 → 머리 카드 바로 아래 1회만
         View warn = null;
         try {
             warn = ScreenMacro.imgFailNote(a);
@@ -389,228 +552,94 @@ public final class MainActivity extends Activity {
         }
         if (warn != null) col.addView(warn);
 
-        fillReady(a, col);
         fillFeatures(a, col);
 
         col.addView(Ui.sectionHeader(a, null, "최근 활동"));
         col.addView(logCard(a));
     }
 
-    // ── 1. 상태 카드 ────────────────────────────────────────────────────────
+    private static String greeting() {
+        int h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        if (h < 5) return "편안한 밤입니다";
+        if (h < 12) return "좋은 아침입니다";
+        if (h < 18) return "좋은 오후입니다";
+        return "편안한 저녁입니다";
+    }
 
-    /**
-     * 자동발송 토글 + 상태 한 줄. 매크로를 켜고 끄는 일이 가장 잦으니 홈에서 직접 조작한다
-     * (UI_V3 3장). 미구매 상태에서는 토글 대신 상태 한 줄 + 구매 내역 재조회만 남긴다
-     * (구매 버튼은 아래 「기능」 카드 하나로 모은다 — 같은 버튼을 두 번 두지 않는다).
-     */
-    private static LinearLayout statusCard(final MainActivity a) {
-        final Settings s = Settings.load(a);
-        LinearLayout card = Ui.card(a);
+    // ── 1. 시작 설정 카드 ───────────────────────────────────────────────────
 
-        if (!License.allowed(a, Features.MACRO)) {
-            LinearLayout head = Ui.row(a);
-            TextView t = Ui.h2(a, "자동발송");
-            t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-            head.addView(t);
-            head.addView(Ui.chip(a, "미구매", Theme.DIM));
-            card.addView(head);
-            card.addView(Ui.divider(a));
-
-            // 구매 버튼은 아래 「기능」 카드에 이미 있다 → 여기서는 결제 직후 재조회만 남긴다
-            TextView off = Ui.sub(a, "매크로 미구매 상태입니다. 구매 후 발송이 가능합니다.");
-            card.addView(off);
-
-            final TextView again = Ui.btn(a, HOME_REFRESH, false);
-            LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(MATCH, WRAP);
-            ap.topMargin = Theme.dp(a, 12);
-            again.setLayoutParams(ap);
-            again.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    Nav.refreshFeature(a, again, Features.MACRO, HOME_REFRESH);
-                }
-            });
-            card.addView(again);
-            return card;
+    private static View setupCard(final MainActivity a) {
+        int missing;
+        int[] pr;
+        try {
+            missing = Setup.missingRequired(a);
+            pr = Setup.progress(a);
+        } catch (Throwable t) {
+            return null;
         }
-
-        final TextView status = Ui.sub(a, homeStatus(a, s));
-        status.setTextColor(homeStatusColor(a, s));
-
-        card.addView(Ui.switchRow(a, "자동발송", "지정한 주기로 대상 대화방에 메시지를 발송합니다",
-                s.macro.enabled, new Ui.OnToggle() {
-                    @Override public void on(boolean v) {
-                        s.macro.enabled = v;
-                        ScreenMacro.apply(a, s);
-                        status.setText(homeStatus(a, s));
-                        status.setTextColor(homeStatusColor(a, s));
-                        Log.add(a, v ? "자동발송을 사용으로 변경했습니다."
-                                : "자동발송을 미사용으로 변경했습니다.");
-                        refreshHome();
-                    }
-                }));
-        card.addView(Ui.divider(a));
-        card.addView(status);
+        if (missing == 0) return null;
+        LinearLayout card = Ui.hero(a, Theme.GOLD, Icon.LOCK, "SETUP", "시작 설정",
+                "필수 항목 " + missing + "건이 남아 있습니다. 완료 전에는 백그라운드 동작이 보장되지 않습니다.");
+        LinearLayout row = Ui.row(a);
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        rp.topMargin = Theme.dp(a, 14);
+        row.setLayoutParams(rp);
+        View bar = Ui.progress(a, pr[0], pr[1], Theme.GOLD);
+        bar.setLayoutParams(new LinearLayout.LayoutParams(0, Theme.dp(a, 4), 1f));
+        row.addView(bar);
+        TextView n = Ui.sub(a, pr[0] + " / " + pr[1]);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(WRAP, WRAP);
+        np.leftMargin = Theme.dp(a, 12);
+        n.setLayoutParams(np);
+        row.addView(n);
+        card.addView(row);
+        int keep = Theme.accent();
+        Theme.setAccent(Theme.GOLD);
+        card.addView(Nav.wideBtn(a, "이어서 설정", true, new Runnable() {
+            @Override public void run() { Setup.open(a); }
+        }));
+        Theme.setAccent(keep);
         return card;
     }
 
-    /** 켜짐이면 `다음 발송 21:34 (12분 후) · 금일 8회 발송`, 꺼짐이면 `미사용` */
-    private static String homeStatus(MainActivity a, Settings s) {
-        if (!s.macro.enabled) return "미사용";
-        if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
-        if (s.macro.message == null || s.macro.message.trim().length() == 0) {
-            return "메시지 미설정 · 발송 보류";
-        }
-        long at;
-        try {
-            at = Scheduler.nextAt(a);
-        } catch (Throwable t) {
-            at = s.macro.nextAt;
-        }
-        String next = (at > 0) ? (ScreenMacro.hm(at) + " " + after(at)) : "예정 없음";
-        return "다음 발송 " + next + " · 금일 " + sentToday(a) + "회 발송";
-    }
-
-    private static int homeStatusColor(MainActivity a, Settings s) {
-        if (!s.macro.enabled) return Theme.DIM;
-        if (s.macro.roomRefs().isEmpty()) return Theme.AMBER;
-        if (s.macro.message == null || s.macro.message.trim().length() == 0) return Theme.AMBER;
-        return Theme.SUB;
-    }
-
-    /** "(12분 후)" */
-    private static String after(long at) {
-        long d = at - System.currentTimeMillis();
-        if (d <= 0) return "(대기 중)";
-        if (d < 60000L) return "(1분 내)";
-        if (d < 3600000L) return "(" + (d / 60000L) + "분 후)";
-        if (d < 86400000L) return "(" + (d / 3600000L) + "시간 후)";
-        return "(" + (d / 86400000L) + "일 후)";
-    }
-
-    // ── 2. 준비 항목 ────────────────────────────────────────────────────────
-    //  "뭘 설정해야 하는지 모르겠다" 에 대한 직접적인 답이다. 미완료가 하나도 없으면
-    //  카드도 머리글도 만들지 않는다 (UI_V3 3장) — 다 끝낸 화면에 잔소리를 남기지 않는다.
-
-    private static void fillReady(final MainActivity a, LinearLayout col) {
-        final Settings s = Settings.load(a);
-        final boolean macroOn = License.allowed(a, Features.MACRO);
-
-        boolean noti = false;
-        try { noti = KakaoListener.connected(a); } catch (Throwable t) { noti = false; }
-        final boolean notiOk = noti;
-        final boolean battOk = ignoringBattery(a);
-
-        final boolean msgOk = !macroOn
-                || (s.macro.message != null && s.macro.message.trim().length() > 0);
-        final boolean roomOk = !macroOn || !s.macro.roomRefs().isEmpty();
-
-        // 이미지 첨부를 쓸 때만 접근성·오버레이를 묻는다 (텍스트 발송에는 필요 없다)
-        final boolean imgUse = macroOn && !Settings.IMG_NEVER.equals(s.macro.sendImages);
-        boolean acc = true;
-        boolean ov = true;
-        if (imgUse) {
-            try { acc = ImageSender.accessibilityOn(a); } catch (Throwable t) { acc = false; }
-            try { ov = ImageSender.overlayOn(a); } catch (Throwable t) { ov = false; }
-        }
-        final boolean accOk = acc;
-        final boolean ovOk = ov;
-
-        int todo = 0;
-        if (!notiOk) todo++;
-        if (!battOk) todo++;
-        if (!msgOk) todo++;
-        if (!roomOk) todo++;
-        if (!accOk) todo++;
-        if (!ovOk) todo++;
-        if (todo == 0) return;
-
-        col.addView(Ui.sectionHeader(a, null, "준비 항목 " + todo + "건"));
-        LinearLayout card = Ui.card(a);
-        boolean first = true;
-
-        if (!notiOk) {
-            first = readyRow(a, card, first, "알림 접근 권한",
-                    "카카오톡 알림을 읽어 대화방을 확인하고 답장으로 발송합니다. 미허용 시 발송이 불가합니다.",
-                    new Runnable() {
-                        @Override public void run() {
-                            Nav.openIntent(a, new Intent(android.provider.Settings
-                                    .ACTION_NOTIFICATION_LISTENER_SETTINGS), "알림 접근 설정");
-                            Ui.toast(a, "목록에서 「카톡 오토 · 알림 읽기」를 허용하십시오.");
-                        }
-                    });
-        }
-        if (!battOk) {
-            first = readyRow(a, card, first, "배터리 최적화 제외",
-                    "절전 상태에서 예약 발송 알람이 중단되지 않도록 제외 항목으로 등록합니다.",
-                    new Runnable() {
-                        @Override public void run() { requestBattery(a); }
-                    });
-        }
-        if (!msgOk) {
-            first = readyRow(a, card, first, "발송 메시지",
-                    "발송할 내용이 설정되지 않았습니다.",
-                    new Runnable() {
-                        @Override public void run() {
-                            Nav.push(a, "메시지", MacroDetail.message(a));
-                        }
-                    });
-        }
-        if (!roomOk) {
-            first = readyRow(a, card, first, "대상 대화방",
-                    "발송할 대화방이 선택되지 않았습니다.",
-                    new Runnable() {
-                        @Override public void run() {
-                            Nav.push(a, "대상 대화방", ScreenRooms.build(a));
-                        }
-                    });
-        }
-        if (!accOk) {
-            first = readyRow(a, card, first, "접근성 권한",
-                    "이미지 첨부 발송에만 필요합니다. 텍스트 발송은 영향받지 않습니다.",
-                    new Runnable() {
-                        @Override public void run() { ImageSender.openSettings(a); }
-                    });
-        }
-        if (!ovOk) {
-            first = readyRow(a, card, first, "다른 앱 위에 표시",
-                    "화면이 꺼진 상태에서 카카오톡 공유 화면을 띄우기 위해 필요합니다.",
-                    new Runnable() {
-                        @Override public void run() { ImageSender.openOverlaySettings(a); }
-                    });
-        }
-        col.addView(card);
-    }
-
-    /** 준비 항목 한 줄: `항목명 + 사유 + [설정]`. 다음 행부터는 위에 구분선을 넣는다. */
-    private static boolean readyRow(MainActivity a, LinearLayout card, boolean first,
-                                    String name, String why, Runnable fix) {
-        if (!first) card.addView(Ui.divider(a));
-        card.addView(Nav.actionRow(a, name, why, "설정", fix));
-        return false;
-    }
-
-    // ── 3. 기능 ─────────────────────────────────────────────────────────────
+    // ── 2. 기능 ─────────────────────────────────────────────────────────────
+    //  기능마다 색·아이콘이 다르다 (매크로 사파이어 · 추적 자수정 · 자동응답 아쿠아 · 관리봇 제이드 · 게임 로즈).
 
     private static void fillFeatures(final MainActivity a, LinearLayout col) {
         License.State st = License.state(a);
         col.addView(Ui.sectionHeader(a, null, "기능"));
 
-        // 매크로는 주력 기능이라 카드로 크게 (UI_V3 3장)
-        Ui.State fs = featState(a, Features.MACRO);
-        long exp = 0L;
-        License.Feat f = (st == null || st.features == null) ? null : st.features.get(Features.MACRO);
-        if (f != null) exp = f.expiresAt;
-        col.addView(Ui.featureCard(a, Features.label(Features.MACRO),
-                Features.desc(Features.MACRO), fs, exp,
-                new Runnable() {
-                    @Override public void run() { Gate.openBuy(a, Features.MACRO); }
-                },
-                (fs == Ui.State.OFF) ? null : new Runnable() {
-                    @Override public void run() { Nav.go(Nav.MACRO); }
-                }));
+        if (!License.allowed(a, Features.MACRO)) {
+            long exp = 0L;
+            License.Feat f = (st == null || st.features == null) ? null : st.features.get(Features.MACRO);
+            if (f != null) exp = f.expiresAt;
+            col.addView(Ui.featureCard(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO),
+                    Features.desc(Features.MACRO), Ui.State.OFF, exp,
+                    new Runnable() {
+                        @Override public void run() { Gate.openBuy(a, Features.MACRO); }
+                    }, null));
+        }
 
-        // 봇 2종은 1행씩
         LinearLayout g = Ui.group(a);
+        if (License.allowed(a, Features.MACRO)) {
+            Settings s = Settings.load(a);
+            String macroV = "대상 " + s.macro.roomRefs().size() + "개 · " + ScreenMacro.cycleSummary(s);
+            String chip = License.expiringSoon(a, Features.MACRO) ? ("D-" + License.daysLeft(a, Features.MACRO)) : null;
+            g.addView(Ui.fnRow(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO), macroV,
+                    Theme.SUB, chip, new Runnable() {
+                        @Override public void run() { Nav.go(Nav.MACRO); }
+                    }));
+            int trigOn = 0;
+            for (int i = 0; i < s.triggers.size(); i++) if (s.triggers.get(i).enabled) trigOn++;
+            g.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "메시지 추적", ScreenMacro.trigSummary(s),
+                    (trigOn > 0) ? Theme.SUB : Theme.DIM, null, new Runnable() {
+                        @Override public void run() { Nav.push(a, "메시지 추적", MacroDetail.triggers(a)); }
+                    }));
+            g.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "개인 대화 자동응답", ScreenMacro.replySummary(s),
+                    s.autoreply.enabled ? Theme.SUB : Theme.DIM, null, new Runnable() {
+                        @Override public void run() { Nav.push(a, "개인 대화 자동응답", MacroDetail.autoReply(a)); }
+                    }));
+        }
         botRow(a, g, Features.ROOMBOT, ScreenBot.NAME_ROOMBOT,
                 ScreenBot.roomBotValue(a), ScreenBot.roomBotColor(a));
         botRow(a, g, Features.MINIGAME, ScreenBot.NAME_MINIGAME,
@@ -618,32 +647,26 @@ public final class MainActivity extends Activity {
         col.addView(g);
     }
 
-    /** 봇 한 행. 미구매면 값 대신 [구매] 버튼을 붙인다. */
+    /** 봇 한 행. 미구매면 `미구매` 칩 + 누르면 구매 안내. */
     private static void botRow(final MainActivity a, LinearLayout g, final String feat,
                               String name, String value, int color) {
+        int fc = Features.color(feat);
+        int glyph = Features.icon(feat);
         if (!License.allowed(a, feat)) {
-            LinearLayout r = Nav.actionRow(a, name, "미구매", "구매", new Runnable() {
-                @Override public void run() { Gate.openBuy(a, feat); }
-            });
-            int ph = Theme.dp(a, 16);
-            r.setPadding(ph, Theme.dp(a, 10), ph, Theme.dp(a, 10));
-            r.setMinimumHeight(Theme.dp(a, 56));
-            g.addView(r);
+            g.addView(Ui.fnRow(a, fc, glyph, name, "미구매 · 기능 안내 보기", Theme.DIM, "구매",
+                    new Runnable() {
+                        @Override public void run() { Gate.openBuy(a, feat); }
+                    }));
             return;
         }
-        String v = value;
-        int c = color;
-        if (License.expiringSoon(a, feat)) {
-            v = v + " · D-" + License.daysLeft(a, feat);
-            c = Theme.AMBER;
-        }
-        final String fv = v;
-        g.addView(Ui.navRow(a, name, fv, c, new Runnable() {
-            @Override public void run() { Nav.go(Nav.BOT); }
-        }));
+        String chip = License.expiringSoon(a, feat) ? ("D-" + License.daysLeft(a, feat)) : null;
+        g.addView(Ui.fnRow(a, fc, glyph, name, value, (color == Theme.TEXT) ? Theme.SUB : color, chip,
+                new Runnable() {
+                    @Override public void run() { Nav.go(Nav.BOT); }
+                }));
     }
 
-    // ── 4. 최근 활동 ────────────────────────────────────────────────────────
+    // ── 3. 최근 활동 ────────────────────────────────────────────────────────
 
     /** 최근 기록 4행 + `전체 로그 ›` */
     private static LinearLayout logCard(final MainActivity a) {
@@ -662,6 +685,15 @@ public final class MainActivity extends Activity {
             String[] all = dump.split("\n");
             int n = Math.min(4, all.length);
             for (int i = 0; i < n; i++) {
+                LinearLayout lr = Ui.row(a);
+                LinearLayout.LayoutParams lrp = new LinearLayout.LayoutParams(MATCH, WRAP);
+                lrp.topMargin = Theme.dp(a, (i == 0) ? 0 : 10);
+                lr.setLayoutParams(lrp);
+                View dot = new View(a);
+                dot.setBackground(Theme.circle((i == 0) ? Theme.GOLD : Theme.LINE2, a));
+                LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 5), Theme.dp(a, 5));
+                dp.rightMargin = Theme.dp(a, 10);
+                lr.addView(dot, dp);
                 TextView lv = new TextView(a);
                 lv.setText(all[i]);
                 lv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
@@ -669,15 +701,14 @@ public final class MainActivity extends Activity {
                 lv.setSingleLine(true);
                 lv.setEllipsize(TextUtils.TruncateAt.END);
                 lv.setIncludeFontPadding(false);
-                LinearLayout.LayoutParams lvp = new LinearLayout.LayoutParams(MATCH, WRAP);
-                lvp.topMargin = Theme.dp(a, (i == 0) ? 0 : 8);
-                lv.setLayoutParams(lvp);
-                lines.addView(lv);
+                lv.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+                lr.addView(lv);
+                lines.addView(lr);
             }
         }
         g.addView(lines);
 
-        g.addView(Ui.navRow(a, "전체 로그", null, 0, new Runnable() {
+        g.addView(Ui.navRow(a, Icon.LIST, Theme.SUB, "전체 로그", null, 0, new Runnable() {
             @Override public void run() { Nav.go(Nav.ACCOUNT); }
         }));
         return g;
@@ -765,41 +796,6 @@ public final class MainActivity extends Activity {
     }
 
     // ── 자잘한 것 ────────────────────────────────────────────────────────────
-
-    private void askNotificationPermission() {
-        if (Build.VERSION.SDK_INT < 33) return;
-        try {
-            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
-                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, REQ_NOTI_PERM);
-            }
-        } catch (Throwable t) {
-            Log.add(this, "알림 권한 요청에 실패했습니다: " + t);
-        }
-    }
-
-    private static boolean ignoringBattery(Context c) {
-        try {
-            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
-            return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static void requestBattery(Context c) {
-        Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-        i.setData(Uri.parse("package:" + c.getPackageName()));
-        try {
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            c.startActivity(i);
-        } catch (Throwable t) {
-            Log.add(c, "배터리 최적화 제외 화면을 열지 못했습니다: " + t);
-            Nav.openIntent(c, new Intent(
-                    android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                    "배터리 최적화");
-        }
-    }
 
     /** 기능 카드 상태: 켜짐 / 만료임박(7일) / 꺼짐 */
     static Ui.State featState(Context c, String id) {
