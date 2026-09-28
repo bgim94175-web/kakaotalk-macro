@@ -59,7 +59,12 @@ public final class ScreenBot {
     }
 
     private static void fill(final MainActivity a, LinearLayout col) {
-        col.addView(Ui.pageHead(a, "BOTS", "봇", "대상 대화방에서 알림을 받아 자동으로 응답합니다.", Theme.F_ROOMBOT));
+        col.addView(Ui.pageHead(a, "BOTS", "봇", "방에서 알림을 받아 자동으로 응답합니다.", Theme.F_ROOMBOT));
+
+        if (!KakaoAccount.ready(a)) {
+            col.addView(ScreenKakaoRegister.prompt(a));
+            return;
+        }
 
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
@@ -78,8 +83,8 @@ public final class ScreenBot {
                     @Override public void run() { Nav.push(a, NAME_MINIGAME, BotDetail.miniGame(a)); }
                 }));
 
-        col.addView(Nav.note(a, "각 봇에서 대상 대화방과 동작을 설정합니다."
-                + " 봇은 대상 대화방의 알림이 수신될 때 동작합니다.", Theme.ACCENT2, null, null));
+        col.addView(Nav.note(a, "각 봇에서 방과 동작을 설정합니다."
+                + " 봇은 방의 알림이 수신될 때 동작합니다.", Theme.ACCENT2, null, null));
     }
 
     /** 봇 하나 = 기능 색 머리 카드 한 장. 카드 전체가 눌린다. */
@@ -120,13 +125,13 @@ public final class ScreenBot {
 
     // ── 값 요약 (UI_V3 2장 — 제목만 있는 행은 만들지 않는다) ────────────────
 
-    /** `사용 중 · 2개` / `미사용` / `미구매` / `대상 대화방 미설정` */
+    /** `사용 중 · 2개` / `미사용` / `미구매` / `방 미설정` */
     static String roomBotValue(MainActivity a) {
         if (!License.allowed(a, Features.ROOMBOT)) return "미구매";
         Settings s = Settings.load(a);
         if (!s.roombot.enabled) return "미사용";
         List<RoomRef> rooms = s.roombot.roomRefs();
-        if (rooms.isEmpty()) return "대상 대화방 미설정";
+        if (rooms.isEmpty()) return "방 미설정";
         return "사용 중 · " + rooms.size() + "개";
     }
 
@@ -138,13 +143,13 @@ public final class ScreenBot {
         return Theme.TEXT;
     }
 
-    /** `사용 중 · 1개` / `미사용` / `미구매` / `대상 대화방 미설정` / `사용할 게임 미선택` */
+    /** `사용 중 · 1개` / `미사용` / `미구매` / `방 미설정` / `사용할 게임 미선택` */
     static String miniGameValue(MainActivity a) {
         if (!License.allowed(a, Features.MINIGAME)) return "미구매";
         Settings s = Settings.load(a);
         if (!s.minigame.enabled) return "미사용";
         List<RoomRef> rooms = s.minigame.roomRefs();
-        if (rooms.isEmpty()) return "대상 대화방 미설정";
+        if (rooms.isEmpty()) return "방 미설정";
         if (gamesOn(s) == 0) return "사용할 게임 미선택";
         return "사용 중 · " + rooms.size() + "개";
     }

@@ -160,14 +160,7 @@ public final class Scheduler {
         }
 
         long now = System.currentTimeMillis();
-        long next = storedNext(c);
-
-        // 주기 최대치보다 더 멀리 잡혀 있으면(주기를 줄였거나 값이 깨졌으면) 다시 계산한다.
-        // 단, 지금이 방해금지 시간이면 예정 시각이 원래 멀 수밖에 없다 — 그건 건드리지 않는다.
-        long maxAhead = (long) Math.max(1, Math.max(m.intervalMinMin, m.intervalMaxMin)) * 60000L;
-        boolean tooFar = (next > now + maxAhead) && !m.inQuiet(now);
-        if (next <= now || tooFar) next = m.pickNextAt(now);
-
+        long next = earliestAlarm(m, now);
         setNext(c, m, next);
         arm(c, next);
         EngineService.sync(c);
@@ -219,8 +212,7 @@ public final class Scheduler {
     }
 
     /**
-     * 지금부터 주기(intervalMinMin~intervalMaxMin 분) 안에서 랜덤으로 다음 발송을 새로 잡는다.
-     * 방해금지 시간대에 걸리면 pickNextAt 이 끝나는 시각 뒤로 밀어준다.
+     * 방별 쿨타임 중 가장 빠른 시각으로 다음 알람을 다시 잡는다.
      */
     public static void scheduleNext(Context ctx) {
         Context c = app(ctx);
@@ -234,10 +226,73 @@ public final class Scheduler {
             return;
         }
 
-        long at = m.pickNextAt(System.currentTimeMillis());
+        long at = earliestAlarm(m, System.currentTimeMillis());
         setNext(c, m, at);
         arm(c, at);
         EngineService.sync(c);
+    }
+
+    /**
+     * 다음 알람 시각. 방마다 저장된 예약 중 가장 빠른 것.
+     * 아직 예약이 없는 방은 바로 보낼 수 있으므로 곧 한 번 깨운다.
+     */
+    private static long earliestAlarm(Settings.Macro m, long now) {
+        long soonest = Long.MAX_VALUE;
+        boolean pending = false;
+        int n = 0;
+        List<RoomRef> all = m.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid()) continue;
+            n++;
+            long due = m.dueAt(r);
+            if (due > now) {
+                if (due < soonest) soonest = due;
+            } else {
+                pending = true;
+            }
+        }
+        if (n == 0) return now + m.cooldownMs(null);
+        if (pending) {
+            long retry = now + 5000L;
+            if (retry < soonest) soonest = retry;
+        }
+        if (soonest == Long.MAX_VALUE) return now + m.cooldownMs(null);
+        return soonest;
+    }
+
+    /**
+     * 이번에 보내지 못한 방의 다음 시각을 쿨타임만큼 뒤로 민다.
+     * 예약이 비어 있으면 알람이 5초마다 다시 깨어나므로, 조건이 안 되는 실행은 여기서 막는다.
+     */
+    private static void deferOpenRooms(Context c, long now) {
+        try {
+            Settings s = Settings.load(c);
+            if (s == null) return;
+            deferOpenRooms(c, s, now);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "방별 쿨타임 연기에 실패", t);
+        }
+    }
+
+    private static void deferOpenRooms(Context c, Settings s, long now) {
+        if (s == null || s.macro == null) return;
+        Settings.Macro m = s.macro;
+        List<RoomRef> all = m.roomRefs();
+        boolean changed = false;
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid()) continue;
+            if (m.dueAt(r) > now) continue;
+            m.setDueAt(r, now + m.cooldownMs(r));
+            changed = true;
+        }
+        if (!changed) return;
+        try {
+            s.save(c);
+        } catch (Throwable t) {
+            Log.add(c, "방별 쿨타임을 저장하지 못했습니다. (" + t + ")");
+        }
     }
 
     // ── 라이선스 하트비트 (매크로와 완전히 독립) ───────────────────────────────
@@ -427,6 +482,7 @@ public final class Scheduler {
         // 1) 기능 게이트 — 유일한 관문
         if (!License.allowed(c, Features.MACRO)) {
             Log.add(c, "자동발송을 건너뛰었습니다. 매크로 기능이 활성 상태가 아닙니다. 구매 내역과 인증 상태를 확인하십시오.");
+            deferOpenRooms(c, now);
             return;
         }
 
@@ -445,23 +501,11 @@ public final class Scheduler {
             return;
         }
 
-        // 3) 방해금지 시간
-        if (m.inQuiet(now)) {
-            Log.add(c, "방해금지 시간대(" + m.quietFrom + "~" + m.quietTo + ")이므로 발송하지 않았습니다.");
-            return;
-        }
-
-        // 4) 일일 한도
-        final int limit = m.dailyLimit;
-        if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-            Log.add(c, "일일 발송 한도(" + limit + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
-            return;
-        }
-
-        // 5) 보낼 내용 / 대상
+        // 3) 보낼 내용 / 대상
         final String msg = (m.message == null) ? "" : m.message;
         if (msg.trim().length() == 0) {
             Log.add(c, "발송 메시지가 비어 있어 발송하지 않았습니다. 매크로 탭에서 메시지를 입력하십시오.");
+            deferOpenRooms(c, s, now);
             return;
         }
         // 대상 계정 필터 — Settings.accounts 가 비어 있으면 모든 계정이 대상이다
@@ -476,10 +520,10 @@ public final class Scheduler {
         }
         if (rooms.isEmpty()) {
             if (offAccount > 0) {
-                Log.add(c, "대상 대화방 " + offAccount + "개가 모두 미사용 계정에 속해 발송하지 않았습니다."
+                Log.add(c, "방 " + offAccount + "개가 모두 미사용 계정에 속해 발송하지 않았습니다."
                         + " 내정보 탭의 카카오톡 계정에서 대상 계정을 확인하십시오.");
             } else {
-                Log.add(c, "대상 대화방이 지정되지 않아 발송하지 않았습니다. 매크로 탭에서 대화방을 추가하십시오.");
+                Log.add(c, "방이 지정되지 않아 발송하지 않았습니다. 매크로 탭에서 대화방을 추가하십시오.");
             }
             return;
         }
@@ -500,6 +544,7 @@ public final class Scheduler {
             } else {
                 Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
             }
+            deferOpenRooms(c, s, now);
             return;
         }
 
@@ -516,15 +561,13 @@ public final class Scheduler {
                 left = rooms.size() - i;
                 break;
             }
-            if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-                Log.add(c, "일일 발송 한도(" + limit + "건)에 도달하여 남은 대화방은 중단했습니다.");
-                left = rooms.size() - i;
-                break;
-            }
 
             RoomRef room = rooms.get(i);
             // 계정이 2개 이상이면 label(c) 가 계정 이름까지 붙여준다 (하나면 방 이름만)
             String label = room.label(c);
+
+            long due = m.dueAt(room);
+            if (due > now) continue;
 
             // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 minNeed 개 이상 쌓인 방에만 보낸다
             // 카카오 방과 연결된 방은 서버의 실제 대화 기록으로 센다 (알림은 앱이 켜진 뒤 받은 것만 안다)
@@ -537,6 +580,8 @@ public final class Scheduler {
             }
             if (others < minNeed) {
                 waiting++;
+                long retry = now + (long) Math.max(1, m.baseMin) * 60000L;
+                m.setDueAt(room, retry);
                 continue;
             }
 
@@ -553,6 +598,9 @@ public final class Scheduler {
             if (sent) {
                 ok++;
                 MainActivity.countSent(c, 1);
+                long sentAt = System.currentTimeMillis();
+                m.setLastSent(room, sentAt);
+                m.setDueAt(room, sentAt + m.cooldownMs(room));
 
                 // 이미지 첨부 (EVERY / EVERY_N). NEVER·MANUAL 은 imagesThisTime 이 false 를 준다.
                 int seq = bumpSeq(c);
@@ -589,7 +637,14 @@ public final class Scheduler {
             } else {
                 if (failed.length() > 0) failed.append(", ");
                 failed.append(label);
+                long retry = now + 60_000L;
+                if (m.dueAt(room) < retry) m.setDueAt(room, retry);
             }
+        }
+        try {
+            s.save(c);
+        } catch (Throwable t) {
+            Log.add(c, "방별 쿨타임을 저장하지 못했습니다. (" + t + ")");
         }
 
         StringBuilder sb = new StringBuilder(96);
@@ -668,7 +723,7 @@ public final class Scheduler {
 
         Log.add(c, "이미지 전송을 생략하고 텍스트만 발송합니다. 백그라운드 상태에서 카카오톡 화면이 "
                 + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다. "
-                + "채팅방 첨부 경로도 사용할 수 없는 상태입니다(대상 대화방 알림 미수신 또는 이미지 시각 확인 불가). "
+                + "채팅방 첨부 경로도 사용할 수 없는 상태입니다(방 알림 미수신 또는 이미지 시각 확인 불가). "
                 + "이미지는 매크로 › 이미지 첨부 › 즉시 발송 으로 전송하십시오. "
                 + "1회 성공하면 예약 발송이 이미지 첨부를 다시 시도합니다. "
                 + "이 안내는 하루 1회만 기록됩니다.");

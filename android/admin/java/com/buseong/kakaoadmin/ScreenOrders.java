@@ -178,8 +178,8 @@ public final class ScreenOrders implements MainActivity.Screen {
         mt(r3, 8);
         TextView amount = Ui.body(a, Ui.won(o.optLong("amount", 0)));
         amount.setTextColor(Theme.TEXT);
-        amount.setTypeface(Theme.serif());
-        amount.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f);
+        amount.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
+        amount.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f);
         amount.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         r3.addView(amount);

@@ -1,5 +1,6 @@
 package com.buseong.kakaoauto;
 
+import android.graphics.Typeface;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -25,7 +26,7 @@ public final class MacroDetail {
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
 
     // ── 화면 틀 ─────────────────────────────────────────────────────────────
-    //  서브화면은 중첩된다 (메시지 추적 → 규칙 → 감지 대화방). 값이 바뀌면 지금 열려 있는
+    //  서브화면은 중첩된다 (경쟁사 저격 → 규칙 → 감지 대화방). 값이 바뀌면 지금 열려 있는
     //  화면 전부를 제자리에서 다시 그려야 하니까, 화면마다 "다시 채우는 방법" 을 들고 있는다.
 
     /** 화면 본문을 채우는 방법 */
@@ -114,7 +115,7 @@ public final class MacroDetail {
                 final int fc = Theme.F_MACRO;
 
                 LinearLayout hero = Ui.hero(a, fc, Icon.BUBBLE, "MESSAGE", "발송 메시지",
-                        "대상 대화방에 발송되는 본문입니다. 입력한 줄바꿈이 그대로 유지됩니다.");
+                        "방에 발송되는 본문입니다. 입력한 줄바꿈이 그대로 유지됩니다.");
                 TextView prev = Ui.body(a, empty ? "설정되지 않았습니다." : s.macro.message);
                 prev.setTextColor(empty ? Theme.DIM : Theme.TEXT);
                 prev.setMaxLines(14);
@@ -140,7 +141,7 @@ public final class MacroDetail {
                 }));
                 col.addView(hero);
 
-                col.addView(Nav.note(a, "치환 토큰은 메시지 추적·자동응답에서만 적용됩니다.",
+                col.addView(Nav.note(a, "치환 토큰은 경쟁사 저격·자동응답에서만 적용됩니다.",
                         Theme.ACCENT2, null, null));
             }
         });
@@ -162,7 +163,7 @@ public final class MacroDetail {
                 });
     }
 
-    // ── 2. 발송 주기 ────────────────────────────────────────────────────────
+    // ── 2. 발송 쿨타임 ──────────────────────────────────────────────────────
 
     public static View cycle(MainActivity a) {
         return screen(a, Theme.F_MACRO, new Filler() {
@@ -170,23 +171,25 @@ public final class MacroDetail {
                 final Settings s = Settings.load(a);
                 final int fc = Theme.F_MACRO;
 
-                LinearLayout hero = Ui.hero(a, fc, Icon.CLOCK, "SCHEDULE", "발송 주기",
-                        "지정한 간격 안의 임의 시각에 발송합니다. 매 회차 간격이 달라집니다.");
+                LinearLayout hero = Ui.hero(a, fc, Icon.CLOCK, "SCHEDULE", "발송 쿨타임",
+                        "기본 간격은 하나의 값입니다. 랜덤 쿨타임을 더할 수 있고, 보낼 방마다 따로 지정할 수 있습니다.");
                 hero.addView(Ui.heroRule(a, fc));
                 LinearLayout stats = Ui.row(a);
                 stats.setPadding(0, Theme.dp(a, 10), 0, 0);
-                stats.addView(Ui.stat(a, "발송 간격",
-                        s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분", Theme.TEXT));
-                stats.addView(Ui.stat(a, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT));
+                stats.addView(Ui.stat(a, "기본 간격", s.macro.baseText(), Theme.TEXT));
+                stats.addView(Ui.stat(a, "랜덤 쿨타임", s.macro.randomText(), Theme.TEXT));
                 hero.addView(stats);
                 col.addView(hero);
 
-                col.addView(Ui.sectionHeader(a, null, "설정"));
+                col.addView(Ui.sectionHeader(a, null, "기본"));
                 LinearLayout g = Ui.group(a);
-                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 간격",
-                        s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분", Theme.TEXT,
+                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "기본 간격", s.macro.baseText(), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { editInterval(a, s); }
+                        }));
+                g.addView(Ui.navRow(a, Icon.CLOCK, fc, "랜덤 쿨타임", s.macro.randomText(), Theme.TEXT,
+                        new Runnable() {
+                            @Override public void run() { editRandom(a, s); }
                         }));
                 g.addView(Ui.navRow(a, Icon.BUBBLE, fc, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT,
                         new Runnable() {
@@ -194,26 +197,75 @@ public final class MacroDetail {
                         }));
                 col.addView(g);
 
+                col.addView(Ui.sectionHeader(a, null, "방별 쿨타임"));
+                final java.util.List<RoomRef> rooms = s.macro.roomRefs();
+                if (rooms.isEmpty()) {
+                    col.addView(Nav.note(a, "보낼 방을 먼저 선택하십시오. 선택한 방마다 쿨타임을 따로 지정할 수 있습니다.",
+                            Theme.ACCENT2, null, null));
+                } else {
+                    LinearLayout rg = Ui.group(a);
+                    for (int i = 0; i < rooms.size(); i++) {
+                        final RoomRef room = rooms.get(i);
+                        rg.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, room.label(a),
+                                s.macro.cooldownLabel(room), Theme.TEXT, new Runnable() {
+                                    @Override public void run() { editRoomCooldown(a, s, room); }
+                                }));
+                    }
+                    col.addView(rg);
+                }
+
                 col.addView(Nav.note(a, "최소 신규 메시지는 마지막 발송 이후 상대 메시지가 지정 수량 이상 누적된"
-                        + " 대화방에만 발송하는 조건입니다. 0은 항상 발송입니다.", Theme.ACCENT2, null, null));
+                        + " 방에만 발송하는 조건입니다. 0은 항상 발송입니다. 방별 쿨타임을 0분으로 저장하면"
+                        + " 기본 간격과 랜덤 쿨타임을 사용합니다.", Theme.ACCENT2, null, null));
             }
         });
     }
 
     private static void editInterval(final MainActivity a, final Settings s) {
-        final Nav.NumField lo = new Nav.NumField("최소 간격 (분)", "20", 1, 1440, s.macro.intervalMinMin);
-        final Nav.NumField hi = new Nav.NumField("최대 간격 (분)", "40", 1, 1440, s.macro.intervalMaxMin);
-        Nav.editNums(a, "발송 간격", "두 값 사이의 임의 시각에 발송됩니다.",
-                new Nav.NumField[] { lo, hi }, new Nav.OnNums() {
+        final Nav.NumField n = new Nav.NumField("기본 간격 (분)", "1", 1, 1440, s.macro.baseMin);
+        Nav.editNums(a, "기본 간격", "방별 쿨타임이 없는 보낼 방은 이 간격으로 발송됩니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
-                        if (lo.value > hi.value) {
-                            Nav.errText(hi.err, "최대 간격은 최소 간격 이상으로 입력하십시오");
-                            return "";
-                        }
-                        s.macro.intervalMinMin = lo.value;
-                        s.macro.intervalMaxMin = hi.value;
+                        s.macro.baseMin = n.value;
                         save(a, s);
-                        Log.add(a, "발송 간격을 " + lo.value + "~" + hi.value + "분으로 변경했습니다.");
+                        Scheduler.ensureScheduled(a);
+                        Log.add(a, "기본 간격을 ~" + n.value + "분으로 변경했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void editRandom(final MainActivity a, final Settings s) {
+        final Nav.NumField n = new Nav.NumField("랜덤 쿨타임 (분)", "0", 0, 1440, s.macro.randomMin);
+        Nav.editNums(a, "랜덤 쿨타임", "0분이면 기본 간격만 사용합니다. 1분 이상이면 기본 간격에 0분부터 이 값까지를 더합니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        s.macro.randomMin = n.value;
+                        save(a, s);
+                        Scheduler.ensureScheduled(a);
+                        Log.add(a, "랜덤 쿨타임을 " + n.value + "분으로 변경했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void editRoomCooldown(final MainActivity a, final Settings s, final RoomRef room) {
+        final Nav.NumField n = new Nav.NumField("쿨타임 (분)", "0", 0, 1440, s.macro.cooldownMin(room));
+        Nav.editNums(a, room.label(a), "0분이면 기본 간격을 사용합니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        s.macro.setCooldownMin(room, n.value);
+                        long last = s.macro.lastSent(room);
+                        if (last > 0 && n.value > 0) {
+                            s.macro.setDueAt(room, last + (long) n.value * 60000L);
+                        }
+                        save(a, s);
+                        Scheduler.ensureScheduled(a);
+                        if (n.value < 1) {
+                            Log.add(a, "「" + room.label(a) + "」 쿨타임을 기본 간격으로 변경했습니다.");
+                        } else {
+                            Log.add(a, "「" + room.label(a) + "」 쿨타임을 " + n.value + "분으로 변경했습니다.");
+                        }
                         return null;
                     }
                 });
@@ -254,8 +306,8 @@ public final class MacroDetail {
                 cntRow.setLayoutParams(crp);
                 TextView big = new TextView(a);
                 big.setText(have + " / " + Settings.MAX_IMAGES);
-                big.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 22f);
-                big.setTypeface(Theme.serif());
+                big.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f);
+                big.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
                 big.setTextColor(have > 0 ? Theme.TEXT : Theme.DIM);
                 big.setIncludeFontPadding(false);
                 cntRow.addView(big);
@@ -309,8 +361,8 @@ public final class MacroDetail {
                 final List<RoomRef> rooms = s.macro.roomRefs();
                 LinearLayout card = Ui.card(a);
                 card.addView(Ui.sub(a, rooms.isEmpty()
-                        ? "대상 대화방을 먼저 설정하십시오."
-                        : ("첫 번째 대상 대화방 「" + rooms.get(0).label(a) + "」 로 선택한 이미지를 1회 전송합니다.")));
+                        ? "방을 먼저 설정하십시오."
+                        : ("첫 번째 방 「" + rooms.get(0).label(a) + "」 로 선택한 이미지를 1회 전송합니다.")));
                 final TextView now = Ui.btn(a, "즉시 이미지 발송", false);
                 LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
                 np.topMargin = Theme.dp(a, 12);
@@ -403,7 +455,7 @@ public final class MacroDetail {
                 });
     }
 
-    /** 즉시 이미지 발송 — 대상 대화방 중 첫 번째 한 곳으로만 보낸다 */
+    /** 즉시 이미지 발송 — 방 중 첫 번째 한 곳으로만 보낸다 */
     private static void sendImagesNow(final MainActivity a, final Settings s, final TextView btn) {
         if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
         if (s.macro.images.isEmpty()) { Ui.toast(a, "이미지를 먼저 선택하십시오."); return; }
@@ -415,8 +467,8 @@ public final class MacroDetail {
             if (r != null && r.valid() && s.accountOn(r.acc)) { pick = r; break; }
         }
         if (pick == null) {
-            Ui.toast(a, all.isEmpty() ? "대상 대화방을 먼저 설정하십시오."
-                    : "대상 대화방이 모두 미사용 계정에 속합니다.");
+            Ui.toast(a, all.isEmpty() ? "방을 먼저 설정하십시오."
+                    : "방이 모두 미사용 계정에 속합니다.");
             return;
         }
 
@@ -459,7 +511,7 @@ public final class MacroDetail {
         }
     }
 
-    // ── 4. 메시지 추적 (트리거) ─────────────────────────────────────────────
+    // ── 4. 경쟁사 저격 (트리거) ─────────────────────────────────────────────
 
     public static View triggers(MainActivity a) {
         return screen(a, Theme.F_TRIGGER, new Filler() {
@@ -469,8 +521,8 @@ public final class MacroDetail {
 
                 int on = 0;
                 for (int i = 0; i < s.triggers.size(); i++) if (s.triggers.get(i).enabled) on++;
-                LinearLayout hero = Ui.hero(a, fc, Icon.BOLT, "TRIGGERS", "메시지 추적",
-                        "지정한 문자열이 감지되면 즉시 발송합니다. 발송 주기와 독립적으로 동작합니다.");
+                LinearLayout hero = Ui.hero(a, fc, Icon.BOLT, "TRIGGERS", "경쟁사 저격",
+                        "지정한 문자열이 감지되면 즉시 발송합니다. 발송 쿨타임과 독립적으로 동작합니다.");
                 hero.addView(Ui.heroRule(a, fc));
                 LinearLayout stats = Ui.row(a);
                 stats.setPadding(0, Theme.dp(a, 10), 0, 0);
@@ -946,7 +998,7 @@ public final class MacroDetail {
         };
     }
 
-    // ── 5. 개인 대화 자동응답 ───────────────────────────────────────────────
+    // ── 5. 갠톡 자동응답 ───────────────────────────────────────────────
 
     public static View autoReply(MainActivity a) {
         return screen(a, Theme.F_REPLY, new Filler() {
@@ -955,7 +1007,7 @@ public final class MacroDetail {
                 final Settings.AutoReplyCfg r = s.autoreply;
                 final int fc = Theme.F_REPLY;
 
-                LinearLayout hero = Ui.hero(a, fc, Icon.REPLY, "AUTO REPLY", "개인 대화 자동응답",
+                LinearLayout hero = Ui.hero(a, fc, Icon.REPLY, "AUTO REPLY", "갠톡 자동응답",
                         "오픈프로필 등 1:1 대화에 지정한 메시지를 발송합니다.");
                 hero.addView(Ui.heroRule(a, fc));
                 hero.addView(Ui.switchRow(a, r.enabled ? "사용 중" : "사용 안 함",
@@ -965,8 +1017,8 @@ public final class MacroDetail {
                                 r.enabled = v;
                                 ScreenMacro.apply(a, s);
                                 ScreenMacro.refresh();
-                                Log.add(a, v ? "개인 대화 자동응답을 사용으로 변경했습니다."
-                                        : "개인 대화 자동응답을 미사용으로 변경했습니다.");
+                                Log.add(a, v ? "갠톡 자동응답을 사용으로 변경했습니다."
+                                        : "갠톡 자동응답을 미사용으로 변경했습니다.");
                                 refresh();
                             }
                         }));
@@ -1138,111 +1190,8 @@ public final class MacroDetail {
         };
     }
 
-    // ── 6. 발송 제한 ────────────────────────────────────────────────────────
-
-    public static View limits(MainActivity a) {
-        return screen(a, Theme.F_MACRO, new Filler() {
-            @Override public void fill(final MainActivity a, LinearLayout col) {
-                final Settings s = Settings.load(a);
-                final int fc = Theme.F_MACRO;
-
-                int sent = MainActivity.sentToday(a);
-                LinearLayout hero = Ui.hero(a, fc, Icon.GAUGE, "LIMITS", "발송 제한",
-                        "방해금지 시간에는 자동발송이 중지됩니다. 1일 한도는 자정에 초기화됩니다.");
-                hero.addView(Ui.heroRule(a, fc));
-                LinearLayout stats = Ui.row(a);
-                stats.setPadding(0, Theme.dp(a, 10), 0, Theme.dp(a, 10));
-                stats.addView(Ui.stat(a, "금일 발송", sent + "회", Theme.TEXT));
-                stats.addView(Ui.stat(a, "1일 최대", s.macro.dailyLimit + "회", Theme.TEXT));
-                hero.addView(stats);
-                hero.addView(Ui.progress(a, sent, Math.max(1, s.macro.dailyLimit), fc));
-                col.addView(hero);
-
-                col.addView(Ui.sectionHeader(a, null, "설정"));
-                LinearLayout g = Ui.group(a);
-                String q = ScreenMacro.quietKr(s);
-                g.addView(Ui.navRow(a, Icon.ALARM, fc, "방해금지 시간", q, "없음".equals(q) ? Theme.DIM : Theme.TEXT,
-                        new Runnable() {
-                            @Override public void run() { editQuiet(a, s); }
-                        }));
-                g.addView(Ui.navRow(a, Icon.GAUGE, fc, "1일 최대 발송",
-                        s.macro.dailyLimit + "회 · 금일 " + MainActivity.sentToday(a) + "회",
-                        Theme.TEXT, new Runnable() {
-                            @Override public void run() { editDailyLimit(a, s); }
-                        }));
-                col.addView(g);
-            }
-        });
-    }
-
-    private static void editQuiet(final MainActivity a, final Settings s) {
-        LinearLayout body = Nav.col(a);
-        body.addView(Ui.sub(a, "해당 시간대에는 발송을 중지합니다. 두 칸을 모두 비우면 제한이 해제됩니다.\n"
-                + "22:00 ~ 07:00 처럼 자정을 넘겨도 됩니다."));
-
-        body.addView(fieldLabel(a, "시작 (HH:mm)", 14));
-        final android.widget.EditText from = line(a, "22:00", s.macro.quietFrom);
-        body.addView(from);
-        final TextView fromErr = Nav.errLine(a);
-        body.addView(fromErr);
-
-        body.addView(fieldLabel(a, "종료 (HH:mm)", 14));
-        final android.widget.EditText to = line(a, "07:00", s.macro.quietTo);
-        body.addView(to);
-        final TextView toErr = Nav.errLine(a);
-        body.addView(toErr);
-
-        Nav.form(a, "방해금지 시간", body, "저장", new Nav.OnSave() {
-            @Override public String save() {
-                Nav.errClear(fromErr);
-                Nav.errClear(toErr);
-                String fv = from.getText().toString().trim();
-                String tv = to.getText().toString().trim();
-                if (fv.length() == 0 && tv.length() == 0) {
-                    s.macro.quietFrom = "";
-                    s.macro.quietTo = "";
-                    MacroDetail.save(a, s);
-                    Log.add(a, "방해금지 시간을 해제했습니다.");
-                    return null;
-                }
-                boolean bad = false;
-                if (Settings.hhmm(fv) < 0) {
-                    Nav.errText(fromErr, "HH:mm 형식으로 입력하십시오 (예 22:00)");
-                    bad = true;
-                }
-                if (Settings.hhmm(tv) < 0) {
-                    Nav.errText(toErr, "HH:mm 형식으로 입력하십시오 (예 07:00)");
-                    bad = true;
-                }
-                if (bad) return "";
-                if (Settings.hhmm(fv) == Settings.hhmm(tv)) {
-                    Nav.errText(toErr, "시작과 종료가 같으면 제한이 적용되지 않습니다");
-                    return "";
-                }
-                s.macro.quietFrom = fv;
-                s.macro.quietTo = tv;
-                MacroDetail.save(a, s);
-                Log.add(a, "방해금지 시간을 " + fv + "~" + tv + " 로 설정했습니다.");
-                return null;
-            }
-        });
-    }
-
-    private static void editDailyLimit(final MainActivity a, final Settings s) {
-        final Nav.NumField n = new Nav.NumField("1일 최대 발송 수", "200", 1, 5000, s.macro.dailyLimit);
-        Nav.editNums(a, "1일 최대 발송", "이 수량을 초과하면 당일 발송을 중지합니다.",
-                new Nav.NumField[] { n }, new Nav.OnNums() {
-                    @Override public String ok() {
-                        s.macro.dailyLimit = n.value;
-                        save(a, s);
-                        Log.add(a, "1일 최대 발송을 " + n.value + "회로 설정했습니다.");
-                        return null;
-                    }
-                });
-    }
-
     // ── 대화방 다중 선택 서브화면 ───────────────────────────────────────────
-    //  대상 대화방(매크로)은 ScreenRooms 가 담당한다. 이 화면은 규칙·자동응답처럼
+    //  방(매크로)은 ScreenRooms 가 담당한다. 이 화면은 규칙·자동응답처럼
     //  "설정 안에서 대화방 목록을 고르는" 자리에 쓴다. 고르면 즉시 저장한다.
 
     /** 어떤 설정의 대화방 목록인지 (읽고 쓰는 방법만 넘긴다) */

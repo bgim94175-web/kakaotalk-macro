@@ -126,7 +126,7 @@ public final class ScreenAccounts {
     /** 계정이 1개뿐일 때 — 고를 게 없으니 안내와 이름 수정만 둔다 (UI_V3 6장) */
     private static void single(final MainActivity a, LinearLayout col, final Accounts.Acc ac) {
         col.addView(Nav.note(a, "카카오톡 계정 1개가 감지되었습니다. 듀얼 메신저 등으로 계정을 추가하면 "
-                + "계정별로 대상 대화방을 구분할 수 있습니다.", Theme.ACCENT2, null, null));
+                + "계정별로 방을 구분할 수 있습니다.", Theme.ACCENT2, null, null));
 
         col.addView(Ui.sectionHeader(a, null, "계정 정보"));
         LinearLayout g = Ui.group(a);

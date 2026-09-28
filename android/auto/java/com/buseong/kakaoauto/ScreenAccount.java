@@ -174,6 +174,11 @@ public final class ScreenAccount {
         // ── 카카오톡 ──
         col.addView(Ui.sectionHeader(a, null, "카카오톡"));
         LinearLayout kakao = Ui.group(a);
+        final boolean reg = KakaoAccount.ready(a);
+        kakao.addView(Ui.navRow(a, Icon.KEY, fc, "카카오 계정 등록",
+                reg ? "등록됨" : "등록 필요", reg ? Theme.OK : Theme.AMBER, new Runnable() {
+                    @Override public void run() { ScreenKakaoRegister.open(a); }
+                }));
         int accN = Accounts.count(a);
         kakao.addView(Ui.navRow(a, Icon.USERS, fc, "카카오톡 계정", accValue(a, accN),
                 (accN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
@@ -209,16 +214,17 @@ public final class ScreenAccount {
     private static LinearLayout memberCard(final MainActivity a, License.State st, boolean ok) {
         LinearLayout card = new LinearLayout(a);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Theme.sheen(Theme.mix(Theme.CARD, Theme.GOLD, 0.22f), Theme.mix(Theme.BG, Theme.GOLD, 0.04f),
-                Theme.R_XL, Theme.fade(Theme.GOLD, 0.40f), a));
-        int p = Theme.dp(a, 20);
-        card.setPadding(p, p, p, Theme.dp(a, 18));
+        card.setBackground(Theme.round(Theme.CARD, Theme.R_MD, 0, 0, a));
+        int p = Theme.dp(a, 16);
+        card.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.bottomMargin = Theme.dp(a, 8);
         card.setLayoutParams(lp);
 
         LinearLayout top = Ui.row(a);
-        TextView eb = Ui.eyebrow(a, "MEMBERSHIP", Theme.GOLD);
+        top.addView(Ui.accentBar(a, Theme.F_ACCOUNT, 16));
+        TextView eb = Ui.body(a, "라이선스");
+        eb.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
         eb.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         top.addView(eb);
         top.addView(Ui.chip(a, ok ? "인증됨" : (st.locked ? "잠김" : "미인증"), ok ? Theme.OK : Theme.RED));
@@ -227,9 +233,9 @@ public final class ScreenAccount {
         TextView key = new TextView(a);
         key.setText(keyValue(st));
         key.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        key.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
-        key.setTextColor(Theme.GOLD_HI);
-        key.setLetterSpacing(0.08f);
+        key.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+        key.setTextColor(Theme.TEXT);
+        key.setLetterSpacing(0.02f);
         key.setSingleLine(true);
         key.setIncludeFontPadding(false);
         LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -250,7 +256,7 @@ public final class ScreenAccount {
             long exp = expOf(st, id);
             LinearLayout r = Ui.row(a);
             r.setPadding(0, Theme.dp(a, 8), 0, 0);
-            View ic = Ui.icon(a, Features.icon(id), (fs == Ui.State.OFF) ? Theme.DIM : Features.color(id), 16);
+            View ic = Ui.accentBar(a, (fs == Ui.State.OFF) ? Theme.DIM : Features.color(id), 14);
             LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
             ip.rightMargin = Theme.dp(a, 10);
             r.addView(ic, ip);
@@ -659,7 +665,7 @@ public final class ScreenAccount {
             LinearLayout card = Ui.card(a);
             card.addView(Ui.kv(a, "마지막 실패", (fail == null) ? "없음" : ScreenMacro.ago(fail.at)));
             if (fail != null) {
-                card.addView(Ui.kv(a, "대상 대화방",
+                card.addView(Ui.kv(a, "방",
                         (fail.room.length() == 0) ? "미확인" : Nav.preview(fail.room, 16)));
                 card.addView(Ui.kv(a, "사유", Nav.preview(fail.why, 40)));
             }
