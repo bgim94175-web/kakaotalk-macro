@@ -348,6 +348,13 @@ public final class ImageSender {
             Log.add(c, "이미지는 최대 " + MAX + "장까지 전송됩니다. 앞의 " + ok.size() + "장만 전송합니다.");
         }
 
+        // 카카오 계정이 연결되고 이 방이 카카오 방과 연결돼 있으면 화면 조작 없이 계정으로 직접 보낸다.
+        // 이 경로는 접근성·오버레이·화면 상태와 무관하다.
+        if (com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) {
+            com.buseong.kakaoauto.engine.EngineSend.sendImages(c, ref, ok, onDone);
+            return;
+        }
+
         // 타사 접근성 자동화 앱은 차단하지 않는다. 다만 클릭이 서로 엉켜 실패하는 사례가 있어
         // 전송을 시작하는 시점에 한 번은 반드시 알린다 (진단에도 같은 항목이 들어간다).
         warnOtherAccessibility(c);
@@ -547,6 +554,7 @@ public final class ImageSender {
      */
     public static boolean blockedInBackground(Context c, RoomRef ref) {
         if (c == null || ref == null || !ref.valid()) return false;
+        if (com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) return false;
         if (backgroundBlockedAt(c) <= 0L) return false;
         if (replyImageReady(c, ref)) return false;
         if (foregroundNow(c)) return false;

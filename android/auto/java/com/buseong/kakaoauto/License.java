@@ -434,6 +434,8 @@ public final class License {
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "설정 삭제 실패", t);
         }
+        // 카카오 로그인 토큰·방 연결도 같이 지운다 (설정키를 지우기 전에 — 방 연결은 설정키로 봉인돼 있다)
+        com.buseong.kakaoauto.engine.Engine.wipe(app);
         try {
             Keystore.clear(app);     // 설정키 삭제 + Prefs 캐시 비움
         } catch (Throwable t) {
