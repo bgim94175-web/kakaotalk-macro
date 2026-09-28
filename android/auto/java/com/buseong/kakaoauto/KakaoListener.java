@@ -1088,10 +1088,14 @@ public final class KakaoListener extends NotificationListenerService {
      * 이름 매칭 없이 대화방으로 직행하는 유일한 수단이지만, <b>이미지 첨부까지는 못 한다</b>:
      * 방이 열린 뒤 사진을 고르는 단계는 카톡 자기 앨범(MediaStore)이라서 우리 URI 를 지목할 수 없다.
      *
-     * 쓰는 쪽 주의 — {@code send()} 는 액티비티를 띄우므로 백그라운드 실행 제한을 받는다.
-     * 우리 특권을 전달하려면 API 34 이상에서 {@code ActivityOptions.makeBasic()
-     * .setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)}
-     * 를 같이 넘겨야 한다.
+     * 쓰는 쪽 주의 —
+     *  (1) {@code send()} 는 액티비티를 띄우므로 백그라운드 실행 제한을 받는다. 우리 특권을
+     *      전달하려면 API 34 이상에서 {@code ActivityOptions.makeBasic()
+     *      .setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)}
+     *      를 같이 넘겨야 한다.
+     *  (2) 카톡이 그 알림을 치우면 이 인텐트도 만료된다. 돌려받은 값이 null 이 아니어도
+     *      {@code send()} 는 {@link PendingIntent.CanceledException} 을 던질 수 있다.
+     *      그때는 만료된 것이니 {@code session(ref).open = null} 로 비우고 다음 알림을 기다린다.
      */
     public static PendingIntent openIntentFor(RoomRef ref) {
         Session s = findSession(ref, false);

@@ -543,8 +543,9 @@ public final class ScreenMacro {
                 Nav.busy(btn, true, "진단 중…", idle);
                 Log.add(a, "이미지 전송 진단을 시작했습니다. (" + label + ")");
                 try {
-                    // ImageSender 에는 RoomRef.key() 를 넘긴다 — 계정까지 정확히 맞춰야 한다
-                    ImageSender.sendWithResult(a, room.key(), uris, new ImageSender.Done() {
+                    // ★ RoomRef 를 그대로 넘긴다. key() 를 넘기면 계정 구분자가 붙은 문자열이
+                    //   카톡 화면 매칭에 쓰여 어떤 텍스트와도 일치하지 않는다.
+                    ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
                         @Override public void done(boolean ok, String detail) {
                             Nav.busy(btn, false, "진단 중…", idle);
                             diagResult(a, room, ok, detail, dumpBefore);

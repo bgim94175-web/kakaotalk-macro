@@ -287,6 +287,25 @@ public final class MacroDetail {
                                 @Override public void run() { ImageSender.openOverlaySettings(a); }
                             }));
                 }
+                // 타사 접근성 자동화 앱은 차단하지 않는다. 자동 클릭이 공유 화면을 함께 조작하면
+                // 전송이 실패하므로 사실만 알린다 (진단 기록에도 같은 항목이 들어간다).
+                String otherAcc;
+                try { otherAcc = ImageSender.otherAccessibilityOn(a) ? ImageSender.otherAccessibility(a) : ""; }
+                catch (Throwable t) { otherAcc = ""; }
+                if (otherAcc.length() > 0) {
+                    col.addView(Nav.note(a, ImageSender.OTHER_ACC_HELP + "\n활성 앱: " + otherAcc,
+                            Theme.AMBER, null, null));
+                }
+                // 백그라운드 전송 불가로 확정된 상태 — 예약 발송에서는 이미지가 생략된다
+                long bgAt;
+                try { bgAt = ImageSender.backgroundBlockedAt(a); } catch (Throwable t) { bgAt = 0L; }
+                if (bgAt > 0L) {
+                    col.addView(Nav.note(a, "예약 발송에서 카카오톡 공유창이 "
+                            + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다."
+                            + " 현재 예약 발송은 이미지를 생략하고 텍스트만 발송합니다."
+                            + " 아래 즉시 발송으로 1회 전송에 성공하면 예약 발송이 다시 이미지를 첨부합니다.",
+                            Theme.AMBER, null, null));
+                }
 
                 // ── 전송 확인 ──
                 col.addView(Ui.sectionHeader(a, null, "전송 확인"));
@@ -463,10 +482,14 @@ public final class MacroDetail {
         // ★ 보내기 전 화면 기록 시각. 이게 없으면 지난 덤프를 "그때 화면" 이라고 거짓말한다.
         final long dumpBefore = ScreenMacro.dumpAtSafe(a);
         Nav.busy(btn, true, "전송 중…", idle);
+        // 사용자가 직접 전송을 누른 시점 = 권한을 고치고 다시 확인해보는 시점이다.
+        // 백그라운드 불가 확정을 풀어 예약 발송이 다시 이미지를 시도하게 한다.
+        try { ImageSender.clearBackgroundBlocked(a); } catch (Throwable ignore) { }
         Log.add(a, "이미지 " + uris.size() + "장을 「" + label + "」 로 전송합니다.");
         try {
-            // ImageSender 에는 RoomRef.key() 를 넘긴다 — 계정까지 정확히 맞춰야 한다
-            ImageSender.sendWithResult(a, room.key(), uris, new ImageSender.Done() {
+            // ★ RoomRef 를 그대로 넘긴다. key() 를 넘기면 계정 구분자가 붙은 문자열이
+            //   카톡 화면 매칭에 쓰여 어떤 텍스트와도 일치하지 않는다.
+            ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
                 @Override public void done(boolean ok, String detail) {
                     Nav.busy(btn, false, "전송 중…", idle);
                     if (ok) {

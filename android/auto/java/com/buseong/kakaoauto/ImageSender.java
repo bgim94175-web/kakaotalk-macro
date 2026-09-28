@@ -135,10 +135,16 @@ public final class ImageSender {
         ComponentName single = null;
         boolean multiExported = true;
         boolean singleExported = true;
+        /**
+         * 조회 자체가 실패했나 (예외). <b>"받을 액티비티가 없다" 와 절대 같게 취급하지 않는다</b> —
+         * 조회 실패를 없음으로 읽으면 실제로는 보낼 수 있는 상황에서 전송을 스스로 포기한다.
+         */
+        boolean queryFailed = false;
 
         boolean none() { return multi == null && single == null; }
 
         String text() {
+            if (queryFailed) return "조회 실패 (수신 액티비티 존재 여부 미확인)";
             return "ACTION_SEND_MULTIPLE " + one(multi, multiExported)
                     + " · ACTION_SEND " + one(single, singleExported);
         }
@@ -191,6 +197,8 @@ public final class ImageSender {
         volatile String wakeErr = "";
         /** 백그라운드에서 공유창을 한 번도 못 본 실패였나 */
         volatile boolean bgMiss = false;
+        /** 마지막으로 등록한 깨우기 감시자 id (0 = 없음). 끝날 때 반드시 해제한다. */
+        volatile long wakeId = 0L;
 
         Job(long id, Context app, RoomRef ref, String label, ArrayList<String> uris, Done onDone) {
             this.id = id;
@@ -622,7 +630,10 @@ public final class ImageSender {
         //  이 조회 없이는 둘을 절대 구별할 수 없다.
         Share sh = resolveShare(j.app);
         j.share = sh;
-        if (sh.none()) {
+        if (sh.queryFailed) {
+            // 조회가 안 됐을 뿐이다. 이걸 "없음" 으로 읽고 포기하면 보낼 수 있는 건도 못 보낸다.
+            Log.add(j.app, "카카오톡 공유 수신 액티비티를 조회하지 못했습니다. 조회 없이 전송을 시도합니다.");
+        } else if (sh.none()) {
             diag(j, "카카오톡에 이미지 공유를 받을 액티비티가 없습니다", 0L,
                     "queryIntentActivities 결과가 비어 있습니다. 카카오톡 버전이 이미지 공유를 지원하지 않거나 "
                     + "설치가 손상되었습니다. 카카오톡을 최신 버전으로 업데이트하십시오.");
@@ -631,8 +642,9 @@ public final class ImageSender {
             finish(j.id, false, "카카오톡이 이미지 공유를 받을 수 없는 상태입니다. 카카오톡을 최신 버전으로 업데이트하십시오.");
             return;
         }
-        // ACTION_SEND_MULTIPLE 을 안 받는 버전이면 한 장씩 보낸다 (조건부 폴백 — 기본 경로가 아니다)
-        j.single = (sh.multi == null);
+        // ACTION_SEND_MULTIPLE 을 안 받는 버전이면 한 장씩 보낸다 (조건부 폴백 — 기본 경로가 아니다).
+        // 조회가 실패한 경우에는 폴백하지 않는다 — 근거 없이 4장을 4건으로 쪼개면 도배가 된다.
+        j.single = !sh.queryFailed && sh.multi == null && sh.single != null;
         if (j.single && j.uris.size() > 1) {
             Log.add(j.app, "카카오톡이 여러 장 동시 공유(ACTION_SEND_MULTIPLE)를 지원하지 않습니다. "
                     + j.uris.size() + "장을 한 장씩 순서대로 전송합니다.");
@@ -736,6 +748,7 @@ public final class ImageSender {
         if (P_WAKE.equals(path)) {
             final long wid = j.id * 1000L + sess;
             j.woke = true;
+            j.wakeId = wid;
             WakeActivity.watch(wid, new WakeActivity.Watcher() {
                 @Override public void shown(long id) {
                     j.wakeShown = true;
@@ -748,6 +761,7 @@ public final class ImageSender {
                 j.app.startActivity(WakeActivity.wrap(j.app, i, wid));
             } catch (Throwable t) {
                 WakeActivity.unwatch(wid);
+                j.wakeId = 0L;
                 nextPath(j, sess, pi, "startActivity 예외 " + t.getClass().getSimpleName());
                 return;
             }
@@ -947,21 +961,27 @@ public final class ImageSender {
      */
     private static Share resolveShare(Context c) {
         Share s = new Share();
-        ResolveInfo m = pick(c, Intent.ACTION_SEND_MULTIPLE);
+        boolean[] err = new boolean[1];
+
+        ResolveInfo m = pick(c, Intent.ACTION_SEND_MULTIPLE, err);
         if (m != null && m.activityInfo != null) {
             s.multi = new ComponentName(m.activityInfo.packageName, m.activityInfo.name);
             s.multiExported = m.activityInfo.exported;
         }
-        ResolveInfo o = pick(c, Intent.ACTION_SEND);
+        ResolveInfo o = pick(c, Intent.ACTION_SEND, err);
         if (o != null && o.activityInfo != null) {
             s.single = new ComponentName(o.activityInfo.packageName, o.activityInfo.name);
             s.singleExported = o.activityInfo.exported;
         }
+        s.queryFailed = err[0] && s.none();
         return s;
     }
 
-    /** 그 액션으로 카톡이 받는 액티비티 하나 (exported 인 것을 우선한다) */
-    private static ResolveInfo pick(Context c, String action) {
+    /**
+     * 그 액션으로 카톡이 받는 액티비티 하나 (exported 인 것을 우선한다).
+     * 조회가 예외로 끝나면 err[0] 을 세운다 — 호출부가 "없음" 과 구별해야 한다.
+     */
+    private static ResolveInfo pick(Context c, String action, boolean[] err) {
         try {
             Intent i = new Intent(action);
             i.setType("image/*");
@@ -974,6 +994,7 @@ public final class ImageSender {
             }
             return l.get(0);
         } catch (Throwable t) {
+            err[0] = true;
             return null;
         }
     }
@@ -1179,6 +1200,12 @@ public final class ImageSender {
         if (j == null || j.id != id) return;
         current = null;
         busy = false;
+
+        // 깨우기 감시자를 남겨두면 Job(과 완료 콜백)이 계속 붙들린다
+        if (j.wakeId != 0L) {
+            try { WakeActivity.unwatch(j.wakeId); } catch (Throwable ignore) { }
+            j.wakeId = 0L;
+        }
 
         String d = (detail == null || detail.length() == 0) ? (ok ? j.label : "원인 불명") : detail;
         if (!ok) {

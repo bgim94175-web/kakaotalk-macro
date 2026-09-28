@@ -346,6 +346,26 @@ public final class KakaoAccessibility extends AccessibilityService {
         // 그 값을 화면에서 찾으면 100% 실패한다 (카톡 화면에 계정키와 제어문자가 있을 수 없다).
         // 호출부가 이미 표시 이름을 넘겼으면 구분자가 없으니 이 줄은 아무 일도 하지 않는다.
         String r = (raw.indexOf(RoomRef.SEP) >= 0) ? RoomRef.parse(raw).name : raw;
+        return armWith(raw, r, timeoutMs, cb, ctx);
+    }
+
+    /**
+     * <b>권장 진입점</b> — 계정과 이름을 합친 문자열을 만들지 않는다.
+     * 화면에서 찾는 것은 {@code ref.name} 뿐이고, 계정까지 필요한 조회(세션·대화방 열기 인텐트)는
+     * {@code ref.key()} 로 한다. 둘을 한 문자열로 합쳐 넘기면 화면 매칭이 조용히 전부 실패한다.
+     */
+    public static long arm(RoomRef ref, long timeoutMs, Result cb, Context ctx) {
+        String key = (ref == null) ? "" : ref.key();
+        String name = (ref == null) ? "" : ref.name;
+        return armWith(key, name, timeoutMs, cb, ctx);
+    }
+
+    /**
+     * @param rawKey 저장·조회용 값 ({@code RoomRef.key()} 또는 구버전 이름)
+     * @param r      <b>화면에서 찾을 표시 이름</b>
+     */
+    private static long armWith(String rawKey, String r, long timeoutMs, Result cb, Context ctx) {
+        String raw = (rawKey == null) ? "" : rawKey;
         long t = (timeoutMs <= 0) ? DEFAULT_TIMEOUT_MS : timeoutMs;
 
         long now = System.currentTimeMillis();
@@ -1651,7 +1671,8 @@ public final class KakaoAccessibility extends AccessibilityService {
         String k = targetKey;
         if (k == null || k.length() == 0) return "확인 불가(대상 대화방 없음)";
         try {
-            return KakaoListener.hasOpenIntent(RoomRef.parse(k))
+            // 저장값을 그대로 넘긴다 — 구분자가 있으면 그 계정에서, 없으면 구버전 경로로 찾는다
+            return KakaoListener.hasOpenIntent(k)
                     ? "보유"
                     : "없음(해당 대화방 알림을 아직 수신하지 않았거나 카카오톡이 제공하지 않음)";
         } catch (Throwable t) {
