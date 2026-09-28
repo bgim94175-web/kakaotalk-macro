@@ -45,6 +45,8 @@ public final class ScreenOrders implements MainActivity.Screen {
         if (rootView != null) return rootView;
 
         LinearLayout page = Ui.screen(a);
+        page.addView(Ui.hero(a, Theme.F_ORDERS, Icon.RECEIPT, "ORDERS · DEPOSITS", "주문 · 입금",
+                "구매 신청 승인과 입금 내역 매칭을 처리합니다."));
 
         String[] labels = new String[Api.ORDER_STATUS_LABELS.length + 1];
         for (int i = 0; i < Api.ORDER_STATUS_LABELS.length; i++) labels[i] = Api.ORDER_STATUS_LABELS[i];
@@ -55,12 +57,13 @@ public final class ScreenOrders implements MainActivity.Screen {
         });
         page.addView(segView);
 
-        countLabel = Ui.label(a, "");
+        LinearLayout countRow = Ui.dotLabel(a, "");
+        countLabel = Ui.dotLabelText(countRow);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Theme.dp(a, 18);
-        countLabel.setLayoutParams(lp);
-        page.addView(countLabel);
+        lp.topMargin = Theme.dp(a, 20);
+        countRow.setLayoutParams(lp);
+        page.addView(countRow);
 
         noteLabel = Ui.hint(a, "");
         LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
@@ -165,7 +168,7 @@ public final class ScreenOrders implements MainActivity.Screen {
         if (feats != null) {
             for (int i = 0; i < feats.length(); i++) {
                 String f = feats.optString(i, "");
-                if (f.length() > 0) r2.addView(Ui.chipSm(a, Api.featShort(f), Theme.ACCENT2));
+                if (f.length() > 0) r2.addView(Ui.chipSm(a, Api.featShort(f), Theme.feature(f)));
             }
         }
         r2.addView(Ui.chipSm(a, Api.planLabel(o.optString("plan", ""), 0), Theme.SUB));
@@ -174,9 +177,9 @@ public final class ScreenOrders implements MainActivity.Screen {
         LinearLayout r3 = Ui.row(a);
         mt(r3, 8);
         TextView amount = Ui.body(a, Ui.won(o.optLong("amount", 0)));
-        amount.setTextColor(Theme.PRIMARY);
-        amount.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        amount.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f);
+        amount.setTextColor(Theme.TEXT);
+        amount.setTypeface(Theme.serif());
+        amount.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f);
         amount.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         r3.addView(amount);
@@ -231,7 +234,7 @@ public final class ScreenOrders implements MainActivity.Screen {
         mt(acts, 10);
         boolean any = false;
         if (!"done".equals(status) && !"canceled".equals(status)) {
-            TextView ok = Ui.btnSm(a, "승인", Theme.PRIMARY, true);
+            TextView ok = Ui.btnSm(a, "승인", Theme.F_ORDERS, true);
             ok.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { openApprove(id, target, o); }
             });
@@ -480,7 +483,7 @@ public final class ScreenOrders implements MainActivity.Screen {
         if ("unmatched".equals(status) || "ambiguous".equals(status)) {
             LinearLayout acts = Ui.row(a);
             mt(acts, 10);
-            TextView match = Ui.btnSm(a, "수동 매칭", Theme.PRIMARY, true);
+            TextView match = Ui.btnSm(a, "수동 매칭", Theme.F_DEPOSIT, true);
             match.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { pickOrderFor(depId, d.optLong("amount", 0)); }
             });

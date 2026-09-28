@@ -30,7 +30,7 @@ import java.util.Locale;
 
 /**
  * 뷰 조립기. 사용자앱(KakaoAuto)의 Ui 와 같은 토큰·같은 모양을 쓴다.
- * 다른 점은 primary 버튼/선택 상태가 Theme.PRIMARY(바이올렛) 라는 것뿐.
+ * 주 버튼·스위치·세그먼트·체크는 지금 탭의 색(Theme.accent())을 따른다.
  * XML 레이아웃도, 외부 라이브러리도 안 쓴다.
  *
  * 관리자앱이라 목록 밀도는 사용자앱보다 높다 — listCard() / chipSm() / kvTight() 를 쓴다.
@@ -54,12 +54,119 @@ public final class Ui {
 
     // ── 글자 ──────────────────────────────────────────────────────────────────
 
-    /** 화면 제목 22sp bold */
+    /** 화면 제목 26sp 세리프 */
     public static TextView title(Context c, String s) {
-        TextView t = base(c, s, 22f, Theme.TEXT, true);
-        t.setLetterSpacing(-0.02f);
+        TextView t = base(c, s, 26f, Theme.TEXT, true);
+        t.setTypeface(Theme.serif());
+        t.setLetterSpacing(-0.01f);
         t.setPadding(0, Theme.dp(c, 4), 0, Theme.dp(c, 4));
         return t;
+    }
+
+    /** 제목 위 작은 영문 머리글 (자간 넓게) */
+    public static TextView eyebrow(Context c, String s, int color) {
+        TextView t = base(c, s, 10.5f, (color == 0) ? Theme.GOLD : color, true);
+        t.setLetterSpacing(0.22f);
+        t.setSingleLine(true);
+        return t;
+    }
+
+    // ── 아이콘 · 기능 표식 ────────────────────────────────────────────────────
+
+    /** 선 아이콘 한 개 (sizeDp 정사각) */
+    public static View icon(Context c, int glyph, int color, int sizeDp) {
+        View v = new View(c);
+        v.setBackground(new Icon(glyph, color));
+        int n = Theme.dp(c, sizeDp);
+        v.setLayoutParams(new LinearLayout.LayoutParams(n, n));
+        v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return v;
+    }
+
+    /** 색 타일 안의 아이콘 (카드 제목 왼쪽). 32dp 라운드 사각. */
+    public static FrameLayout iconTile(Context c, int glyph, int color) {
+        return iconBox(c, glyph, color, 32, 16, false);
+    }
+
+    /** 원형 메달 (머리 카드) */
+    public static FrameLayout medallion(Context c, int glyph, int color, int sizeDp) {
+        return iconBox(c, glyph, color, sizeDp, Math.round(sizeDp * 0.46f), true);
+    }
+
+    private static FrameLayout iconBox(Context c, int glyph, int color, int sizeDp, int iconDp, boolean round) {
+        FrameLayout f = new FrameLayout(c);
+        f.setBackground(round
+                ? Theme.ring(Theme.fade(color, 0.12f), Theme.fade(color, 0.38f), c)
+                : Theme.round(Theme.fade(color, 0.12f), Theme.R_SM, Theme.fade(color, 0.26f), 1, c));
+        int n = Theme.dp(c, sizeDp);
+        f.setLayoutParams(new LinearLayout.LayoutParams(n, n));
+        View ic = new View(c);
+        ic.setBackground(new Icon(glyph, color));
+        int in = Theme.dp(c, iconDp);
+        FrameLayout.LayoutParams ip = new FrameLayout.LayoutParams(in, in);
+        ip.gravity = Gravity.CENTER;
+        f.addView(ic, ip);
+        f.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return f;
+    }
+
+    /**
+     * 탭 머리 카드. 탭 색이 왼쪽 위에서 은은하게 번지고, 메달 · 영문 머리글 · 세리프 제목 · 설명이 들어간다.
+     * 돌려준 카드에 검색줄·세그먼트를 이어서 addView 해도 된다.
+     */
+    public static LinearLayout hero(Context c, int color, int glyph, String eyebrowTxt,
+                                    String titleTxt, String desc) {
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Theme.sheen(Theme.mix(Theme.CARD, color, 0.14f), Theme.CARD,
+                Theme.R_XL, Theme.fade(color, 0.26f), c));
+        int p = Theme.dp(c, 18);
+        card.setPadding(p, p, p, Theme.dp(c, 16));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        lp.topMargin = Theme.dp(c, 6);
+        lp.bottomMargin = Theme.dp(c, 12);
+        card.setLayoutParams(lp);
+
+        LinearLayout head = row(c);
+        FrameLayout med = medallion(c, glyph, color, 44);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(Theme.dp(c, 44), Theme.dp(c, 44));
+        mp.rightMargin = Theme.dp(c, 14);
+        head.addView(med, mp);
+
+        LinearLayout txt = new LinearLayout(c);
+        txt.setOrientation(LinearLayout.VERTICAL);
+        txt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        if (eyebrowTxt != null && eyebrowTxt.length() > 0) txt.addView(eyebrow(c, eyebrowTxt, color));
+        TextView nm = base(c, titleTxt, 21f, Theme.TEXT, true);
+        nm.setTypeface(Theme.serif());
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(MATCH, WRAP);
+        np.topMargin = Theme.dp(c, 5);
+        nm.setLayoutParams(np);
+        txt.addView(nm);
+        head.addView(txt);
+        card.addView(head);
+
+        if (desc != null && desc.length() > 0) {
+            TextView d = sub(c, desc);
+            LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+            dp.topMargin = Theme.dp(c, 12);
+            d.setLayoutParams(dp);
+            card.addView(d);
+        }
+        return card;
+    }
+
+    /** 카드 제목 줄: 색 타일 아이콘 + 제목 */
+    public static LinearLayout cardHead(Context c, int glyph, int color, String titleTxt) {
+        LinearLayout r = row(c);
+        FrameLayout tile = iconTile(c, glyph, color);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(Theme.dp(c, 32), Theme.dp(c, 32));
+        tp.rightMargin = Theme.dp(c, 12);
+        r.addView(tile, tp);
+        TextView t = h2(c, titleTxt);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        r.addView(t);
+        return r;
     }
 
     /** 카드/구역 제목 16sp bold */
@@ -132,12 +239,12 @@ public final class Ui {
         TextView t = new TextView(c);
         t.setText(s == null ? "" : s);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f);
-        t.setTextColor(Theme.PRIMARY);
+        t.setTextColor(Theme.GOLD_HI);
         t.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         t.setLetterSpacing(0.04f);
         t.setGravity(Gravity.CENTER);
-        t.setBackground(Theme.round(Theme.fade(Theme.PRIMARY, 0.10f), Theme.R_MD,
-                Theme.fade(Theme.PRIMARY, 0.28f), 1, c));
+        t.setBackground(Theme.sheen(Theme.fade(Theme.GOLD, 0.16f), Theme.fade(Theme.GOLD, 0.05f),
+                Theme.R_MD, Theme.fade(Theme.GOLD, 0.40f), c));
         t.setPadding(Theme.dp(c, 12), Theme.dp(c, 16), Theme.dp(c, 12), Theme.dp(c, 16));
         try { t.setTextIsSelectable(true); } catch (Throwable ignore) { }
         t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
@@ -250,24 +357,43 @@ public final class Ui {
         return v;
     }
 
-    /** 구역 머리말: 작은 라벨 + 제목 */
+    /** 구역 머리말 한 줄 (탭 색 점 + 라벨). titleTxt 가 있으면 그걸 쓴다. */
     public static LinearLayout sectionHeader(Context c, String labelTxt, String titleTxt) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.topMargin = Theme.dp(c, 18);
-        lp.bottomMargin = Theme.dp(c, 12);
+        lp.bottomMargin = Theme.dp(c, 8);
         l.setLayoutParams(lp);
-        if (labelTxt != null && labelTxt.length() > 0) l.addView(label(c, labelTxt));
-        if (titleTxt != null && titleTxt.length() > 0) {
-            TextView t = base(c, titleTxt, 18f, Theme.TEXT, true);
-            t.setLetterSpacing(-0.01f);
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            tp.topMargin = Theme.dp(c, 5);
-            t.setLayoutParams(tp);
-            l.addView(t);
-        }
+        String one = (titleTxt != null && titleTxt.length() > 0) ? titleTxt : labelTxt;
+        if (one != null && one.length() > 0) l.addView(dotLabel(c, one));
         return l;
+    }
+
+    /** 탭 색 점 + 라벨 (목록 위 "전체 12건" 같은 줄). 글자는 첫 자식이 아니라 두 번째 자식이다 → dotLabelText() */
+    public static LinearLayout dotLabel(Context c, String s) {
+        LinearLayout r = row(c);
+        r.setPadding(Theme.dp(c, 4), 0, Theme.dp(c, 4), 0);
+        View dot = new View(c);
+        dot.setBackground(Theme.circle(Theme.accent(), c));
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(c, 4), Theme.dp(c, 4));
+        dp.rightMargin = Theme.dp(c, 8);
+        r.addView(dot, dp);
+        TextView t = base(c, s, 12.5f, Theme.SUB, true);
+        t.setLetterSpacing(0.06f);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        r.addView(t);
+        return r;
+    }
+
+    public static TextView dotLabelText(View dotLabel) {
+        if (dotLabel instanceof LinearLayout && ((LinearLayout) dotLabel).getChildCount() > 1) {
+            View v = ((LinearLayout) dotLabel).getChildAt(1);
+            if (v instanceof TextView) return (TextView) v;
+        }
+        return null;
     }
 
     /** 좌 라벨 · 우 값 한 줄 */
@@ -366,11 +492,12 @@ public final class Ui {
         return t;
     }
 
-    /** 버튼. primary 면 PRIMARY(바이올렛) 채움, 아니면 투명 + 보더. 높이 48dp. */
+    /** 버튼. primary 면 탭 색 채움(은은한 광택), 아니면 투명 + 보더. 높이 48dp. */
     public static TextView btn(Context c, String s, boolean primary) {
         TextView t = base(c, s, 14f, primary ? Theme.ON_PRIMARY : Theme.TEXT, primary);
+        int ac = Theme.accent();
         t.setBackground(primary
-                ? Theme.round(Theme.PRIMARY, Theme.R_MD, 0, 0, c)
+                ? Theme.sheen(Theme.mix(ac, 0xFFFFFFFF, 0.14f), ac, Theme.R_MD, 0, c)
                 : Theme.round(0x00000000, Theme.R_MD, Theme.LINE2, 1, c));
         t.setGravity(Gravity.CENTER);
         t.setPadding(Theme.dp(c, 18), Theme.dp(c, 14), Theme.dp(c, 18), Theme.dp(c, 14));
@@ -544,9 +671,10 @@ public final class Ui {
             if (!(v instanceof TextView)) continue;
             TextView t = (TextView) v;
             boolean on = (i == sel);
-            t.setTextColor(on ? Theme.PRIMARY : Theme.SUB);
+            int ac = Theme.accent();
+            t.setTextColor(on ? ac : Theme.SUB);
             t.setBackground(on
-                    ? Theme.pill(Theme.fade(Theme.PRIMARY, 0.16f), Theme.fade(Theme.PRIMARY, 0.30f), c)
+                    ? Theme.pill(Theme.fade(ac, 0.16f), Theme.fade(ac, 0.30f), c)
                     : null);
         }
     }
@@ -683,27 +811,31 @@ public final class Ui {
         }
     }
 
-    /** 통계 요약 타일. 가로 줄에 weight 1 로 들어간다. */
-    public static LinearLayout statTile(Context c, String labelTxt, String value, int color) {
+    /** 통계 요약 타일 (아이콘 + 세리프 숫자 + 라벨). 가로 줄에 weight 1 로 들어간다. */
+    public static LinearLayout statTile(Context c, int glyph, String labelTxt, String value, int color) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.setGravity(Gravity.CENTER_HORIZONTAL);
-        l.setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
+        l.setBackground(Theme.sheen(Theme.mix(Theme.CARD, color, 0.08f), Theme.CARD,
+                Theme.R_MD, Theme.fade(color, 0.18f), c));
         int pv = Theme.dp(c, 10);
-        l.setPadding(Theme.dp(c, 6), pv, Theme.dp(c, 6), pv);
+        l.setPadding(Theme.dp(c, 10), pv, Theme.dp(c, 8), pv);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, WRAP, 1f);
         lp.rightMargin = Theme.dp(c, 6);
         l.setLayoutParams(lp);
 
-        TextView v = base(c, value, 18f, color, true);
-        v.setGravity(Gravity.CENTER);
+        l.addView(icon(c, glyph, Theme.fade(color, 0.85f), 14));
+
+        TextView v = base(c, value, 19f, color, true);
+        v.setTypeface(Theme.serif());
         v.setSingleLine(true);
-        v.setLetterSpacing(-0.02f);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        vp.topMargin = Theme.dp(c, 7);
+        v.setLayoutParams(vp);
         l.addView(v);
 
         TextView t = base(c, labelTxt, 10.5f, Theme.SUB, false);
-        t.setGravity(Gravity.CENTER);
         t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(MATCH, WRAP);
         tp.topMargin = Theme.dp(c, 3);
         t.setLayoutParams(tp);
@@ -711,27 +843,53 @@ public final class Ui {
         return l;
     }
 
-    /** 하단 탭 버튼 */
-    public static LinearLayout tabButton(Context c, String labelTxt, boolean active) {
+    /**
+     * 하단 탭 버튼. 자식 0 = 아이콘 칸(FrameLayout, 안에 Icon 뷰), 자식 1 = 라벨.
+     * 선택 상태는 paintTab() 으로 다시 칠한다.
+     */
+    public static LinearLayout tabButton(Context c, int glyph, String labelTxt, int color, boolean active) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         l.setGravity(Gravity.CENTER);
-        l.setPadding(0, Theme.dp(c, 9), 0, Theme.dp(c, 9));
+        l.setPadding(0, Theme.dp(c, 8), 0, Theme.dp(c, 8));
         l.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         l.setClickable(true);
         l.setFocusable(true);
+        l.setContentDescription(labelTxt);
 
-        View dot = new View(c);
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(c, 5), Theme.dp(c, 5));
-        dp.bottomMargin = Theme.dp(c, 5);
-        dot.setLayoutParams(dp);
-        dot.setBackground(Theme.circle(active ? Theme.PRIMARY : 0x00000000, c));
-        l.addView(dot);
+        FrameLayout pill = new FrameLayout(c);
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(Theme.dp(c, 56), Theme.dp(c, 30));
+        pp.bottomMargin = Theme.dp(c, 4);
+        pill.setLayoutParams(pp);
+        View ic = new View(c);
+        ic.setBackground(new Icon(glyph, Theme.DIM));
+        FrameLayout.LayoutParams ip = new FrameLayout.LayoutParams(Theme.dp(c, 20), Theme.dp(c, 20));
+        ip.gravity = Gravity.CENTER;
+        pill.addView(ic, ip);
+        l.addView(pill);
 
-        TextView t = base(c, labelTxt, 12.5f, active ? Theme.TEXT : Theme.DIM, active);
+        TextView t = base(c, labelTxt, 11.5f, Theme.DIM, false);
         t.setGravity(Gravity.CENTER);
         l.addView(t);
+        paintTab(l, color, active);
         return l;
+    }
+
+    public static void paintTab(View tab, int color, boolean active) {
+        if (!(tab instanceof LinearLayout) || ((LinearLayout) tab).getChildCount() < 2) return;
+        LinearLayout l = (LinearLayout) tab;
+        Context c = l.getContext();
+        View pill = l.getChildAt(0);
+        pill.setBackground(active ? Theme.pill(Theme.fade(color, 0.16f), 0, c) : null);
+        if (pill instanceof FrameLayout && ((FrameLayout) pill).getChildCount() > 0) {
+            android.graphics.drawable.Drawable d = ((FrameLayout) pill).getChildAt(0).getBackground();
+            if (d instanceof Icon) ((Icon) d).setColor(active ? color : Theme.DIM);
+        }
+        View lb = l.getChildAt(1);
+        if (lb instanceof TextView) {
+            ((TextView) lb).setTextColor(active ? Theme.TEXT : Theme.DIM);
+            ((TextView) lb).setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
     }
 
     /**
@@ -827,7 +985,7 @@ public final class Ui {
                 m.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
                 m.setLineSpacing(0, 1.45f);
             }
-            styleDialogBtn(d.getButton(AlertDialog.BUTTON_POSITIVE), Theme.PRIMARY, true);
+            styleDialogBtn(d.getButton(AlertDialog.BUTTON_POSITIVE), Theme.accent(), true);
             styleDialogBtn(d.getButton(AlertDialog.BUTTON_NEGATIVE), Theme.SUB, false);
             styleDialogBtn(d.getButton(AlertDialog.BUTTON_NEUTRAL), Theme.SUB, false);
         } catch (Throwable t) {
@@ -988,7 +1146,7 @@ public final class Ui {
 
     private static void paintSwitch(Context c, View track, View knob, boolean on) {
         if (track == null || knob == null) return;
-        track.setBackground(Theme.pill(on ? Theme.PRIMARY : Theme.LINE2, 0, c));
+        track.setBackground(Theme.pill(on ? Theme.accent() : Theme.LINE2, 0, c));
         knob.setBackground(Theme.circle(on ? Theme.TEXT : Theme.SUB, c));
         ViewGroup.LayoutParams p = knob.getLayoutParams();
         if (p instanceof FrameLayout.LayoutParams) {
@@ -1002,7 +1160,7 @@ public final class Ui {
         if (box == null) return;
         box.setText(on ? "✓" : "");
         box.setBackground(on
-                ? Theme.round(Theme.PRIMARY, 6, 0, 0, c)
+                ? Theme.round(Theme.accent(), 6, 0, 0, c)
                 : Theme.round(0x00000000, 6, Theme.LINE2, 1, c));
     }
 

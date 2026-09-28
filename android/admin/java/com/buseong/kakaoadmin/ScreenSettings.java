@@ -37,11 +37,12 @@ public final class ScreenSettings implements MainActivity.Screen {
         if (rootView != null) return rootView;
 
         LinearLayout page = Ui.screen(a);
-        page.addView(Ui.title(a, "설정"));
+        page.addView(Ui.hero(a, Theme.F_SETTINGS, Icon.GEAR, "SETTINGS", "설정",
+                "서버 접속 · 서명 허용목록 · 진단 정보를 관리합니다."));
 
         // ── 서버 접속
         LinearLayout conn = Ui.card(a);
-        conn.addView(Ui.h2(a, "서버 접속"));
+        conn.addView(Ui.cardHead(a, Icon.TERMINAL, Theme.F_SETTINGS, "서버 접속"));
         TextView ch = Ui.sub(a, "주소 또는 비밀번호 변경 시 저장 시점에 서버 연결을 검증합니다.");
         mt(ch, 6);
         conn.addView(ch);
@@ -77,7 +78,7 @@ public final class ScreenSettings implements MainActivity.Screen {
 
         // ── 앱서명 허용목록
         LinearLayout sigs = Ui.card(a);
-        sigs.addView(Ui.h2(a, "앱 서명 허용목록"));
+        sigs.addView(Ui.cardHead(a, Icon.SHIELD, Theme.F_AUDIT, "앱 서명 허용목록"));
         TextView sh = Ui.sub(a, "등록된 SHA-256 서명으로 빌드된 APK 만 인증을 통과합니다.\n"
                 + "build.sh 가 출력하는 '서버 등록용 hex' 값을 입력하십시오.");
         mt(sh, 6);
@@ -91,7 +92,7 @@ public final class ScreenSettings implements MainActivity.Screen {
         mt(sigBox, 10);
         sigs.addView(sigBox);
 
-        TextView addSig = Ui.btn(a, "＋  서명 추가", false);
+        TextView addSig = Ui.btn(a, "서명 추가", false);
         mt(addSig, 10);
         addSig.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { openAddSig(); }
@@ -101,7 +102,7 @@ public final class ScreenSettings implements MainActivity.Screen {
 
         // ── 통계 상세
         LinearLayout st = Ui.card(a);
-        st.addView(Ui.h2(a, "통계"));
+        st.addView(Ui.cardHead(a, Icon.CHART, Theme.F_KEYS, "통계"));
         statBox = Ui.col(a);
         mt(statBox, 8);
         st.addView(statBox);
@@ -109,7 +110,7 @@ public final class ScreenSettings implements MainActivity.Screen {
 
         // ── 진단
         LinearLayout diag = Ui.card(a);
-        diag.addView(Ui.h2(a, "진단"));
+        diag.addView(Ui.cardHead(a, Icon.GAUGE, Theme.ACCENT2, "진단"));
         crashLabel = Ui.hint(a, "");
         mt(crashLabel, 8);
         diag.addView(crashLabel);
@@ -155,7 +156,7 @@ public final class ScreenSettings implements MainActivity.Screen {
 
         // ── 로그아웃
         LinearLayout out = Ui.card(a);
-        out.addView(Ui.h2(a, "로그아웃"));
+        out.addView(Ui.cardHead(a, Icon.DOOR, Theme.RED, "로그아웃"));
         TextView oh = Ui.sub(a, "현재 기기에 저장된 비밀번호를 삭제하고 로그인 화면으로 전환합니다.");
         mt(oh, 6);
         out.addView(oh);
