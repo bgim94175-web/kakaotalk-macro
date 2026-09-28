@@ -472,7 +472,127 @@ public final class ScreenMacro {
             f.body.addView(Ui.sub(a, "사진 수동 전송은 대상 방 중 첫 번째 방(「" + imgRoom
                     + "」)에만 보낸다. 다른 방에 보내려면 방 순서를 바꿔줘."));
         }
+
+        // ── 진단 ──
+        // 사진 전송은 카톡 공유창을 우리가 대신 눌러야 해서, 카톡이 화면을 바꾸면 조용히 깨진다.
+        // 그때 화면에 뭐가 있었는지 사용자가 그대로 개발자에게 보낼 수 있게 여기 버튼을 둔다.
+        f.body.addView(Nav.gap(a, 14));
+        f.body.addView(Ui.label(a, "안 될 때"));
+        f.body.addView(Ui.sub(a, "「사진 전송 진단」은 실제로 한 번 보내보면서 카톡 화면을 기록한다. "
+                + "실패하면 그 화면을 그대로 복사해서 개발자에게 보내줘 — 그게 있으면 고칠 수 있어."));
+
+        LinearLayout drow = Ui.row(a);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        dp.topMargin = Theme.dp(a, 10);
+        drow.setLayoutParams(dp);
+
+        final TextView diag = Ui.btn(a, "사진 전송 진단", false);
+        diag.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        diag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { runDiag(a, s, diag); }
+        });
+        drow.addView(diag);
+
+        final long dumpAt = KakaoAccessibility.lastDumpAt(a);
+        TextView show = Ui.btn(a, (dumpAt > 0) ? "화면 진단 보기" : "화면 진단 없음", false);
+        LinearLayout.LayoutParams sp2 = new LinearLayout.LayoutParams(0, WRAP, 1f);
+        sp2.leftMargin = Theme.dp(a, 8);
+        show.setLayoutParams(sp2);
+        show.setEnabled(dumpAt > 0);
+        show.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showDump(a); }
+        });
+        drow.addView(show);
+        f.body.addView(drow);
+
+        if (dumpAt > 0) {
+            f.body.addView(Ui.sub(a, "마지막 화면 진단: " + Nav.whenRel(dumpAt)));
+        }
         return f;
+    }
+
+    // ── 사진 전송 진단 ──────────────────────────────────────────────────────
+
+    /**
+     * 첫 번째 대상 방으로 실제로 한 번 보내보고, 끝나면 결과 + 화면 덤프를 보여준다.
+     * 실패했을 때 화면에 뭐가 있었는지가 제일 중요한 정보라서, 복사해서 바로 보낼 수 있게 한다.
+     */
+    private static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
+        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
+        if (s.macro.images.isEmpty()) { Ui.toast(a, "먼저 사진을 골라줘"); return; }
+        if (s.macro.rooms.isEmpty()) { Ui.toast(a, "대상 방을 먼저 추가해줘"); return; }
+
+        boolean accOn;
+        try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
+        if (!accOn) {
+            Nav.confirm(a, "접근성 권한이 필요해",
+                    "진단도 카톡 화면을 읽어야 해서 접근성 권한이 필요해. 지금 켜러 갈래?",
+                    "설정 열기", new Runnable() {
+                        @Override public void run() { ImageSender.openSettings(a); }
+                    });
+            return;
+        }
+
+        final String room = s.macro.rooms.get(0);
+        final List<String> uris = new ArrayList<String>(s.macro.images);
+        Nav.confirm(a, "진단을 돌릴까?",
+                "「" + room + "」 에 사진 " + uris.size() + "장을 실제로 보내본다. "
+                        + "성공하면 정말 전송되고, 실패하면 그때 카톡 화면을 기록해둘게.",
+                "진단 시작", new Runnable() {
+            @Override public void run() {
+                final String idle = "사진 전송 진단";
+                Nav.busy(btn, true, "진단 중…", idle);
+                Log.add(a, "사진 전송 진단 시작 — 「" + room + "」");
+                try {
+                    ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
+                        @Override public void done(boolean ok, String detail) {
+                            Nav.busy(btn, false, "진단 중…", idle);
+                            diagResult(a, room, ok, detail);
+                        }
+                    });
+                } catch (Throwable t) {
+                    Nav.busy(btn, false, "진단 중…", idle);
+                    Log.add(a, "진단을 시작하지 못했어: " + t);
+                    Ui.toast(a, "진단을 시작하지 못했어");
+                }
+            }
+        });
+    }
+
+    /** 진단 결과 + 화면 덤프를 한 창에 보여준다 (복사 가능) */
+    private static void diagResult(final MainActivity a, String room, boolean ok, String detail) {
+        StringBuilder sb = new StringBuilder(2048);
+        sb.append(ok ? "■ 결과: 성공 (카톡에서 실제로 갔는지 확인해줘)" : "■ 결과: 실패").append('\n');
+        sb.append("■ 방: ").append(room).append('\n');
+        sb.append("■ 원인/상세: ").append((detail == null || detail.length() == 0) ? "(없음)" : detail).append('\n');
+        sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "켜짐" : "꺼짐")
+                .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "켜짐" : "꺼짐").append('\n');
+        sb.append('\n');
+
+        String dump = KakaoAccessibility.lastDump(a);
+        if (dump == null || dump.length() == 0) {
+            sb.append("(화면 진단이 없어 — 공유창 자체가 안 떴거나 성공했을 때는 안 남는다)\n");
+        } else {
+            sb.append(dump);
+        }
+        final String all = sb.toString();
+        Nav.showText(a, ok ? "진단 결과 — 성공" : "진단 결과 — 실패", all, new Runnable() {
+            @Override public void run() { Nav.copy(a, "사진 전송 진단", all); }
+        });
+        refresh();
+    }
+
+    /** 마지막 화면 진단 보기 (지우기 포함) */
+    private static void showDump(final MainActivity a) {
+        final String dump = KakaoAccessibility.lastDump(a);
+        if (dump == null || dump.length() == 0) {
+            Ui.toast(a, "저장된 화면 진단이 없어");
+            return;
+        }
+        Nav.showText(a, "화면 진단 (" + Nav.whenRel(KakaoAccessibility.lastDumpAt(a)) + ")",
+                dump, new Runnable() {
+                    @Override public void run() { Nav.copy(a, "화면 진단", dump); }
+                });
     }
 
     /** 사진 수동 전송 버튼 라벨 (어느 방으로 가는지 보여준다) */
@@ -558,10 +678,27 @@ public final class ScreenMacro {
         Nav.busy(btn, true, "보내는 중…", idle);
         Log.add(a, "사진 " + uris.size() + "장을 「" + room + "」로 보내는 중");
         try {
-            ImageSender.send(a, room, uris, new Runnable() {
-                @Override public void run() {
+            // 결과를 받아야 한다 — 실패했는데 "끝냈어" 라고 하면 사용자가 보낸 줄 안다.
+            ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
+                @Override public void done(boolean ok, String detail) {
                     Nav.busy(btn, false, "보내는 중…", idle);
-                    Ui.toast(a, "「" + room + "」에 사진 전송을 끝냈어. 카톡에서 확인해줘");
+                    if (ok) {
+                        Ui.toast(a, "「" + room + "」에 사진 전송을 끝냈어. 카톡에서 확인해줘");
+                        refresh();
+                        return;
+                    }
+                    String why = (detail == null || detail.length() == 0) ? "원인 불명" : detail;
+                    boolean hasDump = KakaoAccessibility.lastDump(a).length() > 0;
+                    if (hasDump) {
+                        Nav.confirm(a, "사진을 못 보냈어",
+                                why + "\n\n그때 카톡 화면을 기록해뒀어. 그걸 복사해서 개발자에게 보내주면 고칠 수 있어.",
+                                "화면 진단 보기", new Runnable() {
+                                    @Override public void run() { showDump(a); }
+                                });
+                    } else {
+                        Ui.toast(a, "사진을 못 보냈어 — " + why);
+                    }
+                    refresh();
                 }
             });
         } catch (Throwable t) {

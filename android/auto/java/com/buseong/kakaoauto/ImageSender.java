@@ -49,14 +49,19 @@ public final class ImageSender {
     private static long seq = 0L;
     private static Handler H = null;
 
+    /** 결과(성공 여부 + 원인)까지 받는 콜백. 진단 화면이 이걸 쓴다. */
+    public interface Done {
+        void done(boolean ok, String detail);
+    }
+
     private static final class Job {
         final long id;
         final Context app;
         final String room;
         final ArrayList<String> uris;
-        final Runnable onDone;
+        final Done onDone;
 
-        Job(long id, Context app, String room, ArrayList<String> uris, Runnable onDone) {
+        Job(long id, Context app, String room, ArrayList<String> uris, Done onDone) {
             this.id = id;
             this.app = app;
             this.room = room;
@@ -72,7 +77,21 @@ public final class ImageSender {
      * onDone 은 성공이든 실패든 <b>정확히 한 번</b> 메인 스레드에서 불린다 (null 허용).
      */
     public static void send(Context ctx, String room, List<String> uris, final Runnable onDone) {
-        if (ctx == null) { fire(onDone); return; }
+        sendWithResult(ctx, room, uris, new Done() {
+            @Override public void done(boolean ok, String detail) {
+                fire(onDone);
+            }
+        });
+    }
+
+    /**
+     * 위와 같지만 <b>왜 실패했는지</b>까지 받는다. 진단 버튼이 이걸 쓴다.
+     * onDone 은 성공이든 실패든 정확히 한 번 메인 스레드에서 불린다 (null 허용).
+     *
+     * (이름을 따로 둔 이유: send(.., null) 호출부가 있어서 오버로드로 만들면 컴파일이 모호해진다)
+     */
+    public static void sendWithResult(Context ctx, String room, List<String> uris, final Done onDone) {
+        if (ctx == null) { fire(onDone, false, "앱 컨텍스트가 없어"); return; }
         Context app = ctx.getApplicationContext();
         if (app == null) app = ctx;
         final Context c = app;
@@ -80,13 +99,13 @@ public final class ImageSender {
         String r = (room == null) ? "" : room.trim();
         if (r.length() == 0) {
             Log.add(c, "이미지 전송 취소 — 보낼 방 이름이 비어있어");
-            fire(onDone);
+            fire(onDone, false, "보낼 방 이름이 비어있어");
             return;
         }
 
         if (uris == null || uris.isEmpty()) {
             Log.add(c, "이미지 전송 취소 — 첨부된 사진이 없어");
-            fire(onDone);
+            fire(onDone, false, "첨부된 사진이 없어");
             return;
         }
 
@@ -106,7 +125,7 @@ public final class ImageSender {
         }
         if (ok.isEmpty()) {
             Log.add(c, "이미지 전송 취소 — 보낼 수 있는 사진이 하나도 없어");
-            fire(onDone);
+            fire(onDone, false, "사진이 다 안 읽혀 — 다시 골라줘");
             return;
         }
         if (uris.size() > MAX) {
@@ -116,7 +135,7 @@ public final class ImageSender {
         if (!accessibilityOn(c)) {
             Log.add(c, "접근성 권한이 꺼져 있어서 이미지 전송을 못 했어 — "
                     + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 켜줘");
-            fire(onDone);
+            fire(onDone, false, "접근성 권한이 꺼져 있어");
             return;
         }
         if (!overlayOn(c)) {
@@ -132,7 +151,7 @@ public final class ImageSender {
             @Override public void run() {
                 if (QUEUE.size() >= MAX_QUEUE) {
                     Log.add(c, "이미지 전송 대기열이 꽉 찼어(" + MAX_QUEUE + "건) — " + room2 + " 건은 버렸어");
-                    fire(onDone);
+                    fire(onDone, false, "전송 대기열이 꽉 찼어");
                     return;
                 }
                 seq++;
@@ -312,7 +331,7 @@ public final class ImageSender {
                         : "「다른 앱 위에 표시」 권한이 꺼져 있어서 안드로이드가 공유창을 막았어 — "
                           + "설정 › 애플리케이션 › 카톡 오토 › 다른 앱 위에 표시 를 켜줘";
                 Log.add(j.app, "사진 전송 실패: 카톡 공유창이 안 떴어. " + why);
-                finish(j.id, false, "공유창이 안 뜸");
+                finish(j.id, false, "카톡 공유창이 안 떴어 — " + why);
             }
         }, 6000L);
 
@@ -322,7 +341,8 @@ public final class ImageSender {
                 KakaoAccessibility.disarm();
                 Log.add(j.app, "이미지 전송 시간 초과(" + (TIMEOUT_MS / 1000)
                         + "초) — 카톡 공유창에서 방을 못 골랐어. 접근성 권한과 방 이름을 확인해줘");
-                finish(j.id, false, "시간 초과");
+                finish(j.id, false, "시간 초과 — 접근성 서비스가 원인을 못 남겼어. "
+                        + "접근성 권한을 껐다 켜보고 다시 해봐");
             }
         }, TIMEOUT_MS);
     }
@@ -334,18 +354,26 @@ public final class ImageSender {
         current = null;
         busy = false;
 
+        String d = (detail == null || detail.length() == 0) ? (ok ? j.room : "원인 불명") : detail;
         if (!ok) {
-            String d = (detail == null || detail.length() == 0) ? "원인 불명" : detail;
             Log.add(j.app, "사진 전송 못 했어 — " + j.room + " (" + d + ")");
         }
 
-        fire(j.onDone);
+        fire(j.onDone, ok, d);
 
         if (!QUEUE.isEmpty()) {
             main().postDelayed(new Runnable() {
                 @Override public void run() { pump(); }
             }, GAP_MS);
         }
+    }
+
+    /** 결과 콜백을 메인 스레드에서 한 번 부른다. 안에서 터져도 여기서 먹는다. */
+    private static void fire(final Done d, final boolean ok, final String detail) {
+        if (d == null) return;
+        fire(new Runnable() {
+            @Override public void run() { d.done(ok, detail); }
+        });
     }
 
     /** onDone 을 메인 스레드에서 한 번 부른다. 안에서 터져도 여기서 먹는다. */

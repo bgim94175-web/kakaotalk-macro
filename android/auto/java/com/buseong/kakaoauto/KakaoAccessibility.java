@@ -2,29 +2,47 @@ package com.buseong.kakaoauto;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.accessibilityservice.GestureDescription;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Path;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.DisplayMetrics;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * 카톡 공유 화면 자동 조작.
  *
  * 알림 RemoteInput 으로는 사진을 못 보낸다. 그래서 {@link ImageSender} 가
  * ACTION_SEND_MULTIPLE 로 카톡 공유창을 띄우고, 이 서비스가 그 창에서
- * "방 이름 탭 → 전송 버튼 탭" 을 대신 눌러준다.
+ * "방 고르기 → (체크됐으면) 전송 버튼" 을 대신 눌러준다.
  *
  * 규칙 하나만 지킨다 — <b>armed 아닐 때는 아무것도 안 한다.</b>
  * 사용자가 평소에 카톡 쓰는 걸 방해하면 안 되니까, 이미지 전송을 예약한
  * 그 몇십 초 동안만 카톡 화면을 본다.
  *
- * 카톡은 버전마다 UI 가 바뀐다. 그래서 텍스트/설명/viewId 후보를 아래 상수 배열에
- * 모아두고 순서대로 시도하고, 다 실패하면 사용자가 원인을 알 수 있게 로그를 남긴다.
+ * <h3>왜 이렇게 생겼나</h3>
+ * 카톡 공유창의 실제 뷰 트리(view id·버튼 라벨·탭 구조)는 공개 자료가 하나도 없다.
+ * 그래서 셀렉터를 추측으로 박는 대신, <b>실패했을 때 화면에 뭐가 있었는지 통째로 남긴다</b>
+ * ({@link #dumpScreen()} → {@link #lastDump(Context)}). 사용자가 그걸 복사해서 보내주면
+ * 다음 버전에서 추측 없이 고칠 수 있다. 진단이 1순위, 탐색 강화가 2순위다.
+ *
+ * <h3>실패를 성공으로 속이지 않는다</h3>
+ * ACTION_CLICK 이 true 를 돌려주는 건 "그 뷰에 클릭 리스너가 있었다" 는 뜻일 뿐이다.
+ * 그래서 누른 다음에 <b>진짜로 바뀌었는지</b>(체크됨 / 채팅방 진입 / 공유창 닫힘) 확인하고,
+ * 확인이 안 되면 성공이라고 보고하지 않는다. 사용자가 "보냈다"고 믿는 게 실패보다 나쁘다.
  */
 public final class KakaoAccessibility extends AccessibilityService {
 
@@ -38,19 +56,42 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** arm 할 때 타임아웃을 안 주면 쓰는 기본값 */
     public static final long DEFAULT_TIMEOUT_MS = 40000L;
 
+    /**
+     * 우리는 호출자(ImageSender)의 타임아웃보다 <b>반드시 먼저</b> 포기해야 한다.
+     * 그래야 실패 원인과 화면 덤프를 우리가 남길 수 있다. 그 여유분.
+     */
+    private static final long SAFETY_MS = 3500L;
+
+    // ── 진단 덤프 저장 위치 ─────────────────────────────────────────────────
+    //  Log.add 로 트리를 쏟으면 200줄 링버퍼가 다 밀려나고 줄마다 commit() 이라 ANR 위험이 있다.
+    //  그래서 Prefs 평문 키에 한 덩어리로 apply() 한 번에 저장한다.
+    private static final String K_DUMP = "K_SHARE_DUMP";
+    private static final String K_DUMP_AT = "K_SHARE_DUMP_AT";
+
     // ── 라벨 후보 (하드코딩 금지 — 전부 여기 모아둔다) ──────────────────────────
-    /** 공유창의 전송/보내기 버튼 후보 */
-    static final String[] SEND = { "전송", "보내기", "확인", "Send", "완료" };
+    /** 공유창 하단의 전송/확인 버튼 후보 (정확히 일치 / 접두 일치용) */
+    static final String[] SEND = {
+            "전송", "보내기", "확인", "완료", "선택완료", "선택 완료",
+            "공유", "다음", "Send", "Done", "OK", "Next"
+    };
+    /** 개수가 붙어 나오는 형태까지 잡는 느슨한 후보 ("1명 선택", "확인 · 1") */
+    static final String[] SEND_LOOSE = {
+            "명 선택", "개 선택", "선택 완료", "전송", "보내기", "확인"
+    };
     /** 방을 못 찾았을 때 쓸 검색창 힌트 후보 */
-    static final String[] SEARCH_HINT = { "이름, 채팅방", "검색", "이름 검색", "채팅방 검색", "Search" };
-    /** 한 번 더 확인을 물어볼 때의 버튼 후보 */
-    static final String[] CONFIRM = { "확인", "완료", "OK", "보내기" };
+    static final String[] SEARCH_HINT = {
+            "이름, 채팅방", "이름 또는", "검색", "이름 검색", "채팅방 검색", "친구 검색", "Search"
+    };
+    /** 친구/채팅이 탭으로 갈려 있을 때 눌러볼 탭 라벨 후보 */
+    static final String[] TAB_CHAT = { "채팅", "채팅방", "대화", "채팅 목록", "Chats" };
 
     /** 전송 버튼 viewId 후보. 없으면 텍스트로 폴백한다. */
     static final String[] SEND_IDS = {
             "com.kakao.talk:id/confirm",
             "com.kakao.talk:id/btn_send",
             "com.kakao.talk:id/send",
+            "com.kakao.talk:id/send_layout",
+            "com.kakao.talk:id/media_send_button",
             "com.kakao.talk:id/ok",
             "com.kakao.talk:id/toolbar_right_button",
             "com.kakao.talk:id/menu_send",
@@ -64,7 +105,7 @@ public final class KakaoAccessibility extends AccessibilityService {
             "com.kakao.talk:id/search_edit",
             "com.kakao.talk:id/et_search"
     };
-    /** 방 이름이 들어있는 목록 행 viewId 후보 (참고용 — 텍스트 매칭이 먼저다) */
+    /** 방 이름이 들어있는 목록 행 viewId 후보 (텍스트 매칭이 먼저, 이건 가산점용) */
     static final String[] ROOM_IDS = {
             "com.kakao.talk:id/name",
             "com.kakao.talk:id/title",
@@ -78,42 +119,90 @@ public final class KakaoAccessibility extends AccessibilityService {
             "com.kakao.talk:id/edit_text"
     };
 
-    // ── 탐색 한도 (이상한 트리에서 멈추지 않게) ─────────────────────────────────
-    private static final int MAX_NODES = 2000;
-    /** 한 단계(phase)에서 연속 실패 허용 횟수 */
-    private static final int MAX_MISS = 12;
+    // ── 탐색 한도 ──────────────────────────────────────────────────────────
+    /** 한 번 훑을 때 볼 최대 노드 수 */
+    private static final int MAX_NODES = 2500;
     /** 재시도 간격 */
-    private static final long RETRY_MS = 400L;
+    private static final long RETRY_MS = 450L;
     /** 같은 창에서 이 시간 안에 또 온 이벤트는 무시 (이벤트 폭주 방지) */
-    private static final long DEDUPE_MS = 100L;
+    private static final long DEDUPE_MS = 120L;
     /** 검색창 입력 재시도 허용 횟수 */
     private static final int MAX_SEARCH_TRY = 2;
+    /** 목록 스크롤 허용 횟수 */
+    private static final int MAX_SCROLL = 15;
+    /** 방 행 다시 누르기 허용 횟수 */
+    private static final int MAX_CLICK_TRY = 2;
+    /** 전송 버튼 누르기 허용 횟수 */
+    private static final int MAX_SEND_TRY = 2;
+    /** 화면이 이만큼 연속으로 똑같으면 "더 볼 것 없다" 로 본다 (약 3초) */
+    private static final int STUCK_ROUNDS = 6;
+
+    // ── 덤프 한도 (접근성 서비스 메인 스레드에서 도니까 반드시 지킨다) ───────────
+    private static final int DUMP_MAX_NODES = 300;
+    private static final int DUMP_MAX_LINES = 60;
+    private static final int DUMP_MAX_LINE_LEN = 160;
+    private static final int DUMP_MAX_CHARS = 24000;
+    /** 대화 본문처럼 보이는 긴 글자는 이만큼만 남긴다 (남의 대화를 개발자한테 보내지 않게) */
+    private static final int TEXT_KEEP = 20;
+
+    // ── 단계 ───────────────────────────────────────────────────────────────
+    /** 방 고르기 */
+    private static final int P_PICK = 0;
+    /** 방을 누른 직후 — 체크됐나 / 채팅방으로 갔나 판별 */
+    private static final int P_AFTER = 1;
+    /** 전송(확인) 버튼 누르기 */
+    private static final int P_SEND = 2;
+    /** 전송 버튼을 누른 뒤 진짜 나갔는지 확인 */
+    private static final int P_VERIFY = 3;
 
     // ── 예약(armed) 상태 — 서비스 인스턴스와 별개로 살아있어야 해서 static ────────
     private static volatile KakaoAccessibility INSTANCE = null;
     private static volatile boolean armed = false;
     /** 카톡 화면을 마지막으로 본 시각 (0 = 한 번도 못 봄). 공유창이 떴는지 진단용. */
     private static volatile long lastKakaoWindowAt = 0L;
+    private static volatile String targetRoom = null;
+    private static volatile long armedUntil = 0L;
+    /** 우리가 포기할 시각. 항상 armedUntil 보다 앞이다 (원인 보고는 우리가 한다). */
+    private static volatile long deadlineAt = 0L;
+    private static volatile Result callback = null;
+    private static volatile int phase = P_PICK;
+    private static volatile long phaseAt = 0L;
+    private static volatile int searchTry = 0;
+    private static volatile boolean searchImpossible = false;
+    private static volatile int scrolls = 0;
+    private static volatile boolean scrollDone = false;
+    /** 마지막 스크롤 직전의 화면 서명 — 스크롤했는데 이게 그대로면 바닥이다 */
+    private static volatile String scrollSig = "";
+    private static volatile int clickTry = 0;
+    private static volatile int sendTry = 0;
+    private static volatile int tabTry = 0;
+    /** 방 행을 실제로 눌렀나 (이 증거 없이는 "보내진 것 같다" 로 끝내지 않는다) */
+    private static volatile boolean clickedRow = false;
+    private static volatile long clickedAt = 0L;
+    /** 공유창 목록(스크롤 되는 목록 + 여러 행)을 실제로 본 적 있나 */
+    private static volatile boolean sawShareList = false;
+    /** 방을 누른 순간의 화면 서명 — 이게 안 바뀌면 클릭이 아무 일도 안 한 거다 */
+    private static volatile String clickSig = "";
+    private static volatile String pickedRowKey = "";
+    private static volatile String pickedName = "";
+    private static volatile String lastSendLabel = "";
+    /** 화면 서명 — 안 바뀌면 헛돌고 있다는 뜻 */
+    private static volatile String lastSig = "";
+    private static volatile int sameSig = 0;
+    private static volatile int emptyRounds = 0;
+    private static volatile String lastWinKey = "";
+    private static volatile long lastWinAt = 0L;
+    /** 마지막으로 남긴 실패 사유 (덤프 머리에 박는다) */
+    private static volatile String lastWhere = "";
+
+    private final Handler h = new Handler(Looper.getMainLooper());
+
+    // ── 공개 API (기존 그대로 유지) ───────────────────────────────────────────
 
     /** since 이후로 카톡 화면을 본 적 있나 */
     public static boolean sawKakaoSince(long since) {
         return lastKakaoWindowAt >= since;
     }
-    private static volatile String targetRoom = null;
-    private static volatile long armedUntil = 0L;
-    private static volatile Result callback = null;
-    /** 0 = 방 고르기, 1 = 전송 버튼 누르기 */
-    private static volatile int phase = 0;
-    private static volatile int miss = 0;
-    /** 지금 단계를 시작한 시각. 이벤트가 쏟아져도 너무 빨리 포기하지 않게 쓴다. */
-    private static volatile long phaseAt = 0L;
-    private static volatile int searchTry = 0;
-    private static volatile String lastWinKey = "";
-    private static volatile long lastWinAt = 0L;
-
-    private final Handler h = new Handler(Looper.getMainLooper());
-
-    // ── 공개 API ────────────────────────────────────────────────────────────
 
     /** 기본 타임아웃으로 예약 */
     public static void arm(String room) {
@@ -133,15 +222,35 @@ public final class KakaoAccessibility extends AccessibilityService {
         String r = (room == null) ? "" : room.trim();
         long t = (timeoutMs <= 0) ? DEFAULT_TIMEOUT_MS : timeoutMs;
 
+        long now = System.currentTimeMillis();
         targetRoom = r;
-        armedUntil = System.currentTimeMillis() + t;
+        armedUntil = now + t;
+        // 호출자보다 먼저 포기한다. 아주 짧은 타임아웃이면 절반 지점에서.
+        deadlineAt = (t > SAFETY_MS * 2) ? (armedUntil - SAFETY_MS) : (now + t / 2);
         callback = cb;
-        phase = 0;
-        miss = 0;
-        phaseAt = System.currentTimeMillis();
+        phase = P_PICK;
+        phaseAt = now;
         searchTry = 0;
+        searchImpossible = false;
+        scrolls = 0;
+        scrollDone = false;
+        scrollSig = "";
+        clickTry = 0;
+        sendTry = 0;
+        tabTry = 0;
+        clickedRow = false;
+        clickedAt = 0L;
+        clickSig = "";
+        sawShareList = false;
+        pickedRowKey = "";
+        pickedName = "";
+        lastSendLabel = "";
+        lastSig = "";
+        sameSig = 0;
+        emptyRounds = 0;
         lastWinKey = "";
         lastWinAt = 0L;
+        lastWhere = "";
         armed = true;
 
         KakaoAccessibility me = INSTANCE;
@@ -149,6 +258,9 @@ public final class KakaoAccessibility extends AccessibilityService {
             Log.add(null, "접근성 서비스가 아직 안 붙었어 — 공유창을 자동으로 못 누를 수 있어");
             return;
         }
+        // 지난번 진단을 지운다 — 남아있으면 이번 시도의 화면인 줄 오해한다.
+        // (실패하면 이번 화면으로 다시 채워진다)
+        try { clearDump(me); } catch (Throwable ignore) { }
         Log.add(me, "카톡 공유창 자동 조작 예약했어 — 방: " + r);
         me.kick(700L);   // 이벤트를 놓쳐도 스스로 한 번은 찾아본다
     }
@@ -162,11 +274,13 @@ public final class KakaoAccessibility extends AccessibilityService {
         clear();
     }
 
-    /** 지금 예약 상태인가. 시간이 지났으면 스스로 풀린다. */
+    /** 지금 예약 상태인가. 시간이 지났으면 스스로 풀린다(그때도 원인은 남긴다). */
     public static boolean isArmed() {
         if (!armed) return false;
         if (System.currentTimeMillis() > armedUntil) {
-            clear();
+            KakaoAccessibility me = INSTANCE;
+            if (me != null) me.dumpAndFail("카톡이 끝까지 응답을 안 했어 (" + whereNow() + ")");
+            else clear();
             return false;
         }
         return true;
@@ -183,15 +297,77 @@ public final class KakaoAccessibility extends AccessibilityService {
         return (r == null || !armed) ? "" : r;
     }
 
+    // ── 진단 덤프 공개 API ───────────────────────────────────────────────────
+
+    /**
+     * 지금 화면(카톡 창 + 위에 떠 있는 다이얼로그 창까지)을 사람이 읽을 수 있게 떠낸다.
+     * 서비스가 안 붙어있거나 카톡 화면이 아니면 짧은 안내 문구를 돌려준다.
+     * <b>armed 일 때만 실제 트리를 읽는다</b> — 평소 카톡 화면은 들여다보지 않는다.
+     */
+    public static String dumpScreen() {
+        KakaoAccessibility me = INSTANCE;
+        if (me == null) return "접근성 서비스가 안 붙어 있어서 화면을 못 읽었어";
+        if (!armed) return "지금은 예약(armed) 상태가 아니라 화면을 안 읽었어 — 진단은 전송을 시도하는 동안에만 떠낸다";
+        try {
+            return me.buildDump(lastWhere);
+        } catch (Throwable t) {
+            return "화면 덤프를 만들다 실패했어 — " + t.getClass().getSimpleName();
+        }
+    }
+
+    /** 마지막으로 저장한 화면 진단. 없으면 "". */
+    public static String lastDump(Context c) {
+        String s = Prefs.getStr(c, K_DUMP, "");
+        return (s == null) ? "" : s;
+    }
+
+    /** 마지막 화면 진단을 남긴 시각 (0 = 없음) */
+    public static long lastDumpAt(Context c) {
+        return Prefs.getLong(c, K_DUMP_AT, 0L);
+    }
+
+    /** 화면 진단 저장 (덮어쓴다 — 한 번에 한 덩어리만 보관한다) */
+    public static void saveDump(Context c, String dump) {
+        if (c == null) return;
+        if (dump == null || dump.length() == 0) { clearDump(c); return; }
+        String d = (dump.length() > DUMP_MAX_CHARS) ? dump.substring(0, DUMP_MAX_CHARS) + "\n…여기서 잘랐어" : dump;
+        Prefs.putStr(c, K_DUMP, d);
+        Prefs.putLong(c, K_DUMP_AT, System.currentTimeMillis());
+    }
+
+    /** 화면 진단 지우기 */
+    public static void clearDump(Context c) {
+        if (c == null) return;
+        Prefs.remove(c, K_DUMP);
+        Prefs.remove(c, K_DUMP_AT);
+    }
+
     private static void clear() {
         armed = false;
         targetRoom = null;
         armedUntil = 0L;
+        deadlineAt = 0L;
         callback = null;
-        phase = 0;
-        miss = 0;
+        phase = P_PICK;
         phaseAt = 0L;
         searchTry = 0;
+        searchImpossible = false;
+        scrolls = 0;
+        scrollDone = false;
+        scrollSig = "";
+        clickTry = 0;
+        sendTry = 0;
+        tabTry = 0;
+        clickedRow = false;
+        clickedAt = 0L;
+        clickSig = "";
+        sawShareList = false;
+        pickedRowKey = "";
+        pickedName = "";
+        lastSendLabel = "";
+        lastSig = "";
+        sameSig = 0;
+        emptyRounds = 0;
         lastWinKey = "";
         lastWinAt = 0L;
     }
@@ -206,7 +382,8 @@ public final class KakaoAccessibility extends AccessibilityService {
             AccessibilityServiceInfo info = getServiceInfo();
             if (info == null) info = new AccessibilityServiceInfo();
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                    | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
+                    | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    | AccessibilityEvent.TYPE_VIEW_SCROLLED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.notificationTimeout = 100;
             info.packageNames = new String[] { KAKAO };
@@ -217,7 +394,8 @@ public final class KakaoAccessibility extends AccessibilityService {
             Log.add(this, "접근성 서비스 설정 적용 실패 — " + t.getClass().getSimpleName()
                     + " (기본 설정으로 계속 갈게)");
         }
-        Log.add(this, "접근성 서비스 켜졌어 — 이미지 전송 쓸 수 있어");
+        Log.add(this, "접근성 서비스 켜졌어 — 이미지 전송 쓸 수 있어"
+                + (canGesture() ? "" : " (좌표 탭 폴백은 못 써 — 접근성 설정에 canPerformGestures 가 없어)"));
         if (isArmed()) kick(500L);
     }
 
@@ -225,7 +403,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     public void onInterrupt() {
         // 시스템이 서비스를 잠깐 멈출 때 온다. 진행 중이던 예약은 못 끝내니까 실패로 정리.
         if (isArmed()) {
-            finish(false, "접근성 서비스가 중단됐어");
+            finish(false, "접근성 서비스가 중단됐어 (" + whereNow() + ")");
         } else {
             Log.add(this, "접근성 서비스가 잠깐 중단됐어");
         }
@@ -233,7 +411,7 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     @Override
     public boolean onUnbind(Intent intent) {
-        if (isArmed()) finish(false, "접근성 권한이 꺼졌어");
+        if (isArmed()) finish(false, "접근성 권한이 꺼졌어 (" + whereNow() + ")");
         if (INSTANCE == this) INSTANCE = null;
         Log.add(this, "접근성 서비스 꺼졌어 — 이미지 전송은 안 돼");
         try {
@@ -269,9 +447,10 @@ public final class KakaoAccessibility extends AccessibilityService {
         int type;
         try { type = e.getEventType(); } catch (Throwable ignore) { return; }
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return;
+                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                && type != AccessibilityEvent.TYPE_VIEW_SCROLLED) return;
 
-        // 같은 창에서 100ms 안에 또 오면 스킵 (카톡은 content_changed 를 쏟아낸다)
+        // 같은 창에서 짧은 시간에 또 오면 스킵 (카톡은 content_changed 를 쏟아낸다)
         int winId = -1;
         try { winId = e.getWindowId(); } catch (Throwable ignore) { }
         String key = winId + "|" + type;
@@ -280,10 +459,11 @@ public final class KakaoAccessibility extends AccessibilityService {
         lastWinKey = key;
         lastWinAt = now;
 
-        // 새 창이 떴으면 그 화면에서 다시 12번 볼 기회를 준다
+        // 새 창이 떴으면 화면이 바뀐 것이니 "헛돌고 있다" 카운터만 리셋한다.
+        // (포기 시점은 절대 데드라인으로 재니까 여기서 예산이 늘어나지는 않는다)
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            miss = 0;
-            phaseAt = System.currentTimeMillis();
+            sameSig = 0;
+            lastSig = "";
         }
 
         kick(0L);
@@ -308,73 +488,553 @@ public final class KakaoAccessibility extends AccessibilityService {
     private void step() {
         if (!isArmed()) return;
 
-        AccessibilityNodeInfo root = null;
-        try {
-            root = getRootInActiveWindow();
-        } catch (Throwable t) {
-            Log.add(this, "카톡 화면을 읽다 실패했어 — " + t.getClass().getSimpleName());
-        }
-        if (root == null) { retry(); return; }
-
-        CharSequence rp = null;
-        try { rp = root.getPackageName(); } catch (Throwable ignore) { }
-        if (rp != null && !KAKAO.contentEquals(rp)) {
-            // 카톡이 아직 앞에 안 왔다. 기다린다.
-            retry();
+        long now = System.currentTimeMillis();
+        if (now >= deadlineAt) {
+            dumpAndFail(timeoutWhere());
             return;
         }
 
+        ArrayList<AccessibilityNodeInfo> rs = roots();
+        if (rs.isEmpty()) {
+            emptyRounds++;
+            // 방을 이미 눌렀는데 카톡 창이 사라졌다 = 공유창이 닫혔다.
+            // 단건 공유형(탭하면 바로 보냄) 카톡은 이렇게 끝난다.
+            if (clickedRow && phase != P_PICK && emptyRounds >= 2
+                    && (now - clickedAt) > 700L) {
+                finish(true, targetRoom + " — 공유창이 닫혔어. 카톡에서 한 번 확인해줘");
+                return;
+            }
+            retry();
+            return;
+        }
+        emptyRounds = 0;
+
         try {
-            if (phase == 0) {
-                if (pickRoom(root)) {
-                    phase = 1;
-                    miss = 0;
-                    phaseAt = System.currentTimeMillis();
-                    kick(600L);
-                    return;
-                }
-                if (searchTry < MAX_SEARCH_TRY && typeSearch(root)) {
-                    searchTry++;
-                    miss = 0;
-                    phaseAt = System.currentTimeMillis();
-                    kick(800L);
-                    return;
-                }
-                retry();
-            } else {
-                if (pressSend(root)) {
-                    finish(true, targetRoom);
-                    return;
-                }
-                // 전송 버튼이 안 보이는데 이미 채팅방으로 넘어갔으면 보내진 걸로 본다.
-                // (카톡 일부 버전은 방을 누르는 순간 바로 보낸다)
-                if (miss >= 6 && inChatRoom(root)) {
-                    Log.add(this, "전송 버튼은 못 찾았는데 채팅방으로 넘어갔어 — 보내진 걸로 볼게. 카톡에서 확인해줘");
-                    finish(true, targetRoom);
-                    return;
-                }
-                retry();
+            Scan sc = scan(rs);
+            // 화면이 계속 똑같으면 헛돌고 있다는 뜻 (스크롤/검색이 필요하다는 신호)
+            if (sc.sig.equals(lastSig)) sameSig++;
+            else { sameSig = 0; lastSig = sc.sig; }
+
+            switch (phase) {
+                case P_PICK:   doPick(sc);   break;
+                case P_AFTER:  doAfter(sc);  break;
+                case P_SEND:   doSend(sc);   break;
+                default:       doVerify(sc); break;
             }
         } catch (Throwable t) {
             Log.add(this, "카톡 화면 자동 조작 중 오류 — " + t.getClass().getSimpleName()
                     + ": " + String.valueOf(t.getMessage()));
             retry();
+        } finally {
+            // 루트는 매 step 마다 새로 잡는다 — 다 쓴 건 여기서 반납한다.
+            // (자식 노드는 별개 객체라 부모를 반납해도 안 깨진다. 잎 노드는 walk 가 반납했다)
+            for (int i = 0; i < rs.size(); i++) {
+                try { rs.get(i).recycle(); } catch (Throwable ignore) { }
+            }
         }
     }
 
     private void retry() {
-        miss++;
-        // 카톡은 typeWindowContentChanged 를 초당 몇 번씩 쏘기 때문에 횟수만 보면
-        // 화면이 다 그려지기도 전에 포기해버린다. 그래서 최소 경과시간도 같이 본다.
-        long spent = System.currentTimeMillis() - phaseAt;
-        if (miss > MAX_MISS && spent >= MAX_MISS * RETRY_MS) {
-            String where = (phase == 0) ? "방 목록에서 \"" + targetRoom + "\" 을 못 찾았어"
-                                        : "전송 버튼을 못 찾았어";
-            Log.add(this, "카톡 화면을 못 찾았어 — 카톡 버전이 바뀌었을 수 있어 (" + where + ")");
-            finish(false, "카톡 화면을 못 찾았어 — 카톡 버전이 바뀌었을 수 있어");
+        kick(RETRY_MS);
+    }
+
+    // ── 1단계: 방 고르기 ─────────────────────────────────────────────────────
+
+    private void doPick(Scan sc) {
+        final String room = targetRoom;
+        if (room == null || room.length() == 0) {
+            finish(false, "보낼 방 이름이 비어있어");
             return;
         }
-        kick(RETRY_MS);
+        if (sc.rows >= 2 && sc.scrollables.size() > 0) sawShareList = true;
+
+        ArrayList<Hit> hits = sc.bestHits();
+
+        // 비슷한 방이 여러 개면 아무것도 고르지 않는다 — 엉뚱한 방에 사진을 보내는 게 최악이다.
+        if (hits.size() > 1) {
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < hits.size() && i < 4; i++) {
+                if (i > 0) names.append(", ");
+                names.append(cut(hits.get(i).name, 24));
+            }
+            dumpAndFail("비슷한 방이 여러 개라 안 보냈어(" + names + ") — 방 이름을 더 정확히 적어줘");
+            return;
+        }
+
+        if (hits.size() == 1) {
+            Hit hit = hits.get(0);
+            int r = clickRoom(hit);
+            if (r == 2) return;                     // 이미 끝냈다
+            if (r == 1) {
+                phase = P_AFTER;
+                phaseAt = System.currentTimeMillis();
+                clickSig = sc.sig;      // 이게 안 바뀌면 클릭이 헛방이었다는 뜻
+                sameSig = 0;
+                lastSig = "";
+                kick(900L);
+                return;
+            }
+            // 클릭 자체가 안 먹었다 — 다음 번에 다시
+            if (sameSig >= STUCK_ROUNDS) {
+                dumpAndFail("방 「" + cut(hit.name, 24) + "」 을 찾았는데 눌러도 안 먹혔어");
+                return;
+            }
+            retry();
+            return;
+        }
+
+        // 못 찾았다. 스플래시/로딩이면 그냥 기다린다 (콜드스타트면 목록이 아직 없다)
+        if (sc.splash && sameSig < STUCK_ROUNDS * 2) {
+            retry();
+            return;
+        }
+
+        // 1) 검색창에 넣어보는 게 스크롤보다 빠르고 정확하다
+        if (searchTry < MAX_SEARCH_TRY && !searchImpossible && trySearch(sc)) {
+            searchTry++;
+            // 검색으로 목록이 바뀌면 스크롤 예산을 다시 준다
+            scrolls = 0;
+            scrollDone = false;
+            scrollSig = "";
+            sameSig = 0;
+            lastSig = "";
+            kick(1000L);
+            return;
+        }
+
+        // 2) 목록을 내려본다 (RecyclerView 는 화면 밖 행을 트리에 아예 안 내보낸다)
+        if (!scrollDone && scrollNext(sc)) {
+            kick(420L);
+            return;
+        }
+
+        // 3) 친구/채팅 탭이 갈려 있으면 채팅 탭을 눌러본다
+        if (tabTry < TAB_CHAT.length && tryChatTab(sc)) {
+            scrolls = 0;
+            scrollDone = false;
+            scrollSig = "";
+            sameSig = 0;
+            lastSig = "";
+            kick(800L);
+            return;
+        }
+
+        // 더 해볼 게 없고 화면도 안 바뀐다 → 여기서 끝내고 원인을 남긴다
+        boolean noSearchLeft = searchImpossible || searchTry >= MAX_SEARCH_TRY;
+        if (noSearchLeft && scrollDone && tabTry >= TAB_CHAT.length && sameSig >= STUCK_ROUNDS) {
+            dumpAndFail("방 목록에서 「" + cut(room, 24) + "」 을 못 찾았어"
+                    + " (스크롤 " + scrolls + "회 · 검색 " + searchTry + "회 · 화면에 보이던 글자 "
+                    + sc.leafTexts.size() + "개)");
+            return;
+        }
+        retry();
+    }
+
+    /**
+     * 방 행을 누른다.
+     * @return 0 = 못 눌렀다, 1 = 눌렀다(또는 이미 선택돼 있었다), 2 = 여기서 끝냈다
+     */
+    private int clickRoom(Hit hit) {
+        AccessibilityNodeInfo row = rowOf(hit.node);
+        if (row == null) row = hit.node;
+
+        pickedName = hit.name;
+        pickedRowKey = keyOf(row);
+
+        // 이미 체크돼 있으면 절대 누르면 안 된다 — 누르면 선택이 풀린다.
+        Boolean checked = rowChecked(row);
+        if (checked != null && checked.booleanValue()) {
+            Log.add(this, "「" + cut(hit.name, 20) + "」 은 이미 선택돼 있어 — 다시 누르지 않을게");
+            clickedRow = true;
+            clickedAt = System.currentTimeMillis();
+            sawShareList = true;
+            return 1;
+        }
+
+        boolean ok = clickNode(row, "방 행");
+        if (!ok) return 0;
+
+        clickedRow = true;
+        clickedAt = System.currentTimeMillis();
+        sawShareList = true;
+        Log.add(this, "공유창에서 방을 눌렀어 — " + cut(hit.name, 20)
+                + " (매칭: " + hit.how() + ")");
+        return 1;
+    }
+
+    // ── 2단계: 누른 다음에 뭐가 됐는지 판별 ─────────────────────────────────────
+
+    private void doAfter(Scan sc) {
+        long now = System.currentTimeMillis();
+
+        // (a) 채팅방으로 들어갔다 = 단건 공유형. 우리가 방을 눌렀다는 증거가 있을 때만 성공으로 본다.
+        if (sc.chatInput && clickedRow && sawShareList) {
+            Log.add(this, "방을 누르니 채팅방으로 넘어갔어 — 보내진 걸로 볼게. 카톡에서 확인해줘");
+            finish(true, targetRoom + " — 채팅방으로 넘어갔어. 카톡에서 확인해줘");
+            return;
+        }
+
+        // (b) 체크만 됐다 → 하단 확인/전송 버튼을 눌러야 한다
+        boolean checkedNow = sc.checkedCount > 0 || rowCheckedByKey(sc);
+        boolean changed = clickSig.length() > 0 && !sc.sig.equals(clickSig);
+        Btn b = sc.bestBtn(true);
+        // 화면이 하나도 안 바뀌었으면 전송 버튼처럼 보이는 걸 눌러선 안 된다 —
+        // 권한 요청이나 다른 경고 다이얼로그의 "확인" 을 눌러버릴 수 있다.
+        // 확실한 viewId(prio 0)만 예외로 허용한다.
+        if (checkedNow || (b != null && (changed || b.prio == 0))) {
+            if (checkedNow) Log.add(this, "방이 선택(체크)됐어 — 이제 전송 버튼을 찾을게");
+            phase = P_SEND;
+            phaseAt = now;
+            sameSig = 0;
+            lastSig = "";
+            kick(250L);
+            return;
+        }
+
+        // (c) 눌렀는데 아무 일도 안 일어났다 = 엉뚱한 노드를 눌렀을 수 있다
+        if ((now - clickedAt) > 2500L || sameSig >= STUCK_ROUNDS) {
+            if (clickTry < MAX_CLICK_TRY) {
+                clickTry++;
+                Log.add(this, "방을 눌렀는데 화면이 안 바뀌었어 — 다시 눌러볼게 (" + clickTry + ")");
+                phase = P_PICK;
+                phaseAt = now;
+                sameSig = 0;
+                lastSig = "";
+                clickedRow = false;
+                kick(350L);
+                return;
+            }
+            Btn dis = sc.bestBtn(false);
+            String extra = (dis == null) ? ""
+                    : " · 하단 버튼 「" + cut(dis.label, 20) + "」 은 비활성이야(선택이 안 된 거야)";
+            dumpAndFail("방 「" + cut(pickedName, 20) + "」 을 눌렀는데 선택도 안 되고 화면도 안 바뀌었어" + extra);
+            return;
+        }
+        retry();
+    }
+
+    // ── 3단계: 전송 버튼 ─────────────────────────────────────────────────────
+
+    private void doSend(Scan sc) {
+        if (sc.chatInput && clickedRow && sawShareList) {
+            finish(true, targetRoom + " — 채팅방으로 넘어갔어. 카톡에서 확인해줘");
+            return;
+        }
+
+        Btn b = sc.bestBtn(true);
+        if (b != null) {
+            if (sendTry >= MAX_SEND_TRY) {
+                dumpAndFail("전송 버튼 「" + cut(b.label, 20) + "」 을 " + sendTry
+                        + "번 눌렀는데 화면이 그대로야");
+                return;
+            }
+            if (clickNode(b.node, "전송 버튼")) {
+                sendTry++;
+                lastSendLabel = b.label;
+                Log.add(this, "전송 버튼 눌렀어 — 「" + cut(b.label, 20) + "」"
+                        + (b.id.length() > 0 ? " (" + b.id + ")" : ""));
+                phase = P_VERIFY;
+                phaseAt = System.currentTimeMillis();
+                sameSig = 0;
+                lastSig = "";
+                kick(1200L);
+                return;
+            }
+            if (sameSig >= STUCK_ROUNDS) {
+                dumpAndFail("전송 버튼 「" + cut(b.label, 20) + "」 을 눌러도 안 먹혔어");
+                return;
+            }
+            retry();
+            return;
+        }
+
+        // 버튼이 없다 — 비활성 버튼이 있으면 그게 곧 "선택이 안 됐다" 는 증거다
+        if (sameSig >= STUCK_ROUNDS) {
+            Btn dis = sc.bestBtn(false);
+            if (dis != null) {
+                dumpAndFail("전송 버튼 「" + cut(dis.label, 20) + "」 이 비활성이야 — 방 선택이 안 된 것 같아");
+            } else {
+                dumpAndFail("전송 버튼을 못 찾았어 (화면에 있던 누를 수 있는 글자: "
+                        + joinBtnLabels(sc) + ")");
+            }
+            return;
+        }
+        retry();
+    }
+
+    // ── 4단계: 진짜 나갔는지 확인 ────────────────────────────────────────────
+
+    private void doVerify(Scan sc) {
+        if (sc.chatInput) {
+            finish(true, targetRoom);
+            return;
+        }
+        Btn b = sc.bestBtn(true);
+        if (b == null) {
+            // 눌렀던 버튼이 사라졌다 = 공유창이 진행됐다
+            Log.add(this, "전송 버튼이 사라졌어 — 보내진 걸로 볼게");
+            finish(true, targetRoom);
+            return;
+        }
+        if (sameSig >= STUCK_ROUNDS) {
+            if (sendTry < MAX_SEND_TRY) {
+                phase = P_SEND;
+                sameSig = 0;
+                lastSig = "";
+                kick(400L);
+                return;
+            }
+            dumpAndFail("전송 버튼 「" + cut(lastSendLabel, 20) + "」 을 눌렀는데 화면이 그대로야");
+            return;
+        }
+        retry();
+    }
+
+    // ── 검색창 ───────────────────────────────────────────────────────────────
+
+    /** 검색창을 찾아 방 이름을 넣어본다. 넣었으면 true. */
+    private boolean trySearch(Scan sc) {
+        final String room = targetRoom;
+        if (room == null || room.length() == 0) return false;
+
+        AccessibilityNodeInfo box = sc.searchBox;
+        if (box == null) {
+            // 검색 아이콘/힌트 라벨일 수 있다. 눌러서 입력창을 띄워만 본다.
+            if (sc.searchOpener != null) {
+                if (clickNode(sc.searchOpener, "검색 열기")) {
+                    Log.add(this, "방이 안 보여서 검색을 열었어");
+                    return true;
+                }
+            }
+            searchImpossible = true;
+            return false;
+        }
+
+        // 완전일치 검색은 이모지/말줄임표 때문에 0건이 되기 쉽다 → 앞 8자만 넣는다
+        String q = norm(room);
+        if (q.length() > 8) q = q.substring(0, 8);
+
+        try {
+            // 커스텀 검색뷰는 눌러야 편집 모드가 되는 경우가 있다 → CLICK → FOCUS → SET_TEXT
+            try { box.performAction(AccessibilityNodeInfo.ACTION_CLICK); } catch (Throwable ignore) { }
+            try { box.performAction(AccessibilityNodeInfo.ACTION_FOCUS); } catch (Throwable ignore) { }
+            Bundle args = new Bundle();
+            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, q);
+            boolean ok = box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+            if (!ok) {
+                Log.add(this, "검색창에 글자를 못 넣었어 — 직접 눌러봐야 할 수도 있어");
+                searchImpossible = true;
+                return false;
+            }
+            // 진짜 들어갔는지 확인한다 (performAction 이 true 인데 안 들어가는 기기가 있다)
+            boolean went = true;
+            try {
+                if (box.refresh()) {
+                    String got = norm(text(box));
+                    went = got.length() > 0 && squash(got).contains(squash(q));
+                }
+            } catch (Throwable ignore) { }
+            Log.add(this, "방이 안 보여서 검색창에 「" + q + "」 넣어봤어"
+                    + (went ? "" : " (글자가 안 들어간 것 같아)"));
+            return true;
+        } catch (Throwable t) {
+            Log.add(this, "검색창 입력 실패 — " + t.getClass().getSimpleName());
+            searchImpossible = true;
+            return false;
+        }
+    }
+
+    /**
+     * 친구/채팅이 탭으로 갈려 있으면 채팅 탭을 눌러본다.
+     * 후보를 한 번에 다 훑고, 하나도 없으면 tabTry 를 끝까지 올려서 다시 안 시도한다
+     * (안 그러면 여기서 데드라인까지 헛돈다).
+     */
+    private boolean tryChatTab(Scan sc) {
+        if (tabTry >= TAB_CHAT.length) return false;
+        for (int k = tabTry; k < TAB_CHAT.length; k++) {
+            String want = squash(TAB_CHAT[k]);
+            for (int i = 0; i < sc.tabs.size(); i++) {
+                Btn t = sc.tabs.get(i);
+                if (!squash(t.label).equals(want)) continue;
+                tabTry = k + 1;
+                if (clickNode(t.node, "탭")) {
+                    Log.add(this, "「" + TAB_CHAT[k] + "」 탭을 눌러봤어");
+                    return true;
+                }
+                return false;
+            }
+        }
+        tabTry = TAB_CHAT.length;   // 화면에 탭이 아예 없다
+        return false;
+    }
+
+    // ── 스크롤 ───────────────────────────────────────────────────────────────
+
+    /**
+     * 목록을 한 칸 내린다. 더 내릴 게 없으면 scrollDone 을 세우고 false.
+     * 카톡처럼 바닥에서도 true 를 돌려주는 뷰가 있으니 내용 변화까지 같이 본다.
+     */
+    private boolean scrollNext(Scan sc) {
+        if (scrolls >= MAX_SCROLL) {
+            scrollDone = true;
+            Log.add(this, "목록을 " + scrolls + "번 내려봤는데 방이 없어");
+            scrollBackToTop(sc);
+            return false;
+        }
+        AccessibilityNodeInfo list = sc.biggestScrollable();
+        if (list == null) {
+            scrollDone = true;
+            return false;
+        }
+        // 내용이 안 바뀌면 바닥이다 — 카톡처럼 바닥에서도 true 를 돌려주는 뷰가 있어서
+        // performAction 반환값만 믿으면 안 된다.
+        if (scrolls > 0 && sc.sig.equals(scrollSig)) {
+            scrollDone = true;
+            Log.add(this, "목록 끝까지 내려봤어 (" + scrolls + "회) — 방이 안 보여");
+            scrollBackToTop(sc);
+            return false;
+        }
+        boolean ok = false;
+        try {
+            ok = list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+        } catch (Throwable ignore) { }
+        if (!ok) {
+            scrollDone = true;
+            Log.add(this, "목록을 더 못 내려 (" + scrolls + "회) — 방이 안 보여");
+            scrollBackToTop(sc);
+            return false;
+        }
+        scrolls++;
+        scrollSig = sc.sig;   // 다음 번에 이게 그대로면 더 내릴 게 없다는 뜻
+        // 다음 step 에서 루트를 다시 잡고 처음부터 찾는다 (스크롤하면 기존 노드는 전부 무효)
+        return true;
+    }
+
+    /** 목록을 맨 위로 되돌린다 (중간에 남겨두면 다음 시도가 더 나빠진다) */
+    private void scrollBackToTop(Scan sc) {
+        AccessibilityNodeInfo list = sc.biggestScrollable();
+        if (list == null) return;
+        for (int i = 0; i < MAX_SCROLL + 2; i++) {
+            boolean ok = false;
+            try {
+                ok = list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+            } catch (Throwable ignore) { }
+            if (!ok) break;
+        }
+    }
+
+    // ── 클릭 ─────────────────────────────────────────────────────────────────
+
+    /**
+     * 이 노드를 누른다.
+     * 1) 자기/조상 중 clickable 을 골라 ACTION_CLICK — 행처럼 생긴 것(체크박스가 있거나 충분히 큰 것) 우선
+     * 2) 다 실패하면 좌표 탭(dispatchGesture)
+     *
+     * <b>성공을 여기서 단정하지 않는다.</b> ACTION_CLICK 이 true 라도 실제로는 아무 일도
+     * 안 일어날 수 있어서, 다음 단계에서 화면 변화를 확인한다.
+     */
+    private boolean clickNode(AccessibilityNodeInfo n, String what) {
+        if (n == null) return false;
+        try { n.refresh(); } catch (Throwable ignore) { }
+
+        ArrayList<AccessibilityNodeInfo> ups = new ArrayList<AccessibilityNodeInfo>(8);
+        AccessibilityNodeInfo cur = n;
+        for (int up = 0; up < 8 && cur != null; up++) {
+            boolean clickable = false, enabled = true;
+            try { clickable = cur.isClickable(); } catch (Throwable ignore) { }
+            try { enabled = cur.isEnabled(); } catch (Throwable ignore) { }
+            if (clickable && enabled) ups.add(cur);
+            AccessibilityNodeInfo p = null;
+            try { p = cur.getParent(); } catch (Throwable ignore) { }
+            cur = p;
+        }
+
+        // 행답게 큰 후보(또는 체크박스를 품은 후보)를 먼저 — 아바타/체크박스 컨테이너를
+        // 먼저 누르면 프로필 팝업이 열린다.
+        int rowH = Theme.dp(this, 40);
+        AccessibilityNodeInfo first = null;
+        for (int i = 0; i < ups.size(); i++) {
+            Rect r = boundsOf(ups.get(i));
+            if (r.height() >= rowH && r.width() >= rowH * 3) { first = ups.get(i); break; }
+        }
+        if (first != null) {
+            try {
+                if (first.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            } catch (Throwable ignore) { }
+        }
+        for (int i = 0; i < ups.size(); i++) {
+            if (ups.get(i) == first) continue;
+            try {
+                if (ups.get(i).performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            } catch (Throwable ignore) { }
+        }
+        // clickable 조상이 아예 없으면 원본에도 한 번 쏴본다 (응답하는 커스텀 뷰가 더러 있다)
+        try {
+            if (ups.isEmpty() && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+        } catch (Throwable ignore) { }
+
+        // 마지막 수단: 좌표 탭
+        return tapNode(n, what);
+    }
+
+    /** 좌표 탭. canPerformGestures 가 없으면 조용히 실패하니 미리 확인한다. */
+    private boolean tapNode(AccessibilityNodeInfo n, String what) {
+        if (!canGesture()) {
+            Log.add(this, what + " 좌표 탭을 못 써 — 접근성 설정에 canPerformGestures 가 없어");
+            return false;
+        }
+        Rect r = boundsOf(n);
+        if (r.width() <= 0 || r.height() <= 0) return false;
+        int sw = 0, sh = 0;
+        try {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            sw = dm.widthPixels;
+            sh = dm.heightPixels;
+        } catch (Throwable ignore) { }
+        float cx = r.exactCenterX(), cy = r.exactCenterY();
+        if (cx < 0 || cy < 0 || (sw > 0 && cx > sw) || (sh > 0 && cy > sh)) return false;
+        try {
+            Path p = new Path();
+            p.moveTo(cx, cy);
+            GestureDescription.Builder b = new GestureDescription.Builder();
+            b.addStroke(new GestureDescription.StrokeDescription(p, 0L, 60L));
+            boolean ok = dispatchGesture(b.build(), null, null);
+            Log.add(this, what + " 를 좌표로 눌러봤어 (" + (int) cx + "," + (int) cy + ")"
+                    + (ok ? "" : " — 실패"));
+            return ok;
+        } catch (Throwable t) {
+            Log.add(this, what + " 좌표 탭 실패 — " + t.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private boolean canGesture() {
+        try {
+            AccessibilityServiceInfo info = getServiceInfo();
+            if (info == null) return false;
+            return (info.getCapabilities()
+                    & AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) != 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // ── 끝내기 ───────────────────────────────────────────────────────────────
+
+    /** 실패 + 화면 덤프 저장. detail 에 단계 정보를 반드시 같이 넘긴다. */
+    private void dumpAndFail(String where) {
+        String w = (where == null || where.length() == 0) ? "카톡 화면을 못 찾았어" : where;
+        lastWhere = w;
+        String dump;
+        try {
+            dump = buildDump(w);
+        } catch (Throwable t) {
+            dump = "화면 덤프를 만들다 실패했어 — " + t.getClass().getSimpleName();
+        }
+        try { saveDump(this, dump); } catch (Throwable ignore) { }
+        Log.add(this, "사진 전송 실패: " + w
+                + " · 그때 화면을 저장했어 — 매크로 › 사진 첨부 › 「화면 진단 보기」 에서 복사해서 보내줘");
+        finish(false, w + " · 화면 진단을 남겼어(매크로 › 사진 첨부 › 화면 진단 보기)");
     }
 
     /** 성공/실패 정리 + 콜백 1회 */
@@ -396,268 +1056,643 @@ public final class KakaoAccessibility extends AccessibilityService {
         }
     }
 
-    // ── 단계별 동작 ──────────────────────────────────────────────────────────
-
-    /** 공유창 목록에서 방 이름을 찾아 누른다 */
-    private boolean pickRoom(AccessibilityNodeInfo root) {
-        final String room = targetRoom;
-        if (room == null || room.length() == 0) return false;
-
-        // 1) 텍스트 정확히 일치
-        AccessibilityNodeInfo n = findByTextExact(root, room);
-        // 2) contentDescription 정확히 일치
-        if (n == null) n = findByDesc(root, room, true);
-        // 3) 잎 노드 부분 일치 (방 이름 뒤에 인원수가 붙는 경우가 있다)
-        if (n == null) n = findByTextContains(root, room);
-        if (n == null) return false;
-
-        // 검색 입력창에 방 이름을 넣어둔 상태면 그 입력창이 잡힌다 — 그건 누르면 안 된다
-        if (isEditable(n)) return false;
-
-        if (!clickUp(n)) return false;
-        Log.add(this, "공유창에서 방 찾았어 — " + room);
-        return true;
+    /** 지금 어느 단계에서 뭘 하고 있었나 (한 줄) */
+    private static String whereNow() {
+        int p = phase;
+        if (p == P_PICK) return "방 고르기 중 · 스크롤 " + scrolls + "회 · 검색 " + searchTry + "회";
+        if (p == P_AFTER) return "방을 누른 직후 반응 확인 중";
+        if (p == P_SEND) return "전송 버튼 찾는 중";
+        return "전송 버튼 누른 뒤 확인 중";
     }
 
-    /** 방을 못 찾았을 때: 검색창에 방 이름을 넣어본다 */
-    private boolean typeSearch(AccessibilityNodeInfo root) {
-        final String room = targetRoom;
-        if (room == null || room.length() == 0) return false;
-
-        AccessibilityNodeInfo box = null;
-        for (int i = 0; i < SEARCH_IDS.length && box == null; i++) {
-            box = findByViewId(root, SEARCH_IDS[i]);
+    private static String timeoutWhere() {
+        int p = phase;
+        String room = (targetRoom == null) ? "" : targetRoom;
+        if (p == P_PICK) {
+            return "방 목록에서 「" + cut(room, 24) + "」 을 못 찾아서 시간이 다 됐어"
+                    + " (스크롤 " + scrolls + "회 · 검색 " + searchTry + "회)";
         }
-        if (box == null) box = findEditable(root);
-        if (box == null) {
-            for (int i = 0; i < SEARCH_HINT.length && box == null; i++) {
-                box = findByTextContains(root, SEARCH_HINT[i]);
-                if (box == null) box = findByDesc(root, SEARCH_HINT[i], false);
+        if (p == P_AFTER) return "방을 눌렀는데 선택됐는지 확인이 안 돼서 시간이 다 됐어";
+        if (p == P_SEND) return "전송 버튼을 못 찾아서 시간이 다 됐어";
+        return "전송 버튼을 누른 뒤 화면이 안 바뀌어서 시간이 다 됐어";
+    }
+
+    // ── 창/루트 모으기 ───────────────────────────────────────────────────────
+
+    /**
+     * 볼 만한 카톡 루트 노드들. 활성 창 먼저, 그다음 떠 있는 창을 레이어 높은 순으로.
+     * getRootInActiveWindow() 하나만 보면 바텀시트·다이얼로그·최종 확인 팝업을 놓친다.
+     */
+    private ArrayList<AccessibilityNodeInfo> roots() {
+        ArrayList<AccessibilityNodeInfo> out = new ArrayList<AccessibilityNodeInfo>(4);
+        try {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r != null) {
+                CharSequence p = null;
+                try { p = r.getPackageName(); } catch (Throwable ignore) { }
+                if (p == null || KAKAO.contentEquals(p)) out.add(r);
             }
-        }
-        if (box == null) return false;
-
-        if (!isEditable(box)) {
-            // 검색 아이콘/힌트 라벨일 수 있다. 눌러서 입력창을 띄워만 본다.
-            boolean opened = clickUp(box);
-            if (opened) Log.add(this, "방이 안 보여서 검색을 열었어");
-            return opened;
-        }
+        } catch (Throwable ignore) { }
 
         try {
-            box.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-            Bundle args = new Bundle();
-            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, room);
-            boolean ok = box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-            if (ok) Log.add(this, "방이 안 보여서 검색창에 \"" + room + "\" 넣어봤어");
-            else Log.add(this, "검색창에 글자를 못 넣었어 — 직접 눌러봐야 할 수도 있어");
-            return ok;
-        } catch (Throwable t) {
-            Log.add(this, "검색창 입력 실패 — " + t.getClass().getSimpleName());
-            return false;
+            List<AccessibilityWindowInfo> ws = getWindows();
+            if (ws != null && !ws.isEmpty()) {
+                ArrayList<AccessibilityWindowInfo> sorted = new ArrayList<AccessibilityWindowInfo>(ws);
+                // 레이어 높은 순 (위에 뜬 창을 먼저 본다). 목록이 짧으니 삽입 정렬로 충분하다.
+                for (int i = 1; i < sorted.size(); i++) {
+                    AccessibilityWindowInfo w = sorted.get(i);
+                    int j = i - 1;
+                    while (j >= 0 && layerOf(sorted.get(j)) < layerOf(w)) {
+                        sorted.set(j + 1, sorted.get(j));
+                        j--;
+                    }
+                    sorted.set(j + 1, w);
+                }
+                for (int i = 0; i < sorted.size(); i++) {
+                    AccessibilityNodeInfo r = null;
+                    try { r = sorted.get(i).getRoot(); } catch (Throwable ignore) { }
+                    if (r == null) continue;
+                    CharSequence p = null;
+                    try { p = r.getPackageName(); } catch (Throwable ignore) { }
+                    if (p == null || !KAKAO.contentEquals(p)) continue;
+                    boolean dup = false;
+                    for (int k = 0; k < out.size(); k++) {
+                        if (r.equals(out.get(k))) { dup = true; break; }
+                    }
+                    if (!dup) out.add(r);
+                }
+            }
+        } catch (Throwable ignore) { }
+        return out;
+    }
+
+    private static int layerOf(AccessibilityWindowInfo w) {
+        try { return (w == null) ? -1 : w.getLayer(); } catch (Throwable t) { return -1; }
+    }
+
+    // ── 한 번에 다 훑기 ──────────────────────────────────────────────────────
+
+    /** 이름 후보 한 건 */
+    private static final class Hit {
+        AccessibilityNodeInfo node;
+        String name = "";
+        int level = 9;          // 0 정확 · 1 공백무시 · 2 말줄임 접두 · 3 부분일치
+        String rowKey = "";
+
+        String how() {
+            switch (level) {
+                case 0: return "정확히 일치";
+                case 1: return "공백/특수문자 무시";
+                case 2: return "말줄임 접두";
+                default: return "부분 일치";
+            }
         }
     }
 
-    /** 전송/확인 버튼을 찾아 누른다 */
-    private boolean pressSend(AccessibilityNodeInfo root) {
-        // 1) viewId 후보
-        for (int i = 0; i < SEND_IDS.length; i++) {
-            AccessibilityNodeInfo n = findByViewId(root, SEND_IDS[i]);
-            if (n != null && clickUp(n)) {
-                Log.add(this, "전송 버튼 눌렀어 (" + SEND_IDS[i] + ")");
-                return true;
-            }
-        }
-        // 2) 텍스트/설명 정확히 일치
-        for (int i = 0; i < SEND.length; i++) {
-            AccessibilityNodeInfo n = findByTextExact(root, SEND[i]);
-            if (n == null) n = findByDesc(root, SEND[i], true);
-            if (n != null && !isEditable(n) && clickUp(n)) {
-                Log.add(this, "전송 버튼 눌렀어 (" + SEND[i] + ")");
-                return true;
-            }
-        }
-        // 3) 접두 매칭 — "전송 (1)", "확인 3" 같은 표기
-        for (int i = 0; i < SEND.length; i++) {
-            AccessibilityNodeInfo n = findByTextPrefix(root, SEND[i]);
-            if (n != null && !isEditable(n) && clickUp(n)) {
-                Log.add(this, "전송 버튼 눌렀어 (" + SEND[i] + "…)");
-                return true;
-            }
-        }
-        // 4) 마지막으로 확인 버튼 후보
-        for (int i = 0; i < CONFIRM.length; i++) {
-            AccessibilityNodeInfo n = findByTextExact(root, CONFIRM[i]);
-            if (n == null) n = findByDesc(root, CONFIRM[i], true);
-            if (n != null && !isEditable(n) && clickUp(n)) {
-                Log.add(this, "확인 버튼 눌렀어 (" + CONFIRM[i] + ")");
-                return true;
-            }
-        }
-        return false;
+    /** 버튼 후보 한 건 */
+    private static final class Btn {
+        AccessibilityNodeInfo node;
+        String label = "";
+        String id = "";
+        boolean enabled = true;
+        int prio = 9;
     }
 
-    /** 지금 화면이 채팅방(입력창이 있는 화면) 인가 */
-    private boolean inChatRoom(AccessibilityNodeInfo root) {
-        for (int i = 0; i < CHATROOM_IDS.length; i++) {
-            if (findByViewId(root, CHATROOM_IDS[i]) != null) return true;
+    /** 한 step 에서 화면에서 알아낸 모든 것 */
+    private final class Scan {
+        final ArrayList<Hit> h0 = new ArrayList<Hit>(4);
+        final ArrayList<Hit> h1 = new ArrayList<Hit>(4);
+        final ArrayList<Hit> h2 = new ArrayList<Hit>(4);
+        final ArrayList<Hit> h3 = new ArrayList<Hit>(4);
+        final ArrayList<Btn> btns = new ArrayList<Btn>(8);
+        final ArrayList<Btn> tabs = new ArrayList<Btn>(6);
+        final ArrayList<AccessibilityNodeInfo> scrollables = new ArrayList<AccessibilityNodeInfo>(4);
+        final ArrayList<String> leafTexts = new ArrayList<String>(32);
+        AccessibilityNodeInfo searchBox = null;
+        AccessibilityNodeInfo searchOpener = null;
+        boolean chatInput = false;
+        boolean splash = false;
+        int checkables = 0;
+        int checkedCount = 0;
+        int rows = 0;
+        int nodes = 0;
+        boolean truncated = false;
+        String sig = "";
+
+        /** 제일 확실한 후보 묶음만 돌려준다 (행 기준 중복 제거) */
+        ArrayList<Hit> bestHits() {
+            if (!h0.isEmpty()) return dedupe(h0);
+            if (!h1.isEmpty()) return dedupe(h1);
+            if (!h2.isEmpty()) return dedupe(h2);
+            return dedupe(h3);
         }
-        return false;
+
+        private ArrayList<Hit> dedupe(ArrayList<Hit> in) {
+            ArrayList<Hit> out = new ArrayList<Hit>(in.size());
+            for (int i = 0; i < in.size(); i++) {
+                Hit a = in.get(i);
+                boolean dup = false;
+                for (int k = 0; k < out.size(); k++) {
+                    Hit b = out.get(k);
+                    if (a.rowKey.length() > 0 && a.rowKey.equals(b.rowKey)) { dup = true; break; }
+                    if (squash(a.name).equals(squash(b.name))) { dup = true; break; }
+                }
+                if (!dup) out.add(a);
+            }
+            return out;
+        }
+
+        /** 가장 그럴듯한 전송 버튼. wantEnabled=false 면 비활성 버튼도 본다. */
+        Btn bestBtn(boolean wantEnabled) {
+            Btn best = null;
+            for (int i = 0; i < btns.size(); i++) {
+                Btn b = btns.get(i);
+                if (wantEnabled && !b.enabled) continue;
+                if (!wantEnabled && b.enabled) continue;
+                if (best == null || b.prio < best.prio) best = b;
+            }
+            return best;
+        }
+
+        /** 면적이 가장 큰 스크롤 노드 (탭 스트립 같은 엉뚱한 걸 굴리지 않게) */
+        AccessibilityNodeInfo biggestScrollable() {
+            AccessibilityNodeInfo best = null;
+            long area = 0;
+            for (int i = 0; i < scrollables.size(); i++) {
+                Rect r = boundsOf(scrollables.get(i));
+                long a = (long) r.width() * (long) r.height();
+                if (a > area) { area = a; best = scrollables.get(i); }
+            }
+            return best;
+        }
     }
 
-    // ── 노드 탐색 유틸 ────────────────────────────────────────────────────────
-
-    private interface Test {
-        boolean ok(AccessibilityNodeInfo n);
+    /** 순회 상태 */
+    private static final class Walk {
+        int visited = 0;
+        boolean truncated = false;
     }
 
-    /** 너비 우선 탐색. 얕은 노드가 먼저 걸린다. 노드 수 상한이 있다. */
-    private static AccessibilityNodeInfo find(AccessibilityNodeInfo root, Test t) {
-        if (root == null || t == null) return null;
-        ArrayList<AccessibilityNodeInfo> q = new ArrayList<AccessibilityNodeInfo>(64);
-        q.add(root);
-        int seen = 0;
-        for (int i = 0; i < q.size(); i++) {
-            if (seen++ > MAX_NODES) break;
-            AccessibilityNodeInfo n = q.get(i);
-            if (n == null) continue;
-            try {
-                if (t.ok(n)) return n;
-            } catch (Throwable ignore) { }
-            int cc = 0;
-            try { cc = n.getChildCount(); } catch (Throwable ignore) { }
-            for (int k = 0; k < cc; k++) {
+    private interface Eye {
+        /** true 를 주면 그 노드는 보관한다(재활용하지 않는다) */
+        boolean at(AccessibilityNodeInfo n, int depth);
+    }
+
+    /**
+     * 깊이 우선 순회 (화면에 보이는 순서대로).
+     * 보관하지 않는 <b>잎 노드만</b> recycle() 한다 — 조상은 클릭 경로에 쓰이니 건드리지 않는다.
+     * (API 33+ 는 recycle() 이 no-op 이고, 잘못 반납하면 IllegalStateException 이 나니 이 선만 지킨다)
+     */
+    private static void walk(AccessibilityNodeInfo n, int depth, int limit, Walk w, Eye eye) {
+        if (n == null) return;
+        if (w.visited >= limit) { w.truncated = true; return; }
+        w.visited++;
+        boolean keep = false;
+        try { keep = eye.at(n, depth); } catch (Throwable ignore) { }
+        int cc = 0;
+        try { cc = n.getChildCount(); } catch (Throwable ignore) { }
+        if (depth < 40) {
+            for (int i = 0; i < cc; i++) {
                 AccessibilityNodeInfo ch = null;
-                try { ch = n.getChild(k); } catch (Throwable ignore) { }
-                if (ch != null) q.add(ch);
+                try { ch = n.getChild(i); } catch (Throwable ignore) { }
+                walk(ch, depth + 1, limit, w, eye);
             }
+        }
+        if (!keep && cc == 0 && depth > 0) {
+            try { n.recycle(); } catch (Throwable ignore) { }
+        }
+    }
+
+    /** 화면 한 번 훑어서 필요한 걸 다 모은다 (한 step 에 한 번만 돈다) */
+    private Scan scan(List<AccessibilityNodeInfo> rs) {
+        final Scan sc = new Scan();
+        final String room = (targetRoom == null) ? "" : targetRoom;
+        final String roomN = norm(room).toLowerCase(Locale.ROOT);
+        final String roomS = squash(room);
+        final StringBuilder sig = new StringBuilder(256);
+        final int topThird = screenH() / 3;
+
+        for (int ri = 0; ri < rs.size(); ri++) {
+            final AccessibilityNodeInfo root = rs.get(ri);
+            Walk w = new Walk();
+            walk(root, 0, MAX_NODES, w, new Eye() {
+                @Override public boolean at(AccessibilityNodeInfo n, int depth) {
+                    boolean keep = false;
+                    String id = viewId(n);
+                    String shortId = shortId(id);
+                    String tx = norm(text2(n));
+                    String ds = norm(desc(n));
+                    boolean vis = visible(n);
+                    boolean clickable = flag(n, 1);
+                    boolean editable = isEditable(n);
+                    int cc = 0;
+                    try { cc = n.getChildCount(); } catch (Throwable ignore) { }
+
+                    // 체크 상태는 "보이는 노드" 만 센다 — 화면 밖 행이 체크돼 있다고
+                    // 우리가 고른 방이 선택된 줄 오해하면 안 된다.
+                    if (flag(n, 2) && vis) {
+                        sc.checkables++;
+                        if (flag(n, 3)) sc.checkedCount++;
+                    }
+                    if (flag(n, 4) && vis) {          // scrollable
+                        sc.scrollables.add(n);
+                        keep = true;
+                    }
+                    if (idIn(id, CHATROOM_IDS) && vis) sc.chatInput = true;
+
+                    // 목록 행 개수 추정 (공유창을 실제로 봤는지 판단용)
+                    if (clickable && vis && cc > 0 && tx.length() > 0) sc.rows++;
+
+                    if (vis && cc == 0 && tx.length() > 0 && sig.length() < 900) {
+                        sig.append(cut(tx, 12)).append('|');
+                        if (sc.leafTexts.size() < 40 && !sc.leafTexts.contains(tx)) {
+                            sc.leafTexts.add(tx);
+                        }
+                    }
+
+                    // ── 검색 입력창 ──
+                    if (editable && vis && !idIn(id, CHATROOM_IDS)) {
+                        boolean hintOk = idIn(id, SEARCH_IDS) || hintLike(n);
+                        boolean topOk = boundsOf(n).top <= topThird;
+                        if (sc.searchBox == null && (hintOk || topOk)) {
+                            sc.searchBox = n;
+                            keep = true;
+                        }
+                    } else if (!editable && vis && clickable && sc.searchOpener == null) {
+                        // 검색 아이콘 / 힌트 라벨
+                        for (int k = 0; k < SEARCH_HINT.length; k++) {
+                            String hs = squash(SEARCH_HINT[k]);
+                            if (hs.length() == 0) continue;
+                            if (squash(tx).contains(hs) || squash(ds).contains(hs)) {
+                                sc.searchOpener = n;
+                                keep = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // ── 방 이름 후보 ──
+                    if (vis && !editable && (tx.length() > 0 || ds.length() > 0) && roomN.length() > 0) {
+                        String cand = (tx.length() > 0) ? tx : ds;
+                        Hit hit = match(cand, roomN, roomS, room);
+                        if (hit != null) {
+                            hit.node = n;
+                            hit.rowKey = keyOf(rowOf(n));
+                            boolean idBonus = idIn(id, ROOM_IDS);
+                            if (idBonus && hit.level > 0) hit.level--;
+                            switch (hit.level) {
+                                case 0: sc.h0.add(hit); break;
+                                case 1: sc.h1.add(hit); break;
+                                case 2: sc.h2.add(hit); break;
+                                default: sc.h3.add(hit); break;
+                            }
+                            keep = true;
+                        }
+                    }
+
+                    // ── 전송/확인 버튼 후보 ──
+                    if (vis && !editable && (clickable || hasClickableUp(n))) {
+                        String lbl = (tx.length() > 0) ? tx : ds;
+                        int prio = btnPrio(id, lbl, room);
+                        if (prio < 9) {
+                            Btn b = new Btn();
+                            b.node = n;
+                            b.label = (lbl.length() > 0) ? lbl : shortId;
+                            b.id = shortId;
+                            b.enabled = flag(n, 5) && !zeroCount(lbl);
+                            b.prio = prio;
+                            sc.btns.add(b);
+                            keep = true;
+                        }
+                        // 탭 후보
+                        if (lbl.length() > 0 && lbl.length() <= 6 && boundsOf(n).top <= topThird) {
+                            Btn t = new Btn();
+                            t.node = n;
+                            t.label = lbl;
+                            t.id = shortId;
+                            if (sc.tabs.size() < 12) sc.tabs.add(t);
+                            keep = true;
+                        }
+                    }
+                    return keep;
+                }
+            });
+            sc.nodes += w.visited;
+            if (w.truncated) sc.truncated = true;
+        }
+        // 목록도 글자도 거의 없으면 아직 스플래시/로딩 구간이다 (콜드스타트면 방 목록이 없다)
+        sc.splash = sc.scrollables.isEmpty() && sc.leafTexts.size() <= 2;
+        sc.sig = String.valueOf(sig.toString().hashCode()) + "/" + sc.nodes
+                + "/" + sc.checkedCount + "/" + sc.btns.size();
+        return sc;
+    }
+
+    /** 이름 매칭. 안 맞으면 null. */
+    private static Hit match(String cand, String roomN, String roomS, String room) {
+        String cn = cand.toLowerCase(Locale.ROOT);
+        String cs = squash(cand);
+        if (cn.equals(roomN)) { Hit h = new Hit(); h.name = cand; h.level = 0; return h; }
+        if (cs.length() > 0 && cs.equals(roomS)) { Hit h = new Hit(); h.name = cand; h.level = 1; return h; }
+        // 카톡이 긴 방 이름을 "…" 로 잘라서 보여주는 경우
+        String base = cs;
+        if (base.endsWith("…")) base = base.substring(0, base.length() - 1);
+        else if (base.endsWith("...")) base = base.substring(0, base.length() - 3);
+        if (base.length() >= 3 && !base.equals(cs) && roomS.startsWith(base)) {
+            Hit h = new Hit(); h.name = cand; h.level = 2; return h;
+        }
+        // 부분 일치 — 남의 대화 미리보기 줄을 잡지 않게 길이를 제한한다
+        if (roomS.length() >= 2 && cs.contains(roomS)
+                && cs.length() <= roomS.length() + 14) {
+            Hit h = new Hit(); h.name = cand; h.level = 3; return h;
         }
         return null;
     }
 
-    /** text 가 정확히 일치하는 노드 */
-    static AccessibilityNodeInfo findByTextExact(AccessibilityNodeInfo root, String s) {
-        final String want = norm(s);
-        if (want.length() == 0) return null;
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                return want.equalsIgnoreCase(norm(text(n)));
-            }
-        });
+    /** 전송 버튼 우선순위. 9 = 후보 아님. */
+    private static int btnPrio(String id, String label, String room) {
+        if (idIn(id, SEND_IDS)) return 0;
+        String l = squash(label);
+        if (l.length() == 0) return 9;
+        // 방 이름 자체를 전송 버튼으로 오인하지 않게
+        if (room != null && room.length() > 0 && l.equals(squash(room))) return 9;
+        for (int i = 0; i < SEND.length; i++) {
+            if (l.equals(squash(SEND[i]))) return 1;
+        }
+        for (int i = 0; i < SEND.length; i++) {
+            if (l.startsWith(squash(SEND[i])) && l.length() <= squash(SEND[i]).length() + 6) return 2;
+        }
+        for (int i = 0; i < SEND_LOOSE.length; i++) {
+            String s = squash(SEND_LOOSE[i]);
+            if (s.length() > 0 && l.contains(s) && l.length() <= s.length() + 8) return 3;
+        }
+        return 9;
     }
 
-    /** text 에 s 가 들어있는 노드. 잎 노드를 먼저 본다(부모가 자식 텍스트를 합쳐 갖는 경우 회피). */
-    static AccessibilityNodeInfo findByTextContains(AccessibilityNodeInfo root, String s) {
-        final String want = norm(s).toLowerCase();
-        if (want.length() == 0) return null;
-        AccessibilityNodeInfo leaf = find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                int cc;
-                try { cc = n.getChildCount(); } catch (Throwable t) { cc = 0; }
-                if (cc != 0) return false;
-                String got = norm(text(n)).toLowerCase();
-                return got.length() > 0 && got.contains(want);
-            }
-        });
-        if (leaf != null) return leaf;
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                String got = norm(text(n)).toLowerCase();
-                return got.length() > 0 && got.contains(want);
-            }
-        });
+    /** "전송 0", "확인 (0)" 처럼 개수가 0 인 버튼은 눌러도 아무 일이 없다 */
+    private static boolean zeroCount(String label) {
+        if (label == null) return false;
+        boolean sawDigit = false;
+        int val = 0;
+        for (int i = 0; i < label.length(); i++) {
+            char c = label.charAt(i);
+            if (c >= '0' && c <= '9') { sawDigit = true; val = val * 10 + (c - '0'); }
+            else if (sawDigit) break;
+        }
+        return sawDigit && val == 0;
     }
 
-    /** text 가 s 로 시작하는 노드 ("전송 (1)" 같은 표기 대응) */
-    static AccessibilityNodeInfo findByTextPrefix(AccessibilityNodeInfo root, String s) {
-        final String want = norm(s).toLowerCase();
-        if (want.length() == 0) return null;
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                String got = norm(text(n)).toLowerCase();
-                return got.length() > 0 && got.startsWith(want);
-            }
-        });
-    }
-
-    /** contentDescription 으로 찾기. exact=false 면 부분 일치. */
-    static AccessibilityNodeInfo findByDesc(AccessibilityNodeInfo root, String s, final boolean exact) {
-        final String want = norm(s).toLowerCase();
-        if (want.length() == 0) return null;
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                String got = norm(desc(n)).toLowerCase();
-                if (got.length() == 0) return false;
-                return exact ? got.equals(want) : got.contains(want);
-            }
-        });
-    }
-
-    /** viewIdResourceName 으로 찾기 (보이고 눌릴 만한 노드만) */
-    static AccessibilityNodeInfo findByViewId(AccessibilityNodeInfo root, String id) {
-        final String want = (id == null) ? "" : id.trim();
-        if (want.length() == 0) return null;
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                if (!want.equals(viewId(n))) return false;
-                try {
-                    if (!n.isVisibleToUser()) return false;
-                } catch (Throwable ignore) { }
-                return true;
-            }
-        });
-    }
-
-    /** 글자를 넣을 수 있는 노드 (검색창) */
-    static AccessibilityNodeInfo findEditable(AccessibilityNodeInfo root) {
-        return find(root, new Test() {
-            @Override public boolean ok(AccessibilityNodeInfo n) {
-                if (!isEditable(n)) return false;
-                try {
-                    if (!n.isVisibleToUser()) return false;
-                } catch (Throwable ignore) { }
-                return true;
-            }
-        });
-    }
-
-    /**
-     * 이 노드부터 위로 올라가며 ACTION_CLICK 가능한 조상을 찾아 누른다.
-     * 텍스트 노드 자체는 보통 clickable 이 아니고 그 부모 행이 clickable 이다.
-     */
-    static boolean clickUp(AccessibilityNodeInfo n) {
+    /** 방 이름 노드에서 눌러야 하는 "행" 을 찾는다 */
+    private AccessibilityNodeInfo rowOf(AccessibilityNodeInfo n) {
+        if (n == null) return null;
+        int rowH = Theme.dp(this, 40);
         AccessibilityNodeInfo cur = n;
-        for (int up = 0; up < 8 && cur != null; up++) {
+        AccessibilityNodeInfo firstClickable = null;
+        for (int up = 0; up < 6 && cur != null; up++) {
             boolean clickable = false;
-            boolean enabled = true;
             try { clickable = cur.isClickable(); } catch (Throwable ignore) { }
-            try { enabled = cur.isEnabled(); } catch (Throwable ignore) { }
-            if (clickable && enabled) {
-                try {
-                    if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
-                } catch (Throwable ignore) { }
+            if (clickable) {
+                if (firstClickable == null) firstClickable = cur;
+                Rect r = boundsOf(cur);
+                if (r.height() >= rowH && r.width() >= rowH * 3) return cur;
             }
             AccessibilityNodeInfo p = null;
             try { p = cur.getParent(); } catch (Throwable ignore) { }
             cur = p;
         }
-        // clickable 조상이 없어도 그냥 눌러본다 (응답하는 뷰가 더러 있다)
-        try {
-            return n != null && n.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        } catch (Throwable t) {
-            return false;
+        return (firstClickable != null) ? firstClickable : n;
+    }
+
+    /** 행 안에 체크박스가 있나 / 켜져 있나. 없으면 null. */
+    private Boolean rowChecked(AccessibilityNodeInfo row) {
+        if (row == null) return null;
+        final boolean[] found = new boolean[] { false, false };
+        Walk w = new Walk();
+        walk(row, 0, 80, w, new Eye() {
+            @Override public boolean at(AccessibilityNodeInfo n, int depth) {
+                if (flag(n, 2)) {
+                    found[0] = true;
+                    if (flag(n, 3)) found[1] = true;
+                }
+                return false;
+            }
+        });
+        if (!found[0]) return null;
+        return Boolean.valueOf(found[1]);
+    }
+
+    /** 우리가 눌렀던 행이 지금 체크돼 있나 */
+    private boolean rowCheckedByKey(Scan sc) {
+        if (pickedRowKey.length() == 0) return false;
+        ArrayList<Hit> hits = sc.bestHits();
+        for (int i = 0; i < hits.size(); i++) {
+            Hit h = hits.get(i);
+            AccessibilityNodeInfo row = rowOf(h.node);
+            Boolean b = rowChecked(row);
+            if (b != null && b.booleanValue()) return true;
         }
+        return false;
+    }
+
+    private String joinBtnLabels(Scan sc) {
+        StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (int i = 0; i < sc.btns.size() && n < 6; i++) {
+            Btn b = sc.btns.get(i);
+            if (b.label.length() == 0) continue;
+            if (n > 0) sb.append(", ");
+            sb.append(cut(b.label, 14));
+            if (!b.enabled) sb.append("(비활성)");
+            n++;
+        }
+        return (n == 0) ? "없음" : sb.toString();
+    }
+
+    // ── 화면 덤프 ────────────────────────────────────────────────────────────
+
+    /**
+     * 지금 화면을 사람이 읽을 수 있게 떠낸다.
+     * 맨 위에 <b>요약</b>(창 목록 · 스크롤 노드 · 체크 노드 · 보이던 글자 · 버튼 후보)을 붙이고,
+     * 그 아래에 노드 목록을 붙인다. 이 요약만 있어도 (a)단건/(b)다중선택 판정, 탭 유무,
+     * 검색창 id, 확정 버튼 라벨이 한 번에 정해진다.
+     */
+    private String buildDump(String where) {
+        final StringBuilder out = new StringBuilder(4096);
+        final String room = (targetRoom == null) ? "" : targetRoom;
+        String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
+
+        out.append("=== 카톡 화면 진단 ").append(now).append(" ===\n");
+        out.append("※ 이 덤프에는 그때 카톡 화면에 보이던 이름·문구가 들어있어.\n");
+        out.append("   개발자에게 보내기 전에 한 번 읽어보고, 곤란한 줄이 있으면 지우고 보내.\n");
+        out.append("실패: ").append((where == null || where.length() == 0) ? "(직접 떠냄)" : where).append('\n');
+        out.append("노린 방: \"").append(room).append("\"  (정리: \"").append(norm(room))
+                .append("\" / 공백무시: \"").append(squash(room)).append("\")\n");
+        out.append("단계: ").append(whereNow())
+                .append(" · 방 클릭 ").append(clickedRow ? "함" : "안 함")
+                .append(" · 전송 클릭 ").append(sendTry).append("회")
+                .append(" · 목록 본 적 ").append(sawShareList ? "있음" : "없음").append('\n');
+        out.append("카톡 버전: ").append(kakaoVersion()).append('\n');
+        out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
+
+        ArrayList<AccessibilityNodeInfo> rs = roots();
+        out.append("카톡 창 개수: ").append(rs.size()).append('\n');
+        try {
+            List<AccessibilityWindowInfo> ws = getWindows();
+            if (ws != null) {
+                for (int i = 0; i < ws.size() && i < 8; i++) {
+                    AccessibilityWindowInfo w = ws.get(i);
+                    if (w == null) continue;
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Throwable ignore) { }
+                    out.append("  창#").append(i).append(" type=").append(winType(w))
+                            .append(" active=").append(bool(w.isActive()))
+                            .append(" focus=").append(bool(w.isFocused()))
+                            .append(" layer=").append(layerOf(w))
+                            .append(" pkg=").append((r == null) ? "?" : String.valueOf(pkgOf(r)))
+                            .append(" 루트=").append((r == null) ? "없음" : shortCls(className(r)))
+                            .append('\n');
+                }
+            }
+        } catch (Throwable t) {
+            out.append("  (창 목록을 못 읽었어 — ").append(t.getClass().getSimpleName()).append(")\n");
+        }
+
+        if (rs.isEmpty()) {
+            out.append("\n지금 화면에 카톡 창이 하나도 없어 — 공유창이 이미 닫혔거나 다른 앱이 앞에 있어.\n");
+            return out.toString();
+        }
+
+        Scan sc;
+        try {
+            sc = scan(rs);
+        } catch (Throwable t) {
+            out.append("\n화면을 훑다 실패했어 — ").append(t.getClass().getSimpleName()).append('\n');
+            return out.toString();
+        }
+
+        out.append("노드 ").append(sc.nodes).append("개")
+                .append(sc.truncated ? " (한도에서 잘렸어!)" : "").append('\n');
+        out.append("스크롤 가능 노드: ").append(sc.scrollables.size()).append("개\n");
+        for (int i = 0; i < sc.scrollables.size() && i < 6; i++) {
+            AccessibilityNodeInfo n = sc.scrollables.get(i);
+            out.append("  - ").append(shortCls(className(n))).append(" id=")
+                    .append(shortId(viewId(n))).append(' ').append(boundsStr(n)).append('\n');
+        }
+        out.append("체크 가능 노드(보이는 것): ").append(sc.checkables).append("개 (켜진 것 ")
+                .append(sc.checkedCount).append("개) → ")
+                .append(sc.checkables > 0 ? "다중선택형(b)으로 보여" : "체크박스가 안 보여 = 단건형(a)일 수 있어")
+                .append('\n');
+        out.append("검색 입력창: ").append(sc.searchBox == null ? "못 찾음"
+                : (shortId(viewId(sc.searchBox)) + " " + boundsStr(sc.searchBox))).append('\n');
+        out.append("검색 열기 후보: ").append(sc.searchOpener == null ? "못 찾음"
+                : (cut(text2(sc.searchOpener), 20) + " / " + shortId(viewId(sc.searchOpener)))).append('\n');
+        out.append("채팅방 입력창 보임: ").append(sc.chatInput ? "Y" : "N").append('\n');
+
+        out.append("버튼 같은 노드(누를 수 있고 글자 있는 것) ").append(sc.btns.size()).append("개:\n");
+        for (int i = 0; i < sc.btns.size() && i < 12; i++) {
+            Btn b = sc.btns.get(i);
+            out.append("  - \"").append(cut(b.label, 24)).append("\" id=").append(b.id)
+                    .append(" enabled=").append(b.enabled ? "Y" : "N")
+                    .append(" prio=").append(b.prio)
+                    .append(' ').append(boundsStr(b.node)).append('\n');
+        }
+        out.append("화면에 있던 글자(중복 제거, 앞 ").append(Math.min(20, sc.leafTexts.size())).append("개):\n");
+        for (int i = 0; i < sc.leafTexts.size() && i < 20; i++) {
+            out.append("  ").append(i + 1).append(". ").append(cut(sc.leafTexts.get(i), 30)).append('\n');
+        }
+        ArrayList<Hit> hits = sc.bestHits();
+        out.append("방 이름 후보: ").append(hits.size()).append("개");
+        for (int i = 0; i < hits.size() && i < 5; i++) {
+            out.append("\n  - \"").append(cut(hits.get(i).name, 24)).append("\" (")
+                    .append(hits.get(i).how()).append(") 행=").append(hits.get(i).rowKey);
+        }
+        out.append('\n');
+
+        // ── 전체 노드 ──
+        out.append("\n--- 노드 목록 (최대 ").append(DUMP_MAX_LINES).append("줄) ---\n");
+        final int[] lines = new int[] { 0 };
+        final int[] skipped = new int[] { 0 };
+        for (int ri = 0; ri < rs.size(); ri++) {
+            out.append("[창 ").append(ri).append("] ").append(shortCls(className(rs.get(ri)))).append('\n');
+            Walk w = new Walk();
+            final StringBuilder sb = out;
+            walk(rs.get(ri), 0, DUMP_MAX_NODES, w, new Eye() {
+                @Override public boolean at(AccessibilityNodeInfo n, int depth) {
+                    String tx = norm(textOnly(n));
+                    String ds = norm(desc(n));
+                    String id = shortId(viewId(n));
+                    if (tx.length() == 0 && ds.length() == 0 && id.length() == 0) return false;
+                    if (lines[0] >= DUMP_MAX_LINES) { skipped[0]++; return false; }
+                    StringBuilder l = new StringBuilder(DUMP_MAX_LINE_LEN);
+                    for (int d = 0; d < depth && d < 12; d++) l.append(' ');
+                    l.append('[').append(shortCls(className(n))).append(']');
+                    if (tx.length() > 0) l.append(" text=\"").append(cut(tx, TEXT_KEEP)).append('"');
+                    if (ds.length() > 0) l.append(" desc=\"").append(cut(ds, TEXT_KEEP)).append('"');
+                    if (id.length() > 0) l.append(" id=").append(id);
+                    l.append(" C=").append(bool(flag(n, 1)));
+                    if (flag(n, 2)) l.append(" K=Y X=").append(bool(flag(n, 3)));
+                    if (flag(n, 4)) l.append(" S=Y");
+                    if (!flag(n, 5)) l.append(" D=Y");
+                    if (!visible(n)) l.append(" 안보임");
+                    l.append(' ').append(boundsStr(n));
+                    String s = l.toString();
+                    if (s.length() > DUMP_MAX_LINE_LEN) s = s.substring(0, DUMP_MAX_LINE_LEN) + "…";
+                    sb.append(s).append('\n');
+                    lines[0]++;
+                    return false;
+                }
+            });
+            if (w.truncated) out.append("  …트리가 ").append(DUMP_MAX_NODES).append("노드에서 잘렸어\n");
+        }
+        if (skipped[0] > 0) out.append("… 외 ").append(skipped[0]).append("개 더 있었어(여기서 잘랐어)\n");
+        out.append("=== 끝 ===\n");
+
+        String s = out.toString();
+        if (s.length() > DUMP_MAX_CHARS) s = s.substring(0, DUMP_MAX_CHARS) + "\n…여기서 잘랐어";
+        return s;
+    }
+
+    private String kakaoVersion() {
+        try {
+            return String.valueOf(getPackageManager().getPackageInfo(KAKAO, 0).versionName);
+        } catch (Throwable t) {
+            return "모름";
+        }
+    }
+
+    private static String winType(AccessibilityWindowInfo w) {
+        int t;
+        try { t = w.getType(); } catch (Throwable ignore) { return "?"; }
+        if (t == AccessibilityWindowInfo.TYPE_APPLICATION) return "APP";
+        if (t == AccessibilityWindowInfo.TYPE_INPUT_METHOD) return "IME";
+        if (t == AccessibilityWindowInfo.TYPE_SYSTEM) return "SYSTEM";
+        if (t == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return "A11Y_OVERLAY";
+        if (t == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER) return "DIVIDER";
+        return String.valueOf(t);
     }
 
     // ── 값 꺼내기 (전부 예외 안전) ─────────────────────────────────────────────
 
-    static String text(AccessibilityNodeInfo n) {
+    /** text 가 없으면 contentDescription 으로 폴백 */
+    static String text2(AccessibilityNodeInfo n) {
         if (n == null) return "";
         CharSequence t = null;
         try { t = n.getText(); } catch (Throwable ignore) { }
         if (t == null || t.length() == 0) {
             try { t = n.getContentDescription(); } catch (Throwable ignore) { }
         }
+        return (t == null) ? "" : t.toString();
+    }
+
+    /** 옛 이름 유지 (다른 파일이 부를 수 있다) */
+    static String text(AccessibilityNodeInfo n) {
+        return text2(n);
+    }
+
+    /** text 만 (폴백 없음) */
+    static String textOnly(AccessibilityNodeInfo n) {
+        if (n == null) return "";
+        CharSequence t = null;
+        try { t = n.getText(); } catch (Throwable ignore) { }
         return (t == null) ? "" : t.toString();
     }
 
@@ -678,6 +1713,40 @@ public final class KakaoAccessibility extends AccessibilityService {
         }
     }
 
+    /** "com.kakao.talk:id/name" → "name" */
+    static String shortId(String id) {
+        if (id == null || id.length() == 0) return "";
+        int i = id.lastIndexOf('/');
+        return (i < 0) ? id : id.substring(i + 1);
+    }
+
+    static String className(AccessibilityNodeInfo n) {
+        if (n == null) return "";
+        try {
+            CharSequence c = n.getClassName();
+            return (c == null) ? "" : c.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** "android.widget.TextView" → "TextView" */
+    static String shortCls(String cls) {
+        if (cls == null || cls.length() == 0) return "?";
+        int i = cls.lastIndexOf('.');
+        return (i < 0) ? cls : cls.substring(i + 1);
+    }
+
+    static String pkgOf(AccessibilityNodeInfo n) {
+        if (n == null) return "";
+        try {
+            CharSequence c = n.getPackageName();
+            return (c == null) ? "" : c.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     static boolean isEditable(AccessibilityNodeInfo n) {
         if (n == null) return false;
         try {
@@ -691,11 +1760,137 @@ public final class KakaoAccessibility extends AccessibilityService {
         }
     }
 
-    /** 공백 정리. 방 이름에 줄바꿈/이중 공백이 섞여 오는 걸 맞춰준다. */
+    /** 1=clickable 2=checkable 3=checked 4=scrollable 5=enabled */
+    private static boolean flag(AccessibilityNodeInfo n, int which) {
+        if (n == null) return false;
+        try {
+            switch (which) {
+                case 1: return n.isClickable();
+                case 2: return n.isCheckable();
+                case 3: return n.isChecked();
+                case 4: return n.isScrollable();
+                default: return n.isEnabled();
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean visible(AccessibilityNodeInfo n) {
+        if (n == null) return false;
+        try {
+            if (!n.isVisibleToUser()) return false;
+        } catch (Throwable ignore) { }
+        Rect r = boundsOf(n);
+        return r.width() > 0 && r.height() > 0;
+    }
+
+    private static boolean hasClickableUp(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo cur = n;
+        for (int up = 0; up < 4 && cur != null; up++) {
+            if (flag(cur, 1)) return true;
+            AccessibilityNodeInfo p = null;
+            try { p = cur.getParent(); } catch (Throwable ignore) { }
+            cur = p;
+        }
+        return false;
+    }
+
+    private static boolean hintLike(AccessibilityNodeInfo n) {
+        String hint = "";
+        try {
+            CharSequence c = n.getHintText();
+            if (c != null) hint = c.toString();
+        } catch (Throwable ignore) { }
+        String all = squash(hint) + squash(desc(n)) + squash(shortId(viewId(n)));
+        if (all.length() == 0) return false;
+        for (int i = 0; i < SEARCH_HINT.length; i++) {
+            String s = squash(SEARCH_HINT[i]);
+            if (s.length() > 0 && all.contains(s)) return true;
+        }
+        return all.contains("search");
+    }
+
+    private static boolean idIn(String id, String[] arr) {
+        if (id == null || id.length() == 0) return false;
+        for (int i = 0; i < arr.length; i++) {
+            if (arr[i].equals(id)) return true;
+        }
+        return false;
+    }
+
+    static Rect boundsOf(AccessibilityNodeInfo n) {
+        Rect r = new Rect();
+        if (n == null) return r;
+        try { n.getBoundsInScreen(r); } catch (Throwable ignore) { }
+        return r;
+    }
+
+    private static String boundsStr(AccessibilityNodeInfo n) {
+        Rect r = boundsOf(n);
+        return "(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + ")";
+    }
+
+    private static String keyOf(AccessibilityNodeInfo n) {
+        if (n == null) return "";
+        return boundsStr(n);
+    }
+
+    private int screenH() {
+        try {
+            return getResources().getDisplayMetrics().heightPixels;
+        } catch (Throwable t) {
+            return 2000;
+        }
+    }
+
+    private static String bool(boolean b) {
+        return b ? "Y" : "N";
+    }
+
+    /** 긴 글자는 앞부분만 (남의 대화를 개발자에게 넘기지 않게) */
+    static String cut(String s, int n) {
+        if (s == null) return "";
+        String t = s.replace('\n', ' ').replace('\r', ' ');
+        if (t.length() <= n + 4) return t;
+        return t.substring(0, n) + "…";
+    }
+
+    /**
+     * 공백/보이지 않는 문자 정리.
+     * NBSP·전각공백·zero-width space·이모지 variation selector 를 걷어낸다 —
+     * 카톡 방 이름에 이런 게 흔해서 완전일치가 조용히 실패한다.
+     */
     static String norm(String s) {
         if (s == null) return "";
-        String t = s.replace(' ', ' ').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ');
+        StringBuilder b = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == ' ' || c == '　' || c == '\t' || c == '\n' || c == '\r'
+                    || c == ' ' || c == ' ') {
+                b.append(' ');
+                continue;
+            }
+            if (c == '​' || c == '‌' || c == '‍' || c == '﻿'
+                    || c == '️' || c == '︎' || c == '­') {
+                continue;
+            }
+            b.append(c);
+        }
+        String t = b.toString();
         while (t.contains("  ")) t = t.replace("  ", " ");
         return t.trim();
+    }
+
+    /** 공백 전부 제거 + 소문자 (너그러운 비교용) */
+    static String squash(String s) {
+        String t = norm(s).toLowerCase(Locale.ROOT);
+        StringBuilder b = new StringBuilder(t.length());
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c == ' ') continue;
+            b.append(c);
+        }
+        return b.toString();
     }
 }
