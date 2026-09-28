@@ -3,7 +3,7 @@ package com.buseong.kakaoauto.engine;
 /**
  * 엔진 호출 실패. {@link #code} 는 엔진이 준 기계 판독용 코드다:
  *   not_packaged · main_thread · engine_start_failed · engine_died · timeout ·
- *   not_linked · kicked · reauth_required · rejected · network · upstream_error · bad_request
+ *   not_linked · kicked · reauth_required · rejected · undelivered · network · upstream_error · bad_request
  */
 public final class EngineException extends Exception {
     public final String code;
@@ -30,6 +30,8 @@ public final class EngineException extends Exception {
             case "kicked": return "다른 기기가 같은 로그인 슬롯을 사용하여 연결이 해제되었습니다. 카카오 계정을 다시 연결하십시오.";
             case "reauth_required": return "저장된 카카오 로그인이 만료되었습니다. 카카오 계정을 다시 연결하십시오.";
             case "rejected": return "카카오 서버가 전송을 거부했습니다. (" + getMessage() + ")";
+            case "undelivered":
+                return "카카오 응답에 메시지 번호가 없어 대화방에 전달되지 않았습니다.";
             case "network": return "네트워크 연결을 확인하십시오. (" + getMessage() + ")";
             default: return getMessage();
         }

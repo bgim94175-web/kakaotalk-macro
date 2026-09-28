@@ -54,9 +54,14 @@ public final class EngineSend {
                     if (chatId == null) throw new EngineException("not_linked", "대화방이 카카오 방과 연결되어 있지 않습니다.");
                     files = ImagePrep.prepare(c, uris);
                     KakaoEngine.SendResult r = Engine.get(c).sendImages(chatId, files);
+                    // 로컬 대기열에 넣은 것, 또는 메시지 번호가 없는 카카오 응답은 성공이 아니다.
+                    // 여기서 실패하면 알림 답장으로 넘어가지 않는다 — 그 경로는 접수만으로 성공을 보고한다.
+                    if (r == null || !NodeEngine.isMessageId(r.logId)) {
+                        throw new EngineException("undelivered", "missing log_id");
+                    }
                     ok = true;
                     detail = ("multiphoto".equals(r.kind) ? "묶음 사진 " + files.size() + "장" : "사진 1장")
-                            + " · 카카오 계정 직접 전송";
+                            + " · 카카오 계정 직접 전송 · 메시지 " + r.logId;
                     Log.add(c, "「" + label + "」 에 " + detail + "을 완료했습니다.");
                 } catch (EngineException e) {
                     detail = "카카오 계정 직접 전송 실패: " + e.userText();

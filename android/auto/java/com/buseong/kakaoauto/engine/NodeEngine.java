@@ -267,8 +267,46 @@ final class NodeEngine implements KakaoEngine {
                 toMillis(r.optLong("last_mine_at")));
     }
 
-    private static SendResult sendResult(JSONObject r) {
-        return new SendResult(r.optString("kind"), r.optString("log_id"), toMillis(r.optLong("sent_at")));
+    /**
+     * 카카오 메시지 번호. 양의 십진수만 인정한다.
+     * {@code "0"} · 빈 값 · 숫자가 아닌 값은 전달이 아니다
+     * (라이브러리가 없는 logId 를 {@code "0"} 으로 바꾸고 success 를 세우는 경우가 있다).
+     */
+    static boolean isMessageId(String id) {
+        if (id == null || id.length() == 0 || id.charAt(0) == '0') return false;
+        for (int i = 0; i < id.length(); i++) {
+            char c = id.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
+    private static String messageId(JSONObject r) {
+        if (r == null || !r.has("log_id") || r.isNull("log_id")) return "";
+        Object raw = r.opt("log_id");
+        String s;
+        if (raw instanceof Number) {
+            if (raw instanceof Double || raw instanceof Float) {
+                double d = ((Number) raw).doubleValue();
+                if (!Double.isFinite(d) || d <= 0 || d != Math.rint(d) || d > Long.MAX_VALUE) return "";
+                s = Long.toString((long) d);
+            } else {
+                long n = ((Number) raw).longValue();
+                if (n <= 0) return "";
+                s = Long.toString(n);
+            }
+        } else {
+            s = String.valueOf(raw).trim();
+        }
+        return isMessageId(s) ? s : "";
+    }
+
+    private static SendResult sendResult(JSONObject r) throws EngineException {
+        String logId = messageId(r);
+        if (!isMessageId(logId)) {
+            throw new EngineException("undelivered", "missing log_id");
+        }
+        return new SendResult(r.optString("kind"), logId, toMillis(r.optLong("sent_at")));
     }
 
     /** 카카오는 초 단위를 준다 */

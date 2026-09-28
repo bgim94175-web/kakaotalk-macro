@@ -341,13 +341,35 @@ async function chatActivity(p) {
 
 // ── sending ─────────────────────────────────────────────────────────────────
 
+// A delivered Kakao message has a positive decimal log id. agent-messenger turns a
+// missing id into the string "0" (longToString(undefined)) and still sets success
+// when POST/FORWARD status is 0 or a COMPLETE packet arrived without a chatLog.
+// That is a local upload ack, not a message in the room.
+function realLogId(v) {
+  if (typeof v === 'bigint') v = v.toString()
+  else if (v && typeof v === 'object' && 'high' in v && 'low' in v) {
+    const high = v.high >>> 0
+    const low = v.low >>> 0
+    v = ((BigInt(high) << 32n) | BigInt(low)).toString()
+  } else if (typeof v === 'number' && Number.isFinite(v)) {
+    if (v !== Math.trunc(v)) return ''
+    v = String(v)
+  }
+  if (typeof v !== 'string') return ''
+  const s = v.trim()
+  if (!/^[1-9][0-9]*$/.test(s)) return ''
+  return s
+}
+
 function sendOutcome(res, kind) {
-  if (!res || !res.success) {
-    throw new EngineError('rejected', `Kakao refused the message (status ${res ? res.status_code : '?'})`, {
-      serverStatus: res ? res.status_code : undefined,
+  const logId = realLogId(res && res.log_id)
+  const status = res && res.status_code != null ? res.status_code : '?'
+  if (!res || res.success !== true || !logId) {
+    throw new EngineError('undelivered', `no message id (status ${status})`, {
+      serverStatus: typeof (res && res.status_code) === 'number' ? res.status_code : undefined,
     })
   }
-  return { kind, log_id: res.log_id, sent_at: res.sent_at, status_code: res.status_code }
+  return { kind, log_id: logId, sent_at: res.sent_at, status_code: res.status_code }
 }
 
 async function sendText(p) {

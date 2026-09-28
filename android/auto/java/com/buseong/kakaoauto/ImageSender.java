@@ -20,11 +20,11 @@ import java.util.Locale;
 /**
  * 이미지 1~5장 전송 오케스트레이션. 경로가 세 계열이고 <b>이 순서로</b> 시도한다.
  *
- * <h3>경로 A — 알림 답장에 사진 첨부 (화면이 아예 안 움직인다)</h3>
- * 카톡이 알림 답장 {@code RemoteInput} 에 이미지 데이터 타입을 허용해뒀으면
- * ({@link KakaoListener#imageTypesFor}) 공유창도 접근성도 안 쓰고 그냥 실어 보낸다.
- * MIME 하나당 URI 하나라서 <b>한 장씩 순서대로</b> 보낸다.
- * 되는지 안 되는지는 기기/카톡 버전마다 다르니 <b>런타임에 확인해서 로그로 알려준다.</b>
+ * <h3>경로 A — 알림 답장에 사진 첨부 (성공으로 쓰지 않는다)</h3>
+ * 카톡이 알림 답장 {@code RemoteInput} 에 이미지 타입을 허용해도, {@code PendingIntent.send}
+ * 가 true 인 것은 로컬 접수일 뿐이다. 메시지 번호가 없고, 실기기에서 이 경로가
+ * 성공으로 끝난 뒤 대화방에 사진이 없었다. 그래서 이 경로로는 전송을 끝내지 않고
+ * 채팅방 첨부 → 공유창으로 내려간다.
  *
  * <h3>경로 B — 채팅방 내부 첨부 시트 (현장에서 유일하게 관측된 화면)</h3>
  * 근거: {@code docs/field/kakao-attach-sheet-26.8.2.md} (실기기 뷰 트리).
@@ -349,7 +349,8 @@ public final class ImageSender {
         }
 
         // 카카오 계정이 연결되고 이 방이 카카오 방과 연결돼 있으면 화면 조작 없이 계정으로 직접 보낸다.
-        // 이 경로는 접근성·오버레이·화면 상태와 무관하다.
+        // 메시지 번호가 없으면 엔진 쪽이 실패로 끝낸다. 알림 답장으로 넘어가지 않는다
+        // (그 경로는 로컬 접수만으로 성공을 보고한 적이 있다).
         if (com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) {
             com.buseong.kakaoauto.engine.EngineSend.sendImages(c, ref, ok, onDone);
             return;
@@ -359,20 +360,17 @@ public final class ImageSender {
         // 전송을 시작하는 시점에 한 번은 반드시 알린다 (진단에도 같은 항목이 들어간다).
         warnOtherAccessibility(c);
 
-        // 알림 답장으로 사진을 보낼 수 있는 방이면 접근성·오버레이·화면 상태가 전부 필요 없다.
-        // 그래서 그 경우에는 여기서 막지 않는다 (막으면 제일 좋은 경로를 스스로 닫는 셈이다).
-        if (!replyImageReady(c, ref)) {
-            if (!accessibilityOn(c)) {
-                Log.add(c, "접근성 권한이 비활성 상태여서 이미지를 전송하지 못했습니다. "
-                        + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 활성화하십시오.");
-                fire(onDone, false, "접근성 권한이 비활성 상태입니다.");
-                return;
-            }
-            if (!overlayOn(c)) {
-                // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
-                Log.add(c, "「다른 앱 위에 표시」 권한이 비활성 상태입니다. 앱이 화면에 표시된 상태에서는 "
-                        + "동작할 수 있으나, 예약 발송에서는 시스템이 공유창 실행을 차단할 수 있습니다. 설정에서 활성화하십시오.");
-            }
+        // 알림 답장은 메시지 번호가 없어 성공으로 보지 않는다. 남은 경로는 접근성이 필요하다.
+        if (!accessibilityOn(c)) {
+            Log.add(c, "접근성 권한이 비활성 상태여서 이미지를 전송하지 못했습니다. "
+                    + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 활성화하십시오.");
+            fire(onDone, false, "접근성 권한이 비활성 상태입니다.");
+            return;
+        }
+        if (!overlayOn(c)) {
+            // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
+            Log.add(c, "「다른 앱 위에 표시」 권한이 비활성 상태입니다. 앱이 화면에 표시된 상태에서는 "
+                    + "동작할 수 있으나, 예약 발송에서는 시스템이 공유창 실행을 차단할 수 있습니다. 설정에서 활성화하십시오.");
         }
 
         // 채팅방 첨부 경로가 쓸 "사진 지목 문자열" 을 여기서 미리 만든다.
@@ -548,7 +546,7 @@ public final class ImageSender {
      * 세 조건이 동시에 맞을 때만 true 다 — 조건 하나라도 다르면 시도해봐야 한다.
      *   <ol>
      *     <li>백그라운드 전송 불가로 이미 확정됐다 ({@link #BG_FAIL_LIMIT} 회 연속 실패)</li>
-     *     <li>그 방은 알림 답장으로 사진을 못 받는다 (답장 경로는 화면 상태와 무관하다)</li>
+     *     <li>알림 답장은 전달 확인이 안 되므로 이 판정을 풀지 않는다</li>
      *     <li>지금 앱이 화면에 없다 (화면에 있으면 공유창은 뜬다)</li>
      *   </ol>
      */
@@ -556,7 +554,6 @@ public final class ImageSender {
         if (c == null || ref == null || !ref.valid()) return false;
         if (com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) return false;
         if (backgroundBlockedAt(c) <= 0L) return false;
-        if (replyImageReady(c, ref)) return false;
         if (foregroundNow(c)) return false;
         return true;
     }
@@ -620,7 +617,7 @@ public final class ImageSender {
     }
 
     /**
-     * 경로 선택. <b>A(알림 답장) → B(채팅방 첨부) → C(공유창)</b> 순서다.
+     * 경로 선택. <b>B(채팅방 첨부) → C(공유창)</b> 순서다. 알림 답장(A)은 시도하지 않는다.
      *
      * 공유창이 마지막인 이유는 실기기에서 한 번도 안 떴기 때문이다(확정된 사실).
      * 건너뛴 경로도 <b>왜 건너뛰었는지</b> 를 남긴다 — 그게 없으면 "채팅방 첨부를 시도했는데
@@ -633,12 +630,11 @@ public final class ImageSender {
         Log.add(j.app, "이미지 " + j.uris.size() + "장 전송을 시작합니다. 대화방: " + j.label
                 + " · 앱 상태: " + fgText(j.fg) + " · 화면: " + screenState(j.app));
 
-        // 경로 A — 되면 화면이 아예 안 움직인다.
-        if (replyImageReady(j.app, j.ref)) {
-            sendByReply(j, 0, 0);
-            return;
-        }
-        route(j, R_REPLY, replyWhy(j.app, j.ref));
+        // 경로 A 는 성공으로 끝내지 않는다. PendingIntent 접수는 메시지 번호가 없고,
+        // 실기기에서 성공으로 표시된 뒤 방에 사진이 없었다.
+        route(j, R_REPLY, replyImageReady(j.app, j.ref)
+                ? "건너뜀(답장 접수만으로는 전송 완료로 보지 않음)"
+                : replyWhy(j.app, j.ref));
         afterReply(j);
     }
 
@@ -727,9 +723,8 @@ public final class ImageSender {
 
     /**
      * 알림 답장 사진 경로를 켜고 끈다.
-     * 카톡이 "이미지 받는다" 고 선언해놓고 실제로는 무시하는 경우가 있을 수 있는데,
-     * 그러면 앱은 보낸 줄 알고 성공으로 보고한다(카톡이 올렸는지 확인할 API 가 없다).
-     * 사용자가 "로그엔 보냈다는데 카톡엔 안 올라왔다" 를 발견하면 이걸 꺼서 공유창 경로로 되돌린다.
+     * 이 경로는 더 이상 성공으로 끝나지 않는다. 카톡이 이미지 타입을 선언해도
+     * 답장 인텐트 접수는 메시지 번호가 없고, 사진이 방에 없는 채로 성공이 된 적이 있다.
      */
     public static void setReplyImageEnabled(Context c, boolean on) {
         Prefs.putBool(c, K_REPLY_IMG_OFF, !on);
@@ -759,21 +754,21 @@ public final class ImageSender {
     }
 
     /**
-     * 사진을 한 장씩 알림 답장으로 보낸다. 메인 스레드에서만 돈다.
+     * 사진을 한 장씩 알림 답장으로 넘긴다. 메인 스레드에서만 돈다.
      *
-     * 한 장도 못 보냈으면 공유창 경로로 폴백한다. 이미 몇 장 나갔으면 폴백하지 않는다 —
-     * 공유창으로 다시 보내면 나간 장이 중복된다(그게 더 나쁘다).
-     *
-     * 카톡이 실제로 올렸는지는 확인할 방법이 없으니 <b>어느 경로로 보냈는지 로그에 남긴다.</b>
+     * {@link KakaoListener#sendImageTo} 가 true 여도 성공이 아니다. 그건 로컬 답장 큐에
+     * 넣은 것이고 카카오 메시지 번호가 없다. 호출부가 이 메서드를 다시 이어 붙이면
+     * 여기서 실패로 끝낸다 — 성공으로 바꾸지 말 것.
      */
     private static void sendByReply(final Job j, final int idx, final int sent) {
         if (current == null || current.id != j.id) return;   // 이미 끝난 건
 
         if (idx >= j.uris.size()) {
-            route(j, R_REPLY, "성공(" + sent + "장)");
-            Log.add(j.app, "이미지 " + sent + "장을 알림 답장으로 전송했습니다. 대화방: " + j.label
-                    + " · 화면 조작은 발생하지 않았습니다. 카카오톡에서 실제 업로드 여부를 확인하십시오.");
-            finish(j.id, true, "알림 답장으로 " + sent + "장을 전송했습니다(화면 조작 없음). 카카오톡에서 업로드 여부를 확인하십시오.");
+            route(j, R_REPLY, "접수만 됨(" + sent + "장, 메시지 번호 없음)");
+            String why = "알림 답장으로는 사진이 대화방에 올라갔는지 확인할 수 없습니다. "
+                    + "카카오가 답장을 접수만 하고 이미지는 표시하지 않았습니다.";
+            Log.add(j.app, "이미지 전송 실패: " + why + " 대화방: " + j.label);
+            finish(j.id, false, why);
             return;
         }
 
@@ -789,12 +784,12 @@ public final class ImageSender {
                 afterReply(j);
                 return;
             }
-            route(j, R_REPLY, "부분 성공(" + sent + "/" + j.uris.size() + "장)");
-            Log.add(j.app, "알림 답장으로 " + sent + "/" + j.uris.size() + "장만 전송했습니다. 대화방: " + j.label
-                    + ". 남은 " + (j.uris.size() - sent) + "장은 직접 전송하십시오"
-                    + "(중복 발송 방지를 위해 공유창 경로로 재시도하지 않습니다).");
-            diag(j, "알림 답장 " + (idx + 1) + "번째 이미지에서 실패", 0L, "앞의 " + sent + "장은 이미 전송되었습니다.");
-            finish(j.id, false, "알림 답장으로 " + sent + "장만 전송했습니다. 남은 이미지는 직접 전송하십시오.");
+            route(j, R_REPLY, "접수 중단(" + sent + "/" + j.uris.size() + "장, 메시지 번호 없음)");
+            String why = "알림 답장으로는 사진이 대화방에 올라갔는지 확인할 수 없습니다. "
+                    + "카카오가 답장을 접수만 하고 이미지는 표시하지 않았습니다.";
+            Log.add(j.app, "이미지 전송 실패: " + why + " 대화방: " + j.label);
+            diag(j, "알림 답장 " + (idx + 1) + "번째 이미지에서 실패", 0L, why);
+            finish(j.id, false, why);
             return;
         }
 
