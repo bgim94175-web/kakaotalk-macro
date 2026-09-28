@@ -74,7 +74,7 @@ public final class ScreenMacro {
     private static void fill(final MainActivity a, LinearLayout col) {
         final int fc = Theme.F_MACRO;
         col.addView(Ui.pageHead(a, "AUTO SEND", "매크로",
-                "대화방별 주기 발송 · 메시지 추적 · 개인 대화 자동응답", fc));
+                "방별 쿨타임 발송 · 경쟁사 저격 · 갠톡 자동응답", fc));
 
         if (!License.allowed(a, Features.MACRO)) {
             fillLocked(a, col);
@@ -105,13 +105,13 @@ public final class ScreenMacro {
                 }));
 
         String rooms = roomSummary(a, s);
-        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", (rooms == null) ? "설정 필요" : rooms,
+        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "방", (rooms == null) ? "설정 필요" : rooms,
                 (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
-                    @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
+                    @Override public void run() { Nav.push(a, "방", ScreenRooms.build(a)); }
                 }));
 
-        content.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 주기", cycleSummary(s), Theme.TEXT, new Runnable() {
-            @Override public void run() { Nav.push(a, "발송 주기", MacroDetail.cycle(a)); }
+        content.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 쿨타임", cycleSummary(s), Theme.TEXT, new Runnable() {
+            @Override public void run() { Nav.push(a, "발송 쿨타임", MacroDetail.cycle(a)); }
         }));
 
         boolean imgOn = !Settings.IMG_NEVER.equals(s.macro.sendImages);
@@ -129,26 +129,18 @@ public final class ScreenMacro {
         for (int i = 0; i < s.triggers.size(); i++) {
             if (s.triggers.get(i).enabled) trigOn++;
         }
-        extra.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "메시지 추적", trigSummary(s),
+        extra.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", trigSummary(s),
                 (trigOn > 0) ? Theme.SUB : Theme.DIM, (trigOn > 0) ? "사용 중" : null, new Runnable() {
-                    @Override public void run() { Nav.push(a, "메시지 추적", MacroDetail.triggers(a)); }
+                    @Override public void run() { Nav.push(a, "경쟁사 저격", MacroDetail.triggers(a)); }
                 }));
-        extra.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "개인 대화 자동응답", replySummary(s),
+        extra.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", replySummary(s),
                 s.autoreply.enabled ? Theme.SUB : Theme.DIM, s.autoreply.enabled ? "사용 중" : null,
                 new Runnable() {
                     @Override public void run() {
-                        Nav.push(a, "개인 대화 자동응답", MacroDetail.autoReply(a));
+                        Nav.push(a, "갠톡 자동응답", MacroDetail.autoReply(a));
                     }
                 }));
         col.addView(extra);
-
-        // ── 제한 ──
-        col.addView(Ui.sectionHeader(a, null, "제한"));
-        LinearLayout limit = Ui.group(a);
-        limit.addView(Ui.navRow(a, Icon.GAUGE, fc, "발송 제한", limitSummary(s), Theme.TEXT, new Runnable() {
-            @Override public void run() { Nav.push(a, "발송 제한", MacroDetail.limits(a)); }
-        }));
-        col.addView(limit);
 
         // ── 즉시 발송 ──
         final TextView send = Ui.btn(a, "즉시 발송", true);
@@ -189,14 +181,14 @@ public final class ScreenMacro {
 
     // ── 자동발송 머리 카드 ──────────────────────────────────────────────────
 
-    /** 자동발송 토글 + 다음 발송 · 금일 발송 · 대상 대화방. 홈도 같은 카드를 쓴다. */
+    /** 자동발송 토글 + 다음 발송 · 금일 발송 · 방. 홈도 같은 카드를 쓴다. */
     static LinearLayout autoCard(final MainActivity a, final Settings s) {
         final int fc = Theme.F_MACRO;
         int keep = Theme.accent();
         Theme.setAccent(fc);
         try {
             LinearLayout hero = Ui.hero(a, fc, Icon.SEND, "AUTO SEND", "자동발송",
-                    "카카오톡 알림 답장으로 발송합니다. 대상 대화방의 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+                    "카카오톡 알림 답장으로 발송합니다. 방의 알림이 1회 이상 수신되어야 발송이 가능합니다.");
             hero.addView(Ui.heroRule(a, fc));
 
             final TextView status = Ui.sub(a, statusText(a, s));
@@ -220,7 +212,7 @@ public final class ScreenMacro {
             stats.addView(Ui.stat(a, "다음 발송", live ? hm(at) : "—", live ? fc : Theme.DIM));
             stats.addView(Ui.stat(a, "금일 발송", MainActivity.sentToday(a) + "회", Theme.TEXT));
             int rn = s.macro.roomRefs().size();
-            stats.addView(Ui.stat(a, "대상 대화방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
+            stats.addView(Ui.stat(a, "방", rn + "개", (rn == 0) ? Theme.AMBER : Theme.TEXT));
             hero.addView(stats);
 
             LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -244,7 +236,7 @@ public final class ScreenMacro {
     /** 머리 카드 아래 한 줄. 켜짐이면 `다음 발송 21:34 · 금일 8회`. */
     private static String statusText(MainActivity a, Settings s) {
         if (!s.macro.enabled) return "자동발송이 꺼져 있습니다.";
-        if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
+        if (s.macro.roomRefs().isEmpty()) return "방 미설정 · 발송 보류";
         if (s.macro.message == null || s.macro.message.trim().length() == 0) {
             return "메시지 미설정 · 발송 보류";
         }
@@ -287,7 +279,14 @@ public final class ScreenMacro {
     }
 
     static String cycleSummary(Settings s) {
-        return s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분마다";
+        String base = s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분";
+        int custom = 0;
+        java.util.List<RoomRef> rooms = s.macro.roomRefs();
+        for (int i = 0; i < rooms.size(); i++) {
+            if (s.macro.cooldownMin(rooms.get(i)) > 0) custom++;
+        }
+        if (custom > 0) return "기본 " + base + " · " + custom + "개 지정";
+        return base + "마다";
     }
 
     /**
@@ -325,17 +324,6 @@ public final class ScreenMacro {
         return "사용 · " + scopeKr(r.scope);
     }
 
-    static String limitSummary(Settings s) {
-        String q = quietKr(s);
-        if ("없음".equals(q)) return "1일 " + s.macro.dailyLimit + "회";
-        return q + " 중지 · 1일 " + s.macro.dailyLimit + "회";
-    }
-
-    static String quietKr(Settings s) {
-        if (Settings.hhmm(s.macro.quietFrom) < 0 || Settings.hhmm(s.macro.quietTo) < 0) return "없음";
-        return s.macro.quietFrom + "~" + s.macro.quietTo;
-    }
-
     static String scopeKr(String scope) {
         if (Settings.SCOPE_UNKNOWN.equals(scope)) return "미등록 상대만";
         if (Settings.SCOPE_EXCEPT.equals(scope)) return "특정 대화방 제외";
@@ -357,9 +345,9 @@ public final class ScreenMacro {
         final List<RoomRef> rooms = targets(a, s);
         if (rooms.isEmpty()) {
             if (!s.macro.roomRefs().isEmpty()) {
-                Ui.toast(a, "대상 대화방이 모두 미사용 계정에 속합니다. 내정보 탭에서 대상 계정을 확인하십시오.");
+                Ui.toast(a, "방이 모두 미사용 계정에 속합니다. 내정보 탭에서 대상 계정을 확인하십시오.");
             } else {
-                Ui.toast(a, "대상 대화방을 먼저 설정하십시오.");
+                Ui.toast(a, "방을 먼저 설정하십시오.");
             }
             return;
         }
@@ -369,24 +357,10 @@ public final class ScreenMacro {
             return;
         }
 
-        // 자동발송이 지키는 규칙(방해금지·1일 한도)을 수동 발송도 먼저 확인한다.
-        // 넘길 수는 있지만 사용자가 의식적으로 넘기게 만든다.
-        String why = blockedWhy(a, s);
-        if (why != null) {
-            final String w = why;
-            Nav.confirm(a, "발송 제한 상태", w + "\n자동발송은 이 조건에서 발송하지 않습니다."
-                    + " 즉시 발송은 1일 한도에 함께 집계됩니다.", "발송", new Runnable() {
-                @Override public void run() {
-                    Log.add(a, "발송 제한 상태에서 즉시 발송을 실행했습니다. (" + w + ")");
-                    doSendNow(a, s, btn, rooms, msg);
-                }
-            });
-            return;
-        }
         doSendNow(a, s, btn, rooms, msg);
     }
 
-    /** 대상 대화방 중 사용 계정에 속한 것만 (Scheduler 와 같은 규칙) */
+    /** 방 중 사용 계정에 속한 것만 (Scheduler 와 같은 규칙) */
     private static List<RoomRef> targets(MainActivity a, Settings s) {
         ArrayList<RoomRef> out = new ArrayList<RoomRef>();
         List<RoomRef> all = s.macro.roomRefs();
@@ -397,23 +371,6 @@ public final class ScreenMacro {
             out.add(r);
         }
         return out;
-    }
-
-    /** 지금 보내면 자동발송 규칙에 걸리는 이유. 안 걸리면 null. */
-    private static String blockedWhy(MainActivity a, Settings s) {
-        try {
-            if (s.macro.inQuiet(System.currentTimeMillis())) {
-                return "현재 방해금지 시간입니다. (" + quietKr(s) + ")";
-            }
-            int limit = s.macro.dailyLimit;
-            int sent = MainActivity.sentToday(a);
-            if (limit > 0 && sent >= limit) {
-                return "금일 발송 " + sent + "회로 1일 한도(" + limit + "회)에 도달했습니다.";
-            }
-        } catch (Throwable t) {
-            return null;
-        }
-        return null;
     }
 
     private static void doSendNow(final MainActivity a, final Settings s, final TextView btn,

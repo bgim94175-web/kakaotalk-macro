@@ -146,10 +146,10 @@ public final class BotDetail {
                 col.addView(Ui.sectionHeader(a, null, "대상"));
                 LinearLayout g1 = Ui.group(a);
                 List<RoomRef> rooms = r.roomRefs();
-                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", roomValue(a, rooms),
+                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "방", roomValue(a, rooms),
                         rooms.isEmpty() ? Theme.AMBER : Theme.TEXT, new Runnable() {
                             @Override public void run() {
-                                Nav.push(a, "대상 대화방", roomSelect(a, roomBotRooms(a),
+                                Nav.push(a, "방", roomSelect(a, roomBotRooms(a),
                                         "선택한 대화방에서만 동작합니다. 선택이 없으면 동작하지 않습니다."));
                             }
                         }));
@@ -489,10 +489,10 @@ public final class BotDetail {
                 col.addView(Ui.sectionHeader(a, null, "대상"));
                 LinearLayout g1 = Ui.group(a);
                 List<RoomRef> rooms = g.roomRefs();
-                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "대상 대화방", roomValue(a, rooms),
+                g1.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "방", roomValue(a, rooms),
                         rooms.isEmpty() ? Theme.AMBER : Theme.TEXT, new Runnable() {
                             @Override public void run() {
-                                Nav.push(a, "대상 대화방", roomSelect(a, miniGameRooms(a),
+                                Nav.push(a, "방", roomSelect(a, miniGameRooms(a),
                                         "선택한 대화방에서만 명령을 처리합니다."
                                                 + " 선택이 없으면 동작하지 않습니다."));
                             }
@@ -631,7 +631,7 @@ public final class BotDetail {
         into.addView(r);
     }
 
-    /** 점수 · 진행 상태 (대상 대화방별) + 초기화 */
+    /** 점수 · 진행 상태 (방별) + 초기화 */
     private static View scores(MainActivity a) {
         return screen(a, new Filler() {
             @Override public void fill(final MainActivity a, LinearLayout col) {
@@ -641,7 +641,7 @@ public final class BotDetail {
                 if (rooms.isEmpty()) {
                     col.addView(Ui.sectionHeader(a, null, "점수"));
                     LinearLayout box = Ui.card(a);
-                    box.addView(Ui.sub(a, "대상 대화방이 설정되지 않았습니다."));
+                    box.addView(Ui.sub(a, "방이 설정되지 않았습니다."));
                     col.addView(box);
                 } else {
                     for (int i = 0; i < rooms.size(); i++) {
@@ -779,14 +779,14 @@ public final class BotDetail {
         boolean on = forRoomBot ? s.roombot.enabled : s.minigame.enabled;
         if (!on) return "미사용";
         List<RoomRef> rooms = forRoomBot ? s.roombot.roomRefs() : s.minigame.roomRefs();
-        if (rooms.isEmpty()) return "대상 대화방 미설정 · 동작 보류";
+        if (rooms.isEmpty()) return "방 미설정 · 동작 보류";
         int off = 0;
         for (int i = 0; i < rooms.size(); i++) {
             if (!s.accountOn(rooms.get(i).acc)) off++;
         }
-        if (off >= rooms.size()) return "대상 대화방이 모두 미사용 계정 · 동작 보류";
+        if (off >= rooms.size()) return "방이 모두 미사용 계정 · 동작 보류";
         if (!forRoomBot && onGames(s.minigame) == 0) return "사용할 게임 미선택 · 동작 보류";
-        return "사용 중 · 대상 대화방 " + rooms.size() + "개";
+        return "사용 중 · 방 " + rooms.size() + "개";
     }
 
     private static int statusColor(Settings s, boolean forRoomBot) {
@@ -975,7 +975,7 @@ public final class BotDetail {
     }
 
     // ── 대화방 다중 선택 (봇 전용) ──────────────────────────────────────────
-    //  매크로의 대상 대화방은 ScreenRooms 가 담당한다. 봇은 "이 봇이 도는 대화방" 이라
+    //  매크로의 방은 ScreenRooms 가 담당한다. 봇은 "이 봇이 도는 대화방" 이라
     //  삭제·초기화 없이 선택만 한다 (감지 목록 정리는 매크로 쪽 화면 한 곳에서만 한다).
 
     /** 어떤 설정의 대화방 목록인지 (읽고 쓰는 방법만 넘긴다) */

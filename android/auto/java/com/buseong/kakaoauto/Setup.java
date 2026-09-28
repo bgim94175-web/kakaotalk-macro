@@ -102,13 +102,13 @@ public final class Setup {
             Settings s = Settings.load(c);
             boolean msgOk = s.macro.message != null && s.macro.message.trim().length() > 0;
             boolean roomOk = !s.macro.roomRefs().isEmpty();
-            out.add(new Step("발송 메시지 작성", "자동발송 매크로가 대상 대화방에 발송할 본문입니다.",
+            out.add(new Step("발송 메시지 작성", "자동발송 매크로가 방에 발송할 본문입니다.",
                     "작성", msgOk, false, (a == null) ? null : new Runnable() {
                         @Override public void run() { Nav.push(a, "메시지", MacroDetail.message(a)); }
                     }));
-            out.add(new Step("대상 대화방 선택", "자동발송 매크로가 발송할 대화방을 선택합니다.",
+            out.add(new Step("방 선택", "자동발송 매크로가 발송할 대화방을 선택합니다.",
                     "선택", roomOk, false, (a == null) ? null : new Runnable() {
-                        @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
+                        @Override public void run() { Nav.push(a, "방", ScreenRooms.build(a)); }
                     }));
         }
         return out;

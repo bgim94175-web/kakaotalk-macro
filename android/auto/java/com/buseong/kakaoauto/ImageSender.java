@@ -313,8 +313,8 @@ public final class ImageSender {
 
         final RoomRef ref = (room == null) ? RoomRef.of("") : room;
         if (!ref.valid()) {
-            Log.add(c, "이미지 전송을 취소했습니다. 대상 대화방 이름이 비어 있습니다.");
-            fire(onDone, false, "대상 대화방 이름이 비어 있습니다.");
+            Log.add(c, "이미지 전송을 취소했습니다. 방 이름이 비어 있습니다.");
+            fire(onDone, false, "방 이름이 비어 있습니다.");
             return;
         }
         final String label = ref.label(c);
@@ -1577,7 +1577,7 @@ public final class ImageSender {
         b.append("단계: ").append(step).append('\n');
         if (extra != null && extra.length() > 0) b.append("힌트: ").append(extra).append('\n');
         // 이름과 계정을 절대 한 문자열로 합치지 않는다 (합쳐 쓰다 화면 매칭이 깨진 적이 있다)
-        b.append("대상 대화방 이름: \"").append(j.ref.name).append("\"\n");
+        b.append("방 이름: \"").append(j.ref.name).append("\"\n");
         b.append("대상 계정: ").append(accLabel(j.app, j.ref)).append('\n');
         b.append("첨부 이미지: ").append(j.uris.size()).append("장");
         if (j.single) b.append(" · 단건 모드(ACTION_SEND) ").append(j.cursor + 1).append("번째");

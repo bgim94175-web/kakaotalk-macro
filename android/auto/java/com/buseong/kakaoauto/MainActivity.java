@@ -185,17 +185,16 @@ public final class MainActivity extends Activity {
         brand.addView(lead);
         col.addView(brand, new LinearLayout.LayoutParams(MATCH, WRAP));
 
-        // ── 기능 3종 (기능마다 색이 다르다) ──
-        LinearLayout feats = Ui.row(this);
+        LinearLayout feats = new LinearLayout(this);
+        feats.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        fp.topMargin = Theme.dp(this, 24);
-        fp.bottomMargin = Theme.dp(this, 22);
+        fp.bottomMargin = Theme.dp(this, 8);
         feats.setLayoutParams(fp);
         for (int i = 0; i < Features.ALL.length; i++) {
             String id = Features.ALL[i];
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, WRAP, 1f);
-            if (i > 0) cp.leftMargin = Theme.dp(this, 8);
-            feats.addView(featChip(this, Features.color(id), Features.icon(id), shortName(id)), cp);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(MATCH, WRAP);
+            cp.bottomMargin = Theme.dp(this, 8);
+            feats.addView(featChip(this, Features.color(id), Features.icon(id), Features.label(id)), cp);
         }
         col.addView(feats);
 
@@ -317,7 +316,7 @@ public final class MainActivity extends Activity {
         LinearLayout steps = Ui.card(this);
         steps.addView(introStep(this, 1, "라이선스 인증", "구매 시 발급된 키를 입력합니다.", false));
         steps.addView(introStep(this, 2, "권한 설정", "알림 접근 · 배터리 최적화 제외를 안내에 따라 허용합니다.", true));
-        steps.addView(introStep(this, 3, "기능 설정", "메시지와 대상 대화방을 정하면 백그라운드에서 동작합니다.", true));
+        steps.addView(introStep(this, 3, "기능 설정", "메시지와 방을 정하면 백그라운드에서 동작합니다.", true));
         col.addView(steps);
 
         // ── 이 기기 · 도움 ──
@@ -364,16 +363,8 @@ public final class MainActivity extends Activity {
         t.setTextColor(Theme.TEXT);
         t.setTypeface(Typeface.SANS_SERIF);
         t.setIncludeFontPadding(false);
-        t.setSingleLine(true);
         l.addView(t);
         return l;
-    }
-
-    private static String shortName(String id) {
-        if (Features.MACRO.equals(id)) return "자동발송";
-        if (Features.ROOMBOT.equals(id)) return "관리봇";
-        if (Features.MINIGAME.equals(id)) return "미니게임";
-        return Features.label(id);
     }
 
     private static View introStep(Context c, int no, String title, String desc, boolean gap) {
@@ -569,13 +560,13 @@ public final class MainActivity extends Activity {
                     }));
             int trigOn = 0;
             for (int i = 0; i < s.triggers.size(); i++) if (s.triggers.get(i).enabled) trigOn++;
-            g.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "메시지 추적", ScreenMacro.trigSummary(s),
+            g.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", ScreenMacro.trigSummary(s),
                     (trigOn > 0) ? Theme.SUB : Theme.DIM, null, new Runnable() {
-                        @Override public void run() { Nav.push(a, "메시지 추적", MacroDetail.triggers(a)); }
+                        @Override public void run() { Nav.push(a, "경쟁사 저격", MacroDetail.triggers(a)); }
                     }));
-            g.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "개인 대화 자동응답", ScreenMacro.replySummary(s),
+            g.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", ScreenMacro.replySummary(s),
                     s.autoreply.enabled ? Theme.SUB : Theme.DIM, null, new Runnable() {
-                        @Override public void run() { Nav.push(a, "개인 대화 자동응답", MacroDetail.autoReply(a)); }
+                        @Override public void run() { Nav.push(a, "갠톡 자동응답", MacroDetail.autoReply(a)); }
                     }));
         }
         botRow(a, g, Features.ROOMBOT, ScreenBot.NAME_ROOMBOT,

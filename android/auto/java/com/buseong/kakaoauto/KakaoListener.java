@@ -436,7 +436,7 @@ public final class KakaoListener extends NotificationListenerService {
                     // 그룹 여부·내 메시지 여부를 여기서 이미 판정했으니 둘 다 넘긴다
                     Trigger.onMessage(ctx, m.ref, m.sender, m.text, m.group, m.fromMe);
                 } catch (Throwable t) {
-                    Log.add(ctx, "메시지 추적 처리 중 오류: " + t);
+                    Log.add(ctx, "경쟁사 저격 처리 중 오류: " + t);
                 }
                 // 자동응답은 1:1 전용이다. 여기서 group==false 를 한 번 더 확인한다.
                 if (!m.group && !m.fromMe && safeForAutoReply(ctx, m)) {
@@ -1371,11 +1371,11 @@ public final class KakaoListener extends NotificationListenerService {
 
     private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
         if (ref == null || !ref.valid()) {
-            Log.add(ctx, "발송 실패: 대상 대화방이 지정되지 않았습니다.");
+            Log.add(ctx, "발송 실패: 방이 지정되지 않았습니다.");
             return false;
         }
         // 계정 사용 여부는 여기 한 곳에서만 검사한다.
-        // 엔진마다 흩어놓으면 빠지는 경로가 생긴다 — 실제로 메시지 추적의 '다른 대화방으로 발송'
+        // 엔진마다 흩어놓으면 빠지는 경로가 생긴다 — 실제로 경쟁사 저격의 '다른 대화방으로 발송'
         // 경로가 수신 대화방만 검사하고 발송 대상 계정은 검사하지 않아 미사용 계정으로 나갔다.
         if (!accountAllowed(ctx, ref.acc)) {
             Log.add(ctx, "발송 취소: " + ref.label(ctx) + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다.");

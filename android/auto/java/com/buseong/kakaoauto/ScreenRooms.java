@@ -22,7 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 대상 대화방 관리 화면 (UI_V3 5장). 매크로 탭의 `대상 방 ›` 에서 Nav.push 로 열린다.
+ * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `대상 방 ›` 에서 Nav.push 로 열린다.
  *
  * 한 화면에서 선택·삭제·추가를 다 한다:
  *   - 계정별 섹션 → 그 계정의 대화방을 체크박스 목록으로 (계정 1개면 머리글 숨김)
@@ -80,7 +80,7 @@ public final class ScreenRooms {
         try {
             fill(a, col);
         } catch (Throwable t) {
-            Log.add(a, "대상 대화방 화면 구성에 실패했습니다: " + t);
+            Log.add(a, "방 화면 구성에 실패했습니다: " + t);
         }
         return Ui.scroll(a, col);
     }
@@ -96,7 +96,7 @@ public final class ScreenRooms {
             col.removeAllViews();
             fill(a, col);
         } catch (Throwable t) {
-            Log.add(a, "대상 대화방 목록 갱신에 실패했습니다: " + t);
+            Log.add(a, "방 목록 갱신에 실패했습니다: " + t);
         } finally {
             Theme.setAccent(keep);
         }
@@ -122,7 +122,7 @@ public final class ScreenRooms {
             if (rows.get(i).selected) selected++;
         }
 
-        LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "대상 대화방",
+        LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "방",
                 "선택한 대화방에 발송합니다. 대화방은 카카오톡 알림을 1회 수신하면 자동으로 감지됩니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ROOMS));
         LinearLayout stats = Ui.row(a);
@@ -172,7 +172,7 @@ public final class ScreenRooms {
         col.addView(clear);
 
         TextView help = Ui.sub(a, "감지 목록 초기화는 감지된 대화방 기록만 비웁니다. "
-                + "선택된 대상 대화방은 유지됩니다.");
+                + "선택된 방은 유지됩니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
@@ -381,7 +381,7 @@ public final class ScreenRooms {
     /** 감지 캐시 전체 비우기. 선택된 방은 건드리지 않는다 (UI_V3 5장). */
     private static void clearDialog(final MainActivity a) {
         Nav.confirm(a, "감지 목록 초기화",
-                "감지된 대화방 기록을 전부 삭제합니다. 선택된 대상 대화방은 유지됩니다. "
+                "감지된 대화방 기록을 전부 삭제합니다. 선택된 방은 유지됩니다. "
                         + "이후 카카오톡 메시지를 수신하면 다시 등록됩니다.",
                 "초기화", new Runnable() {
                     @Override public void run() {
@@ -494,7 +494,7 @@ public final class ScreenRooms {
                     }
                 }
                 select(a, ref, true);
-                Log.add(a, "대상 대화방을 직접 추가했습니다: " + ref.label(a));
+                Log.add(a, "방을 직접 추가했습니다: " + ref.label(a));
                 refresh();
                 Nav.reload();
                 return null;

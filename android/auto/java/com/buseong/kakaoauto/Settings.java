@@ -6,9 +6,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -146,12 +149,24 @@ public final class Settings {
          * 구분자 없는 옛 값(방 이름만)은 기본 계정("0")으로 읽힌다.
          */
         public List<String> rooms = new ArrayList<String>();
-        /** 발송 주기 최소/최대 (분). 이 사이에서 랜덤으로 다음 시각을 잡는다. */
+        /** 기본 쿨타임 최소/최대 (분). 방별 값이 없을 때 이 사이에서 임의로 잡는다. */
         public int intervalMinMin = 20;
         public int intervalMaxMin = 40;
+        /**
+         * 방별 쿨타임(분). 키는 {@link RoomRef#key()}.
+         * 없거나 0 이면 {@link #intervalMinMin}~{@link #intervalMaxMin} 을 쓴다.
+         */
+        public Map<String, Integer> roomCooldownMin = new HashMap<String, Integer>();
+        /**
+         * 방별 다음 발송 가능 시각 (epoch ms). 키는 {@link RoomRef#key()}.
+         * 0 이거나 없으면 아직 쿨타임이 시작되지 않은 것이다.
+         */
+        public Map<String, Long> roomDueAt = new HashMap<String, Long>();
+        /** 방별 마지막 발송 시각 (epoch ms). 쿨타임을 바꾸면 이 시각부터 다시 계산한다. */
+        public Map<String, Long> roomLastSent = new HashMap<String, Long>();
         /** 마지막 발송 뒤 방에 새 메시지가 이만큼 올라와야 다시 보낸다 (도배 방지) */
         public int minMessages = 1;
-        /** 다음 발송 예정 시각 (epoch ms). 0 이면 아직 안 잡힘. */
+        /** 다음 알람 시각 (epoch ms). 방별 쿨타임 중 가장 빠른 시각. 0 이면 아직 안 잡힘. */
         public long nextAt = 0L;
         /** 이미지 첨부 모드 — IMG_* 중 하나 */
         public String sendImages = IMG_NEVER;
@@ -170,9 +185,88 @@ public final class Settings {
             return refsOf(rooms);
         }
 
-        /** 발송 대상 방을 통째로 교체 */
+        /** 발송 대상 방을 통째로 교체. 목록에서 빠진 방의 쿨타임도 함께 지운다. */
         public void setRoomRefs(List<RoomRef> list) {
             rooms = keysOf(list);
+            HashSet<String> keep = new HashSet<String>();
+            for (int i = 0; i < rooms.size(); i++) keep.add(rooms.get(i));
+            dropMissing(roomCooldownMin, keep);
+            dropMissing(roomDueAt, keep);
+            dropMissing(roomLastSent, keep);
+        }
+
+        /** 이 방에 마지막으로 발송한 시각. 0 이면 아직 없다. */
+        public long lastSent(RoomRef room) {
+            if (room == null) return 0L;
+            Long v = roomLastSent.get(room.key());
+            return (v == null) ? 0L : v.longValue();
+        }
+
+        public void setLastSent(RoomRef room, long at) {
+            if (room == null || !room.valid()) return;
+            if (at <= 0L) roomLastSent.remove(room.key());
+            else roomLastSent.put(room.key(), Long.valueOf(at));
+        }
+
+        /** 이 방의 지정 쿨타임(분). 0 이면 기본 간격을 쓴다. */
+        public int cooldownMin(RoomRef room) {
+            if (room == null) return 0;
+            Integer v = roomCooldownMin.get(room.key());
+            if (v == null || v.intValue() < 1) return 0;
+            return v.intValue();
+        }
+
+        /** 방별 쿨타임을 저장한다. 1분 미만이면 기본 간격으로 되돌린다. */
+        public void setCooldownMin(RoomRef room, int minutes) {
+            if (room == null || !room.valid()) return;
+            if (minutes < 1) roomCooldownMin.remove(room.key());
+            else roomCooldownMin.put(room.key(), Integer.valueOf(Math.min(1440, minutes)));
+        }
+
+        /** 이 방을 다시 보낼 수 있는 시각. 0 이면 쿨타임이 없다. */
+        public long dueAt(RoomRef room) {
+            if (room == null) return 0L;
+            Long v = roomDueAt.get(room.key());
+            return (v == null) ? 0L : v.longValue();
+        }
+
+        /** 방별 다음 발송 시각을 기록한다. 0 이하면 지운다. */
+        public void setDueAt(RoomRef room, long at) {
+            if (room == null || !room.valid()) return;
+            if (at <= 0L) roomDueAt.remove(room.key());
+            else roomDueAt.put(room.key(), Long.valueOf(at));
+        }
+
+        /** 목록에 보여줄 쿨타임. 방 값이 없으면 기본 간격으로 적는다. */
+        public String cooldownLabel(RoomRef room) {
+            int own = cooldownMin(room);
+            if (own > 0) return own + "분";
+            int lo = Math.max(1, Math.min(intervalMinMin, intervalMaxMin));
+            int hi = Math.max(lo, Math.max(intervalMinMin, intervalMaxMin));
+            if (lo == hi) return "기본 " + lo + "분";
+            return "기본 " + lo + "~" + hi + "분";
+        }
+
+        /**
+         * 이 발송 뒤에 적용할 쿨타임.
+         * 방에 값이 있으면 그 분 수, 없으면 기본 최소~최대 사이의 임의 간격.
+         */
+        public long cooldownMs(RoomRef room) {
+            int own = cooldownMin(room);
+            if (own > 0) return (long) own * 60000L;
+            int lo = Math.max(1, Math.min(intervalMinMin, intervalMaxMin));
+            int hi = Math.max(lo, Math.max(intervalMinMin, intervalMaxMin));
+            int span = hi - lo + 1;
+            int mins = lo + (int) Math.floor(Math.random() * span);
+            return (long) mins * 60000L;
+        }
+
+        /** 목록에 없는 방의 저장값을 지운다. */
+        private static void dropMissing(Map<String, ?> map, HashSet<String> keep) {
+            Iterator<String> it = map.keySet().iterator();
+            while (it.hasNext()) {
+                if (!keep.contains(it.next())) it.remove();
+            }
         }
 
         /** 이 방이 발송 대상인가 */
@@ -216,15 +310,9 @@ public final class Settings {
             return now >= from || now < to;    // 22:00 ~ 07:00
         }
 
-        /** 다음 발송 시각을 주기 안에서 랜덤으로 잡는다 (방해금지면 끝나는 시각 이후로 밀어준다) */
+        /** 기본 간격으로 다음 시각을 잡는다. 방별 쿨타임이 있으면 {@link #cooldownMs} 를 쓴다. */
         public long pickNextAt(long fromMillis) {
-            int lo = Math.max(1, Math.min(intervalMinMin, intervalMaxMin));
-            int hi = Math.max(lo, Math.max(intervalMinMin, intervalMaxMin));
-            int span = hi - lo + 1;
-            int mins = lo + (int) Math.floor(Math.random() * span);
-            long at = fromMillis + (long) mins * 60000L;
-            for (int guard = 0; guard < 48 && inQuiet(at); guard++) at += 30L * 60000L;
-            return at;
+            return fromMillis + cooldownMs(null);
         }
     }
 
@@ -293,7 +381,7 @@ public final class Settings {
         }
     }
 
-    /** 메시지 추적 = 키워드 트리거 (SPEC 8.4 C) */
+    /** 경쟁사 저격 = 키워드 트리거 (SPEC 8.4 C) */
     public static final class TriggerCfg {
         /** 목록에서 이 규칙을 가리키는 고정 id (쿨다운 상태 저장 키로도 쓴다) */
         public String id = Crypto.randomHex(5);
@@ -737,6 +825,9 @@ public final class Settings {
             m.put("quietFrom", macro.quietFrom);
             m.put("quietTo", macro.quietTo);
             m.put("dailyLimit", macro.dailyLimit);
+            m.put("roomCooldownMin", intMap(macro.roomCooldownMin));
+            m.put("roomDueAt", longMap(macro.roomDueAt));
+            m.put("roomLastSent", longMap(macro.roomLastSent));
             o.put("macro", m);
 
             JSONObject a = new JSONObject();
@@ -844,6 +935,9 @@ public final class Settings {
             s.macro.quietFrom = hhmmOrEmpty(str(m, "quietFrom", ""));
             s.macro.quietTo = hhmmOrEmpty(str(m, "quietTo", ""));
             s.macro.dailyLimit = clamp(m.optInt("dailyLimit", s.macro.dailyLimit), 0, 9999);
+            readIntMap(m, "roomCooldownMin", s.macro.roomCooldownMin);
+            readLongMap(m, "roomDueAt", s.macro.roomDueAt);
+            readLongMap(m, "roomLastSent", s.macro.roomLastSent);
         }
 
         JSONObject a = o.optJSONObject("autoreply");
@@ -951,7 +1045,7 @@ public final class Settings {
             String back = Prefs.secGet(c, SLOT);
             if (back != null && back.equals(json)) {
                 for (int i = 0; i < LEGACY.length; i++) Prefs.remove(c, LEGACY[i]);
-                Log.add(c, "이전 버전 설정을 이전하여 암호화 저장했습니다. (대상 대화방 " + s.macro.rooms.size() + "개)");
+                Log.add(c, "이전 버전 설정을 이전하여 암호화 저장했습니다. (방 " + s.macro.rooms.size() + "개)");
             } else {
                 Log.add(c, "이전 버전 설정의 저장에 실패했습니다. 기존 설정은 삭제하지 않고 보존했습니다.");
             }
@@ -962,6 +1056,64 @@ public final class Settings {
     }
 
     // ── 도구 ──────────────────────────────────────────────────────────────────
+
+    private static JSONObject intMap(Map<String, Integer> map) {
+        JSONObject o = new JSONObject();
+        if (map == null) return o;
+        try {
+            for (Map.Entry<String, Integer> e : map.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                if (e.getValue().intValue() < 1) continue;
+                o.put(e.getKey(), e.getValue().intValue());
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "방별 쿨타임 저장 실패", t);
+        }
+        return o;
+    }
+
+    private static JSONObject longMap(Map<String, Long> map) {
+        JSONObject o = new JSONObject();
+        if (map == null) return o;
+        try {
+            for (Map.Entry<String, Long> e : map.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                if (e.getValue().longValue() <= 0L) continue;
+                o.put(e.getKey(), e.getValue().longValue());
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "방별 예약 시각 저장 실패", t);
+        }
+        return o;
+    }
+
+    private static void readIntMap(JSONObject parent, String key, Map<String, Integer> into) {
+        if (parent == null || into == null) return;
+        JSONObject o = parent.optJSONObject(key);
+        if (o == null) return;
+        JSONArray names = o.names();
+        if (names == null) return;
+        for (int i = 0; i < names.length(); i++) {
+            String k = names.optString(i, "");
+            if (k.length() == 0) continue;
+            int v = o.optInt(k, 0);
+            if (v > 0) into.put(k, Integer.valueOf(Math.max(1, Math.min(1440, v))));
+        }
+    }
+
+    private static void readLongMap(JSONObject parent, String key, Map<String, Long> into) {
+        if (parent == null || into == null) return;
+        JSONObject o = parent.optJSONObject(key);
+        if (o == null) return;
+        JSONArray names = o.names();
+        if (names == null) return;
+        for (int i = 0; i < names.length(); i++) {
+            String k = names.optString(i, "");
+            if (k.length() == 0) continue;
+            long v = o.optLong(k, 0L);
+            if (v > 0L) into.put(k, Long.valueOf(v));
+        }
+    }
 
     private static JSONArray arr(List<String> v) {
         JSONArray a = new JSONArray();

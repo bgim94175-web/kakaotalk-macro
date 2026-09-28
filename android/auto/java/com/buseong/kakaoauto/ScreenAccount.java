@@ -659,7 +659,7 @@ public final class ScreenAccount {
             LinearLayout card = Ui.card(a);
             card.addView(Ui.kv(a, "마지막 실패", (fail == null) ? "없음" : ScreenMacro.ago(fail.at)));
             if (fail != null) {
-                card.addView(Ui.kv(a, "대상 대화방",
+                card.addView(Ui.kv(a, "방",
                         (fail.room.length() == 0) ? "미확인" : Nav.preview(fail.room, 16)));
                 card.addView(Ui.kv(a, "사유", Nav.preview(fail.why, 40)));
             }
