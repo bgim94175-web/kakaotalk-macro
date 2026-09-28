@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 이미지 1~5장 전송 오케스트레이션. 경로가 두 계열이다.
+ * 이미지 1~5장 전송 오케스트레이션. 경로가 세 계열이고 <b>이 순서로</b> 시도한다.
  *
  * <h3>경로 A — 알림 답장에 사진 첨부 (화면이 아예 안 움직인다)</h3>
  * 카톡이 알림 답장 {@code RemoteInput} 에 이미지 데이터 타입을 허용해뒀으면
@@ -26,7 +26,20 @@ import java.util.Locale;
  * MIME 하나당 URI 하나라서 <b>한 장씩 순서대로</b> 보낸다.
  * 되는지 안 되는지는 기기/카톡 버전마다 다르니 <b>런타임에 확인해서 로그로 알려준다.</b>
  *
- * <h3>경로 B — 공유창 + 접근성 조작 (화면이 잠깐 움직인다)</h3>
+ * <h3>경로 B — 채팅방 내부 첨부 시트 (현장에서 유일하게 관측된 화면)</h3>
+ * 근거: {@code docs/field/kakao-attach-sheet-26.8.2.md} (실기기 뷰 트리).
+ * 알림 contentIntent({@link KakaoListener#openIntentFor})로 채팅방을 열고,
+ * {@code KakaoAccessibility.armAttach} 가 첨부(+) → {@code 사진} → 썸네일 선택 → {@code btn_send} 를 밟는다.
+ * 사진은 <b>촬영/저장 시각</b>으로 지목한다 — 썸네일 {@code contentDescription} 이
+ * {@code "사진, 9월 28일 오전 8:20"} 형식이라 {@link ImagePicker#kakaoDescList} 가 만든 문자열과
+ * 정확 일치로 찾을 수 있다. 시각을 못 읽는 사진은 <b>이 경로로 지목할 수 없다</b>.
+ *
+ * <h3>경로 C — 공유창 + 접근성 조작 (폴백)</h3>
+ * <b>실기기 두 번의 시도에서 카톡 공유 대상 선택 화면이 한 번도 관측되지 않았다</b>
+ * (안드로이드 16 + 백그라운드 실행 제한으로 판단된다). 그래서 기본 경로가 아니라 폴백이고,
+ * {@link #SHARE_SHOW_MS} 안에 카톡 창이 안 보이면 다음 경로로 <b>빠르게</b> 넘어간다.
+ * 예전에는 이 경로가 기본이어서, 안 뜨는 창을 9초씩 기다리다 40초를 통째로 버렸다.
+ *
  * 여기가 현장에서 제일 많이 깨지는 자리다. 그래서 <b>한 번 던져보고 실패로 끝내지 않고</b>
  * 실행 경로를 순서대로 올라간다. 어느 경로로 성공했는지는 반드시 로그에 남긴다.
  *
@@ -40,6 +53,12 @@ import java.util.Locale;
  *   4. 그래도 안 되면 컴포넌트를 명시해서 한 번 더 던진다.
  *   5. 공유창은 떴는데 접근성이 못 봤거나 방을 못 고른 경우는 접근성 쪽 덤프가 원인을 말한다
  *      (= 원인 (c)).
+ *
+ * <h3>어느 경로를 탔는지 반드시 남긴다</h3>
+ * 경로가 세 개라 "실패했다" 만 적으면 아무것도 고칠 수 없다. 그래서 경로마다
+ * <b>시도했는지 · 건너뛰었으면 왜 · 실패했으면 어디서</b> 를 {@code Job.routes} 에 쌓아
+ * 로그와 진단({@link #diag})에 같이 찍는다. 포그라운드/백그라운드도 같은 자리에 적는다 —
+ * 예약 발송과 수동 발송은 실패 원인이 완전히 다르다.
  *
  * 한 번에 한 건만 돌린다(카톡 공유창이 겹치면 둘 다 망한다). 겹쳐 들어온 요청은 줄 세워서 순서대로.
  * 어느 스레드에서 불러도 된다 — 내부 상태는 전부 메인 루퍼에서만 만진다.
@@ -77,9 +96,18 @@ public final class ImageSender {
 
     /**
      * 공유 인텐트를 던진 뒤 카톡 창을 이만큼 기다린다. 넘으면 다음 경로로 올라간다.
-     * 6초는 카톡 26.x 공유창 콜드스타트에 짧다(현장 실패 사례).
+     *
+     * 공유창은 이제 <b>폴백</b>이다. 실기기 두 번의 시도에서 공유 대상 선택 화면이 한 번도
+     * 관측되지 않았으므로, 오래 기다리는 것 자체가 손해다 — 기다린 시간만큼 채팅방 첨부 경로가
+     * 늦어지고 예약 발송의 실행 예산도 줄어든다. 6초 내 미표시면 원인을 적고 빠르게 포기한다.
      */
-    private static final long SHARE_SHOW_MS = 9000L;
+    private static final long SHARE_SHOW_MS = 6000L;
+
+    /**
+     * 채팅방을 열라고 알림 인텐트를 던진 뒤 카톡 창을 이만큼 기다린다.
+     * 안 뜨면 백그라운드 액티비티 차단으로 보고 다음 경로로 넘어간다.
+     */
+    private static final long ATTACH_OPEN_MS = 6000L;
 
     /**
      * {@link WakeActivity} 가 화면에 뜨는 데 주는 시간.
@@ -97,6 +125,11 @@ public final class ImageSender {
     private static final String P_DIRECT = "직접 실행";
     private static final String P_WAKE = "화면 활성화 후 실행";
     private static final String P_COMPONENT = "직접 실행(대상 지정)";
+
+    // ── 전송 경로 이름 (경로 계열 — 위의 공유 인텐트 실행 경로와 다른 층이다) ────
+    private static final String R_REPLY = "알림 답장";
+    private static final String R_ATTACH = "채팅방 첨부";
+    private static final String R_SHARE = "공유창";
 
     /** 화면이 꺼지고 잠겨 있어서 못 보낸 경우의 안내 (전용 폰이면 잠금을 없애는 게 정답이다) */
     private static final String LOCK_HELP =
@@ -164,6 +197,24 @@ public final class ImageSender {
         final String label;
         final ArrayList<String> uris;
         final Done onDone;
+
+        /**
+         * 경로별 결과 한 줄씩 ("채팅방 첨부 → 대화방 열기 인텐트 없음"). 로그·진단에 그대로 찍는다.
+         * 이게 없으면 "실패했다" 만 남아서 어느 경로가 왜 막혔는지 아무도 모른다.
+         */
+        final ArrayList<String> routes = new ArrayList<String>(4);
+
+        // ── 채팅방 첨부 경로 상태 ──
+        /** 사진별 후보 문자열 ({@link ImagePicker#kakaoDescList}). 순서는 attachUris 와 같다. */
+        final ArrayList<List<String>> descs = new ArrayList<List<String>>(MAX);
+        /** 첨부 경로로 지목할 수 있는 URI (시각을 읽은 것만) */
+        final ArrayList<String> attachUris = new ArrayList<String>(MAX);
+        /** 시각을 못 읽어서 첨부 경로에서 제외한 장수 */
+        int noTime = 0;
+        /** 채팅방 열기 인텐트를 던진 시각 (0 = 아직) */
+        volatile long attachAt = 0L;
+        /** 첨부 경로를 실제로 시도했나 (진단에 "안 해봤다" 와 "해보고 실패" 를 구별해 적는다) */
+        volatile boolean attachTried = false;
 
         // ── 공유창 경로 상태 ──
         Share share = null;
@@ -514,13 +565,93 @@ public final class ImageSender {
         start(j);
     }
 
+    /**
+     * 경로 선택. <b>A(알림 답장) → B(채팅방 첨부) → C(공유창)</b> 순서다.
+     *
+     * 공유창이 마지막인 이유는 실기기에서 한 번도 안 떴기 때문이다(확정된 사실).
+     * 건너뛴 경로도 <b>왜 건너뛰었는지</b> 를 남긴다 — 그게 없으면 "채팅방 첨부를 시도했는데
+     * 실패한 것" 과 "애초에 재료가 없어서 시도조차 못 한 것" 이 로그에서 똑같이 보인다.
+     */
     private static void start(final Job j) {
-        // 경로 A 를 먼저 본다 — 되면 화면이 아예 안 움직인다.
+        // 포그라운드 여부를 여기서 한 번 확정한다. 어느 경로로 가든 진단에 이 값이 필요하다
+        // (예약 발송과 수동 발송은 실패 원인이 완전히 다르다).
+        j.fg = foregroundNow(j.app);
+        Log.add(j.app, "이미지 " + j.uris.size() + "장 전송을 시작합니다. 대화방: " + j.label
+                + " · 앱 상태: " + fgText(j.fg) + " · 화면: " + screenState(j.app));
+
+        // 경로 A — 되면 화면이 아예 안 움직인다.
         if (replyImageReady(j.app, j.ref)) {
+            route(j, R_ATTACH, "시도하지 않음(알림 답장 경로가 사용 가능)");
+            route(j, R_SHARE, "시도하지 않음(알림 답장 경로가 사용 가능)");
             sendByReply(j, 0, 0);
             return;
         }
+        route(j, R_REPLY, replyWhy(j.app, j.ref));
+
+        // 경로 B — 채팅방 첨부. 현장에서 구조가 전부 확인된 유일한 화면이다.
+        if (startAttach(j)) return;
+
+        // 경로 C — 공유창 폴백. 백그라운드에서 이미 불가로 확정됐으면 헛시도하지 않는다.
+        if (!j.fg && backgroundBlockedAt(j.app) > 0L) {
+            route(j, R_SHARE, "시도하지 않음(백그라운드 공유창 불가로 확정된 상태)");
+            failAllRoutes(j);
+            return;
+        }
         startShare(j);
+    }
+
+    /** 알림 답장 경로를 못 쓰는 이유 한 줄 (진단에 그대로 찍힌다) */
+    private static String replyWhy(Context c, RoomRef ref) {
+        try {
+            if (!replyImageEnabled(c)) return "건너뜀(설정에서 비활성)";
+            if (!KakaoListener.listenerBound()) {
+                return KakaoListener.connected(c)
+                        ? "사용 불가(알림 리스너 미연결 — 카카오톡 알림 1회 수신 필요)"
+                        : "사용 불가(알림 읽기 권한 비활성)";
+            }
+            java.util.Set<String> t = KakaoListener.imageTypesFor(ref);
+            if (t == null || t.isEmpty()) {
+                return "사용 불가(카카오톡이 답장창에 이미지 타입을 제공하지 않거나 대화방 세션 없음)";
+            }
+            return "사용 불가(원인 미확정)";
+        } catch (Throwable t) {
+            return "확인 실패(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** 경로 결과 한 줄 적립 */
+    private static void route(Job j, String name, String why) {
+        if (j == null) return;
+        j.routes.add(name + " → " + why);
+    }
+
+    /** 경로 기록을 한 줄로 */
+    private static String routeText(Job j) {
+        if (j.routes.isEmpty()) return "없음";
+        StringBuilder b = new StringBuilder(160);
+        for (int i = 0; i < j.routes.size(); i++) {
+            if (i > 0) b.append(" / ");
+            b.append(j.routes.get(i));
+        }
+        return b.toString();
+    }
+
+    /** 포그라운드 여부를 사람 말로 (로그·진단에서 같은 문구를 쓴다) */
+    private static String fgText(boolean fg) {
+        return fg ? "화면 표시 중(수동 발송)" : "백그라운드(예약 발송)";
+    }
+
+    /**
+     * 세 경로가 모두 막혔다. <b>정직하게</b> 끝낸다 — 백그라운드면 텍스트만 나간 상태이므로
+     * 그 사실을 남긴다({@link Scheduler} 가 이 결과를 받아 하루 1회만 사용자에게 알린다).
+     */
+    private static void failAllRoutes(final Job j) {
+        String why = "이미지 전송 가능한 경로가 없습니다. " + routeText(j)
+                + (j.fg ? "" : " 예약 발송(백그라운드)에서는 이미지를 생략하고 텍스트만 발송됩니다.");
+        diag(j, "전송 경로 없음 — 알림 답장·채팅방 첨부·공유창 모두 사용 불가", 0L, why);
+        Log.add(j.app, "이미지 전송 실패: " + why);
+        if (!j.fg) j.bgMiss = true;
+        finish(j.id, false, why);
     }
 
     // ── 경로 A: 알림 답장에 사진 첨부 ──────────────────────────────────────────

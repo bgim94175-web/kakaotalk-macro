@@ -3,18 +3,26 @@ package com.buseong.kakaoauto;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 
 import java.io.Closeable;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 사진 고르기 (최대 5장) · URI 영속 권한 · 썸네일.
@@ -289,6 +297,237 @@ public final class ImagePicker {
             if (cur != null) { try { cur.close(); } catch (Throwable ignore) { } }
         }
         return shortUri(u);
+    }
+
+    // ── 6. 카카오톡 앨범 썸네일 지목용 문자열 ──────────────────────────────────
+    //
+    //  근거: docs/field/kakao-attach-sheet-26.8.2.md 3장 (실기기 뷰 트리)
+    //    [Button] desc="사진, 9월 28일 오전 8:20"
+    //  채팅방 첨부 시트의 최근 사진 스트립(rv_media)에서 각 썸네일은 clickable Button 이고,
+    //  contentDescription 이 위 형식이다. 우리가 가진 URI 의 촬영/저장 시각을 같은 형식으로
+    //  만들면 접근성이 "그 사진" 을 정확히 지목할 수 있다 (순서·좌표 추측이 필요 없어진다).
+
+    /** 썸네일 contentDescription 접두사 (실기기 관측값) */
+    private static final String DESC_HEAD = "사진, ";
+
+    /** 후보 목록 상한. 시각 출처가 여러 개라 곱하면 늘어나므로 잘라둔다. */
+    private static final int DESC_MAX = 9;
+
+    /** 이보다 오래된 시각은 잘못 읽은 값으로 본다 (2000-01-01) */
+    private static final long T_MIN = 946684800000L;
+
+    /**
+     * 이 사진이 카카오톡 첨부 시트에서 달고 있을 contentDescription.
+     * 예: {@code "사진, 9월 28일 오전 8:20"}
+     *
+     * 시각 출처 우선순위는 {@code DATE_TAKEN} → EXIF 촬영시각 → {@code DATE_ADDED} → 파일 수정시각이다.
+     * (EXIF 가 DATE_TAKEN 의 원본이라 그 다음에 둔다. 문서 URI 는 MediaStore 조회가 막혀 있어도
+     *  EXIF 는 읽히는 경우가 있다.)
+     *
+     * @return 시각을 하나도 못 읽으면 <b>null</b>. null 이면 이 사진은 첨부 시트 경로로 지목할 수 없다 —
+     *         호출부는 그 사실을 로그·진단에 남기고 다른 경로를 쓰거나 이 사진을 제외해야 한다.
+     */
+    public static String kakaoDesc(Context c, String uri) {
+        long t = shotAt(c, uri);
+        return (t <= 0L) ? null : desc(t);
+    }
+
+    /**
+     * 같은 사진의 <b>후보 문자열 목록</b> (정확 일치용). 접근성 쪽은 정확 일치만 하므로
+     * 후보를 여러 개 넘겨 순서대로 찾게 하는 방식이다.
+     *
+     * 후보가 여러 개인 이유 두 가지 —
+     *   <ol>
+     *     <li>카카오톡이 표시하는 시각이 우리가 읽은 값과 <b>1분</b> 차이날 수 있다(초 단위 절삭 지점이 다르다).
+     *         그래서 ±1분을 같이 만든다.</li>
+     *     <li>카카오톡이 어느 시각(촬영/저장/수정)을 쓰는지 확정되지 않았다. 읽을 수 있는 출처를
+     *         전부 후보로 넣는다. 화면에 없는 문자열은 아무것도 고르지 않으니 후보가 늘어도 위험하지 않다.</li>
+     *   </ol>
+     *
+     * 첫 후보가 가장 유력한 값이다. 목록이 비어 있으면 이 사진은 첨부 시트 경로로 보낼 수 없다.
+     *
+     * @return 절대 null 아님
+     */
+    public static List<String> kakaoDescList(Context c, String uri) {
+        ArrayList<String> out = new ArrayList<String>(DESC_MAX);
+        long[] src = times(c, uri);
+        for (int i = 0; i < src.length && out.size() < DESC_MAX; i++) {
+            long t = src[i];
+            if (t <= 0L) continue;
+            add(out, desc(t));
+            add(out, desc(t - 60000L));
+            add(out, desc(t + 60000L));
+        }
+        return out;
+    }
+
+    /**
+     * 이 사진의 대표 시각(ms). 읽을 수 없으면 0.
+     * {@link #kakaoDesc} 가 쓰는 값이고, 진단에 "왜 못 지목하는지" 를 적을 때도 쓴다.
+     */
+    public static long shotAt(Context c, String uri) {
+        long[] t = times(c, uri);
+        return (t.length == 0) ? 0L : t[0];
+    }
+
+    /**
+     * 읽을 수 있는 시각을 <b>유력한 순서대로</b> 모은다 (중복 제거, 못 읽은 출처는 제외).
+     * 길이 0 이면 이 사진의 시각을 전혀 모른다는 뜻이다.
+     */
+    private static long[] times(Context c, String uri) {
+        if (c == null || uri == null || uri.trim().length() == 0) return new long[0];
+        Uri u;
+        try { u = Uri.parse(uri.trim()); } catch (Throwable t) { return new long[0]; }
+
+        long[] buf = new long[4];
+        int n = 0;
+
+        // 1) DATE_TAKEN — URI 자체에 물어보고, 문서 URI 면 MediaStore 항목으로 바꿔 한 번 더.
+        Uri media = mediaUri(c, u);
+        n = put(buf, n, col(c, u, MediaStore.Images.Media.DATE_TAKEN, false));
+        if (media != null) n = put(buf, n, col(c, media, MediaStore.Images.Media.DATE_TAKEN, false));
+
+        // 2) EXIF 촬영시각 — MediaStore 조회가 막힌 문서 URI 에서도 읽히는 경우가 있다.
+        n = put(buf, n, exifAt(c, u));
+
+        // 3) DATE_ADDED (초 단위) — 저장 시각.
+        n = put(buf, n, col(c, u, MediaStore.Images.Media.DATE_ADDED, true));
+        if (media != null) n = put(buf, n, col(c, media, MediaStore.Images.Media.DATE_ADDED, true));
+
+        // 4) 파일 수정시각 — 문서 제공자는 ms, MediaStore 는 초 단위다.
+        n = put(buf, n, col(c, u, DocumentsContract.Document.COLUMN_LAST_MODIFIED, false));
+        n = put(buf, n, col(c, u, MediaStore.Images.Media.DATE_MODIFIED, true));
+        if (media != null) n = put(buf, n, col(c, media, MediaStore.Images.Media.DATE_MODIFIED, true));
+
+        long[] out = new long[n];
+        System.arraycopy(buf, 0, out, 0, n);
+        return out;
+    }
+
+    /** buf 에 중복 없이 담는다 (버퍼가 꽉 차면 버린다). 돌려주는 값은 새 길이. */
+    private static int put(long[] buf, int n, long ms) {
+        long v = sane(ms);
+        if (v <= 0L) return n;
+        for (int i = 0; i < n; i++) {
+            // 분 단위로 같으면 같은 시각으로 본다 (같은 문자열이 나온다)
+            if (buf[i] / 60000L == v / 60000L) return n;
+        }
+        if (n >= buf.length) return n;
+        buf[n] = v;
+        return n + 1;
+    }
+
+    /** 말이 되는 시각인가. 초 단위 값을 ms 로 잘못 읽은 경우(1970년대)와 미래 시각을 걸러낸다. */
+    private static long sane(long ms) {
+        if (ms <= 0L) return 0L;
+        if (ms < T_MIN) return 0L;
+        if (ms > System.currentTimeMillis() + 86400000L) return 0L;
+        return ms;
+    }
+
+    /**
+     * 시각 하나를 카카오톡 표기로 만든다.
+     *
+     * <b>SimpleDateFormat 의 {@code a} 패턴을 쓰지 않는다.</b> 오전/오후 글자와 12시간제 표기는
+     * 기기 로케일·제조사 번역에 따라 "AM"/"오전"/"오전 "처럼 흔들리는데, 여기서는 카카오톡이
+     * 화면에 쓴 문자열과 <b>한 글자도 다르면 안 된다</b>. 그래서 전부 직접 조립한다.
+     * (달·일·시는 0 을 채우지 않고, 분만 두 자리다 — 실기기 관측값 {@code "9월 28일 오전 8:20"} 기준)
+     */
+    private static String desc(long ms) {
+        Calendar cal = Calendar.getInstance(Locale.KOREA);
+        cal.setTimeInMillis(ms);
+        int h = cal.get(Calendar.HOUR);          // 0~11
+        if (h == 0) h = 12;                      // 0시·12시는 12 로 표기한다
+        int min = cal.get(Calendar.MINUTE);
+        StringBuilder b = new StringBuilder(28);
+        b.append(DESC_HEAD)
+         .append(cal.get(Calendar.MONTH) + 1).append("월 ")
+         .append(cal.get(Calendar.DAY_OF_MONTH)).append("일 ")
+         .append(cal.get(Calendar.AM_PM) == Calendar.AM ? "오전" : "오후").append(' ')
+         .append(h).append(':');
+        if (min < 10) b.append('0');
+        b.append(min);
+        return b.toString();
+    }
+
+    private static void add(ArrayList<String> out, String v) {
+        if (v == null || out.size() >= DESC_MAX || out.contains(v)) return;
+        out.add(v);
+    }
+
+    /** 열 하나만 물어본다. 제공자가 그 열을 모르면 예외가 나므로 열마다 따로 묻는다. */
+    private static long col(Context c, Uri u, String name, boolean seconds) {
+        Cursor cur = null;
+        try {
+            cur = c.getContentResolver().query(u, new String[] { name }, null, null, null);
+            if (cur == null || !cur.moveToFirst()) return 0L;
+            int i = cur.getColumnIndex(name);
+            if (i < 0 || cur.isNull(i)) return 0L;
+            long v = cur.getLong(i);
+            if (v <= 0L) return 0L;
+            return seconds ? (v * 1000L) : v;
+        } catch (Throwable t) {
+            return 0L;   // 그 열이 없는 제공자다. 다음 출처로 넘어간다.
+        } finally {
+            close(cur);
+        }
+    }
+
+    /**
+     * 문서 URI({@code ACTION_OPEN_DOCUMENT} 결과)를 MediaStore 항목 URI 로 바꿔본다.
+     * 문서 제공자는 {@code DATE_TAKEN} 을 모르지만 MediaStore 는 알고 있다.
+     *
+     * @return 못 바꾸면 null (권한이 없어 조회가 실패할 수도 있는데, 그건 호출부의 try 가 먹는다)
+     */
+    private static Uri mediaUri(Context c, Uri u) {
+        boolean doc = false;
+        try { doc = DocumentsContract.isDocumentUri(c, u); } catch (Throwable ignore) { }
+        if (!doc) return null;
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            try {
+                Uri m = MediaStore.getMediaUri(c, u);
+                if (m != null) return m;
+            } catch (Throwable ignore) { }
+        }
+        // 폴백: 문서 id 가 "image:1234" 형태면 이미지 항목을 직접 만든다.
+        try {
+            String id = DocumentsContract.getDocumentId(u);
+            int i = (id == null) ? -1 : id.indexOf(':');
+            if (i > 0 && "image".equals(id.substring(0, i))) {
+                long n = Long.parseLong(id.substring(i + 1).trim());
+                if (n > 0) {
+                    return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, n);
+                }
+            }
+        } catch (Throwable ignore) { }
+        return null;
+    }
+
+    /**
+     * EXIF 촬영시각. MediaStore 의 {@code DATE_TAKEN} 이 여기서 나온 값이라 사실상 같은 시각이다.
+     * EXIF 시각에는 시간대가 없어서 기기 기본 시간대로 읽는다 — 카카오톡도 같은 기준으로 표시한다.
+     */
+    private static long exifAt(Context c, Uri u) {
+        InputStream in = null;
+        try {
+            in = c.getContentResolver().openInputStream(u);
+            if (in == null) return 0L;
+            android.media.ExifInterface ex = new android.media.ExifInterface(in);
+            String s = ex.getAttribute(android.media.ExifInterface.TAG_DATETIME_ORIGINAL);
+            if (s == null || s.trim().length() == 0) {
+                s = ex.getAttribute(android.media.ExifInterface.TAG_DATETIME);
+            }
+            if (s == null || s.trim().length() == 0) return 0L;
+            SimpleDateFormat f = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US);
+            f.setLenient(false);
+            Date d = f.parse(s.trim());
+            return (d == null) ? 0L : d.getTime();
+        } catch (Throwable t) {
+            return 0L;
+        } finally {
+            close(in);
+        }
     }
 
     // ── 유틸 ────────────────────────────────────────────────────────────────

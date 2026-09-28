@@ -132,6 +132,45 @@ public final class KakaoAccessibility extends AccessibilityService {
             "com.kakao.talk:id/edit_text"
     };
 
+    // ── 채팅방 내부 첨부 시트 (근거: docs/field/kakao-attach-sheet-26.8.2.md) ──────
+    //  ★ 아래 id 는 전부 카카오톡 26.8.2 실기기 뷰 트리에서 그대로 읽어온 값이다.
+    //    문서에 없는 id 는 한 개도 넣지 않는다 — 추측으로 만든 셀렉터는 지금까지 전부 실패했다.
+    //    id 는 shortId(= "com.kakao.talk:id/" 를 뗀 값)로 비교한다. 루트는 이미 카톡 창만 모은다.
+    /** 바텀시트 루트 (문서 2장) — 이게 있으면 첨부 시트가 열려 있다 */
+    static final String AID_SHEET = "design_bottom_sheet";
+    /** 첨부 메뉴 목록 (문서 2·5장) */
+    static final String AID_CHAT_TOOL = "rv_chat_tool";
+    /** 최근 사진 가로 스트립 (문서 2·3장) */
+    static final String AID_MEDIA = "rv_media";
+    /** 사진 선택 순번 배지 (문서 3장) — 텍스트가 있으면 그 사진은 선택된 상태다 */
+    static final String AID_SELECT_ORDER = "tv_select_order";
+    /** 전송 버튼 (문서 4장) — enabled 가 선택 여부를 그대로 반영한다 */
+    static final String AID_BTN_SEND = "btn_send";
+    /** 첨부 메뉴 항목 라벨 (문서 5장) */
+    static final String AID_TV_LABEL = "tv_label";
+
+    /** 사진 썸네일 desc 접두 (문서 3장: {@code "사진, 9월 28일 오전 8:20"}) */
+    static final String PHOTO_PREFIX = "사진,";
+    /** 첨부 시트 사진 스트립의 첫 항목 — 사진이 아니라 카메라다 (문서 3장). 건너뛴다. */
+    static final String PHOTO_SKIP = "카메라";
+
+    /**
+     * 첨부 메뉴에서 사진 목록을 여는 항목 라벨 후보.
+     * 실기기 라벨은 <b>「사진」</b> 이다(문서 5장) — 「앨범」 만 두면 못 찾는다.
+     */
+    static final String[] ATTACH_MENU_PHOTO = { "사진", "앨범", "이미지", "사진/동영상" };
+    /**
+     * 채팅방 하단 첨부(+) 버튼의 desc 후보.
+     *
+     * <b>이 버튼의 view id 는 아직 미확보다</b>(문서 8장 — 시트가 이미 열린 상태를 덤프해서 안 잡혔다).
+     * 그래서 없는 id 를 지어내지 않고 desc 로만 찾고, 그래도 못 찾으면 입력창 왼쪽 끝 clickable
+     * 노드를 본다. 둘 다 실패하면 화면을 덤프한 뒤 실패로 끝낸다 — 덤프가 남으면 다음에 정확히 고친다.
+     */
+    static final String[] ATTACH_DESC = { "첨부", "추가", "더보기" };
+
+    static final String[] ATTACH_MENU_PHOTO_S = squashAll(ATTACH_MENU_PHOTO);
+    static final String[] ATTACH_DESC_S = squashAll(ATTACH_DESC);
+
     // ── 위 라벨들을 미리 정규화해둔다 ────────────────────────────────────────────
     //  노드마다 squash(SEND[i]) 를 다시 도는 건 순수 낭비다 (노드 2500개 × 라벨 30개).
     //  클래스 로딩 때 한 번만 만든다. 순서는 원본 배열과 1:1 로 맞춰둔다.
@@ -167,6 +206,20 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static final long SCROLL_BACK_MS = 150L;
     /** 실패 뒤 공유창을 닫으려고 뒤로가기를 누를 최대 횟수 */
     private static final int MAX_BACK = 2;
+
+    // ── 첨부 시트 흐름 한도 ────────────────────────────────────────────────────
+    /** rv_media 가로 스크롤 허용 횟수 (문서 2장: 가로 RecyclerView) */
+    private static final int MAX_MEDIA_SCROLL = 10;
+    /** btn_send 의 enabled 가 Y 가 되기를 기다릴 횟수 (회당 {@link #RETRY_MS}) */
+    private static final int MAX_SEND_WAIT = 12;
+    /** 첨부(+) 버튼을 눌러 시트를 열어볼 횟수 */
+    private static final int MAX_ATTACH_OPEN = 2;
+    /** 사진을 탭한 뒤 tv_select_order 에 순번이 생겼는지 확인할 횟수 */
+    private static final int MAX_SEL_VERIFY = 3;
+    /** 진단에 나란히 적을 사진 desc 최대 개수 */
+    private static final int SHOW_DESCS = 12;
+    /** 첨부 시트에서 수집해둘 사진 desc 최대 개수 (스크롤 종료 판정에도 쓴다) */
+    private static final int MEDIA_DESC_MAX = 60;
     /** 뒤로가기 사이 간격 */
     private static final long BACK_MS = 550L;
 
@@ -208,6 +261,16 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 전송 버튼을 누른 뒤 진짜 나갔는지 확인 */
     private static final int P_VERIFY = 3;
 
+    // ── 단계 (첨부 시트 흐름 전용 — 공유창 단계와 번호를 섞지 않는다) ─────────────
+    /** 첨부 시트가 열려 있나 판정 (없으면 채팅방 하단 + 를 누른다) */
+    private static final int A_SHEET = 10;
+    /** rv_media 에서 대상 사진을 찾아 탭하고 선택을 검증한다 */
+    private static final int A_PICK = 11;
+    /** btn_send 의 enabled 를 기다려 누른다 */
+    private static final int A_SEND = 12;
+    /** 전송 뒤 시트가 실제로 닫혔는지 확인 */
+    private static final int A_VERIFY = 13;
+
     // ── 이름 매칭 등급 (숫자가 작을수록 확실하다) ──────────────────────────────
     /** 정규화 후 완전히 같다 */
     private static final int L_EXACT = 0;
@@ -221,15 +284,31 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static final int L_PART = 4;
     private static final int L_COUNT = 5;
 
+    // ── 전송 흐름 ──────────────────────────────────────────────────────────────
+    //  흐름이 둘이다. 진단에 <b>어느 흐름을 탔는지</b> 반드시 남긴다 —
+    //  둘의 실패 원인과 조치가 완전히 달라서, 흐름 이름이 없으면 엉뚱한 데를 고치게 된다.
+    /** {@link #arm} — 공유 인텐트로 띄운 대화방 선택 화면을 조작한다 */
+    private static final int M_SHARE = 0;
+    /** {@link #armAttach} — 이미 열려 있는 채팅방의 첨부 시트를 조작한다 */
+    private static final int M_ATTACH = 1;
+
     /**
-     * 이 서비스가 다루는 전송 흐름은 <b>공유창 흐름 하나뿐</b>이다.
-     * 채팅방 안에서 「+ → 앨범 → 선택 → 전송」 을 누르는 흐름은 만들지 않았다 —
-     * 검증된 뷰 id 가 하나도 없고, 안드로이드 14 이상에서 카톡이 사진 접근을
-     * 「선택된 항목만」 으로 갖고 있으면 앨범 탭이 <b>시스템 사진 선택기(다른 패키지)</b> 를
-     * 띄워서 packageNames=com.kakao.talk 필터에 아예 걸리지 않는다.
-     * 진단에 흐름 이름을 박아둔다 — 나중에 흐름이 늘었을 때 어느 쪽 실패인지 헷갈리지 않는다.
+     * 공유창 흐름. 실기기에서 <b>이 화면은 한 번도 관측되지 않았다</b>
+     * (안드로이드 16 + 백그라운드 실행 제한으로 추정 — 문서 1·7장).
+     * 남겨두는 이유는 구버전 안드로이드에서 유일하게 동작했던 경로이기 때문이다.
      */
-    private static final String FLOW = "공유창(ACTION_SEND_MULTIPLE → 대화방 선택 → 전송)";
+    private static final String FLOW_SHARE = "공유창(ACTION_SEND_MULTIPLE → 대화방 선택 → 전송)";
+    /**
+     * 채팅방 내부 첨부 시트 흐름. 실기기 뷰 트리가 전부 확보된 경로다
+     * (docs/field/kakao-attach-sheet-26.8.2.md 2~6장).
+     */
+    private static final String FLOW_ATTACH =
+            "채팅방 첨부 시트(+ → rv_media 사진 선택 → btn_send)";
+
+    /** 지금 타고 있는 흐름 이름 (진단·로그에 그대로 박는다) */
+    private static String flowName() {
+        return (mode == M_ATTACH) ? FLOW_ATTACH : FLOW_SHARE;
+    }
 
     // ── 예약(armed) 상태 — 서비스 인스턴스와 별개로 살아있어야 해서 static ────────
     private static volatile KakaoAccessibility INSTANCE = null;
@@ -249,6 +328,8 @@ public final class KakaoAccessibility extends AccessibilityService {
     /** 우리가 포기할 시각. 항상 armedUntil 보다 앞이다 (원인 보고는 우리가 한다). */
     private static volatile long deadlineAt = 0L;
     private static volatile Result callback = null;
+    /** 지금 타고 있는 흐름 ({@link #M_SHARE} / {@link #M_ATTACH}) */
+    private static volatile int mode = M_SHARE;
     private static volatile int phase = P_PICK;
     private static volatile long phaseAt = 0L;
     private static volatile int searchTry = 0;
@@ -278,6 +359,39 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static volatile long lastWinAt = 0L;
     /** 마지막으로 남긴 실패 사유 (덤프 머리에 박는다) */
     private static volatile String lastWhere = "";
+
+    // ── 첨부 시트 흐름 상태 (M_ATTACH 에서만 쓴다) ───────────────────────────────
+    /** 찾아야 하는 사진 desc 후보 — ImageSender 가 만들어 넘긴 원본 그대로 (진단 표시용) */
+    private static volatile String[] wantDescs = new String[0];
+    /** 위 후보를 공백 제거·소문자로 정규화한 값. 비교는 <b>이것과의 완전일치만</b> 인정한다. */
+    private static volatile String[] wantDescsS = new String[0];
+    /** 후보별 선택 완료 여부 (wantDescs 와 같은 순서) */
+    private static volatile boolean[] gotDescs = new boolean[0];
+    /** 선택에 성공한 장수 */
+    private static volatile int pickedCount = 0;
+    /** 첨부 시트(design_bottom_sheet 또는 rv_media)를 한 번이라도 본 적 있나 */
+    private static volatile boolean sawSheet = false;
+    /** 첨부(+) 버튼을 눌러본 횟수 */
+    private static volatile int attachOpens = 0;
+    /** 첨부 메뉴의 「사진」 항목을 눌렀나 (문서 8장 — 그 뒤 화면 구조는 미확보다) */
+    private static volatile boolean menuPhotoTapped = false;
+    /** rv_media 가로 스크롤 횟수 */
+    private static volatile int mediaScrolls = 0;
+    /** 더 스크롤해도 새 사진이 안 나온다 */
+    private static volatile boolean mediaScrollDone = false;
+    /** 지금 선택 검증을 기다리는 후보 index (-1 = 없음) */
+    private static volatile int verifyIdx = -1;
+    private static volatile int verifyTries = 0;
+    /** btn_send 의 enabled 가 Y 가 되기를 기다린 횟수 */
+    private static volatile int sendWaits = 0;
+    /** 마지막으로 본 btn_send 상태 ("미확인" / "enabled=Y" / "enabled=N") */
+    private static volatile String sendState = "미확인";
+    /** 첨부 시트에서 본 사진 desc 목록 (중복 제거, 화면 밖으로 밀려난 것도 기억한다) */
+    private static final ArrayList<String> MEDIA_SEEN = new ArrayList<String>(24);
+    /** 첨부 메뉴에서 본 항목 라벨 (진단용) */
+    private static volatile String menuSeen = "";
+    /** 마지막으로 본 시트 구성 요약 (시트가 닫힌 뒤에도 말할 수 있어야 한다) */
+    private static volatile String sheetShape = "";
 
     /**
      * 시도 번호. arm 할 때마다 1 올린다.
@@ -360,23 +474,109 @@ public final class KakaoAccessibility extends AccessibilityService {
         return armWith(key, name, timeoutMs, cb, ctx);
     }
 
+    // ── 공개 API: 채팅방 내부 첨부 시트 흐름 ────────────────────────────────────
+
     /**
-     * @param rawKey 저장·조회용 값 ({@code RoomRef.key()} 또는 구버전 이름)
-     * @param r      <b>화면에서 찾을 표시 이름</b>
+     * <b>채팅방 내부 첨부 시트 흐름을 예약한다</b> — {@link #arm}(공유창 흐름)과 완전히 별개다.
+     *
+     * 전제: 대상 <b>채팅방이 이미 열려 있어야 한다</b>. 이 서비스는 채팅방을 열지 않는다
+     * (방 열기는 {@code KakaoListener} 의 알림 contentIntent 담당이다).
+     *
+     * 동작 순서 (근거: docs/field/kakao-attach-sheet-26.8.2.md 2~6장)
+     * <pre>
+     *   design_bottom_sheet 있나? → 없으면 채팅방 하단 + 를 눌러 시트를 연다
+     *   → rv_media 에서 desc 가 후보와 완전일치하는 사진을 탭
+     *   → 그 사진의 tv_select_order 에 순번이 생겼는지로 선택을 검증
+     *   → 필요한 장수만큼 반복 (rv_media 가로 스크롤)
+     *   → btn_send 의 enabled 가 Y 가 될 때까지 대기 → 탭
+     * </pre>
+     *
+     * @param room       대상 대화방 (진단·세션 조회용. 화면 매칭에는 {@code ref.name} 만 쓴다.
+     *                   {@code key()} 를 이름으로 쓰면 "0␁이름" 이 화면에서 절대 안 맞는다 — 문서 7장)
+     * @param photoDescs ImageSender 가 만들어 넘기는 <b>사진 desc 후보 목록</b>
+     *                   (형식: {@code "사진, 9월 28일 오전 8:20"}). 공백만 무시하고
+     *                   <b>완전일치하는 것만</b> 선택한다. 부분·근사 매칭은 하지 않는다.
+     * @return 이번 시도의 id. {@link #lastDumpFor(Context, long)} 에 넘기면 이번 실패의 화면만 읽는다.
      */
-    private static long armWith(String rawKey, String r, long timeoutMs, Result cb, Context ctx) {
-        String raw = (rawKey == null) ? "" : rawKey;
+    public static long armAttach(RoomRef room, String[] photoDescs, long timeoutMs, Result cb) {
+        return armAttach(room, photoDescs, timeoutMs, cb, null);
+    }
+
+    /**
+     * {@link #armAttach(RoomRef, String[], long, Result)} + Context.
+     * ctx 를 주면 <b>접근성 서비스가 아직 안 붙은 경우에도</b> 그 사실을 이번 시도의 덤프로 남긴다.
+     */
+    public static long armAttach(RoomRef room, String[] photoDescs, long timeoutMs,
+                                 Result cb, Context ctx) {
+        String key = (room == null) ? "" : room.key();
+        String name = (room == null) ? "" : room.name;
         long t = (timeoutMs <= 0) ? DEFAULT_TIMEOUT_MS : timeoutMs;
 
+        long id = beginAttempt(M_ATTACH, key, name, t, cb);
+        setWantDescs(photoDescs);
+
+        KakaoAccessibility me = INSTANCE;
+        if (me == null) {
+            Log.add(ctx, "접근성 서비스가 연결되지 않았습니다. 첨부 시트 자동 조작이 동작하지 않습니다.");
+            if (ctx != null) {
+                StringBuilder sb = new StringBuilder(640);
+                sb.append("=== 카카오톡 화면 진단 ").append(stamp()).append(" ===\n");
+                sb.append("시도 id: ").append(id).append(" · 전송 흐름: ").append(flowName()).append('\n');
+                sb.append(a11yBlock(ctx));
+                sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
+                sb.append("대상 대화방: \"").append(name).append("\"\n");
+                sb.append(wantDescBlock());
+                sb.append("첨부 시트: 확인 불가(화면을 읽지 못했습니다)\n");
+                sb.append(env(ctx));
+                sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
+                sb.append("=== 끝 ===\n");
+                saveDump(ctx, sb.toString(), id);
+            }
+            return id;
+        }
+        Log.add(me, "카카오톡 첨부 시트 자동 조작을 예약했습니다. 대화방: " + name
+                + " · 대상 사진 " + wantDescs.length + "장 · 흐름: " + FLOW_ATTACH
+                + " (시도 " + id + ")");
+        note("흐름: " + FLOW_ATTACH + " · 대상 사진 " + wantDescs.length + "장");
+        me.kick(500L);
+        return id;
+    }
+
+    /** 후보 desc 목록을 세팅한다 (원본 보관 + 비교용 정규화). null·빈 문자열은 버린다. */
+    private static void setWantDescs(String[] in) {
+        ArrayList<String> raw = new ArrayList<String>(8);
+        ArrayList<String> sq = new ArrayList<String>(8);
+        if (in != null) {
+            for (int i = 0; i < in.length; i++) {
+                String d = norm(in[i]);
+                if (d.length() == 0) continue;
+                String s = squash(d);
+                if (s.length() == 0 || sq.contains(s)) continue;   // 같은 사진을 두 번 세지 않는다
+                raw.add(d);
+                sq.add(s);
+            }
+        }
+        wantDescs = raw.toArray(new String[0]);
+        wantDescsS = sq.toArray(new String[0]);
+        gotDescs = new boolean[wantDescs.length];
+    }
+
+    /**
+     * 시도 하나를 시작한다 (상태 초기화 + 시도 번호 증가). 두 흐름이 <b>같은 상태를 공유</b>하므로
+     * 여기서 전부 한 번에 지운다 — 한쪽 흐름의 잔여 상태가 다음 흐름의 진단을 오염시키면
+     * 사용자가 엉뚱한 곳을 고치게 된다.
+     */
+    private static long beginAttempt(int flowMode, String rawKey, String r, long t, Result cb) {
         long now = System.currentTimeMillis();
-        targetKey = raw;
-        kakaoEvents = 0;
+        mode = flowMode;
+        targetKey = (rawKey == null) ? "" : rawKey;
         targetRoom = r;
+        kakaoEvents = 0;
         armedUntil = now + t;
         // 호출자보다 먼저 포기한다. 아주 짧은 타임아웃이면 절반 지점에서.
         deadlineAt = (t > SAFETY_MS * 2) ? (armedUntil - SAFETY_MS) : (now + t / 2);
         callback = cb;
-        phase = P_PICK;
+        phase = (flowMode == M_ATTACH) ? A_SHEET : P_PICK;
         phaseAt = now;
         searchTry = 0;
         searchImpossible = false;
@@ -405,10 +605,42 @@ public final class KakaoAccessibility extends AccessibilityService {
         seenAt = 0L;
         lastActivityCls = "";
         backTries = 0;
+        clearAttachState();
         synchronized (NOTES) { NOTES.clear(); }
         attempt++;
         armed = true;
-        long id = attempt;
+        return attempt;
+    }
+
+    /** 첨부 시트 흐름 상태만 초기화 */
+    private static void clearAttachState() {
+        wantDescs = new String[0];
+        wantDescsS = new String[0];
+        gotDescs = new boolean[0];
+        pickedCount = 0;
+        sawSheet = false;
+        attachOpens = 0;
+        menuPhotoTapped = false;
+        mediaScrolls = 0;
+        mediaScrollDone = false;
+        verifyIdx = -1;
+        verifyTries = 0;
+        sendWaits = 0;
+        sendState = "미확인";
+        menuSeen = "";
+        sheetShape = "";
+        synchronized (MEDIA_SEEN) { MEDIA_SEEN.clear(); }
+    }
+
+    /**
+     * @param rawKey 저장·조회용 값 ({@code RoomRef.key()} 또는 구버전 이름)
+     * @param r      <b>화면에서 찾을 표시 이름</b>
+     */
+    private static long armWith(String rawKey, String r, long timeoutMs, Result cb, Context ctx) {
+        String raw = (rawKey == null) ? "" : rawKey;
+        long t = (timeoutMs <= 0) ? DEFAULT_TIMEOUT_MS : timeoutMs;
+
+        long id = beginAttempt(M_SHARE, raw, r, t, cb);
 
         // 지난 덤프는 여기서 지우지 않는다.
         //  지우고 나서 아무것도 못 채우는 경로(서비스 미바인드 · 공유창이 안 뜸 · 타임아웃)가
@@ -423,7 +655,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 // 조기 return 해도 이번 시도의 덤프는 남는다 (서비스가 없어서 트리는 못 읽는다)
                 StringBuilder sb = new StringBuilder(512);
                 sb.append("=== 카카오톡 화면 진단 ").append(stamp()).append(" ===\n");
-                sb.append("시도 id: ").append(id).append(" · 전송 흐름: ").append(FLOW).append('\n');
+                sb.append("시도 id: ").append(id).append(" · 전송 흐름: ").append(flowName()).append('\n');
                 sb.append(a11yBlock(ctx));
                 sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
                 sb.append("찾으려던 이름: \"").append(r).append("\"\n");
@@ -456,8 +688,11 @@ public final class KakaoAccessibility extends AccessibilityService {
         if (me != null && was) {
             try {
                 if (lastDumpAttempt(me) != attempt) {
-                    me.saveMini("호출 측(이미지 전송)이 먼저 중단되었습니다. 공유창이 표시되지 않았거나 시간이 초과되었습니다."
-                            + " 카카오톡 공유창이 열려 있으면 닫고, 「다른 앱 위에 표시」 권한과 카카오톡 버전을 확인하십시오.",
+                    me.saveMini(mode == M_ATTACH
+                            ? "호출 측(이미지 전송)이 먼저 중단되었습니다. 첨부 시트 조작을 끝내지 못했습니다."
+                              + " 카카오톡 첨부 시트가 열려 있으면 닫고, 대상 채팅방이 화면에 열린 상태에서 다시 시도하십시오."
+                            : "호출 측(이미지 전송)이 먼저 중단되었습니다. 공유창이 표시되지 않았거나 시간이 초과되었습니다."
+                              + " 카카오톡 공유창이 열려 있으면 닫고, 「다른 앱 위에 표시」 권한과 카카오톡 버전을 확인하십시오.",
                             "disarm");
                 }
             } catch (Throwable ignore) { }
@@ -621,6 +856,9 @@ public final class KakaoAccessibility extends AccessibilityService {
         emptyRounds = 0;
         lastWinKey = "";
         lastWinAt = 0L;
+        // 첨부 흐름 상태도 같이 내린다. 남겨두면 다음 시도(다른 흐름)의 진단에 섞인다.
+        clearAttachState();
+        mode = M_SHARE;
     }
 
     // ── 서비스 수명주기 ──────────────────────────────────────────────────────
@@ -765,6 +1003,17 @@ public final class KakaoAccessibility extends AccessibilityService {
         ArrayList<AccessibilityNodeInfo> rs = roots();
         if (rs.isEmpty()) {
             emptyRounds++;
+            if (mode == M_ATTACH) {
+                // 첨부 흐름에서 카톡 창이 사라졌다. 전송을 누른 뒤라면 화면이 전환된 것으로 본다.
+                // 누른 적이 없으면 사용자가 카톡을 벗어난 것이니 기다린다(데드라인이 잡는다).
+                if (sendTry > 0 && emptyRounds >= 2) {
+                    finish(true, targetRoom + " · 전송 버튼 입력 후 카카오톡 화면이 전환되었습니다."
+                            + " 카카오톡에서 전송 결과를 확인하십시오.");
+                    return;
+                }
+                retry();
+                return;
+            }
             if (clickedRow && phase != P_PICK && emptyRounds >= 2 && (now - clickedAt) > 700L) {
                 // 창이 사라진 것만으로는 성공이 아니다 — 사용자가 뒤로가기를 눌러도 똑같이 사라진다.
                 // 전송(확인) 버튼을 실제로 누른 적이 있을 때만 "갔다" 로 본다.
@@ -785,6 +1034,21 @@ public final class KakaoAccessibility extends AccessibilityService {
         emptyRounds = 0;
 
         try {
+            if (mode == M_ATTACH) {
+                // 흐름이 완전히 갈린다 — 첨부 시트는 공유창과 화면·셀렉터·판정이 하나도 겹치지 않는다.
+                AScan a = ascan(rs);
+                if (a.sig.equals(lastSig)) sameSig++;
+                else { sameSig = 0; lastSig = a.sig; }
+
+                switch (phase) {
+                    case A_SHEET: doSheet(a);       break;
+                    case A_PICK:  doPickPhoto(a);   break;
+                    case A_SEND:  doSendAttach(a);  break;
+                    default:      doVerifyAttach(a); break;
+                }
+                return;
+            }
+
             Scan sc = scan(rs);
             // 화면이 계속 똑같으면 헛돌고 있다는 뜻 (스크롤/검색이 필요하다는 신호)
             if (sc.sig.equals(lastSig)) sameSig++;
@@ -1407,7 +1671,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         StringBuilder sb = new StringBuilder(1024);
         sb.append("=== 카카오톡 화면 진단(간이) ").append(stamp()).append(" ===\n");
         sb.append("시도 id: ").append(attempt).append(" · 경로: ").append(tag)
-                .append(" · 전송 흐름: ").append(FLOW).append('\n');
+                .append(" · 전송 흐름: ").append(flowName()).append('\n');
         sb.append(a11yBlock(this));
         sb.append("실패: ").append(where).append('\n');
         sb.append("찾으려던 이름: \"").append((targetRoom == null) ? "" : targetRoom).append("\"\n");
@@ -2362,7 +2626,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
         out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
         out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
-        out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(FLOW).append('\n');
+        out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(flowName()).append('\n');
         // 타사 접근성 앱은 화면 조작 실패에서 가장 먼저 봐야 하는 항목이다 → 맨 위에 둔다
         out.append(a11yBlock(this));
         out.append("실패: ").append((where == null || where.length() == 0) ? "(수동 수집)" : where).append('\n');
