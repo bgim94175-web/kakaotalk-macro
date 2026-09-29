@@ -183,23 +183,33 @@ final class NodeEngine implements KakaoEngine {
             case "waiting":
                 return new LoginStep(LoginStep.Kind.WAITING, null, null, -1, msg);
             case "bad_credentials":
-                return new LoginStep(LoginStep.Kind.BAD_CREDENTIALS, null, null, -1, msg, statusOf(r));
+                return failedStep(LoginStep.Kind.BAD_CREDENTIALS, msg, r);
             case "slot_occupied":
-                return new LoginStep(LoginStep.Kind.SLOT_OCCUPIED, null, null, -1, msg, statusOf(r));
+                return failedStep(LoginStep.Kind.SLOT_OCCUPIED, msg, r);
             case "expired":
                 pendingAccount = null;
-                return new LoginStep(LoginStep.Kind.EXPIRED, null, null, -1, msg, statusOf(r));
+                return failedStep(LoginStep.Kind.EXPIRED, msg, r);
             default:
                 pendingAccount = null;
                 String code = r.optString("code", "");
-                return new LoginStep(LoginStep.Kind.FAILED, null, null, -1,
-                        (msg.length() > 0) ? msg : code, statusOf(r));
+                return failedStep(LoginStep.Kind.FAILED, (msg.length() > 0) ? msg : code, r);
         }
     }
 
+    private static LoginStep failedStep(LoginStep.Kind kind, String msg, JSONObject r) {
+        return new LoginStep(kind, null, null, -1, msg, statusOf(r),
+                r == null ? "" : r.optString("device_name", ""),
+                r == null ? "" : r.optString("device_model", ""));
+    }
+
+    /** failBody 의 status, 없으면 server_status. 0 은 성공이라 빠진 값을 0 으로 읽지 않는다. */
     private static int statusOf(JSONObject r) {
-        if (r == null || !r.has("status") || r.isNull("status")) return Integer.MIN_VALUE;
-        return r.optInt("status", Integer.MIN_VALUE);
+        if (r == null) return Integer.MIN_VALUE;
+        if (r.has("status") && !r.isNull("status")) return r.optInt("status", Integer.MIN_VALUE);
+        if (r.has("server_status") && !r.isNull("server_status")) {
+            return r.optInt("server_status", Integer.MIN_VALUE);
+        }
+        return Integer.MIN_VALUE;
     }
 
     @Override public void unlink() {

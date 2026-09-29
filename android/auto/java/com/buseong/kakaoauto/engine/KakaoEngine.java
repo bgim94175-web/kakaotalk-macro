@@ -77,6 +77,10 @@ public interface KakaoEngine {
         public final String message;
         /** 카카오 상태 코드. 없으면 {@link Integer#MIN_VALUE}. */
         public final int kakaoStatus;
+        /** 이번 등록 시도에 보낸 태블릿 이름. 없으면 빈 문자열. */
+        public final String deviceName;
+        /** 이번 등록 시도에 보낸 모델. 없으면 빈 문자열. */
+        public final String deviceModel;
 
         public LoginStep(Kind kind, String pendingId, String passcode, int remainingSeconds, String message) {
             this(kind, pendingId, passcode, remainingSeconds, message, Integer.MIN_VALUE);
@@ -84,12 +88,19 @@ public interface KakaoEngine {
 
         public LoginStep(Kind kind, String pendingId, String passcode, int remainingSeconds, String message,
                          int kakaoStatus) {
+            this(kind, pendingId, passcode, remainingSeconds, message, kakaoStatus, "", "");
+        }
+
+        public LoginStep(Kind kind, String pendingId, String passcode, int remainingSeconds, String message,
+                         int kakaoStatus, String deviceName, String deviceModel) {
             this.kind = kind;
             this.pendingId = pendingId == null ? "" : pendingId;
             this.passcode = passcode == null ? "" : passcode;
             this.remainingSeconds = remainingSeconds;
             this.message = message == null ? "" : message;
             this.kakaoStatus = kakaoStatus;
+            this.deviceName = deviceName == null ? "" : deviceName;
+            this.deviceModel = deviceModel == null ? "" : deviceModel;
         }
     }
 

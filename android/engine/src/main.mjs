@@ -130,7 +130,7 @@ async function authBegin(p) {
   if (r.next_action === 'provide_passcode') {
     const pc = await requestPasscode(email, password, deviceUuid, tablet.name, tablet.model)
     if (!pc.passcode) {
-      return { state: 'failed', code: pc.error || 'passcode_request_failed', message: pc.message || '' }
+      return failBody(pc.error || 'passcode_request_failed', pc.message || '', pc.status, tablet)
     }
     const pendingId = randomBytes(12).toString('hex')
     pendingLogins.set(pendingId, { email, password, deviceUuid, deviceType, forced, tablet })
@@ -144,26 +144,33 @@ async function authBegin(p) {
     }
   }
 
-  if (r.error === 'bad_credentials') return withStatus('bad_credentials', r.message || '', r.status)
-  if (r.error === 'login_failed' && !forced) return withStatus('slot_occupied', r.message || '', r.status)
-  return failBody(r.error || 'login_failed', r.message || '', r.status)
+  if (r.error === 'bad_credentials') return withStatus('bad_credentials', r.message || '', r.status, tablet)
+  if (r.error === 'login_failed' && !forced) return withStatus('slot_occupied', r.message || '', r.status, tablet)
+  return failBody(r.error || 'login_failed', r.message || '', r.status, tablet)
 }
 
-function withStatus(state, message, status) {
-  const out = failBody('', message, status)
+function withStatus(state, message, status, tablet) {
+  const out = failBody('', message, status, tablet)
   out.state = state
   delete out.code
   return out
 }
 
-function failBody(code, message, status) {
+function failBody(code, message, status, tablet) {
   const out = { state: 'failed', code: code || 'login_failed', message: message || '' }
   let n = typeof status === 'number' ? status : null
   if (n == null) {
     const hit = String(message || '').match(/status (-?\d+)/)
     if (hit) n = Number(hit[1])
   }
-  if (n != null && !Number.isNaN(n)) out.status = n
+  if (n != null && !Number.isNaN(n)) {
+    out.status = n
+    out.server_status = n
+  }
+  if (tablet && typeof tablet.name === 'string' && tablet.name) {
+    out.device_name = tablet.name
+    out.device_model = typeof tablet.model === 'string' ? tablet.model : ''
+  }
   return out
 }
 
@@ -180,13 +187,13 @@ async function authConfirm(p) {
   if (reg.error === 'registration_timeout') return { state: 'waiting' }
   if (reg.error) {
     pendingLogins.delete(id)
-    return failBody(reg.error, reg.message || '', reg.status)
+    return failBody(reg.error, reg.message || '', reg.status, tablet)
   }
 
   const r = await attemptLogin(pl.email, pl.password, pl.deviceUuid, pl.deviceType, pl.forced, undefined, tablet.name, tablet.model)
   pendingLogins.delete(id)
   if (r.authenticated && r.credentials) return loginOk(r, pl.deviceUuid)
-  return failBody(r.error || 'login_failed', r.message || '', r.status)
+  return failBody(r.error || 'login_failed', r.message || '', r.status, tablet)
 }
 
 function authCancel(p) {

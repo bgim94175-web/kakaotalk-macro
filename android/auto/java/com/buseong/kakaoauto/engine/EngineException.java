@@ -8,11 +8,18 @@ package com.buseong.kakaoauto.engine;
 public final class EngineException extends Exception {
     public final String code;
     public final boolean retryable;
+    /** 엔진이 넘긴 server_status. 없으면 {@link Integer#MIN_VALUE}. */
+    public final int serverStatus;
 
     public EngineException(String code, String message, boolean retryable) {
+        this(code, message, retryable, Integer.MIN_VALUE);
+    }
+
+    public EngineException(String code, String message, boolean retryable, int serverStatus) {
         super(message == null ? code : message);
         this.code = code == null ? "upstream_error" : code;
         this.retryable = retryable;
+        this.serverStatus = serverStatus;
     }
 
     public EngineException(String code, String message) {

@@ -12,41 +12,83 @@ public final class AuthText {
 
     public static String of(KakaoEngine.LoginStep step) {
         if (step == null) return "카카오 서버가 실패 원인을 주지 않았습니다.";
-        String mapped = fromRaw(step.message, step.kakaoStatus);
-        if (mapped != null) return mapped;
-        if (step.kind == KakaoEngine.LoginStep.Kind.EXPIRED) {
-            return "인증번호 입력 시간이 지났습니다. 처음부터 다시 로그인해 주세요.";
+        int st = step.kakaoStatus;
+        if (st == Integer.MIN_VALUE) st = statusIn(step.message);
+        String sentence = sentenceFor(step.message, st);
+        if (sentence == null && step.kind == KakaoEngine.LoginStep.Kind.EXPIRED) {
+            sentence = "인증번호 입력 시간이 지났습니다. 처음부터 다시 로그인해 주세요.";
         }
-        if (step.kind == KakaoEngine.LoginStep.Kind.BAD_CREDENTIALS) {
-            return "카카오계정 또는 비밀번호가 일치하지 않습니다.";
+        if (sentence == null && step.kind == KakaoEngine.LoginStep.Kind.BAD_CREDENTIALS) {
+            sentence = "카카오계정 또는 비밀번호가 일치하지 않습니다.";
         }
-        return "카카오 서버가 실패 원인을 주지 않았습니다.";
+        return withFacts(sentence, st, step.deviceName, step.deviceModel);
     }
 
     public static String of(EngineException e) {
         if (e == null) return "카카오 서버가 실패 원인을 주지 않았습니다.";
-        String mapped = fromRaw(e.getMessage(), Integer.MIN_VALUE);
-        if (mapped != null) return mapped;
-        if ("network".equals(e.code) || "timeout".equals(e.code)) {
-            return "네트워크 연결을 확인해 주세요.";
+        int st = e.serverStatus;
+        if (st == Integer.MIN_VALUE) st = statusIn(e.getMessage());
+        String sentence = sentenceFor(e.getMessage(), st);
+        if (sentence == null && ("network".equals(e.code) || "timeout".equals(e.code))) {
+            sentence = "네트워크 연결을 확인해 주세요.";
         }
-        String text = e.userText();
-        return (text == null || text.trim().length() == 0)
-                ? "카카오 서버가 실패 원인을 주지 않았습니다." : text;
+        if (sentence == null) {
+            String text = e.userText();
+            if (text != null && text.trim().length() > 0) sentence = text.trim();
+        }
+        return withFacts(sentence, st, "", "");
     }
 
-    /** 카카오 문장이거나 상태 코드 문구. 둘 다 아니면 null. */
+    /** 카카오 문장 또는 상태 코드 문구. 상태 번호와 기기 이름은 붙이지 않는다. */
     static String fromRaw(String message, int status) {
-        String sentence = kakaoSentence(message);
-        if (sentence != null) return sentence;
         int st = status;
         if (st == Integer.MIN_VALUE) st = statusIn(message);
-        String mapped = mapStatus(st);
+        return sentenceFor(message, st);
+    }
+
+    /**
+     * -111 에는 이용자 보호조치 문장을 붙이지 않는다.
+     * 카카오가 다른 문장을 주면 그 문장을 쓴다.
+     */
+    private static String sentenceFor(String message, int status) {
+        String sentence = kakaoSentence(message);
+        if (status == -111) {
+            if (sentence != null && sentence.indexOf("이용자 보호조치") >= 0) return null;
+            return sentence;
+        }
+        if (sentence != null) return sentence;
+        String mapped = mapStatus(status);
         if (mapped != null) return mapped;
         if ("registration_timeout".equals(codeOf(message))) {
             return "인증번호 입력 시간이 지났습니다. 처음부터 다시 로그인해 주세요.";
         }
         return null;
+    }
+
+    /** 문장 아래에 상태 번호와 이번 시도의 태블릿 이름을 붙인다. */
+    private static String withFacts(String sentence, int status, String deviceName, String deviceModel) {
+        StringBuilder sb = new StringBuilder();
+        if (sentence != null && sentence.trim().length() > 0) sb.append(sentence.trim());
+        if (status != Integer.MIN_VALUE) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append("카카오 상태 ").append(status);
+        }
+        String device = deviceLine(deviceName, deviceModel);
+        if (device.length() > 0) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(device);
+        }
+        if (sb.length() == 0) return "카카오 서버가 실패 원인을 주지 않았습니다.";
+        return sb.toString();
+    }
+
+    private static String deviceLine(String name, String model) {
+        String n = name == null ? "" : name.trim();
+        String m = model == null ? "" : model.trim();
+        if (n.length() == 0 && m.length() == 0) return "";
+        if (m.length() == 0 || m.equals(n)) return "기기 " + n;
+        if (n.length() == 0) return "기기 " + m;
+        return "기기 " + n + " (" + m + ")";
     }
 
     private static String kakaoSentence(String message) {
@@ -95,7 +137,7 @@ public final class AuthText {
 
     /**
      * 커뮤니티 클라이언트와 카카오 계정 로그인에서 확인된 상태 코드.
-     * -328 은 서브디바이스가 이용자 보호조치로 막힐 때 내려온다.
+     * -328 만 이용자 보호조치 문장을 쓴다. -111 은 그 문장으로 바꾸지 않는다.
      */
     private static String mapStatus(int status) {
         switch (status) {
@@ -114,7 +156,6 @@ public final class AuthText {
                 return "인증번호가 올바르지 않습니다.";
             case -102:
                 return "인증번호 입력 시간이 지났습니다. 처음부터 다시 로그인해 주세요.";
-            case -111:
             case -328:
                 return "이용자 보호조치로 인해 서브디바이스 로그인이 제한되었습니다.";
             case -444:

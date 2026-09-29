@@ -269,7 +269,17 @@ final class NodeHost {
         JSONObject e = resp.optJSONObject("e");
         if (e == null) throw new EngineException("upstream_error", "알 수 없는 오류", true);
         throw new EngineException(e.optString("code", "upstream_error"), e.optString("message", ""),
-                e.optBoolean("retryable", false));
+                e.optBoolean("retryable", false), serverStatusOf(e));
+    }
+
+    /** 오류 객체의 status 또는 server_status. 없으면 Integer.MIN_VALUE. */
+    private static int serverStatusOf(JSONObject e) {
+        if (e == null) return Integer.MIN_VALUE;
+        if (e.has("status") && !e.isNull("status")) return e.optInt("status", Integer.MIN_VALUE);
+        if (e.has("server_status") && !e.isNull("server_status")) {
+            return e.optInt("server_status", Integer.MIN_VALUE);
+        }
+        return Integer.MIN_VALUE;
     }
 
     void stop() {
