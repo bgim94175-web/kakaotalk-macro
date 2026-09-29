@@ -2,11 +2,11 @@
 
 | 파일 | 앱 | 버전 | 크기 | SHA-256 |
 |---|---|---|---|---|
-| [KakaoAuto-v2.1.apk](KakaoAuto-v2.1.apk) | 사용자앱 (카카오 계정 직접 연결 엔진 포함 · arm64/armv7) | 2.1.13 (34) | 36,627,694 B | `ec098aa65ceb4741a2867b7d379035a1c97997abb97cdf2ba74984aedec47108` |
+| [KakaoAuto-v2.1.apk](KakaoAuto-v2.1.apk) | 사용자앱 (카카오 계정 직접 연결 엔진 포함 · arm64/armv7) | 2.1.14 (35) | 36,627,694 B | `c32d384f4fcd603c1ebe02d6a9140c096a7bf26bdcbfc78921cb4bddb6e8fdbc` |
 | [KakaoAdmin-v2.1.apk](KakaoAdmin-v2.1.apk) | 관리자앱 | 2.1.1 (22) | 78,436 B | `c3ed71175849afe0c7deac1a5d73ab5342c6b5061ee036deda1292d8b6b030d6` |
 
 - 서명 인증서 SHA-256: `33ed6784cbea8bb34eb9a4f08f1f13c845a588a8d7d14cb74915b70cc53730fa` (v2.0 과 동일 → v2.0 위에 업데이트 설치됩니다)
-- 소스: `cursor/on-device-kakao-engine-9b70` 브랜치 `1b53d93` (KakaoAuto versionName 2.1.13 · versionCode 34, KakaoAdmin versionName 2.1.1 · versionCode 22)
+- 소스: `cursor/on-device-kakao-engine-9b70` 브랜치 `bcfafe0` (KakaoAuto versionName 2.1.14 · versionCode 35, KakaoAdmin versionName 2.1.1 · versionCode 22)
 - 방 관리봇은 홈의 별도 항목이고 계정마다 따로다. 켠 방에서만 동작하며, 폰이 꺼져 있어도 상시 발송이 이어서 한다. 방 유지, 강퇴 테러 방지, 도배 방지, 들낙 방지, 자동 환영, 주기 공지는 각각 켜고 끌 수 있다. 문장이 비어 있으면 그 항목은 메시지를 보내지 않는다.
 - 카카오 계정 등록을 다시 시작하면 저장된 기기 번호를 쓰지 않고 새 번호를 만든다. 그 번호는 그 시도가 성공한 뒤에만 남긴다. 로그인 기기 이름은 매번 다른 안드로이드 태블릿이며, 고정 이름 SM-T870 은 보내지 않는다.
 - 등록이 실패하면 카카오 상태 번호와 그 시도에 보낸 태블릿 이름을 보여 준다. -111 은 이용자 보호조치 문장으로 바꾸지 않는다. -328 은 그 문장을 유지하고 상태 번호도 함께 보여 준다.
