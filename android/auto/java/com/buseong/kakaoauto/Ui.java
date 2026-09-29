@@ -893,6 +893,16 @@ public final class Ui {
      */
     public static LinearLayout checkRow(Context c, String title, String sub, String[] badges,
                                         boolean checked, final OnToggle cb, final Runnable onDelete) {
+        return checkRow(c, title, sub, badges, checked, cb, onDelete, null);
+    }
+
+    /**
+     * 체크 행. onOpen 이 있으면 체크만 선택을 바꾸고, 행을 누르면 onOpen 이 열린다.
+     * onOpen 이 없으면 행 전체가 선택을 바꾼다.
+     */
+    public static LinearLayout checkRow(Context c, String title, String sub, String[] badges,
+                                        boolean checked, final OnToggle cb, final Runnable onDelete,
+                                        final Runnable onOpen) {
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
@@ -910,10 +920,29 @@ public final class Ui {
         press(tap);
 
         final Check box = new Check(c, checked);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(Theme.dp(c, 22), Theme.dp(c, 22));
-        bp.rightMargin = Theme.dp(c, 12);
-        box.setLayoutParams(bp);
-        tap.addView(box);
+        if (onOpen == null) {
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(Theme.dp(c, 22), Theme.dp(c, 22));
+            bp.rightMargin = Theme.dp(c, 12);
+            box.setLayoutParams(bp);
+            tap.addView(box);
+        } else {
+            FrameLayout hit = new FrameLayout(c);
+            int hitPx = Theme.dp(c, 48);
+            LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(hitPx, hitPx);
+            hp.rightMargin = Theme.dp(c, 4);
+            hit.setLayoutParams(hp);
+            FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(Theme.dp(c, 22), Theme.dp(c, 22));
+            bp.gravity = Gravity.CENTER;
+            hit.addView(box, bp);
+            hit.setClickable(true);
+            hit.setFocusable(true);
+            hit.setContentDescription(((title == null) ? "" : title) + (checked ? ", 선택됨" : ", 선택 안 됨"));
+            press(hit);
+            hit.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { toggleCheck(v, box, title, cb); }
+            });
+            tap.addView(hit);
+        }
 
         LinearLayout col = new LinearLayout(c);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -959,17 +988,26 @@ public final class Ui {
         root.addView(tap);
 
         final String nm = (title == null) ? "" : title;
-        tap.setContentDescription(nm + (checked ? ", 선택됨" : ", 선택 안 됨"));
-        tap.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                boolean now = !box.isChecked();
-                box.set(now);
-                v.setContentDescription(nm + (now ? ", 선택됨" : ", 선택 안 됨"));
-                if (cb != null) {
-                    try { cb.on(now); } catch (Throwable t2) { Log.add(v.getContext(), "선택 저장 실패: " + t2); }
+        if (onOpen == null) {
+            tap.setContentDescription(nm + (checked ? ", 선택됨" : ", 선택 안 됨"));
+            tap.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { toggleCheck(v, box, nm, cb); }
+            });
+        } else {
+            String openDesc = nm;
+            if (sub != null && sub.length() > 0) openDesc = openDesc + ", " + sub;
+            tap.setContentDescription(openDesc + ", 이 방 쿨타임");
+            tap.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    try { onOpen.run(); } catch (Throwable t2) { Log.add(v.getContext(), "방 열기 실패: " + t2); }
                 }
-            }
-        });
+            });
+            TextView chev = base(c, "›", 18f, Theme.DIM, false);
+            chev.setGravity(Gravity.CENTER);
+            chev.setLayoutParams(new LinearLayout.LayoutParams(Theme.dp(c, 24), Theme.dp(c, 48)));
+            chev.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            tap.addView(chev);
+        }
 
         if (onDelete != null) {
             TextView x = base(c, "✕", 15f, Theme.DIM, false);
@@ -989,6 +1027,17 @@ public final class Ui {
             root.addView(x);
         }
         return root;
+    }
+
+    /** 체크 행의 선택만 바꾼다. 행을 여는 동작과 섞지 않는다. */
+    private static void toggleCheck(View v, Check box, String title, OnToggle cb) {
+        boolean now = !box.isChecked();
+        box.set(now);
+        String nm = (title == null) ? "" : title;
+        v.setContentDescription(nm + (now ? ", 선택됨" : ", 선택 안 됨"));
+        if (cb != null) {
+            try { cb.on(now); } catch (Throwable t2) { Log.add(v.getContext(), "선택 저장 실패: " + t2); }
+        }
     }
 
     /** checkRow 의 체크박스. 켜짐=만들 때의 Theme.accent() 채움+체크, 꺼짐=LINE2 보더. 직접 그린다(위젯 의존 없음). */

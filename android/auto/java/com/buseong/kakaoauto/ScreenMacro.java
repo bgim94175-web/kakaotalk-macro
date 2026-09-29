@@ -74,7 +74,7 @@ public final class ScreenMacro {
     private static void fill(final MainActivity a, LinearLayout col) {
         final int fc = Theme.F_MACRO;
         col.addView(Ui.pageHead(a, "AUTO SEND", "매크로",
-                "보낼 방별 쿨타임 발송 · 경쟁사 저격 · 갠톡 자동응답", fc));
+                "발송 내용 · 보낼 방 · 발송 쿨타임 · 랜덤 쿨타임 · 이미지", fc));
 
         if (!License.allowed(a, Features.MACRO)) {
             fillLocked(a, col);
@@ -91,72 +91,48 @@ public final class ScreenMacro {
         }
 
         final Settings s = Settings.load(a);
-        final KakaoSlots.Slot slot = KakaoSlots.selected(a);
-        if (slot != null) {
-            col.addView(Ui.sectionHeader(a, null, "카카오 계정"));
-            LinearLayout who = Ui.group(a);
-            String hint = slot.hint.length() > 0 ? slot.hint : "등록된 계정";
-            int n = KakaoSlots.count(a);
-            who.addView(Ui.navRow(a, Icon.KEY, Theme.F_ACCOUNT, "사용 계정",
-                    n > 1 ? (hint + " · " + n + "개") : hint, Theme.TEXT, new Runnable() {
-                        @Override public void run() { ScreenKakaoRegister.open(a); }
-                    }));
-            col.addView(who);
-        }
 
-        col.addView(autoCard(a, s));
-
-        // 예약 발송의 이미지 전송은 아무도 안 보고 있을 때 실패한다 → 토글 카드 바로 아래 1회만 띄운다
+        // 예약 발송의 이미지 전송은 아무도 안 보고 있을 때 실패한다 → 설정 블록 위에 1회만 띄운다
         View warn = imgFailNote(a);
         if (warn != null) col.addView(warn);
 
-        // ── 발송 내용 ──
-        col.addView(Ui.sectionHeader(a, null, "발송 내용"));
-        LinearLayout content = Ui.group(a);
-
         String msg = msgSummary(s);
-        content.addView(Ui.navRow(a, Icon.BUBBLE, fc, "메시지", (msg == null) ? "설정 필요" : msg,
-                (msg == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
-                    @Override public void run() { Nav.push(a, "메시지", MacroDetail.message(a)); }
+        block(a, col, "발송 내용", Ui.navRow(a, Icon.BUBBLE, fc, "발송 내용",
+                (msg == null) ? "설정 필요" : msg, (msg == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "발송 내용", MacroDetail.message(a)); }
                 }));
 
         String rooms = roomSummary(a, s);
-        content.addView(Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "보낼 방", (rooms == null) ? "설정 필요" : rooms,
-                (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
+        block(a, col, "보낼 방", Ui.navRow(a, Icon.ROOMS, Theme.F_ROOMS, "보낼 방",
+                (rooms == null) ? "설정 필요" : rooms, (rooms == null) ? Theme.AMBER : Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "보낼 방", ScreenRooms.build(a)); }
                 }));
 
-        content.addView(Ui.navRow(a, Icon.CLOCK, fc, "발송 쿨타임", cycleSummary(s), Theme.TEXT, new Runnable() {
-            @Override public void run() { Nav.push(a, "발송 쿨타임", MacroDetail.cycle(a)); }
-        }));
+        block(a, col, "발송 쿨타임", Ui.navRow(a, Icon.CLOCK, fc, "발송 쿨타임", s.macro.baseText(),
+                Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "발송 쿨타임", MacroDetail.cycle(a)); }
+                }));
+
+        block(a, col, "랜덤 쿨타임", Ui.navRow(a, Icon.CLOCK, fc, "랜덤 쿨타임", s.macro.randomText(),
+                Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "랜덤 쿨타임", MacroDetail.random(a)); }
+                }));
 
         boolean imgOn = s.macro.images.size() > 0;
         boolean imgFail = (lastFail(a) != null);
-        content.addView(Ui.navRow(a, Icon.IMAGE, fc, "이미지 첨부", imageSummary(a, s),
+        block(a, col, "이미지", Ui.navRow(a, Icon.IMAGE, fc, "이미지", imageSummary(a, s),
                 imgFail ? Theme.AMBER : (imgOn ? Theme.TEXT : Theme.DIM), new Runnable() {
-                    @Override public void run() { Nav.push(a, "이미지 첨부", MacroDetail.image(a)); }
+                    @Override public void run() { Nav.push(a, "이미지", MacroDetail.image(a)); }
                 }));
-        col.addView(content);
 
-        // ── 반응형 발송 (기능마다 색이 다르다) ──
-        col.addView(Ui.sectionHeader(a, null, "반응형 발송"));
-        LinearLayout extra = Ui.group(a);
-        int trigOn = 0;
-        for (int i = 0; i < s.triggers.size(); i++) {
-            if (s.triggers.get(i).enabled) trigOn++;
-        }
-        extra.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", trigSummary(s),
-                (trigOn > 0) ? Theme.SUB : Theme.DIM, (trigOn > 0) ? "사용 중" : null, new Runnable() {
-                    @Override public void run() { Nav.push(a, "경쟁사 저격", MacroDetail.triggers(a)); }
+        block(a, col, "최소 신규 메시지", Ui.navRow(a, Icon.BUBBLE, fc, "최소 신규 메시지",
+                s.macro.minMessages + "개", Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "최소 신규 메시지", MacroDetail.minMessages(a)); }
                 }));
-        extra.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", replySummary(s),
-                s.autoreply.enabled ? Theme.SUB : Theme.DIM, s.autoreply.enabled ? "사용 중" : null,
-                new Runnable() {
-                    @Override public void run() {
-                        Nav.push(a, "갠톡 자동응답", MacroDetail.autoReply(a));
-                    }
-                }));
-        col.addView(extra);
+
+        col.addView(Nav.note(a, "방별 쿨타임은 보낼 방에서 그 방을 엽니다."
+                + " 지정하지 않은 방은 발송 쿨타임을 사용합니다."
+                + " 경쟁사 저격과 갠톡 자동응답은 홈의 기능에 있습니다.", Theme.ACCENT2, null, null));
 
         // ── 즉시 발송 ──
         final TextView send = Ui.btn(a, "즉시 발송", true);
@@ -167,6 +143,14 @@ public final class ScreenMacro {
             @Override public void onClick(View v) { sendNow(a, s, send); }
         });
         col.addView(send);
+    }
+
+    /** 기능 하나 = 제목 하나 + 행 하나. 여러 설정을 한 목록에 섞지 않는다. */
+    private static void block(MainActivity a, LinearLayout col, String title, View row) {
+        col.addView(Ui.sectionHeader(a, null, title));
+        LinearLayout g = Ui.group(a);
+        g.addView(row);
+        col.addView(g);
     }
 
     /** 미구매 상태. 기능 설명 + 구매 + 구매 내역 재조회만 남긴다. */
@@ -203,8 +187,8 @@ public final class ScreenMacro {
         int keep = Theme.accent();
         Theme.setAccent(fc);
         try {
-            LinearLayout hero = Ui.hero(a, fc, Icon.SEND, "AUTO SEND", "자동발송",
-                    "등록한 카카오 계정으로 발송합니다. 연결된 대화방에만 전송됩니다.");
+            LinearLayout hero = Ui.hero(a, fc, Icon.SEND, "AUTO SEND", "매크로",
+                    "등록한 카카오 계정으로 발송합니다. 켜짐과 꺼짐은 이 화면에서 바꿉니다.");
             hero.addView(Ui.heroRule(a, fc));
 
             final TextView status = Ui.sub(a, statusText(a, s));

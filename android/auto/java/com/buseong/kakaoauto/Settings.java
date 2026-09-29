@@ -239,11 +239,11 @@ public final class Settings {
             else roomDueAt.put(room.key(), Long.valueOf(at));
         }
 
-        /** 목록에 보여줄 쿨타임. 방 값이 없으면 기본 간격으로 적는다. */
+        /** 목록에 보여줄 쿨타임. 방 값이 없으면 기본 발송 쿨타임을 쓴다고 적는다. */
         public String cooldownLabel(RoomRef room) {
             int own = cooldownMin(room);
-            if (own > 0) return own + "분";
-            return baseText();
+            if (own > 0) return "이 방 " + own + "분";
+            return "기본 발송 쿨타임 " + baseText();
         }
 
         /** 기본 간격 표시. 예: ~1분 */

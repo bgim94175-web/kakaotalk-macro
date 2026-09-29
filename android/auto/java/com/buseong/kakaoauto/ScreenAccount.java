@@ -178,7 +178,7 @@ public final class ScreenAccount {
                 : (reg ? (hint.length() > 0 ? hint : "등록됨") + (accounts > 1 ? " · " + accounts + "개" : "")
                 : "등록 필요");
         final int regColor = (reg && !again) ? Theme.OK : Theme.AMBER;
-        kakao.addView(Ui.navRow(a, Icon.KEY, fc, "카카오 계정 등록",
+        kakao.addView(Ui.navRow(a, Icon.KEY, fc, "계정",
                 regValue, regColor, new Runnable() {
                     @Override public void run() { ScreenKakaoRegister.open(a); }
                 }));

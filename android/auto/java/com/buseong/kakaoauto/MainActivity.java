@@ -458,10 +458,7 @@ public final class MainActivity extends Activity {
 
     private static void fillHome(final MainActivity a, LinearLayout col) {
         col.addView(Ui.pageHead(a, null, "홈", null, Theme.F_HOME));
-        String acc = KakaoAccount.accountId(a);
-        String whoLine = Device.deviceName();
-        if (acc.length() > 0) whoLine = whoLine + " · " + acc;
-        whoLine = whoLine + " · " + activeSummary(a);
+        String whoLine = Device.deviceName() + " · " + activeSummary(a);
         TextView who = Ui.sub(a, whoLine);
         who.setSingleLine(true);
         who.setEllipsize(TextUtils.TruncateAt.END);
@@ -475,6 +472,8 @@ public final class MainActivity extends Activity {
             fillUnlocked(a, col);
             return;
         }
+
+        col.addView(accountBlock(a));
 
         // ── 시작 설정 (필수 단계가 남아 있을 때만) ──
         View setup = setupCard(a);
@@ -498,6 +497,25 @@ public final class MainActivity extends Activity {
 
         col.addView(Ui.sectionHeader(a, null, "최근 활동"));
         col.addView(logCard(a));
+    }
+
+    /** 지금 선택된 카카오 계정. 추가·전환·해제는 계정 화면에서 한다. */
+    private static View accountBlock(final MainActivity a) {
+        LinearLayout wrap = new LinearLayout(a);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+        wrap.addView(Ui.sectionHeader(a, null, "계정"));
+        KakaoSlots.Slot slot = KakaoSlots.selected(a);
+        String hint = (slot != null && slot.hint.length() > 0) ? slot.hint : KakaoAccount.accountId(a);
+        if (hint == null || hint.length() == 0) hint = "등록된 계정";
+        int n = KakaoSlots.count(a);
+        String value = n > 1 ? (hint + " · " + n + "개") : hint;
+        LinearLayout g = Ui.group(a);
+        g.addView(Ui.navRow(a, Icon.KEY, Theme.F_ACCOUNT, "사용 계정", value, Theme.TEXT, new Runnable() {
+            @Override public void run() { ScreenKakaoRegister.open(a); }
+        }));
+        wrap.addView(g);
+        return wrap;
     }
 
     // ── 1. 시작 설정 카드 ───────────────────────────────────────────────────
@@ -574,9 +592,9 @@ public final class MainActivity extends Activity {
 
     private static void fillFeatures(final MainActivity a, LinearLayout col) {
         License.State st = License.state(a);
-        col.addView(Ui.sectionHeader(a, null, "기능"));
 
         if (!License.allowed(a, Features.MACRO)) {
+            col.addView(Ui.sectionHeader(a, null, "발송"));
             long exp = 0L;
             License.Feat f = (st == null || st.features == null) ? null : st.features.get(Features.MACRO);
             if (f != null) exp = f.expiresAt;
@@ -587,26 +605,38 @@ public final class MainActivity extends Activity {
                     }, null));
         }
 
-        LinearLayout g = Ui.group(a);
         if (License.allowed(a, Features.MACRO)) {
             Settings s = Settings.load(a);
             String macroV = "보낼 방 " + s.macro.roomRefs().size() + "개 · " + ScreenMacro.cycleSummary(s);
             String chip = License.expiringSoon(a, Features.MACRO) ? ("D-" + License.daysLeft(a, Features.MACRO)) : null;
-            g.addView(Ui.fnRow(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO), macroV,
+            col.addView(Ui.sectionHeader(a, null, "발송"));
+            LinearLayout send = Ui.group(a);
+            send.addView(Ui.fnRow(a, Theme.F_MACRO, Icon.SEND, Features.label(Features.MACRO), macroV,
                     Theme.SUB, chip, new Runnable() {
                         @Override public void run() { Nav.go(Nav.MACRO); }
                     }));
+            col.addView(send);
+
             int trigOn = 0;
             for (int i = 0; i < s.triggers.size(); i++) if (s.triggers.get(i).enabled) trigOn++;
-            g.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", ScreenMacro.trigSummary(s),
+            col.addView(Ui.sectionHeader(a, null, "경쟁사 저격"));
+            LinearLayout trig = Ui.group(a);
+            trig.addView(Ui.fnRow(a, Theme.F_TRIGGER, Icon.BOLT, "경쟁사 저격", ScreenMacro.trigSummary(s),
                     (trigOn > 0) ? Theme.SUB : Theme.DIM, null, new Runnable() {
                         @Override public void run() { Nav.push(a, "경쟁사 저격", MacroDetail.triggers(a)); }
                     }));
-            g.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", ScreenMacro.replySummary(s),
+            col.addView(trig);
+
+            col.addView(Ui.sectionHeader(a, null, "갠톡 자동응답"));
+            LinearLayout reply = Ui.group(a);
+            reply.addView(Ui.fnRow(a, Theme.F_REPLY, Icon.REPLY, "갠톡 자동응답", ScreenMacro.replySummary(s),
                     s.autoreply.enabled ? Theme.SUB : Theme.DIM, null, new Runnable() {
                         @Override public void run() { Nav.push(a, "갠톡 자동응답", MacroDetail.autoReply(a)); }
                     }));
+            col.addView(reply);
         }
+        col.addView(Ui.sectionHeader(a, null, "봇"));
+        LinearLayout g = Ui.group(a);
         botRow(a, g, Features.ROOMBOT, ScreenBot.NAME_ROOMBOT,
                 ScreenBot.roomBotValue(a), ScreenBot.roomBotColor(a));
         botRow(a, g, Features.MINIGAME, ScreenBot.NAME_MINIGAME,

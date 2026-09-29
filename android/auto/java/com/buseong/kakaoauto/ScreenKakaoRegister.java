@@ -41,7 +41,7 @@ public final class ScreenKakaoRegister {
 
     /** 홈·매크로·봇에서 계정 등록 전에 보여주는 안내. */
     public static View prompt(final MainActivity a) {
-        LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.KEY, "ACCOUNT", "카카오 계정 등록",
+        LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.KEY, "ACCOUNT", "계정",
                 "사용 가능한 기능은 아래에 표시됩니다. 로그인 후 앱에 표시된 인증코드를 카카오톡에 입력하면 매크로와 다른 기능을 설정할 수 있습니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ACCOUNT));
         int keep = Theme.accent();
@@ -55,7 +55,7 @@ public final class ScreenKakaoRegister {
 
     public static void open(MainActivity a) {
         if (a == null) return;
-        Nav.push(a, "카카오 계정 등록", build(a));
+        Nav.push(a, "계정", build(a));
     }
 
     public static View build(MainActivity a) {
@@ -87,8 +87,8 @@ public final class ScreenKakaoRegister {
         final KakaoSlots.Slot sel = KakaoSlots.selected(a);
         boolean ok = sel != null;
         String id = ok ? sel.hint : "";
-        LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.KEY, "ACCOUNT", "카카오 계정 등록",
-                ok ? "고른 계정의 방과 매크로만 이 화면에 따라 바뀝니다. 다른 계정은 서버에서 그대로 발송합니다."
+        LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.KEY, "ACCOUNT", "계정",
+                ok ? "계정을 추가하거나, 목록에서 바꾸거나, 선택한 계정만 해제합니다. 다른 계정은 그대로 둡니다."
                         : "카카오 계정으로 로그인한 뒤, 앱에 표시된 인증코드를 카카오톡에 입력하면 등록이 끝납니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ACCOUNT));
         LinearLayout stats = Ui.row(a);

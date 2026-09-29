@@ -146,7 +146,7 @@ public final class ScreenRooms {
         }
 
         LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "보낼 방",
-                "등록한 카카오 계정의 대화방입니다. 알림 미리보기 없이도 모두 고를 수 있습니다.");
+                "체크는 보낼 방입니다. 방을 열면 그 방의 쿨타임만 지정합니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ROOMS));
         LinearLayout stats = Ui.row(a);
         stats.setPadding(0, Theme.dp(a, 10), 0, 0);
@@ -197,7 +197,7 @@ public final class ScreenRooms {
         col.addView(add);
 
         TextView help = Ui.sub(a, "목록은 등록한 카카오 계정의 대화방입니다. "
-                + "알림을 받은 적 없는 방도 선택할 수 있습니다.");
+                + "따로 지정하지 않은 방은 기본 발송 쿨타임을 사용합니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
@@ -220,13 +220,19 @@ public final class ScreenRooms {
             String[] badges = r.groupKnown
                     ? new String[] { r.group ? "단체" : "1:1" }
                     : null;
-            g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "이 목록에 없음",
+            String cool = Settings.load(a).macro.cooldownLabel(r.ref);
+            String sub = r.detected ? cool : ("이 목록에 없음 · " + cool);
+            g.addView(Ui.checkRow(a, r.ref.name, sub,
                     badges, r.selected, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
                             select(a, r, v);
                             Nav.reload();
                         }
-                    }, null));
+                    }, null, new Runnable() {
+                        @Override public void run() {
+                            Nav.push(a, r.ref.name, MacroDetail.room(a, r.ref));
+                        }
+                    }));
         }
         return g;
     }
