@@ -1,27 +1,26 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
 import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
-import { loadRecord, saveRecord } from './store.mjs'
+import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
 import { macroRoomsDue, noteMacroSent, onInbound, parseRoomKey } from './features.mjs'
 
 process.env.SENDER_KEY = process.env.SENDER_KEY || '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 
-const dir = await mkdtemp(join(tmpdir(), 'kakao-sender-'))
-process.env.DATA_DIR = dir
-
-const rec = {
-  credentials: { access_token: 'tok', refresh_token: 'ref', user_id: '9', device_uuid: 'du', device_type: 'tablet' },
-  hello: '세션',
-}
-await saveRecord('device1234', rec)
-const back = await loadRecord('device1234')
-if (!back || back.credentials.access_token !== 'tok' || back.hello !== '세션') {
+const creds = { access_token: 'tok', refresh_token: 'ref', user_id: '9', device_uuid: 'du', device_type: 'tablet' }
+const sealed = seal(creds)
+if (sealed === JSON.stringify(creds)) throw new Error('token was stored in plaintext')
+const back = open(sealed)
+if (!back || back.access_token !== 'tok' || back.refresh_token !== 'ref' || back.user_id !== '9') {
   throw new Error('encrypt roundtrip failed')
+}
+const tampered = Buffer.from(sealed, 'base64')
+tampered[tampered.length - 1] ^= 1
+try {
+  open(tampered.toString('base64'))
+  throw new Error('tampered seal was accepted')
+} catch (e) {
+  if (e && e.message === 'tampered seal was accepted') throw e
 }
 
 if (!linkable('고려', '여름')) throw new Error('word link 고려->여름')
@@ -56,5 +55,4 @@ if (client.isConnected()) throw new Error('login() must not open a LOCO socket')
 const got = client.getCredentials()
 if (got.oauthToken !== 'tok' || got.userId !== '42') throw new Error('credentials not restored')
 
-await rm(dir, { recursive: true, force: true })
 process.stdout.write('sender selfcheck ok\n')

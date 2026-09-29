@@ -11,6 +11,7 @@ const path = require('path');
 
 const db = require('./lib/db');
 const rl = require('./lib/ratelimit');
+const senderChild = require('./lib/sender-child');
 const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
 const purchaseRoutes = require('./routes/purchase');
@@ -26,7 +27,11 @@ const app = express();
 app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
 app.disable('x-powered-by');
 
-// 본문 크기 제한 (설정 백업 blob 256KB + 여유)
+// 발송 API 는 자식으로 그대로 넘긴다. 이미지 base64 가 512kb 를 넘으므로
+// express.json 보다 먼저 둔다. 자식이 죽어 있으면 503 만 반환하고 부모는 계속 산다.
+senderChild.install(app);
+
+// 본문 크기 제한 (설정 백업 blob 256KB + 여유). /v1 은 위에서 이미 프록시한다.
 app.use(express.json({ limit: '512kb' }));
 
 // ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
@@ -176,5 +181,6 @@ db.migrate()
   .then(() => app.listen(PORT, () => {
     console.log('license server on :' + PORT);
     startSelfPing();
+    senderChild.start();
   }))
   .catch((e) => { console.error('DB init 실패:', e && e.stack ? e.stack : e); process.exit(1); });

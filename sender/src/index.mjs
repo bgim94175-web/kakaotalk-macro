@@ -157,8 +157,27 @@ app.post('/v1/send-images', async (req, res) => {
   }
 })
 
-const port = Number(process.env.PORT) || 8787
+process.on('uncaughtException', (e) => {
+  process.stderr.write(`[sender] uncaughtException ${e && e.stack ? e.stack : e}\n`)
+  process.exit(1)
+})
+process.on('unhandledRejection', (e) => {
+  process.stderr.write(`[sender] unhandledRejection ${e && e.stack ? e.stack : e}\n`)
+  process.exit(1)
+})
+
+const bind = process.env.SENDER_BIND || '0.0.0.0'
+const portEnv = process.env.PORT
+const port = portEnv == null || portEnv === '' ? 8787 : Number(portEnv)
 await hub.boot()
-app.listen(port, () => {
-  process.stderr.write(`[sender] always-on Kakao sender on :${port}\n`)
+const server = app.listen(port, bind)
+server.on('error', (e) => {
+  process.stderr.write(`[sender] listen failed: ${e && e.message ? e.message : e}\n`)
+  process.exit(1)
+})
+server.on('listening', () => {
+  const addr = server.address()
+  const actual = addr && typeof addr === 'object' ? addr.port : port
+  if (bind === '127.0.0.1') process.stdout.write(`SENDER_LISTENING ${actual}\n`)
+  process.stderr.write(`[sender] Kakao sender on ${bind}:${actual}\n`)
 })
