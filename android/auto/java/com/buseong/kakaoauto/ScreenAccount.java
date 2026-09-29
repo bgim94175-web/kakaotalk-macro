@@ -24,8 +24,8 @@ import java.util.List;
  * 아코디언은 접혀 있으면 안에 뭐가 있는지 모르고, 펼치면 옆 카드와 섞여서 경계가 사라진다.
  * 그래서 이 화면은 「제목 · 지금 값 · ›」 행만 남기고 상세는 전부 {@link Nav#push} 서브화면으로 내보냈다.
  *
- * 섹션은 4개다 — 라이선스 / 카카오톡 / 기록 / 고급.
- * <b>아코디언은 '고급' 한 곳에서만</b> 쓴다 (UI_V3 10장이 허용한 유일한 예외).
+ * 섹션은 3개다 — 라이선스 / 카카오 / 기록.
+ * 계정 연결은 아이디·비밀번호 등록뿐이다. 알림으로 계정을 감지하지 않는다.
  *
  * 값 요약 색 규칙: 손댈 게 없으면 OK·TEXT, 조치가 필요하면 AMBER, 꺼진 건 DIM.
  */
@@ -37,10 +37,6 @@ public final class ScreenAccount {
 
     /** 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
     private static final String REFRESH_LABEL = "기능 새로고침";
-
-    /** '고급' 아코디언 펼침 상태 (화면을 다시 그려도 기억한다) */
-    private static final int F_ADV = 1;
-    private static int openBits = 0;
 
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<LinearLayout> BODY;
@@ -139,7 +135,7 @@ public final class ScreenAccount {
 
     private static void fill(final MainActivity a, LinearLayout col) {
         final int fc = Theme.F_ACCOUNT;
-        col.addView(Ui.pageHead(a, "ACCOUNT", "내정보", "라이선스 · 카카오톡 계정 · 권한 · 기록", fc));
+        col.addView(Ui.pageHead(a, "ACCOUNT", "내정보", "라이선스 · 카카오 계정 · 기록", fc));
 
         // 조용히 실패한 이미지 전송은 문제를 확인하러 오는 이 화면에서도 한 번 알린다
         View imgWarn = ScreenMacro.imgFailNote(a);
@@ -179,17 +175,19 @@ public final class ScreenAccount {
                 reg ? "등록됨" : "등록 필요", reg ? Theme.OK : Theme.AMBER, new Runnable() {
                     @Override public void run() { ScreenKakaoRegister.open(a); }
                 }));
-        int accN = Accounts.count(a);
-        kakao.addView(Ui.navRow(a, Icon.USERS, fc, "카카오톡 계정", accValue(a, accN),
-                (accN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
-                    @Override public void run() { Nav.push(a, "카카오톡 계정", ScreenAccounts.build(a)); }
-                }));
         kakao.addView(ScreenKakaoLink.row(a, fc));
-        int need = permMissing(a);
-        kakao.addView(Ui.navRow(a, Icon.LOCK, fc, "권한 · 시작 설정", (need == 0) ? "모두 허용됨" : (need + "건 필요"),
-                (need == 0) ? Theme.OK : Theme.AMBER, new Runnable() {
-                    @Override public void run() { Setup.open(a); }
+        final boolean batt = Setup.ignoringBattery(a);
+        kakao.addView(Ui.navRow(a, Icon.LOCK, fc, "배터리 최적화 제외",
+                batt ? "제외됨" : "제외 필요", batt ? Theme.OK : Theme.AMBER, new Runnable() {
+                    @Override public void run() { Setup.askBattery(a); }
                 }));
+        int need = permMissing(a);
+        if (need > 0) {
+            kakao.addView(Ui.navRow(a, Icon.SPARK, fc, "시작 설정", need + "건 남음", Theme.AMBER,
+                    new Runnable() {
+                        @Override public void run() { Setup.open(a); }
+                    }));
+        }
         col.addView(kakao);
 
         // ── 기록 ──
@@ -204,17 +202,13 @@ public final class ScreenAccount {
             @Override public void run() { Nav.push(a, "이미지 전송 기록", sub(a, DIAG)); }
         }));
         col.addView(rec);
-
-        // ── 고급 (아코디언 허용 구역) ──
-        col.addView(Nav.gap(a, 6));
-        col.addView(Nav.foldGroup(a, advFold(a)));
     }
 
     /** 골드 멤버십 카드: 마스킹한 키 + 기능별 색 점과 남은 기간 */
     private static LinearLayout memberCard(final MainActivity a, License.State st, boolean ok) {
         LinearLayout card = new LinearLayout(a);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Theme.round(Theme.CARD, Theme.R_MD, 0, 0, a));
+        card.setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, a));
         int p = Theme.dp(a, 16);
         card.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -709,102 +703,4 @@ public final class ScreenAccount {
             col.addView(btns);
         }
     };
-
-    // ── 고급 (아코디언 · UI_V3 10장이 허용한 유일한 예외) ───────────────────
-
-    private static Nav.Fold advFold(final MainActivity a) {
-        final Nav.Fold f = Nav.fold(a, "고급", "서버 주소 · 앱 정보 · 최근 오류",
-                (openBits & F_ADV) != 0);
-        f.onToggle(new Ui.OnToggle() {
-            @Override public void on(boolean v) {
-                if (v) openBits |= F_ADV;
-                else openBits &= ~F_ADV;
-            }
-        });
-
-        f.body.addView(Ui.sub(a, "관리자 안내가 있는 경우에만 변경하십시오."));
-
-        f.body.addView(Nav.actionRow(a, "서버 주소", License.server(a), "변경", new Runnable() {
-            @Override public void run() { editServer(a); }
-        }));
-        f.body.addView(Ui.divider(a));
-
-        f.body.addView(Nav.actionRow(a, "앱 버전",
-                Device.appVersionName(a) + " (" + Device.appVersion(a) + ")", null, null));
-        f.body.addView(Ui.divider(a));
-
-        String sig = Device.appSigSha256(a);
-        final String full = (sig == null) ? "" : sig;
-        String shown = (full.length() < 12) ? "확인 불가" : full.substring(0, 12);
-        f.body.addView(Nav.actionRow(a, "서명 SHA-256", shown,
-                (full.length() == 0) ? null : "복사", new Runnable() {
-                    @Override public void run() { Nav.copy(a, "앱 서명 SHA-256", full); }
-                }));
-        f.body.addView(Ui.divider(a));
-
-        final String err = lastError(a);
-        f.body.addView(Nav.actionRow(a, "최근 오류", (err.length() == 0) ? "없음" : Nav.preview(err, 70),
-                (err.length() == 0) ? null : "복사", new Runnable() {
-                    @Override public void run() { Nav.copy(a, "최근 오류", err); }
-                }));
-
-        String tamper = Device.tamperFlags(a);
-        if (tamper != null && tamper.length() > 0) {
-            f.body.addView(Nav.note(a, "⚠ 변조 지표가 감지되었습니다: " + tamper + "\n"
-                    + "정식 APK가 아니거나 개발자 모드일 수 있습니다. 인증이 거부될 수 있습니다.",
-                    Theme.AMBER, null, null));
-        }
-        return f;
-    }
-
-    /** 활동 로그에서 가장 최근의 실패·오류 한 줄을 뽑는다. 없으면 "" */
-    private static String lastError(MainActivity a) {
-        String dump = Log.dump(a);
-        if (dump == null || dump.length() == 0) return "";
-        String[] lines = dump.split("\n");
-        for (int i = 0; i < lines.length; i++) {
-            String s = lines[i];
-            if (s == null) continue;
-            if (s.contains("실패") || s.contains("오류") || s.contains("거부")
-                    || s.contains("차단") || s.contains("잠금")) {
-                return s.trim();
-            }
-        }
-        return "";
-    }
-
-    private static void editServer(final MainActivity a) {
-        LinearLayout body = Nav.col(a);
-        body.addView(Ui.sub(a, "비워서 저장하면 기본 주소로 복원됩니다.\n기본값: " + License.SERVER));
-
-        TextView lb = Ui.label(a, "서버 주소");
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(a, 14);
-        lp.bottomMargin = Theme.dp(a, 6);
-        lb.setLayoutParams(lp);
-        body.addView(lb);
-
-        final EditText f = Ui.field(a, License.SERVER);
-        f.setSingleLine(true);
-        f.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        f.setText(License.server(a));
-        body.addView(f);
-        final TextView err = Nav.errLine(a);
-        body.addView(err);
-
-        Nav.form(a, "서버 주소", body, "저장", new Nav.OnSave() {
-            @Override public String save() {
-                Nav.errClear(err);
-                String v = f.getText().toString().trim();
-                if (v.length() > 0 && !v.startsWith("http://") && !v.startsWith("https://")) {
-                    Nav.errText(err, "http:// 또는 https:// 로 시작해야 합니다.");
-                    return "";
-                }
-                License.setServer(a, v);
-                Log.add(a, "서버 주소를 변경했습니다.");
-                refresh();
-                return null;
-            }
-        });
-    }
 }

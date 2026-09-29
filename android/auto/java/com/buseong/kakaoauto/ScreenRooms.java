@@ -9,6 +9,11 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.buseong.kakaoauto.engine.Engine;
+import com.buseong.kakaoauto.engine.EngineException;
+import com.buseong.kakaoauto.engine.KakaoEngine;
+import com.buseong.kakaoauto.engine.RoomLinks;
+
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -20,20 +25,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `대상 방 ›` 에서 Nav.push 로 열린다.
  *
- * 한 화면에서 선택·삭제·추가를 다 한다:
- *   - 계정별 섹션 → 그 계정의 대화방을 체크박스 목록으로 (계정 1개면 머리글 숨김)
- *   - 체크하면 즉시 저장. 확인 버튼 없음.
- *   - ✕ 는 감지 목록에서 1건 삭제 (멤버 이름이 방으로 잘못 들어간 항목 정리) + 5초 실행 취소
- *   - [직접 입력 추가] 는 아직 감지 안 된 방을 손으로 넣는다
- *   - [감지 목록 초기화] 는 감지 캐시만 비우고 선택된 방은 남긴다
- *
- * 삭제를 5초 미루는 이유 — KakaoListener 에는 감지 캐시에 방을 다시 넣는 공개 API 가 없다.
- * 그래서 ✕ 를 누르면 화면에서만 먼저 감추고(PENDING), 스낵바가 사라질 때 실제로 지운다.
- * 실행 취소를 누르면 예약을 취소하니까 캐시가 그대로 살아있다. 화면을 나가도 예약은 남는다.
+ * 등록한 카카오 계정의 LOCO 대화방 목록을 그대로 보여 준다.
+ * 알림, 미리보기, 예전에 본 방이 없어도 목록에 있으면 선택할 수 있다.
+ * 체크하면 그 방 번호로 연결하고 보낼 방에 넣는다. 발송은 그 세션으로만 한다.
  */
 public final class ScreenRooms {
     private ScreenRooms() {}
@@ -48,6 +48,14 @@ public final class ScreenRooms {
     private static WeakReference<View> SNACK;
 
     private static final Handler H = new Handler(Looper.getMainLooper());
+    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+
+    /** 이번에 받은 카카오 대화방 목록. null 이면 아직 없다. */
+    private static List<KakaoEngine.KakaoRoom> LOADED;
+    /** 목록을 못 받았을 때의 라이브러리 오류. 없으면 null. */
+    private static String LOAD_ERR;
+    private static boolean inflight = false;
+    private static int loadGen = 0;
 
     /** ✕ 를 눌렀지만 아직 실제로 지우지 않은 방 (키 = RoomRef.key()) */
     private static final LinkedHashMap<String, Pending> PENDING =
@@ -68,12 +76,18 @@ public final class ScreenRooms {
         boolean group;
         boolean selected;
         long lastAt;
+        /** LOCO 목록의 방. 목록에 없는 선택 방이면 null. */
+        KakaoEngine.KakaoRoom room;
     }
 
     // ── 셸 ──────────────────────────────────────────────────────────────────
 
     public static View build(MainActivity a) {
         Theme.setAccent(Theme.F_ROOMS);
+        LOADED = null;
+        LOAD_ERR = null;
+        loadGen++;
+        inflight = false;
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
@@ -110,69 +124,60 @@ public final class ScreenRooms {
                     + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
         }
 
-        final List<Row> rows = rows(a);
-        final List<String> accs = accounts(a, rows);
-        final int accCount = Accounts.count(a);
-        final boolean multi = (accCount >= 2) || (accs.size() >= 2);
+        final boolean ready = KakaoAccount.ready(a) && Engine.ready(a);
+        if (ready && LOADED == null && LOAD_ERR == null && !inflight) startLoad(a);
 
-        int detected = 0;
+        final List<Row> rows = rows(a);
+        int listed = 0;
         int selected = 0;
         for (int i = 0; i < rows.size(); i++) {
-            if (rows.get(i).detected) detected++;
+            if (rows.get(i).detected) listed++;
             if (rows.get(i).selected) selected++;
         }
 
         LinearLayout hero = Ui.hero(a, Theme.F_ROOMS, Icon.ROOMS, "TARGET ROOMS", "보낼 방",
-                "선택한 대화방에 발송합니다. 대화방은 카카오톡 알림을 1회 수신하면 자동으로 감지됩니다.");
+                "등록한 카카오 계정의 대화방입니다. 알림 미리보기 없이도 모두 고를 수 있습니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ROOMS));
         LinearLayout stats = Ui.row(a);
         stats.setPadding(0, Theme.dp(a, 10), 0, 0);
         stats.addView(Ui.stat(a, "선택", selected + "개", (selected == 0) ? Theme.AMBER : Theme.TEXT));
-        stats.addView(Ui.stat(a, "감지", detected + "개", Theme.TEXT));
+        stats.addView(Ui.stat(a, "대화방", listed + "개", Theme.TEXT));
         hero.addView(stats);
         col.addView(hero);
 
-        // 계정이 2개 이상이면 계정 화면으로 가는 길을 맨 위에 둔다 (UI_V3 5장)
-        if (accCount >= 2) {
-            LinearLayout top = Ui.group(a);
-            top.addView(Ui.navRow(a, Icon.USERS, Theme.F_ACCOUNT, "카카오톡 계정",
-                    accCount + "개 감지 · " + usedAccounts(a, accs) + "개 사용", 0,
-                    new Runnable() {
-                        @Override public void run() {
-                            Nav.push(a, "카카오톡 계정", ScreenAccounts.build(a));
-                        }
-                    }));
-            col.addView(top);
-        }
-
-        if (rows.isEmpty()) {
-            col.addView(Nav.note(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 "
-                    + "자동으로 등록되며, 직접 입력하여 추가할 수도 있습니다.", Theme.ACCENT2, null, null));
-        } else if (!multi) {
-            col.addView(Ui.sectionHeader(a, null, "선택 " + selected + "개 · 감지 " + detected + "개"));
-            col.addView(section(a, rows));
+        if (!ready) {
+            col.addView(Nav.note(a, "카카오 계정을 등록하고 인증을 마치면 그 계정의 대화방을 모두 불러옵니다.",
+                    Theme.AMBER, null, null));
+        } else if (inflight && LOADED == null) {
+            col.addView(Nav.note(a, "대화방 목록을 불러오는 중입니다.", Theme.ACCENT2, null, null));
+        } else if (LOAD_ERR != null && (LOADED == null || LOADED.isEmpty())) {
+            col.addView(Nav.note(a, "대화방 목록을 불러오지 못했습니다. " + LOAD_ERR,
+                    Theme.AMBER, null, null));
+        } else if (rows.isEmpty()) {
+            col.addView(Nav.note(a, "이 계정에 대화방이 없습니다.", Theme.ACCENT2, null, null));
         } else {
-            for (int i = 0; i < accs.size(); i++) {
-                String acc = accs.get(i);
-                List<Row> mine = filter(rows, acc);
-                col.addView(Ui.sectionHeader(a, null, header(a, acc, mine)));
-                col.addView(section(a, mine));
+            if (LOAD_ERR != null) {
+                col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
+                        Theme.AMBER, null, null));
             }
+            col.addView(Ui.sectionHeader(a, null, "선택 " + selected + "개 · 대화방 " + listed + "개"));
+            col.addView(section(a, sortCopy(rows)));
         }
 
-        TextView add = Nav.wideBtn(a, "직접 입력 추가", false, new Runnable() {
+        if (ready) {
+            TextView reload = Nav.wideBtn(a, "목록 다시 불러오기", false, new Runnable() {
+                @Override public void run() { reload(a); }
+            });
+            col.addView(reload);
+        }
+
+        TextView add = Nav.wideBtn(a, "이름으로 찾기", false, new Runnable() {
             @Override public void run() { addDialog(a); }
         });
         col.addView(add);
 
-        TextView clear = Nav.wideBtn(a, "감지 목록 초기화", false, new Runnable() {
-            @Override public void run() { clearDialog(a); }
-        });
-        clear.setTextColor(Theme.RED);
-        col.addView(clear);
-
-        TextView help = Ui.sub(a, "감지 목록 초기화는 감지된 대화방 기록만 비웁니다. "
-                + "선택된 방은 유지됩니다.");
+        TextView help = Ui.sub(a, "목록은 등록한 카카오 계정의 대화방입니다. "
+                + "알림을 받은 적 없는 방도 선택할 수 있습니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
@@ -183,7 +188,7 @@ public final class ScreenRooms {
     private static LinearLayout section(final MainActivity a, List<Row> list) {
         LinearLayout g = Ui.group(a);
         if (list.isEmpty()) {
-            TextView t = Ui.sub(a, "감지된 대화방이 없습니다.");
+            TextView t = Ui.sub(a, "대화방이 없습니다.");
             int ph = Theme.dp(a, 16);
             t.setPadding(ph, Theme.dp(a, 18), ph, Theme.dp(a, 18));
             t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
@@ -195,19 +200,13 @@ public final class ScreenRooms {
             String[] badges = r.groupKnown
                     ? new String[] { r.group ? "단체" : "1:1" }
                     : null;
-            Runnable del = null;
-            if (r.detected) {
-                del = new Runnable() {
-                    @Override public void run() { delete(a, r.ref); }
-                };
-            }
-            g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "미감지",
+            g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "이 목록에 없음",
                     badges, r.selected, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
-                            select(a, r.ref, v);
+                            select(a, r, v);
                             Nav.reload();
                         }
-                    }, del));
+                    }, null));
         }
         return g;
     }
@@ -223,41 +222,162 @@ public final class ScreenRooms {
     // ── 목록 만들기 ─────────────────────────────────────────────────────────
 
     /**
-     * 감지된 방 + 선택만 남은 방(직접 입력·초기화 이후)을 합친다.
-     * 선택된 방은 감지 목록에 없어도 반드시 보여야 한다 — 안 보이면 해제할 방법이 없다.
+     * 등록 계정의 LOCO 대화방 전체 + 목록에 없는 선택 방.
+     * 선택된 방은 목록에서 빠져도 보여 준다. 안 보이면 해제할 방법이 없다.
      */
     private static List<Row> rows(Context c) {
         LinkedHashMap<String, Row> map = new LinkedHashMap<String, Row>();
-
-        List<KakaoListener.RoomInfo> det = KakaoListener.knownRooms(c);
-        for (int i = 0; i < det.size(); i++) {
-            KakaoListener.RoomInfo ri = det.get(i);
-            if (ri == null || ri.ref == null || !ri.ref.valid()) continue;
-            String k = ri.ref.key();
-            if (PENDING.containsKey(k)) continue;   // 삭제 예약된 방은 화면에서 이미 빠졌다
-            Row r = new Row();
-            r.ref = ri.ref;
-            r.detected = true;
-            r.groupKnown = true;
-            r.group = ri.group;
-            r.lastAt = ri.lastAt;
-            map.put(k, r);
+        List<KakaoEngine.KakaoRoom> src = LOADED;
+        if (src != null) bindSelected(c, src);
+        Settings settings = Settings.load(c);
+        if (src != null) {
+            for (int i = 0; i < src.size(); i++) {
+                KakaoEngine.KakaoRoom k = src.get(i);
+                if (k == null || !realChatId(k.chatId)) continue;
+                RoomRef ref = refFor(c, k);
+                if (ref == null || !ref.valid()) continue;
+                if (PENDING.containsKey(ref.key())) continue;
+                Row r = new Row();
+                r.ref = ref;
+                r.detected = true;
+                r.groupKnown = !"unknown".equals(k.kind);
+                r.group = k.isGroup();
+                r.lastAt = k.lastAt;
+                r.selected = settings.macro.coversRoom(ref);
+                r.room = k;
+                map.put(k.chatId, r);
+            }
         }
-
-        List<RoomRef> sel = Settings.load(c).macro.roomRefs();
+        List<RoomRef> sel = settings.macro.roomRefs();
         for (int i = 0; i < sel.size(); i++) {
             RoomRef ref = sel.get(i);
             if (ref == null || !ref.valid()) continue;
-            String k = ref.key();
-            if (PENDING.containsKey(k)) continue;
-            Row r = map.get(k);
-            if (r != null) { r.selected = true; continue; }
+            if (PENDING.containsKey(ref.key())) continue;
+            if (listed(map, ref)) continue;
             Row n = new Row();
             n.ref = ref;
             n.selected = true;
-            map.put(k, n);
+            map.put("sel:" + ref.key(), n);
         }
         return new ArrayList<Row>(map.values());
+    }
+
+    private static boolean listed(Map<String, Row> map, RoomRef ref) {
+        for (Row r : map.values()) {
+            if (r.ref != null && r.ref.equals(ref)) return true;
+        }
+        return false;
+    }
+
+    /** 이름으로 딱 하나 맞는 선택 방은 방 번호에 연결한다. 발송이 그 방으로 간다. */
+    private static void bindSelected(Context c, List<KakaoEngine.KakaoRoom> list) {
+        if (!Prefs.secReady(c)) return;
+        List<RoomRef> sel = Settings.load(c).macro.roomRefs();
+        for (int i = 0; i < sel.size(); i++) {
+            RoomRef ref = sel.get(i);
+            if (ref == null || !ref.valid() || RoomLinks.get(c, ref) != null) continue;
+            KakaoEngine.KakaoRoom hit = null;
+            int n = 0;
+            for (int j = 0; j < list.size(); j++) {
+                KakaoEngine.KakaoRoom k = list.get(j);
+                if (k == null || !sameName(ref.name, k)) continue;
+                if (RoomLinks.refFor(c, k.chatId) != null) continue;
+                hit = k;
+                n++;
+            }
+            if (n == 1) RoomLinks.put(c, ref, hit);
+        }
+    }
+
+    private static RoomRef refFor(Context c, KakaoEngine.KakaoRoom k) {
+        RoomRef linked = RoomLinks.refFor(c, k.chatId);
+        if (linked != null && linked.valid()) return linked;
+        return uniqueRef(c, k);
+    }
+
+    /** 같은 이름이 이미 다른 방 번호에 연결되어 있으면 번호를 붙여 구분한다. */
+    private static RoomRef uniqueRef(Context c, KakaoEngine.KakaoRoom k) {
+        String base = k.name();
+        RoomRef ref = RoomRef.of(base);
+        RoomLinks.Link have = RoomLinks.get(c, ref);
+        if (have == null || k.chatId.equals(have.chatId)) return ref;
+        String tail = k.chatId.length() > 4 ? k.chatId.substring(k.chatId.length() - 4) : k.chatId;
+        RoomRef alt = RoomRef.of(base + " · " + tail);
+        RoomLinks.Link altHave = RoomLinks.get(c, alt);
+        if (altHave == null || k.chatId.equals(altHave.chatId)) return alt;
+        return RoomRef.of(base + " · " + k.chatId);
+    }
+
+    private static boolean sameName(String want, KakaoEngine.KakaoRoom k) {
+        String n = norm(want);
+        if (n.length() == 0) return false;
+        if (n.equals(norm(k.name()))) return true;
+        if (k.title.trim().length() > 0 && n.equals(norm(k.title))) return true;
+        return k.displayName.trim().length() > 0 && n.equals(norm(k.displayName));
+    }
+
+    private static String norm(String s) {
+        if (s == null) return "";
+        return s.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean realChatId(String id) {
+        if (id == null || id.length() == 0 || id.charAt(0) == '0') return false;
+        for (int i = 0; i < id.length(); i++) {
+            char ch = id.charAt(i);
+            if (ch < '0' || ch > '9') return false;
+        }
+        return true;
+    }
+
+    private static List<Row> sortCopy(List<Row> rows) {
+        ArrayList<Row> out = new ArrayList<Row>(rows);
+        sort(out);
+        return out;
+    }
+
+    private static void startLoad(final MainActivity a) {
+        if (a == null || !KakaoAccount.ready(a) || !Engine.ready(a)) return;
+        final int gen = ++loadGen;
+        inflight = true;
+        IO.execute(new Runnable() {
+            @Override public void run() {
+                List<KakaoEngine.KakaoRoom> list = null;
+                String err = null;
+                try {
+                    list = Engine.get(a).rooms(true);
+                } catch (EngineException e) {
+                    err = e.userText();
+                } catch (Throwable t) {
+                    err = String.valueOf(t);
+                }
+                final List<KakaoEngine.KakaoRoom> got = list;
+                final String why = err;
+                H.post(new Runnable() {
+                    @Override public void run() {
+                        if (gen != loadGen) return;
+                        inflight = false;
+                        if (got != null) {
+                            LOADED = got;
+                            LOAD_ERR = null;
+                        } else {
+                            LOAD_ERR = (why == null || why.trim().length() == 0)
+                                    ? "카카오 서버가 실패 원인을 주지 않았습니다." : why;
+                        }
+                        refresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private static void reload(MainActivity a) {
+        LOADED = null;
+        LOAD_ERR = null;
+        loadGen++;
+        inflight = false;
+        startLoad(a);
+        refresh();
     }
 
     /** 계정 표시 순서: 등록된 계정 순번 → 목록에만 남은 계정 */
@@ -304,6 +424,23 @@ public final class ScreenRooms {
     }
 
     // ── 선택 ────────────────────────────────────────────────────────────────
+
+    /** 체크하면 그 카카오 방 번호로 연결한 뒤 보낼 방에 넣는다. */
+    private static void select(Context c, Row row, boolean on) {
+        if (c == null || row == null || row.ref == null) return;
+        if (on && row.room != null) {
+            RoomRef ref = refFor(c, row.room);
+            if (ref == null || !ref.valid()) return;
+            if (RoomLinks.get(c, ref) == null && !RoomLinks.put(c, ref, row.room)) {
+                snack("저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.", null, null);
+                refresh();
+                return;
+            }
+            select(c, ref, true);
+            return;
+        }
+        select(c, row.ref, on);
+    }
 
     /** 체크 즉시 저장. 확인 버튼은 없다 (UI_V3 5장). */
     private static void select(Context c, RoomRef ref, boolean on) {
@@ -413,15 +550,15 @@ public final class ScreenRooms {
 
     // ── 직접 입력 추가 ──────────────────────────────────────────────────────
 
-    /** 감지 안 된 방을 손으로 넣는다. 계정이 2개 이상이면 계정도 고른다. */
+    /** 불러온 목록에서 이름이 같은 방을 찾아 선택한다. 알림은 보지 않는다. */
     private static void addDialog(final MainActivity a) {
-        final List<String> accs = accounts(a, rows(a));
-        final boolean multi = (Accounts.count(a) >= 2) || (accs.size() >= 2);
-        final String[] pick = { accs.isEmpty() ? RoomRef.DEFAULT_ACC : accs.get(0) };
-
+        if (LOADED == null || LOADED.isEmpty()) {
+            snack("대화방 목록을 먼저 불러오십시오.", null, null);
+            return;
+        }
         LinearLayout body = Nav.col(a);
-        TextView help = Ui.sub(a, "카카오톡에 표시된 대화방 이름과 정확히 일치해야 발송됩니다. "
-                + "발송에는 해당 대화방의 알림이 1회 이상 수신되어야 합니다.");
+        TextView help = Ui.sub(a, "등록한 계정의 대화방 이름과 같으면 그 방을 선택합니다. "
+                + "알림을 받은 적이 없어도 됩니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.bottomMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
@@ -432,72 +569,32 @@ public final class ScreenRooms {
         f.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         body.addView(f);
 
-        if (multi) {
-            LinearLayout row = Ui.row(a);
-            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            rp.topMargin = Theme.dp(a, 12);
-            row.setLayoutParams(rp);
-
-            TextView lab = Ui.sub(a, "계정");
-            lab.setLayoutParams(new LinearLayout.LayoutParams(WRAP, WRAP));
-            row.addView(lab);
-
-            final TextView val = Ui.body(a, Accounts.nameOf(a, pick[0]));
-            val.setGravity(Gravity.END);
-            val.setSingleLine(true);
-            LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(0, WRAP, 1f);
-            vp.leftMargin = Theme.dp(a, 12);
-            val.setLayoutParams(vp);
-            row.addView(val);
-
-            TextView change = Ui.btn(a, "변경", false);
-            change.setPadding(Theme.dp(a, 14), Theme.dp(a, 12), Theme.dp(a, 14), Theme.dp(a, 12));
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(WRAP, WRAP);
-            cp.leftMargin = Theme.dp(a, 12);
-            change.setLayoutParams(cp);
-            change.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    final String[] keys = accs.toArray(new String[accs.size()]);
-                    String[] labels = new String[keys.length];
-                    String[] descs = new String[keys.length];
-                    int sel = 0;
-                    for (int i = 0; i < keys.length; i++) {
-                        labels[i] = Accounts.nameOf(a, keys[i]);
-                        int n = KakaoListener.roomCount(a, keys[i]);
-                        descs[i] = "대화방 " + n + "개 감지";
-                        if (keys[i].equals(pick[0])) sel = i;
-                    }
-                    Nav.choose(a, "계정 선택", labels, descs, sel, new Nav.OnPick() {
-                        @Override public void pick(int index) {
-                            if (index < 0 || index >= keys.length) return;
-                            pick[0] = keys[index];
-                            val.setText(Accounts.nameOf(a, pick[0]));
-                        }
-                    });
-                }
-            });
-            row.addView(change);
-            body.addView(row);
-        }
-
-        Nav.form(a, "대화방 직접 입력", body, "추가", new Nav.OnSave() {
+        Nav.form(a, "이름으로 찾기", body, "선택", new Nav.OnSave() {
             @Override public String save() {
-                RoomRef ref = RoomRef.of(pick[0], f.getText().toString());
-                if (!ref.valid()) return "대화방 이름을 입력하십시오.";
-                if (Settings.load(a).macro.coversRoom(ref)) {
-                    return "이미 대상으로 선택된 대화방입니다.";
+                String name = f.getText().toString();
+                if (name == null || name.trim().length() == 0) return "대화방 이름을 입력하십시오.";
+                KakaoEngine.KakaoRoom hit = null;
+                int n = 0;
+                List<KakaoEngine.KakaoRoom> src = LOADED;
+                if (src == null) return "대화방 목록이 없습니다. 목록을 다시 불러오십시오.";
+                for (int i = 0; i < src.size(); i++) {
+                    KakaoEngine.KakaoRoom k = src.get(i);
+                    if (k != null && sameName(name, k)) { hit = k; n++; }
                 }
+                if (n == 0) return "이 계정의 대화방 목록에 없는 이름입니다.";
+                if (n > 1) return "같은 이름의 대화방이 여러 개입니다. 목록에서 선택하십시오.";
                 List<Row> now = rows(a);
                 for (int i = 0; i < now.size(); i++) {
-                    if (ref.equals(now.get(i).ref)) {
-                        return "이미 감지 목록에 있는 대화방입니다. 목록에서 선택하십시오.";
+                    Row r = now.get(i);
+                    if (r.room != null && hit.chatId.equals(r.room.chatId)) {
+                        select(a, r, true);
+                        Log.add(a, "대화방을 선택했습니다: " + r.ref.label(a));
+                        refresh();
+                        Nav.reload();
+                        return null;
                     }
                 }
-                select(a, ref, true);
-                Log.add(a, "방을 직접 추가했습니다: " + ref.label(a));
-                refresh();
-                Nav.reload();
-                return null;
+                return "목록에서 그 대화방을 찾지 못했습니다.";
             }
         });
     }

@@ -315,7 +315,7 @@ public final class MainActivity extends Activity {
         col.addView(Ui.sectionHeader(this, null, "시작 순서"));
         LinearLayout steps = Ui.card(this);
         steps.addView(introStep(this, 1, "라이선스 인증", "구매 시 발급된 키를 입력합니다.", false));
-        steps.addView(introStep(this, 2, "권한 설정", "알림 접근 · 배터리 최적화 제외를 안내에 따라 허용합니다.", true));
+        steps.addView(introStep(this, 2, "카카오 계정 등록", "아이디와 비밀번호로 등록하고, 카카오톡에 표시된 인증코드를 입력합니다.", true));
         steps.addView(introStep(this, 3, "기능 설정", "메시지와 보낼 방을 정하면 백그라운드에서 동작합니다.", true));
         col.addView(steps);
 

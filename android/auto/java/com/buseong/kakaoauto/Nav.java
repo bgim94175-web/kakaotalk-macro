@@ -653,19 +653,23 @@ public final class Nav {
     public static LinearLayout note(Context c, String text, int color, String btnLabel, final Runnable onTap) {
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(Theme.sheen(Theme.fade(color, 0.13f), Theme.fade(color, 0.05f), Theme.R_MD, Theme.fade(color, 0.28f), c));
+        box.setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
         int p = Theme.dp(c, 14);
         box.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.topMargin = Theme.dp(c, 12);
         box.setLayoutParams(lp);
 
+        LinearLayout row = Ui.row(c);
+        row.addView(Ui.accentBar(c, color, 18));
         TextView t = new TextView(c);
         t.setText((text == null) ? "" : text);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-        t.setTextColor(Theme.SUB);
+        t.setTextColor(Theme.TEXT);
         t.setLineSpacing(0, 1.45f);
-        box.addView(t, new LinearLayout.LayoutParams(MATCH, WRAP));
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(t);
+        box.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         if (btnLabel != null && btnLabel.length() > 0) {
             TextView b = Ui.btn(c, btnLabel, false);

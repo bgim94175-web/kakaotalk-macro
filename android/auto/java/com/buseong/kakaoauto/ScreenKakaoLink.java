@@ -190,7 +190,7 @@ public final class ScreenKakaoLink {
         }
         col.addView(g);
         if (unlinked > 0) {
-            col.addView(Nav.note(a, "연결되지 않은 대화방 " + unlinked + "개는 알림 답장 방식으로 발송합니다.",
+            col.addView(Nav.note(a, "연결되지 않은 대화방 " + unlinked + "개는 등록한 계정으로 보낼 수 없습니다. 목록에서 연결하십시오.",
                     Theme.ACCENT2, "이름으로 일괄 연결", new Runnable() {
                         @Override public void run() { matchByName(a); }
                     }));
@@ -250,7 +250,7 @@ public final class ScreenKakaoLink {
                 }
                 if (linked) {
                     labels[n - 1] = "연결 끊기";
-                    descs[n - 1] = "이 대화방은 알림 답장 방식으로 발송합니다";
+                    descs[n - 1] = "연결을 끊으면 이 대화방으로는 보내지 않습니다";
                 }
                 Nav.choose(a, "「" + ref.label(a) + "」 연결", labels, descs, -1, new Nav.OnPick() {
                     @Override public void pick(int index) {

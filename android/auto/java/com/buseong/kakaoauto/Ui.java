@@ -73,8 +73,8 @@ public final class Ui {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(c, 8);
-        lp.bottomMargin = Theme.dp(c, 16);
+        lp.topMargin = Theme.dp(c, 4);
+        lp.bottomMargin = Theme.dp(c, 12);
         l.setLayoutParams(lp);
 
         LinearLayout top = row(c);
@@ -145,16 +145,16 @@ public final class Ui {
                                     String titleTxt, String desc) {
         LinearLayout card = new LinearLayout(c);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Theme.round(Theme.CARD, Theme.R_MD, 0, 0, c));
+        card.setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
         int p = Theme.dp(c, 16);
-        card.setPadding(p, p, p, p);
+        card.setPadding(p, Theme.dp(c, 14), p, Theme.dp(c, 14));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.bottomMargin = Theme.dp(c, 8);
+        lp.bottomMargin = Theme.dp(c, 12);
         card.setLayoutParams(lp);
 
         LinearLayout head = row(c);
         head.addView(accentBar(c, color, 16));
-        TextView nm = base(c, titleTxt, 16f, Theme.TEXT, true);
+        TextView nm = base(c, titleTxt, 18f, Theme.TEXT, true);
         nm.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         head.addView(nm);
         card.addView(head);
@@ -174,8 +174,8 @@ public final class Ui {
         View v = new View(c);
         v.setBackgroundColor(Theme.fade(color, 0.18f));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, Math.max(1, Theme.dp(c, 1)));
-        lp.topMargin = Theme.dp(c, 14);
-        lp.bottomMargin = Theme.dp(c, 4);
+        lp.topMargin = Theme.dp(c, 12);
+        lp.bottomMargin = Theme.dp(c, 2);
         v.setLayoutParams(lp);
         return v;
     }
@@ -290,7 +290,7 @@ public final class Ui {
     public static LinearLayout card(Context c) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.setBackground(Theme.round(Theme.CARD, Theme.R_MD, 0, 0, c));
+        l.setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
         int p = Theme.dp(c, 16);
         l.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
@@ -336,8 +336,8 @@ public final class Ui {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(c, 18);
-        lp.bottomMargin = Theme.dp(c, 8);
+        lp.topMargin = Theme.dp(c, 16);
+        lp.bottomMargin = Theme.dp(c, 6);
         l.setLayoutParams(lp);
 
         String one = (titleTxt != null && titleTxt.length() > 0) ? titleTxt : labelTxt;
@@ -392,9 +392,10 @@ public final class Ui {
     /** 버튼. primary 면 주색 채움, 아니면 흰 면 + 보더. 높이 48dp. 기능 색으로 칠하지 않는다. */
     public static TextView btn(Context c, String s, boolean primary) {
         TextView t = base(c, s, 15f, primary ? Theme.ON_ACCENT : Theme.TEXT, true);
+        t.setIncludeFontPadding(false);
         t.setBackground(primary
                 ? Theme.round(Theme.PRIMARY, Theme.R_MD, 0, 0, c)
-                : Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE2, 1, c));
+                : Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
         t.setGravity(Gravity.CENTER);
         t.setPadding(Theme.dp(c, 16), Theme.dp(c, 12), Theme.dp(c, 16), Theme.dp(c, 12));
         t.setMinimumHeight(Theme.dp(c, 48));
@@ -624,7 +625,7 @@ public final class Ui {
         Group(Context c) {
             super(c);
             setOrientation(LinearLayout.VERTICAL);
-            setBackground(Theme.round(Theme.CARD, Theme.R_MD, 0, 0, c));
+            setBackground(Theme.round(Theme.CARD, Theme.R_MD, Theme.LINE, 1, c));
             setPadding(0, 0, 0, 0);
             try { setClipToOutline(true); } catch (Throwable ignore) { /* 모양만 손해 */ }
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
