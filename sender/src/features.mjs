@@ -1168,7 +1168,7 @@ export function guardFinishHalt(record, chatId, allowed, now, roomName, count) {
   const room = roomName && String(roomName).trim() ? String(roomName).trim() : '대화방'
   const n = Number(count) || 0
   const text = allowed
-    ? `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈췄습니다.`
+    ? `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 이후 강퇴하지 않습니다.`
     : `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈출 권한이 없습니다.`
   pushNotice(g, now, text)
   return text

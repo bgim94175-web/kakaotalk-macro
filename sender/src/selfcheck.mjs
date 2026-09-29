@@ -159,7 +159,7 @@ if (guardOnChat(said, { kind: 'msg', chatId: '555', text: '강퇴했습니다', 
 }
 guardFinishHalt(kicked, '555', true, t0 + 4, '관리방', 3)
 const notes = guardNotices(kicked)
-if (notes.length !== 1 || notes[0].text.indexOf('강퇴를 멈췄습니다') < 0) throw new Error('halt notice')
+if (notes.length !== 1 || notes[0].text.indexOf('이후 강퇴하지 않습니다') < 0) throw new Error('halt notice')
 const denied = guardRecord()
 guardFinishHalt(denied, '555', false, t0, '관리방', 3)
 if (guardNotices(denied)[0].text.indexOf('권한이 없습니다') < 0) throw new Error('no permission notice')

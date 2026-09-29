@@ -106,7 +106,7 @@ public final class ScreenGuard {
         col.addView(Ui.sectionHeader(a, null, "강퇴 테러 방지"));
         LinearLayout kick = Ui.group(a);
         kick.addView(Ui.navRowSwitch(a, "사용",
-                "짧은 시간에 강퇴가 몰리면, 이 계정이 방장 또는 부방장일 때만 이후 강퇴를 멈춥니다. 결과는 활동 로그에 남습니다.",
+                "짧은 시간에 강퇴가 몰리면 활동 로그로 알립니다. 이 계정이 방장 또는 부방장이면 이 계정은 더 강퇴하지 않습니다.",
                 g.kickOn, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         g.kickOn = v;
