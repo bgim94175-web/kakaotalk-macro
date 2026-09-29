@@ -114,7 +114,7 @@ final class NodeEngine implements KakaoEngine {
             p.put("password", password);
             p.put("forced", forceSlot);
             p.put("device_type", "tablet");
-            if (deviceUuid != null && deviceUuid.length() > 0) p.put("device_uuid", deviceUuid);
+            // deviceUuid is ignored. auth.begin always mints a new device.
         } catch (Throwable t) {
             throw new EngineException("bad_request", String.valueOf(t));
         }

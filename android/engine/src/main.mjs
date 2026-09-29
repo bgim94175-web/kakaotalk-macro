@@ -86,6 +86,25 @@ function need(p, key) {
 
 // ── account login (id/pw once + confirm the code on the phone) ─────────────
 
+// One pair per registration attempt. Kakao shows this name on the sub-device list.
+// SM-T870 is the library default and must not be sent.
+const TABLETS = [
+  ['Galaxy Tab S9', 'SM-X710'],
+  ['Galaxy Tab S9 FE', 'SM-X510'],
+  ['Galaxy Tab S8', 'SM-X700'],
+  ['Galaxy Tab A9+', 'SM-X210'],
+  ['Galaxy Tab S7 FE', 'SM-T733'],
+  ['Galaxy Tab S6 Lite', 'SM-P610'],
+  ['Lenovo Tab P11', 'TB-J606F'],
+  ['Xiaomi Pad 6', '23043RP34G'],
+]
+
+function pickTablet() {
+  const i = randomBytes(1)[0] % TABLETS.length
+  const row = TABLETS[i]
+  return { name: row[0], model: row[1] }
+}
+
 const pendingLogins = new Map()
 
 function dropPendingLater(id) {
@@ -99,20 +118,22 @@ function loginOk(r, deviceUuid) {
 async function authBegin(p) {
   const email = need(p, 'email')
   const password = need(p, 'password')
-  const deviceUuid = typeof p.device_uuid === 'string' && p.device_uuid ? p.device_uuid : generateDeviceUuid()
+  // A saved uuid is a device Kakao already judged. Each registration starts a new one.
+  const deviceUuid = generateDeviceUuid()
+  const tablet = pickTablet()
   const deviceType = p.device_type === 'pc' ? 'pc' : 'tablet'
   const forced = p.forced === true
 
-  const r = await attemptLogin(email, password, deviceUuid, deviceType, forced)
+  const r = await attemptLogin(email, password, deviceUuid, deviceType, forced, undefined, tablet.name, tablet.model)
   if (r.authenticated && r.credentials) return loginOk(r, deviceUuid)
 
   if (r.next_action === 'provide_passcode') {
-    const pc = await requestPasscode(email, password, deviceUuid)
+    const pc = await requestPasscode(email, password, deviceUuid, tablet.name, tablet.model)
     if (!pc.passcode) {
       return { state: 'failed', code: pc.error || 'passcode_request_failed', message: pc.message || '' }
     }
     const pendingId = randomBytes(12).toString('hex')
-    pendingLogins.set(pendingId, { email, password, deviceUuid, deviceType, forced })
+    pendingLogins.set(pendingId, { email, password, deviceUuid, deviceType, forced, tablet })
     dropPendingLater(pendingId)
     return {
       state: 'confirm_on_phone',
@@ -153,14 +174,16 @@ async function authConfirm(p) {
   const pl = pendingLogins.get(id)
   if (!pl) return { state: 'expired' }
 
-  const reg = await registerDevice(pl.email, pl.password, '', pl.deviceUuid)
+  if (!pl.tablet) return { state: 'expired' }
+  const tablet = pl.tablet
+  const reg = await registerDevice(pl.email, pl.password, '', pl.deviceUuid, tablet.name, tablet.model)
   if (reg.error === 'registration_timeout') return { state: 'waiting' }
   if (reg.error) {
     pendingLogins.delete(id)
     return failBody(reg.error, reg.message || '', reg.status)
   }
 
-  const r = await attemptLogin(pl.email, pl.password, pl.deviceUuid, pl.deviceType, pl.forced)
+  const r = await attemptLogin(pl.email, pl.password, pl.deviceUuid, pl.deviceType, pl.forced, undefined, tablet.name, tablet.model)
   pendingLogins.delete(id)
   if (r.authenticated && r.credentials) return loginOk(r, pl.deviceUuid)
   return failBody(r.error || 'login_failed', r.message || '', r.status)

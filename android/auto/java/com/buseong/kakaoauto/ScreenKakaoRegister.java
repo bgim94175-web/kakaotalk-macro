@@ -204,14 +204,14 @@ public final class ScreenKakaoRegister {
                 return;
             }
         }
-        final String uuid = KakaoSlots.armedUuid();
         final AlertDialog wait = progress(a, "카카오 서버에 연결하는 중입니다…");
         IO.execute(new Runnable() {
             @Override public void run() {
                 KakaoEngine.LoginStep step = null;
                 String err = null;
                 try {
-                    step = Engine.get(a).beginLogin(acc, pass, force, uuid);
+                    // 저장된 기기 번호는 넘기지 않는다. 엔진이 이번 시도용 번호를 새로 만든다.
+                    step = Engine.get(a).beginLogin(acc, pass, force, null);
                 } catch (EngineException e) {
                     err = AuthText.of(e);
                 } catch (Throwable t) {

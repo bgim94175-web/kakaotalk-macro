@@ -152,6 +152,69 @@ for old, new in repls:
         lt = lt.replace(old, new, 1)
     elif new not in lt:
         raise SystemExit("kakao login message site missing")
+# The library has no device-name argument and always sends SM-T870.
+# Optional trailing args let one registration attempt use one tablet name.
+device_repls = [
+(
+"""const DEVICE_NAME = 'SM-T870';""",
+"""const DEVICE_NAME = 'SM-X710';""",
+),
+(
+"""export async function attemptLogin(email, password, deviceUuid, deviceType, forced, debugLog) {
+    const body = new URLSearchParams({
+        password,
+        device_name: DEVICE_NAME,
+        model_name: DEVICE_NAME,""",
+"""export async function attemptLogin(email, password, deviceUuid, deviceType, forced, debugLog, deviceName, modelName) {
+    const shownName = typeof deviceName === 'string' && deviceName ? deviceName : DEVICE_NAME;
+    const shownModel = typeof modelName === 'string' && modelName ? modelName : shownName;
+    const body = new URLSearchParams({
+        password,
+        device_name: shownName,
+        model_name: shownModel,""",
+),
+(
+"""    debugLog?.(`device_name=${DEVICE_NAME} device_uuid=${deviceUuid.substring(0, 8)}... forced=${forced}`);""",
+"""    debugLog?.(`device_name=${shownName} device_uuid=${deviceUuid.substring(0, 8)}... forced=${forced}`);""",
+),
+(
+"""export async function requestPasscode(email, password, deviceUuid) {
+    const headers = buildHeaders(email);""",
+"""export async function requestPasscode(email, password, deviceUuid, deviceName, modelName) {
+    const shownName = typeof deviceName === 'string' && deviceName ? deviceName : DEVICE_NAME;
+    const shownModel = typeof modelName === 'string' && modelName ? modelName : shownName;
+    const headers = buildHeaders(email);""",
+),
+(
+"""            device: {
+                name: DEVICE_NAME,
+                uuid: deviceUuid,
+                model: DEVICE_NAME,""",
+"""            device: {
+                name: shownName,
+                uuid: deviceUuid,
+                model: shownModel,""",
+),
+(
+"""export async function registerDevice(email, password, _passcode, deviceUuid) {
+    const headers = buildHeaders(email);""",
+"""export async function registerDevice(email, password, _passcode, deviceUuid, deviceName, modelName) {
+    const shownName = typeof deviceName === 'string' && deviceName ? deviceName : DEVICE_NAME;
+    const shownModel = typeof modelName === 'string' && modelName ? modelName : shownName;
+    const headers = buildHeaders(email);""",
+),
+(
+"""        device: { uuid: deviceUuid },""",
+"""        device: { uuid: deviceUuid, name: shownName, model: shownModel },""",
+),
+]
+for old, new in device_repls:
+    if old in lt:
+        lt = lt.replace(old, new, 1)
+    elif new not in lt:
+        raise SystemExit("kakao device name site missing")
+if "SM-T870" in lt:
+    raise SystemExit("SM-T870 is still hardcoded")
 login.write_text(lt)
 PY
 

@@ -179,8 +179,8 @@ public interface KakaoEngine {
     LoginStep beginLogin(String account, String password, boolean forceSlot) throws EngineException;
 
     /**
-     * {@code deviceUuid} 가 비어 있으면 엔진이 새 기기 번호를 만든다.
-     * 이미 등록한 계정을 다시 로그인할 때만 그 계정의 번호를 넘긴다.
+     * 등록을 시작할 때마다 엔진이 새 기기 번호를 만든다.
+     * 저장해 둔 번호는 넘기지 않는다. 성공한 뒤에만 그 번호가 남는다.
      */
     LoginStep beginLogin(String account, String password, boolean forceSlot, String deviceUuid) throws EngineException;
 

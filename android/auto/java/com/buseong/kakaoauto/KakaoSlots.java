@@ -98,11 +98,15 @@ public final class KakaoSlots {
         return writing;
     }
 
-    /** 이미 있는 계정을 다시 로그인한다. */
+    /**
+     * 이미 있는 계정을 다시 로그인한다.
+     * 저장해 둔 기기 번호는 넘기지 않는다. 이번 시도가 성공한 뒤에만 새 번호를 남긴다.
+     */
     public static Slot arm(Context c, String id) {
         Slot s = byId(c, id);
-        writing = s;
-        return s;
+        if (s == null) return null;
+        writing = new Slot(s.id, s.senderKey, s.hint, s.userId, "");
+        return writing;
     }
 
     public static String writingId() {
