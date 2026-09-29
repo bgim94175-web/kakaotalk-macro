@@ -122,7 +122,19 @@ function okBody(o) {
     purchase: o.purchase,
     nonce: o.nonce,
     ts: o.ts,
+    // 발송 루프는 이 프로세스에 없다. 앱이 상시 프로세스 주소와 토큰만 받아 간다.
+    // 무료 호스트는 잠들므로 값이 없으면 null 이고, 앱은 폰이 켜져 있는 동안만 발송한다.
+    sender_url: senderPublicUrl(),
+    sender_token: process.env.SENDER_TOKEN || null,
   });
+}
+
+function senderPublicUrl() {
+  const raw = process.env.SENDER_PUBLIC_URL;
+  if (!raw) return null;
+  const url = String(raw).trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) return null;
+  return url;
 }
 
 function failBody(reason, nonce, ts) {

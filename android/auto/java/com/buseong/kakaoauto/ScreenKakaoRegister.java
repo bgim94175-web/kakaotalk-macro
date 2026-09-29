@@ -351,6 +351,7 @@ public final class ScreenKakaoRegister {
             return;
         }
         KakaoAccount.complete(a, account);
+        try { com.buseong.kakaoauto.engine.SenderSync.onRegistered(a); } catch (Throwable ignore) { }
         try { com.buseong.kakaoauto.engine.LocoInbox.ensure(a); } catch (Throwable ignore) { }
         Ui.toast(a, "카카오 계정을 등록했습니다.");
         refresh();

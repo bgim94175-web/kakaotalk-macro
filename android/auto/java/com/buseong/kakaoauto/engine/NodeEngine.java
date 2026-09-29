@@ -192,6 +192,7 @@ final class NodeEngine implements KakaoEngine {
         }
         TokenVault.clear(app);
         RoomLinks.clearAll(app);
+        try { SenderSync.onUnlink(app); } catch (Throwable ignore) { }
         synchronized (sessionLock) { sessionGen = -1; }
         lastError = "";
         EngineService.sync(app);
@@ -210,6 +211,13 @@ final class NodeEngine implements KakaoEngine {
     @Override public List<KakaoRoom> rooms(boolean refresh) throws EngineException {
         if (!refresh) return RoomLinks.cachedRooms(app);
         offMain();
+        if (SenderSync.blocksPhoneFeatures(app)) {
+            SenderSync.awaitHandoff(app, 20000L);
+            if (SenderSync.serverOwns(app)) return SenderSync.fetchRooms(app);
+            if (SenderSync.blocksPhoneFeatures(app)) {
+                throw new EngineException("sender_pending", "상시 발송 서버에 세션을 넘기는 중입니다.");
+            }
+        }
         JSONObject r = session("chats.list", new JSONObject(), T_ROOMS);
         JSONArray a = r.optJSONArray("chats");
         ArrayList<KakaoRoom> out = new ArrayList<KakaoRoom>();
@@ -232,6 +240,7 @@ final class NodeEngine implements KakaoEngine {
         if (images == null || images.isEmpty() || images.size() > 5) {
             throw new EngineException("bad_request", "이미지는 1~5장이어야 합니다.");
         }
+        if (SenderSync.serverOwns(app)) return SenderSync.sendImages(app, chatId, images);
         JSONObject p = new JSONObject();
         try {
             p.put("chat_id", chatId);
@@ -246,6 +255,7 @@ final class NodeEngine implements KakaoEngine {
 
     @Override public SendResult sendText(String chatId, String text) throws EngineException {
         offMain();
+        if (SenderSync.serverOwns(app)) return SenderSync.sendText(app, chatId, text);
         JSONObject p = new JSONObject();
         try {
             p.put("chat_id", chatId);
@@ -343,6 +353,9 @@ final class NodeEngine implements KakaoEngine {
 
     /** 엔진 세션이 필요한 호출. 프로세스가 새로 떴으면 봉인된 토큰으로 세션부터 연다. */
     private JSONObject session(String method, JSONObject p, long timeout) throws EngineException {
+        if (SenderSync.blocksPhoneFeatures(app)) {
+            throw new EngineException("sender_owned", "이 계정은 상시 발송 서버에서 동작합니다.");
+        }
         String flag = TokenVault.flag(app);
         if (TokenVault.FLAG_KICKED.equals(flag)) throw new EngineException("kicked", "슬롯 빼앗김");
         if (TokenVault.FLAG_REAUTH.equals(flag)) throw new EngineException("reauth_required", "재로그인 필요");

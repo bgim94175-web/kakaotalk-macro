@@ -171,8 +171,11 @@ public final class ScreenAccount {
         col.addView(Ui.sectionHeader(a, null, "카카오톡"));
         LinearLayout kakao = Ui.group(a);
         final boolean reg = KakaoAccount.ready(a);
+        final boolean again = com.buseong.kakaoauto.engine.SenderSync.needsRegister(a);
+        final String regValue = again ? "다시 등록" : (reg ? "등록됨" : "등록 필요");
+        final int regColor = (reg && !again) ? Theme.OK : Theme.AMBER;
         kakao.addView(Ui.navRow(a, Icon.KEY, fc, "카카오 계정 등록",
-                reg ? "등록됨" : "등록 필요", reg ? Theme.OK : Theme.AMBER, new Runnable() {
+                regValue, regColor, new Runnable() {
                     @Override public void run() { ScreenKakaoRegister.open(a); }
                 }));
         kakao.addView(ScreenKakaoLink.row(a, fc));
@@ -189,6 +192,16 @@ public final class ScreenAccount {
                     }));
         }
         col.addView(kakao);
+        if (again) {
+            col.addView(Nav.note(a, "카카오 로그인이 끊겼습니다. 계정을 다시 등록하십시오.",
+                    Theme.AMBER, null, null));
+        } else if (reg && com.buseong.kakaoauto.engine.SenderSync.serverOwns(a)) {
+            col.addView(Nav.note(a, "등록이 끝난 계정은 서버에서 발송합니다. 폰을 꺼도 계속됩니다.",
+                    Theme.ACCENT2, null, null));
+        } else if (reg && !com.buseong.kakaoauto.engine.SenderSync.hasBase(a)) {
+            col.addView(Nav.note(a, "상시 발송 서버 주소가 없습니다. 폰을 끄면 발송이 멈춥니다.",
+                    Theme.AMBER, null, null));
+        }
 
         // ── 기록 ──
         col.addView(Ui.sectionHeader(a, null, "기록"));

@@ -749,6 +749,7 @@ public final class Settings {
                 Log.add(c, "설정 저장을 확인하지 못했습니다. 다시 저장하십시오.");
                 return false;
             }
+            try { com.buseong.kakaoauto.engine.SenderSync.onSettingsSaved(c); } catch (Throwable ignore) { }
             return true;
         } catch (Throwable t) {
             Log.add(c, "설정 저장에 실패했습니다. (" + t + ")");

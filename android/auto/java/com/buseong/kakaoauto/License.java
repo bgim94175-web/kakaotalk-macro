@@ -536,6 +536,7 @@ public final class License {
                 Prefs.clearCache();
             }
         }
+        try { com.buseong.kakaoauto.engine.SenderSync.noteLicense(c, o); } catch (Throwable ignore) { }
         invalidate();
         // 설정키가 생겼으니 옛 평문 설정을 옮기고 암호화 저장까지 해둔다
         try {
@@ -550,6 +551,7 @@ public final class License {
      * full=true (하트비트) 면 세션·lastOk 까지 갱신하고, false (새로고침) 면 features 만 갱신한다.
      */
     private static void saveTick(Context c, JSONObject o, boolean full) {
+        try { com.buseong.kakaoauto.engine.SenderSync.noteLicense(c, o); } catch (Throwable ignore) { }
         saveFeats(c, o.optJSONObject("features"));
         long exp = o.optLong("expires_at", -1L);
         if (exp >= 0) Prefs.putLong(c, K_EXPIRES, exp);

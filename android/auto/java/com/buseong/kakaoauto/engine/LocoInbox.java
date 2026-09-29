@@ -136,6 +136,7 @@ public final class LocoInbox {
     }
 
     private static boolean wanted(Context c) {
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c)) return false;
         if (!sessionReady(c)) return false;
         try {
             if (License.allowed(c, Features.MACRO)) {

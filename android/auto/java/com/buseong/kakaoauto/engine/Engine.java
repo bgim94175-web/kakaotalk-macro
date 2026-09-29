@@ -40,6 +40,15 @@ public final class Engine {
         try { impl(c).wipe(); } catch (Throwable t) { android.util.Log.w("KakaoEngine", "wipe failed", t); }
     }
 
+    /** 상시 발송 서버가 세션을 가진 뒤, 폰 쪽 LOCO 프로세스를 내린다. 토큰은 지우지 않는다. */
+    public static void releaseLocalSession(Context c) {
+        NodeEngine e = instance;
+        if (e == null || !e.host().alive()) return;
+        try { e.host().stop(); } catch (Throwable t) {
+            android.util.Log.w("KakaoEngine", "local session release failed", t);
+        }
+    }
+
     /** 오래 안 쓴 엔진 프로세스를 내린다 (포그라운드 서비스가 돌고 있으면 유지) */
     static void reapIfIdle(Context c, long idleMs) {
         NodeEngine e = instance;

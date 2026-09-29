@@ -146,6 +146,11 @@ public final class Scheduler {
         // 설정을 못 읽는 상황(설정키 없음)에서도, 매크로가 꺼져 있어도 하트비트는 살아 있어야 한다.
         ensureHeartbeat(c);
 
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c)) {
+            cancelAlarmOnly(c);
+            return;
+        }
+
         Settings.Macro m = macro(c);
         if (m == null) return;
 
@@ -170,6 +175,18 @@ public final class Scheduler {
      * 발송 알람만 끈다. 예정 시각도 지운다.
      * 하트비트 알람은 <b>건드리지 않는다</b> — 매크로를 껐다고 라이선스 확인을 멈추면 3일 뒤 전부 잠긴다.
      */
+    /** 발송 알람만 끈다. 설정은 건드리지 않는다. 상시 발송 서버가 주기를 맡길 때 쓴다. */
+    private static void cancelAlarmOnly(Context c) {
+        try {
+            AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+            PendingIntent pi = pending(c);
+            if (am != null && pi != null) am.cancel(pi);
+            if (pi != null) pi.cancel();
+        } catch (Throwable t) {
+            Log.add(c, "발송 알람 해제에 실패했습니다. (" + t + ")");
+        }
+    }
+
     public static void cancel(Context ctx) {
         Context c = app(ctx);
         if (c == null) return;

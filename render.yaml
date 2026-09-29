@@ -69,3 +69,26 @@ services:
       #   프록시
       #     TRUST_PROXY_HOPS          1     x-forwarded-for 뒤에서 N번째를 클라이언트 IP 로 쓴다.
       #                                     Render 기본 구성이면 1 이 맞다. 모르면 넣지 마라.
+
+      # 상시 발송 프로세스 주소. 이 웹 서비스는 주소를 앱에 알려 주기만 한다.
+      # 발송 루프는 아래 kakao-sender 에 있다. 무료 플랜은 잠들므로 여기 넣지 않는다.
+      - key: SENDER_PUBLIC_URL
+        sync: false
+      - key: SENDER_TOKEN
+        sync: false
+
+  # 카카오 발송. 라이선스 웹(free)과 분리한다. free 는 슬립하므로 이 서비스는 always-on 플랜이어야 한다.
+  # starter 는 잠들지 않는다. 고객 폰이나 운영자 PC 에서 돌리는 프로세스가 아니다.
+  - type: web
+    name: kakao-sender
+    runtime: node
+    plan: starter
+    rootDir: sender
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: SENDER_TOKEN
+        sync: false
+      - key: SENDER_KEY
+        sync: false
