@@ -48,11 +48,12 @@ public final class Settings {
     public static final int MAX_TRIGGERS = 30;
 
     // ── 이미지 첨부 모드 (SPEC 8.4 A) ─────────────────────────────────────────
-    public static final String IMG_NEVER = "NEVER";      // 안 보냄
+    /** 예전 저장값. 화면에는 없다. 이미지가 있으면 매번으로, 없으면 보내지 않는다. */
+    public static final String IMG_NEVER = "NEVER";
     public static final String IMG_EVERY = "EVERY";      // 매 발송마다
     public static final String IMG_EVERY_N = "EVERY_N";  // N번째 발송마다
     public static final String IMG_MANUAL = "MANUAL";    // 수동 전송만
-    public static final String[] IMG_MODES = { IMG_NEVER, IMG_EVERY, IMG_EVERY_N, IMG_MANUAL };
+    public static final String[] IMG_MODES = { IMG_EVERY, IMG_EVERY_N, IMG_MANUAL };
 
     // ── 자동응답 적용 대상 (SPEC 8.4 B) ───────────────────────────────────────
     public static final String SCOPE_ALL = "ALL";          // 모든 1:1
@@ -169,8 +170,8 @@ public final class Settings {
         public int minMessages = 1;
         /** 다음 알람 시각 (epoch ms). 방별 쿨타임 중 가장 빠른 시각. 0 이면 아직 안 잡힘. */
         public long nextAt = 0L;
-        /** 이미지 첨부 모드 — IMG_* 중 하나 */
-        public String sendImages = IMG_NEVER;
+        /** 이미지 첨부 모드 — IMG_MODES 중 하나. 이미지가 없으면 보내지 않는다. */
+        public String sendImages = IMG_EVERY;
         /** EVERY_N 일 때 몇 번째 발송마다 붙일지 */
         public int imageEveryN = 3;
         /** 첨부 이미지 URI (최대 5장) */
@@ -300,12 +301,13 @@ public final class Settings {
         /** 이번 발송(sendCount 번째, 1부터)에 이미지를 붙여야 하나 */
         public boolean imagesThisTime(int sendCount) {
             if (images.isEmpty()) return false;
-            if (IMG_EVERY.equals(sendImages)) return true;
-            if (IMG_EVERY_N.equals(sendImages)) {
+            String mode = IMG_NEVER.equals(sendImages) ? IMG_EVERY : sendImages;
+            if (IMG_EVERY.equals(mode)) return true;
+            if (IMG_EVERY_N.equals(mode)) {
                 int n = (imageEveryN < 1) ? 1 : imageEveryN;
                 return sendCount > 0 && sendCount % n == 0;
             }
-            return false;   // NEVER · MANUAL
+            return false;   // MANUAL
         }
 
         /** 방해금지 시간대인가 (자정 넘김도 처리). 설정이 없으면 항상 false. */
@@ -946,7 +948,9 @@ public final class Settings {
             }
             s.macro.minMessages = clamp(m.optInt("minMessages", s.macro.minMessages), 0, 999);
             s.macro.nextAt = m.optLong("nextAt", s.macro.nextAt);
-            s.macro.sendImages = oneOf(str(m, "sendImages", s.macro.sendImages), IMG_MODES, IMG_NEVER);
+            String imgMode = str(m, "sendImages", s.macro.sendImages);
+            if (IMG_NEVER.equals(imgMode)) imgMode = IMG_EVERY;
+            s.macro.sendImages = oneOf(imgMode, IMG_MODES, IMG_EVERY);
             s.macro.imageEveryN = clamp(m.optInt("imageEveryN", s.macro.imageEveryN), 1, 99);
             s.macro.images = clampStrings(list(m, "images"), MAX_IMAGES);
             s.macro.quietFrom = hhmmOrEmpty(str(m, "quietFrom", ""));

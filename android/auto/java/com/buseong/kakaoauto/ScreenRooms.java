@@ -12,6 +12,7 @@ import android.widget.TextView;
 import com.buseong.kakaoauto.engine.Engine;
 import com.buseong.kakaoauto.engine.EngineException;
 import com.buseong.kakaoauto.engine.KakaoEngine;
+import com.buseong.kakaoauto.engine.RoomKind;
 import com.buseong.kakaoauto.engine.RoomLinks;
 
 import java.lang.ref.WeakReference;
@@ -29,10 +30,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `대상 방 ›` 에서 Nav.push 로 열린다.
+ * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `보낼 방 ›` 에서 Nav.push 로 열린다.
  *
- * 등록한 카카오 계정의 LOCO 대화방 목록을 그대로 보여 준다.
- * 알림, 미리보기, 예전에 본 방이 없어도 목록에 있으면 선택할 수 있다.
+ * 등록한 카카오 계정의 LOCO 대화방을 세 목록으로 나눠 보여 준다.
+ * 오픈채팅방, 일반 채팅방, 오픈프로필로 온 갠톡. 칸을 바꿔도 선택은 유지된다.
  * 체크하면 그 방 번호로 연결하고 보낼 방에 넣는다. 발송은 그 세션으로만 한다.
  */
 public final class ScreenRooms {
@@ -49,6 +50,15 @@ public final class ScreenRooms {
 
     private static final Handler H = new Handler(Looper.getMainLooper());
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+
+    /** 0 오픈채팅방, 1 일반 채팅방, 2 오픈프로필로 온 갠톡. 화면을 다시 그려도 유지한다. */
+    private static int TAB = 1;
+    private static final String[] TAB_KIND = {
+            RoomKind.OPEN_ROOM, RoomKind.NORMAL, RoomKind.OPEN_DM
+    };
+    private static final String[] TAB_LABEL = {
+            "오픈채팅방", "일반 채팅방", "오픈프로필로 온 갠톡"
+    };
 
     /** 이번에 받은 카카오 대화방 목록. null 이면 아직 없다. */
     private static List<KakaoEngine.KakaoRoom> LOADED;
@@ -153,15 +163,25 @@ public final class ScreenRooms {
         } else if (LOAD_ERR != null && (LOADED == null || LOADED.isEmpty())) {
             col.addView(Nav.note(a, "대화방 목록을 불러오지 못했습니다. " + LOAD_ERR,
                     Theme.AMBER, null, null));
-        } else if (rows.isEmpty()) {
-            col.addView(Nav.note(a, "이 계정에 대화방이 없습니다.", Theme.ACCENT2, null, null));
         } else {
             if (LOAD_ERR != null) {
                 col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
                         Theme.AMBER, null, null));
             }
-            col.addView(Ui.sectionHeader(a, null, "선택 " + selected + "개 · 대화방 " + listed + "개"));
-            col.addView(section(a, sortCopy(rows)));
+            int[] counts = kindCounts(rows);
+            col.addView(kindTabs(a, counts));
+            List<Row> visible = ofKind(rows, TAB_KIND[TAB]);
+            col.addView(Ui.sectionHeader(a, null, TAB_LABEL[TAB] + " " + counts[TAB] + "개"));
+            if (visible.isEmpty()) {
+                col.addView(emptyLine(a, "이 종류에 대화방이 없습니다."));
+            } else {
+                col.addView(section(a, visible));
+            }
+            List<Row> missing = orphans(rows);
+            if (!missing.isEmpty()) {
+                col.addView(Ui.sectionHeader(a, null, "목록에 없는 선택"));
+                col.addView(section(a, missing));
+            }
         }
 
         if (ready) {
@@ -208,6 +228,79 @@ public final class ScreenRooms {
                         }
                     }, null));
         }
+        return g;
+    }
+
+    /** 세 목록. 칸의 숫자는 그 종류에 있는 대화방 수다. */
+    private static View kindTabs(final MainActivity a, int[] counts) {
+        LinearLayout g = Ui.group(a);
+        for (int i = 0; i < TAB_KIND.length; i++) g.addView(kindTab(a, i, counts[i]));
+        return g;
+    }
+
+    private static View kindTab(final MainActivity a, final int index, int count) {
+        final boolean on = TAB == index;
+        LinearLayout row = Ui.row(a);
+        int ph = Theme.dp(a, 16);
+        row.setPadding(ph, Theme.dp(a, 14), ph, Theme.dp(a, 14));
+        if (on) row.setBackgroundColor(Theme.fade(Theme.PRIMARY, 0.10f));
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (TAB == index) return;
+                TAB = index;
+                refresh();
+            }
+        });
+        TextView name = Ui.body(a, TAB_LABEL[index]);
+        name.setTextColor(on ? Theme.PRIMARY : Theme.TEXT);
+        name.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        TextView n = Ui.h2(a, String.valueOf(count));
+        n.setTextColor(on ? Theme.PRIMARY : Theme.TEXT);
+        row.addView(name);
+        row.addView(n);
+        return row;
+    }
+
+    private static int[] kindCounts(List<Row> rows) {
+        int[] counts = new int[TAB_KIND.length];
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            if (!r.detected || r.room == null) continue;
+            for (int k = 0; k < TAB_KIND.length; k++) {
+                if (TAB_KIND[k].equals(r.room.listKind)) counts[k]++;
+            }
+        }
+        return counts;
+    }
+
+    /** 지금 칸에 해당하는 감지 방만. 다른 종류는 넣지 않는다. */
+    private static List<Row> ofKind(List<Row> rows, String kind) {
+        ArrayList<Row> out = new ArrayList<Row>();
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            if (!r.detected || r.room == null) continue;
+            if (kind.equals(r.room.listKind)) out.add(r);
+        }
+        sort(out);
+        return out;
+    }
+
+    /** 목록에서 빠졌지만 선택으로 남은 방. 어느 칸에도 섞지 않는다. */
+    private static List<Row> orphans(List<Row> rows) {
+        ArrayList<Row> out = new ArrayList<Row>();
+        for (int i = 0; i < rows.size(); i++) {
+            if (!rows.get(i).detected) out.add(rows.get(i));
+        }
+        return out;
+    }
+
+    private static LinearLayout emptyLine(MainActivity a, String text) {
+        LinearLayout g = Ui.group(a);
+        TextView t = Ui.sub(a, text);
+        int ph = Theme.dp(a, 16);
+        t.setPadding(ph, Theme.dp(a, 18), ph, Theme.dp(a, 18));
+        t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+        g.addView(t);
         return g;
     }
 

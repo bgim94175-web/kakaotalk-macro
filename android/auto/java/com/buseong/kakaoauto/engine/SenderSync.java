@@ -169,7 +169,9 @@ public final class SenderSync {
                     one.isNull("title") ? "" : one.optString("title"),
                     one.isNull("display_name") ? "" : one.optString("display_name"),
                     one.optInt("members"),
-                    toMillis(one.optLong("last_at"))));
+                    toMillis(one.optLong("last_at")),
+                    NodeEngine.wireType(one),
+                    one.optString("list_kind", "")));
         }
         RoomLinks.saveRooms(c, out);
         return out;

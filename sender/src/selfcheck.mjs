@@ -1,5 +1,6 @@
 import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
+import { roomListKind } from './room-kind.mjs'
 import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -28,12 +29,23 @@ if (!linkable('콜라', '나비')) throw new Error('word link 콜라->나비')
 if (!has('사과')) throw new Error('dict missing 사과')
 if (!correct(0, '서울')) throw new Error('quiz')
 
+const kinds = [
+  ['OM', 'open_room'], ['OD', 'open_dm'], ['OpenMultiChat', 'open_room'], ['OpenDirectChat', 'open_dm'],
+  [2, 'open_room'], [13, 'open_room'], [15, 'open_room'], [14, 'open_dm'], [16, 'open_dm'],
+  ['DirectChat', 'normal'], ['MultiChat', 'normal'], [11, 'normal'], [10, 'normal'],
+  ['PlusChat', 'normal'], ['MemoChat', 'normal'],
+]
+for (const [type, want] of kinds) {
+  const got = roomListKind({ type })
+  if (got !== want) throw new Error(`room kind ${type} -> ${got}, want ${want}`)
+}
+
 const roomKey = parseRoomKey('0\u0001공지').key
 const record = {
   features: { macro: true, roombot: true, minigame: true },
   config: {
     accounts: [],
-    macro: { enabled: true, message: '안녕', rooms: [roomKey], baseMin: 1, randomMin: 0, minMessages: 1, sendImages: 'NEVER', images: [] },
+    macro: { enabled: true, message: '안녕', rooms: [roomKey], baseMin: 1, randomMin: 0, minMessages: 1, sendImages: 'EVERY', images: [] },
     triggers: [{ id: 't1', enabled: true, pattern: '가격', mode: 'contains', reply: '안내', rooms: [], fromMe: false, cooldownMs: 0, delayMs: 0 }],
     autoreply: { enabled: true, message: '{이름}님', scope: 'ALL', cooldownMs: 0, dailyLimit: 0, hourFrom: 0, hourTo: 24, delayMaxMs: 0 },
     roombot: { enabled: false },
@@ -48,6 +60,20 @@ const due = macroRoomsDue(record, Date.now())
 if (due.length !== 1 || due[0].chatId !== '12345') throw new Error('macro due')
 noteMacroSent(record, roomKey, Date.now())
 if (macroRoomsDue(record, Date.now()).length !== 0) throw new Error('cooldown')
+
+const neverImages = {
+  features: { macro: true },
+  config: {
+    accounts: [],
+    macro: { enabled: true, message: '안녕', rooms: [roomKey], baseMin: 1, randomMin: 0, minMessages: 1, sendImages: 'NEVER', images: ['a.jpg'] },
+  },
+  rooms: [{ key: roomKey, chat_id: '12345', name: '공지', kind: 'group' }],
+  runtime: {},
+}
+if (noteMacroSent(neverImages, roomKey, Date.now()) !== true) throw new Error('NEVER with images must send every time')
+neverImages.config.macro.images = []
+neverImages.runtime = {}
+if (noteMacroSent(neverImages, roomKey, Date.now()) !== false) throw new Error('no images must not send')
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

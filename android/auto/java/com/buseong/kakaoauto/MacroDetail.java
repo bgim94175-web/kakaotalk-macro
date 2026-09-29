@@ -344,7 +344,7 @@ public final class MacroDetail {
                 col.addView(Ui.sectionHeader(a, null, "전송 조건"));
                 LinearLayout g = Ui.group(a);
                 g.addView(Ui.navRow(a, Icon.SEND, fc, "전송 모드", ScreenMacro.imgModeKr(s.macro.sendImages),
-                        Settings.IMG_NEVER.equals(s.macro.sendImages) ? Theme.DIM : Theme.TEXT,
+                        s.macro.images.isEmpty() ? Theme.DIM : Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { pickImgMode(a, s); }
                         }));
@@ -420,9 +420,8 @@ public final class MacroDetail {
     }
 
     private static void pickImgMode(final MainActivity a, final Settings s) {
-        String[] labels = { "안 보냄", "매번", "N회마다", "수동 전송만" };
+        String[] labels = { "매번", "N회마다", "수동 전송만" };
         String[] descs = {
-                "이미지를 첨부하지 않습니다",
                 "발송 시마다 이미지를 함께 전송합니다",
                 "지정한 발송 횟수마다 1회 전송합니다",
                 "자동 전송하지 않고 즉시 이미지 발송만 사용합니다"

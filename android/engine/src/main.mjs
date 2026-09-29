@@ -284,6 +284,20 @@ function status() {
 
 // ── rooms ───────────────────────────────────────────────────────────────────
 
+// Picker bucket. Same rules as sender/src/room-kind.mjs and RoomKind.java.
+// OM / OD are the protocol tags. 2, 13, 15 are open multi; 14, 16 are open direct.
+function roomListKind(ch) {
+  const raw = ch && ch.type
+  const s = raw == null ? '' : String(raw)
+  if (s === 'OD' || s === 'OpenDirect' || s === 'OpenDirectChat' || s === '14' || s === '16') {
+    return 'open_dm'
+  }
+  if (s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat' || s === '2' || s === '13' || s === '15') {
+    return 'open_room'
+  }
+  return 'normal'
+}
+
 function wireChat(ch) {
   // chat_id must stay a decimal string. A JSON number above 2^53 drops bits and
   // the photo is then shipped to the wrong room.
@@ -292,6 +306,7 @@ function wireChat(ch) {
     chat_id: chatId,
     kind: classifyKakaoChat(ch),
     type: ch.type,
+    list_kind: roomListKind(ch),
     title: ch.title || null,
     display_name: ch.display_name || null,
     members: ch.active_members,

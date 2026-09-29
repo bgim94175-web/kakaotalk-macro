@@ -167,6 +167,8 @@ public final class RoomLinks {
                 o.put("d", r.displayName);
                 o.put("n", r.members);
                 o.put("at", r.lastAt);
+                o.put("ty", r.chatType);
+                o.put("lk", r.listKind);
                 a.put(o);
             }
         } catch (Throwable t) {
@@ -184,7 +186,8 @@ public final class RoomLinks {
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
                 out.add(new KakaoEngine.KakaoRoom(o.optString("id"), o.optString("k"), o.optString("t"),
-                        o.optString("d"), o.optInt("n"), o.optLong("at")));
+                        o.optString("d"), o.optInt("n"), o.optLong("at"),
+                        o.optString("ty", ""), o.optString("lk", "")));
             }
         } catch (Throwable ignore) { }
         return out;

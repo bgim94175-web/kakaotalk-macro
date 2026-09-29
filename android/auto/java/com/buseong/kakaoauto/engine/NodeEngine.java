@@ -228,7 +228,8 @@ final class NodeEngine implements KakaoEngine {
                 out.add(new KakaoRoom(o.optString("chat_id"), o.optString("kind"),
                         o.isNull("title") ? "" : o.optString("title"),
                         o.isNull("display_name") ? "" : o.optString("display_name"),
-                        o.optInt("members"), toMillis(o.optLong("last_at"))));
+                        o.optInt("members"), toMillis(o.optLong("last_at")),
+                        wireType(o), o.optString("list_kind", "")));
             }
         }
         RoomLinks.saveRooms(app, out);
@@ -347,6 +348,12 @@ final class NodeEngine implements KakaoEngine {
     private static long toMillis(long v) {
         if (v <= 0) return 0L;
         return (v < 100000000000L) ? v * 1000L : v;
+    }
+
+    /** type 은 숫자일 수도 문자일 수도 있다. optString 은 숫자를 문자열로 바꾼다. */
+    static String wireType(JSONObject o) {
+        if (o == null || !o.has("type") || o.isNull("type")) return "";
+        return o.optString("type", "");
     }
 
     // ── 내부 ────────────────────────────────────────────────────────────────

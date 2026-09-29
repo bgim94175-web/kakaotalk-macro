@@ -17,6 +17,7 @@ import {
   othersSinceMine,
   realId,
 } from './features.mjs'
+import { roomListKind } from './room-kind.mjs'
 import { listIds, loadRecord, saveRecord } from './store.mjs'
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
@@ -137,6 +138,7 @@ export class Hub {
       chat_id: String(ch.chat_id),
       kind: classifyKakaoChat(ch),
       type: ch.type,
+      list_kind: roomListKind(ch),
       title: ch.title || null,
       display_name: ch.display_name || null,
       members: ch.active_members,

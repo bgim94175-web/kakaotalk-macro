@@ -233,8 +233,10 @@ function cooldownMs(macro, roomKey) {
 function imagesThisTime(macro, seq) {
   const images = macro.images || []
   if (!images.length) return false
-  if (macro.sendImages === 'EVERY') return true
-  if (macro.sendImages === 'EVERY_N') {
+  // Saved "NEVER" is no longer a mode. With images attached it sends every time.
+  const mode = macro.sendImages === 'NEVER' ? 'EVERY' : macro.sendImages
+  if (mode === 'EVERY') return true
+  if (mode === 'EVERY_N') {
     const n = Math.max(1, Number(macro.imageEveryN) || 1)
     return seq > 0 && seq % n === 0
   }

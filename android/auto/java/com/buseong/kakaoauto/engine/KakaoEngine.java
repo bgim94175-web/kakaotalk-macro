@@ -96,14 +96,25 @@ public interface KakaoEngine {
         public final int members;
         /** 마지막 메시지 시각 (epoch ms, 모르면 0) */
         public final long lastAt;
+        /** LOCO type 원문. 없으면 "" */
+        public final String chatType;
+        /** "open_room" · "open_dm" · "normal" */
+        public final String listKind;
 
         public KakaoRoom(String chatId, String kind, String title, String displayName, int members, long lastAt) {
+            this(chatId, kind, title, displayName, members, lastAt, "", "");
+        }
+
+        public KakaoRoom(String chatId, String kind, String title, String displayName, int members, long lastAt,
+                         String chatType, String listKind) {
             this.chatId = chatId == null ? "" : chatId;
             this.kind = kind == null ? "unknown" : kind;
             this.title = title == null ? "" : title;
             this.displayName = displayName == null ? "" : displayName;
             this.members = members;
             this.lastAt = lastAt;
+            this.chatType = chatType == null ? "" : chatType;
+            this.listKind = RoomKind.resolve(this.chatType, this.kind, this.members, listKind);
         }
 
         /** 화면·매칭에 쓰는 이름: 방 제목 → 표시 이름 → "대화방 <번호>" */

@@ -118,7 +118,7 @@ public final class ScreenMacro {
             @Override public void run() { Nav.push(a, "발송 쿨타임", MacroDetail.cycle(a)); }
         }));
 
-        boolean imgOn = !Settings.IMG_NEVER.equals(s.macro.sendImages);
+        boolean imgOn = s.macro.images.size() > 0;
         boolean imgFail = (lastFail(a) != null);
         content.addView(Ui.navRow(a, Icon.IMAGE, fc, "이미지 첨부", imageSummary(a, s),
                 imgFail ? Theme.AMBER : (imgOn ? Theme.TEXT : Theme.DIM), new Runnable() {
@@ -294,15 +294,13 @@ public final class ScreenMacro {
     }
 
     /**
-     * `안 보냄` / `3장 · 매번` / `3장 · 3회마다` / `3장 · 수동 전송만`.
+     * `이미지 미선택` / `3장 · 매번` / `3장 · 3회마다` / `3장 · 수동 전송만`.
      * 전송 실패 기록이 남아 있으면 앞에 ⚠ 를 붙인다 — 상세로 들어갈 이유를 값에서 알려준다.
      */
     static String imageSummary(MainActivity a, Settings s) {
         String base;
         int n = s.macro.images.size();
-        if (Settings.IMG_NEVER.equals(s.macro.sendImages)) {
-            base = "안 보냄";
-        } else if (n == 0) {
+        if (n == 0) {
             base = "이미지 미선택";
         } else {
             base = n + "장 · " + imgModeKr(s.macro.sendImages);
@@ -338,7 +336,7 @@ public final class ScreenMacro {
         if (Settings.IMG_EVERY.equals(mode)) return "매번";
         if (Settings.IMG_EVERY_N.equals(mode)) return "N회마다";
         if (Settings.IMG_MANUAL.equals(mode)) return "수동 전송만";
-        return "안 보냄";
+        return "매번";
     }
 
     // ── 즉시 발송 ───────────────────────────────────────────────────────────
