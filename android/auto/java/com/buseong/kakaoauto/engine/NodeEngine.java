@@ -99,6 +99,11 @@ final class NodeEngine implements KakaoEngine {
     // ── 로그인 ──────────────────────────────────────────────────────────────
 
     @Override public LoginStep beginLogin(String account, String password, boolean forceSlot) throws EngineException {
+        return beginLogin(account, password, forceSlot, null);
+    }
+
+    @Override public LoginStep beginLogin(String account, String password, boolean forceSlot, String deviceUuid)
+            throws EngineException {
         offMain();
         if (account == null || account.trim().length() == 0 || password == null || password.length() == 0) {
             throw new EngineException("bad_request", "카카오 계정과 비밀번호를 입력하십시오.");
@@ -109,8 +114,7 @@ final class NodeEngine implements KakaoEngine {
             p.put("password", password);
             p.put("forced", forceSlot);
             p.put("device_type", "tablet");
-            String du = TokenVault.deviceUuid(app);
-            if (du.length() > 0) p.put("device_uuid", du);
+            if (deviceUuid != null && deviceUuid.length() > 0) p.put("device_uuid", deviceUuid);
         } catch (Throwable t) {
             throw new EngineException("bad_request", String.valueOf(t));
         }
@@ -149,14 +153,25 @@ final class NodeEngine implements KakaoEngine {
             case "ok": {
                 JSONObject creds = r.optJSONObject("credentials");
                 if (creds == null) throw new EngineException("upstream_error", "로그인 응답에 토큰이 없습니다.");
-                if (!TokenVault.save(app, creds)) {
+                String slot = com.buseong.kakaoauto.KakaoSlots.writingId();
+                if (slot.length() == 0) slot = com.buseong.kakaoauto.KakaoSlots.selectedId(app);
+                String hint = TokenVault.mask(account);
+                if (!TokenVault.save(app, slot, creds)) {
                     throw new EngineException("upstream_error", "이 기기의 보안 키저장소를 사용할 수 없어 로그인을 보관하지 못했습니다.");
                 }
-                TokenVault.markLinked(app, TokenVault.mask(account));
+                boolean kept = com.buseong.kakaoauto.KakaoSlots.commit(app, slot, hint,
+                        creds.optString("user_id", ""), creds.optString("device_uuid", ""));
+                if (!kept) {
+                    TokenVault.clear(app, slot);
+                    com.buseong.kakaoauto.KakaoSlots.abandon();
+                    return new LoginStep(LoginStep.Kind.FAILED, null, null, -1,
+                            "이 카카오 계정은 이미 등록되어 있습니다.", statusOf(r));
+                }
+                TokenVault.markLinked(app, slot, hint);
                 pendingAccount = null;
                 synchronized (sessionLock) { sessionGen = -1; }
                 lastError = "";
-                Log.add(app, "카카오 계정을 연결했습니다. (" + TokenVault.mask(account) + ")");
+                Log.add(app, "카카오 계정을 연결했습니다. (" + hint + ")");
                 EngineService.sync(app);
                 notifyStatus();
                 return new LoginStep(LoginStep.Kind.OK, null, null, -1, "");
@@ -168,18 +183,23 @@ final class NodeEngine implements KakaoEngine {
             case "waiting":
                 return new LoginStep(LoginStep.Kind.WAITING, null, null, -1, msg);
             case "bad_credentials":
-                return new LoginStep(LoginStep.Kind.BAD_CREDENTIALS, null, null, -1, msg);
+                return new LoginStep(LoginStep.Kind.BAD_CREDENTIALS, null, null, -1, msg, statusOf(r));
             case "slot_occupied":
-                return new LoginStep(LoginStep.Kind.SLOT_OCCUPIED, null, null, -1, msg);
+                return new LoginStep(LoginStep.Kind.SLOT_OCCUPIED, null, null, -1, msg, statusOf(r));
             case "expired":
                 pendingAccount = null;
-                return new LoginStep(LoginStep.Kind.EXPIRED, null, null, -1, msg);
+                return new LoginStep(LoginStep.Kind.EXPIRED, null, null, -1, msg, statusOf(r));
             default:
                 pendingAccount = null;
                 String code = r.optString("code", "");
                 return new LoginStep(LoginStep.Kind.FAILED, null, null, -1,
-                        (msg.length() > 0) ? msg : code);
+                        (msg.length() > 0) ? msg : code, statusOf(r));
         }
+    }
+
+    private static int statusOf(JSONObject r) {
+        if (r == null || !r.has("status") || r.isNull("status")) return Integer.MIN_VALUE;
+        return r.optInt("status", Integer.MIN_VALUE);
     }
 
     @Override public void unlink() {
@@ -190,19 +210,25 @@ final class NodeEngine implements KakaoEngine {
                 }
             }, "engine-unlink").start();
         }
-        TokenVault.clear(app);
+        com.buseong.kakaoauto.KakaoSlots.Slot gone = com.buseong.kakaoauto.KakaoSlots.selected(app);
+        if (gone != null) TokenVault.clear(app, gone.id);
         RoomLinks.clearAll(app);
-        try { SenderSync.onUnlink(app); } catch (Throwable ignore) { }
+        try {
+            if (gone != null) SenderSync.unlinkKey(app, gone.senderKey);
+            else SenderSync.onUnlink(app);
+        } catch (Throwable ignore) { }
+        com.buseong.kakaoauto.KakaoSlots.removeSelected(app);
         synchronized (sessionLock) { sessionGen = -1; }
         lastError = "";
         EngineService.sync(app);
-        Log.add(app, "카카오 계정 연결을 해제했습니다. 카카오톡 › 설정 › 기기 연결 관리에서 이 기기를 삭제할 수 있습니다.");
+        Log.add(app, "선택한 카카오 계정만 해제했습니다. 다른 계정은 그대로입니다.");
         notifyStatus();
     }
 
     void wipe() {
-        unlink();
+        try { SenderSync.unlinkAll(app); } catch (Throwable ignore) { }
         TokenVault.wipe(app);
+        com.buseong.kakaoauto.KakaoSlots.clearAll(app);
         host.stop();
     }
 

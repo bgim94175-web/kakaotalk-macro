@@ -40,6 +40,11 @@ public final class Engine {
         try { impl(c).wipe(); } catch (Throwable t) { android.util.Log.w("KakaoEngine", "wipe failed", t); }
     }
 
+    /** 예전 한 계정 토큰을 슬롯 키로 옮긴다. */
+    public static void adoptLegacyTokens(Context c, String slotId) {
+        TokenVault.adoptLegacy(c, slotId);
+    }
+
     /** 상시 발송 서버가 세션을 가진 뒤, 폰 쪽 LOCO 프로세스를 내린다. 토큰은 지우지 않는다. */
     public static void releaseLocalSession(Context c) {
         NodeEngine e = instance;

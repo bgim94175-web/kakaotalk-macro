@@ -6,6 +6,7 @@ import android.util.Base64;
 import com.buseong.kakaoauto.Device;
 import com.buseong.kakaoauto.Features;
 import com.buseong.kakaoauto.KakaoAccount;
+import com.buseong.kakaoauto.KakaoSlots;
 import com.buseong.kakaoauto.License;
 import com.buseong.kakaoauto.Log;
 import com.buseong.kakaoauto.Prefs;
@@ -49,6 +50,7 @@ public final class SenderSync {
     private static final String K_OWNS = "sender_owns";
     private static final String K_PENDING = "sender_pending";
     private static final String K_REAUTH = "sender_reauth";
+    private static final String K_STATE = "sender_accounts";
 
     private static final ExecutorService Q = Executors.newSingleThreadExecutor();
     private static final Object LOCK = new Object();
@@ -66,16 +68,28 @@ public final class SenderSync {
     }
 
     public static boolean serverOwns(Context c) {
-        return c != null && Prefs.getBool(c, K_OWNS, false);
+        return c != null && owns(c, senderKey(c));
     }
 
     public static boolean needsRegister(Context c) {
-        return c != null && Prefs.getBool(c, K_REAUTH, false);
+        return c != null && reauthReason(c, senderKey(c)) != null;
     }
 
-    /** 폰의 LOCO 를 열면 서버 세션과 슬롯이 겹친다. 넘기는 중에도 열지 않는다. */
+    public static boolean needsRegister(Context c, String senderKey) {
+        return c != null && senderKey != null && reauthReason(c, senderKey) != null;
+    }
+
+    /** 지금 고른 계정의 폰 LOCO 를 열면 그 계정의 서버 세션과 슬롯이 겹친다. */
     public static boolean blocksPhoneFeatures(Context c) {
-        return serverOwns(c) || (c != null && Prefs.getBool(c, K_PENDING, false));
+        if (c == null) return false;
+        String key = senderKey(c);
+        return owns(c, key) || key.equals(pendingKey(c));
+    }
+
+    static String senderKey(Context c) {
+        KakaoSlots.Slot s = KakaoSlots.selected(c);
+        if (s != null && s.senderKey.length() > 0) return s.senderKey;
+        return Device.deviceId(c);
     }
 
     public static String base(Context c) {
@@ -91,28 +105,34 @@ public final class SenderSync {
 
     public static void onRegistered(Context c) {
         if (c == null) return;
-        Prefs.putBool(c, K_PENDING, true);
-        Prefs.putBool(c, K_REAUTH, false);
+        String key = senderKey(c);
+        setPending(c, key);
+        setReauth(c, key, null);
         schedule(c);
     }
 
     public static void onSettingsSaved(Context c) {
         if (c == null || !KakaoAccount.ready(c)) return;
+        setPending(c, senderKey(c));
         schedule(c);
     }
 
     public static void onUnlink(Context c) {
-        if (c == null) return;
+        unlinkKey(c, senderKey(c));
+    }
+
+    public static void unlinkKey(Context c, final String key) {
+        if (c == null || key == null || key.length() == 0) return;
         final Context app = c.getApplicationContext();
-        Prefs.putBool(app, K_OWNS, false);
-        Prefs.putBool(app, K_PENDING, false);
-        Prefs.putBool(app, K_REAUTH, false);
+        setOwns(app, key, false);
+        setReauth(app, key, null);
+        if (key.equals(pendingKey(app))) setPending(app, "");
         Q.execute(new Runnable() {
             @Override public void run() {
                 try {
                     if (!hasBase(app)) return;
                     JSONObject body = new JSONObject();
-                    body.put("device_id", Device.deviceId(app));
+                    body.put("device_id", key);
                     post(app, "/v1/unlink", body, 20000);
                 } catch (Throwable t) {
                     Log.add(app, "상시 발송 등록 해제 알림에 실패했습니다. (" + t + ")");
@@ -121,37 +141,48 @@ public final class SenderSync {
         });
     }
 
+    public static void unlinkAll(Context c) {
+        if (c == null) return;
+        java.util.List<KakaoSlots.Slot> slots = KakaoSlots.all(c);
+        for (int i = 0; i < slots.size(); i++) unlinkKey(c, slots.get(i).senderKey);
+    }
+
     public static void refreshStatus(final Context c) {
         if (c == null || !KakaoAccount.ready(c) || !hasBase(c)) return;
         Q.execute(new Runnable() {
             @Override public void run() {
-                try {
-                    String url = base(c) + "/v1/status?device_id=" + enc(Device.deviceId(c));
-                    HttpResult r = open(c, "GET", url, null, 20000);
-                    if (r.code != 200 || r.body == null) return;
-                    JSONObject o = new JSONObject(r.body);
-                    if (!o.optBoolean("ok", false)) return;
-                    if (o.optBoolean("needs_register", false)) applyReauth(c, o.optString("reason", "reauth"));
-                    else if (o.optBoolean("linked", false)) {
-                        Prefs.putBool(c, K_OWNS, true);
-                        Prefs.putBool(c, K_PENDING, false);
-                        Prefs.putBool(c, K_REAUTH, false);
-                    }
-                } catch (Throwable ignore) { }
+                java.util.List<KakaoSlots.Slot> slots = KakaoSlots.all(c);
+                for (int i = 0; i < slots.size(); i++) {
+                    String key = slots.get(i).senderKey;
+                    try {
+                        String url = base(c) + "/v1/status?device_id=" + enc(key);
+                        HttpResult r = open(c, "GET", url, null, 20000);
+                        if (r.code != 200 || r.body == null) continue;
+                        JSONObject o = new JSONObject(r.body);
+                        if (!o.optBoolean("ok", false)) continue;
+                        if (o.optBoolean("needs_register", false)) applyReauth(c, key, o.optString("reason", "reauth"));
+                        else if (o.optBoolean("linked", false)) {
+                            setOwns(c, key, true);
+                            setReauth(c, key, null);
+                            if (key.equals(pendingKey(c))) setPending(c, "");
+                        }
+                    } catch (Throwable ignore) { }
+                }
             }
         });
     }
 
     public static void awaitHandoff(Context c, long timeoutMs) {
         long until = System.currentTimeMillis() + timeoutMs;
+        String key = senderKey(c);
         while (System.currentTimeMillis() < until) {
-            if (serverOwns(c) || !Prefs.getBool(c, K_PENDING, false)) return;
+            if (owns(c, key) || !key.equals(pendingKey(c))) return;
             try { Thread.sleep(200L); } catch (InterruptedException e) { return; }
         }
     }
 
     public static List<KakaoEngine.KakaoRoom> fetchRooms(Context c) throws EngineException {
-        HttpResult r = open(c, "GET", base(c) + "/v1/chats?device_id=" + enc(Device.deviceId(c)), null, 90000);
+        HttpResult r = open(c, "GET", base(c) + "/v1/chats?device_id=" + enc(senderKey(c)), null, 90000);
         JSONObject o = readOk(r);
         if (o.optBoolean("needs_register", false)) {
             applyReauth(c, o.optString("reason", "reauth"));
@@ -180,7 +211,7 @@ public final class SenderSync {
     public static KakaoEngine.SendResult sendText(Context c, String chatId, String text) throws EngineException {
         JSONObject body = new JSONObject();
         try {
-            body.put("device_id", Device.deviceId(c));
+            body.put("device_id", senderKey(c));
             body.put("chat_id", chatId);
             body.put("text", text);
         } catch (Throwable t) {
@@ -199,7 +230,7 @@ public final class SenderSync {
     public static KakaoEngine.SendResult sendImages(Context c, String chatId, List<File> files) throws EngineException {
         JSONObject body = new JSONObject();
         try {
-            body.put("device_id", Device.deviceId(c));
+            body.put("device_id", senderKey(c));
             body.put("chat_id", chatId);
             JSONArray images = new JSONArray();
             if (files != null) {
@@ -247,66 +278,70 @@ public final class SenderSync {
     }
 
     private static void pushOnce(Context c) {
-        if (!KakaoAccount.ready(c) || !TokenVault.linked(c)) {
-            Prefs.putBool(c, K_PENDING, false);
+        String key = pendingKey(c);
+        KakaoSlots.Slot slot = key.length() == 0 ? KakaoSlots.selected(c) : KakaoSlots.bySenderKey(c, key);
+        if (slot == null) slot = KakaoSlots.selected(c);
+        if (slot == null || !TokenVault.linked(c, slot.id)) {
+            if (key.length() > 0) setPending(c, "");
             return;
         }
+        key = slot.senderKey;
         if (!hasBase(c)) {
-            Prefs.putBool(c, K_PENDING, false);
-            Prefs.putBool(c, K_OWNS, false);
+            setPending(c, "");
+            setOwns(c, key, false);
             Log.add(c, "상시 발송 서버 주소가 없습니다. 폰을 끄면 발송이 멈춥니다.");
             return;
         }
         String tok = Prefs.getStr(c, K_TOKEN, "");
         if (tok == null || tok.length() == 0) {
-            Prefs.putBool(c, K_PENDING, false);
+            setPending(c, "");
             Log.add(c, "상시 발송 서버 인증값이 없습니다. 라이선스 확인 후 다시 시도합니다.");
             return;
         }
         try {
-            JSONObject creds = TokenVault.load(c);
+            JSONObject creds = TokenVault.load(c, slot.id);
             if (creds == null) {
-                Prefs.putBool(c, K_PENDING, false);
+                setPending(c, "");
                 return;
             }
             creds.remove("password");
             creds.remove("passcode");
-            boolean owns = serverOwns(c);
-            JSONObject body = payload(c, creds, !owns);
-            String path = owns ? "/v1/config" : "/v1/session";
-            if (owns) body.remove("credentials");
+            boolean already = owns(c, key);
+            JSONObject body = payload(c, slot, creds, !already);
+            String path = already ? "/v1/config" : "/v1/session";
+            if (already) body.remove("credentials");
             HttpResult r = post(c, path, body, 60000);
             JSONObject o = new JSONObject(r.body == null ? "{}" : r.body);
             if (r.code == 200 && o.optBoolean("ok", false) && !o.optBoolean("needs_register", false)) {
-                Prefs.putBool(c, K_OWNS, true);
-                Prefs.putBool(c, K_PENDING, false);
-                Prefs.putBool(c, K_REAUTH, false);
-                Engine.releaseLocalSession(c);
-                Log.add(c, owns
+                setOwns(c, key, true);
+                setReauth(c, key, null);
+                if (key.equals(pendingKey(c))) setPending(c, "");
+                if (key.equals(senderKey(c))) Engine.releaseLocalSession(c);
+                Log.add(c, already
                         ? "설정을 상시 발송 서버에 반영했습니다."
                         : "카카오 세션을 상시 발송 서버에 넘겼습니다. 폰을 꺼도 발송이 계속됩니다.");
                 return;
             }
             if (o.optBoolean("needs_register", false) || "reauth".equals(o.optString("error", ""))) {
-                applyReauth(c, o.optString("reason", o.optString("error", "reauth")));
+                applyReauth(c, key, o.optString("reason", o.optString("error", "reauth")));
                 return;
             }
-            Prefs.putBool(c, K_PENDING, false);
-            Prefs.putBool(c, K_OWNS, false);
+            if (key.equals(pendingKey(c))) setPending(c, "");
+            setOwns(c, key, false);
             Log.add(c, "상시 발송 서버에 세션을 넘기지 못했습니다. 폰이 켜져 있는 동안만 발송합니다. ("
                     + r.code + " " + clip(o.optString("error", "")) + ")");
         } catch (Throwable t) {
-            Prefs.putBool(c, K_PENDING, false);
-            Prefs.putBool(c, K_OWNS, false);
+            if (key.equals(pendingKey(c))) setPending(c, "");
+            setOwns(c, key, false);
             Log.add(c, "상시 발송 서버에 연결하지 못했습니다. 폰이 켜져 있는 동안만 발송합니다. (" + t + ")");
         }
     }
 
-    private static JSONObject payload(Context c, JSONObject creds, boolean withCreds) throws Exception {
+    private static JSONObject payload(Context c, KakaoSlots.Slot slot, JSONObject creds, boolean withCreds) throws Exception {
         JSONObject body = new JSONObject();
-        body.put("device_id", Device.deviceId(c));
+        body.put("device_id", slot.senderKey);
         if (withCreds) body.put("credentials", creds);
-        Settings s = Settings.load(c);
+        Settings s = Settings.readSlot(c, slot.id);
         body.put("config", new JSONObject(s.toJson()));
         JSONObject features = new JSONObject();
         features.put("macro", License.allowed(c, Features.MACRO));
@@ -314,7 +349,7 @@ public final class SenderSync {
         features.put("minigame", License.allowed(c, Features.MINIGAME));
         body.put("features", features);
         JSONArray rooms = new JSONArray();
-        Map<String, RoomLinks.Link> links = RoomLinks.all(c);
+        Map<String, RoomLinks.Link> links = linksOf(c, slot);
         for (RoomLinks.Link l : links.values()) {
             if (l == null) continue;
             JSONObject one = new JSONObject();
@@ -327,6 +362,11 @@ public final class SenderSync {
         body.put("rooms", rooms);
         body.put("images", imagePayload(c, s));
         return body;
+    }
+
+    private static Map<String, RoomLinks.Link> linksOf(Context c, KakaoSlots.Slot slot) {
+        if (slot != null && slot.id.equals(KakaoSlots.selectedId(c))) return RoomLinks.all(c);
+        return RoomLinks.linksFor(c, slot == null ? "" : slot.id);
     }
 
     private static JSONArray imagePayload(Context c, Settings s) {
@@ -345,11 +385,17 @@ public final class SenderSync {
     }
 
     private static void applyReauth(Context c, String reason) {
-        Prefs.putBool(c, K_OWNS, false);
-        Prefs.putBool(c, K_PENDING, false);
-        Prefs.putBool(c, K_REAUTH, true);
-        TokenVault.setFlag(c, TokenVault.FLAG_REAUTH);
-        Log.add(c, "카카오 로그인이 끊겼습니다. 계정을 다시 등록하십시오."
+        applyReauth(c, senderKey(c), reason);
+    }
+
+    private static void applyReauth(Context c, String key, String reason) {
+        setOwns(c, key, false);
+        setReauth(c, key, (reason == null || reason.length() == 0) ? "reauth" : reason);
+        if (key.equals(pendingKey(c))) setPending(c, "");
+        KakaoSlots.Slot slot = KakaoSlots.bySenderKey(c, key);
+        if (slot != null) TokenVault.setFlag(c, slot.id, TokenVault.FLAG_REAUTH);
+        String who = (slot == null || slot.hint.length() == 0) ? "" : (" (" + slot.hint + ")");
+        Log.add(c, "카카오 로그인이 끊겼습니다. 그 계정을 다시 등록하십시오." + who
                 + ((reason == null || reason.length() == 0) ? "" : " (" + reason + ")"));
     }
 
@@ -451,6 +497,82 @@ public final class SenderSync {
     private static String clip(String s) {
         if (s == null) return "";
         return s.length() > 180 ? s.substring(0, 180) : s;
+    }
+
+    private static JSONObject loadState(Context c) {
+        String raw = Prefs.getStr(c, K_STATE, "");
+        JSONObject o = null;
+        if (raw != null && raw.length() > 0) {
+            try { o = new JSONObject(raw); } catch (Throwable ignore) { o = null; }
+        }
+        if (o == null) {
+            o = new JSONObject();
+            try {
+                o.put("owns", new JSONObject());
+                o.put("reauth", new JSONObject());
+                o.put("pending", "");
+                if (Prefs.getBool(c, K_OWNS, false)) o.getJSONObject("owns").put(Device.deviceId(c), true);
+                if (Prefs.getBool(c, K_REAUTH, false)) o.getJSONObject("reauth").put(Device.deviceId(c), "reauth");
+                if (Prefs.getBool(c, K_PENDING, false)) o.put("pending", Device.deviceId(c));
+            } catch (Throwable ignore) { }
+        }
+        if (o.optJSONObject("owns") == null) try { o.put("owns", new JSONObject()); } catch (Throwable ignore) { }
+        if (o.optJSONObject("reauth") == null) try { o.put("reauth", new JSONObject()); } catch (Throwable ignore) { }
+        return o;
+    }
+
+    private static void saveState(Context c, JSONObject o) {
+        Prefs.putStr(c, K_STATE, o.toString());
+    }
+
+    private static boolean owns(Context c, String key) {
+        if (c == null || key == null || key.length() == 0) return false;
+        JSONObject owns = loadState(c).optJSONObject("owns");
+        return owns != null && owns.optBoolean(key, false);
+    }
+
+    private static void setOwns(Context c, String key, boolean on) {
+        if (c == null || key == null || key.length() == 0) return;
+        JSONObject o = loadState(c);
+        try {
+            JSONObject owns = o.getJSONObject("owns");
+            if (on) owns.put(key, true);
+            else owns.remove(key);
+            saveState(c, o);
+        } catch (Throwable ignore) { }
+    }
+
+    private static String reauthReason(Context c, String key) {
+        if (c == null || key == null || key.length() == 0) return null;
+        JSONObject re = loadState(c).optJSONObject("reauth");
+        if (re == null || !re.has(key) || re.isNull(key)) return null;
+        return re.optString(key, "reauth");
+    }
+
+    private static void setReauth(Context c, String key, String reason) {
+        if (c == null || key == null || key.length() == 0) return;
+        JSONObject o = loadState(c);
+        try {
+            JSONObject re = o.getJSONObject("reauth");
+            if (reason == null || reason.length() == 0) re.remove(key);
+            else re.put(key, reason);
+            saveState(c, o);
+        } catch (Throwable ignore) { }
+    }
+
+    private static String pendingKey(Context c) {
+        if (c == null) return "";
+        String v = loadState(c).optString("pending", "");
+        return v == null ? "" : v;
+    }
+
+    private static void setPending(Context c, String key) {
+        if (c == null) return;
+        JSONObject o = loadState(c);
+        try {
+            o.put("pending", key == null ? "" : key);
+            saveState(c, o);
+        } catch (Throwable ignore) { }
     }
 
     private static final class HttpResult {

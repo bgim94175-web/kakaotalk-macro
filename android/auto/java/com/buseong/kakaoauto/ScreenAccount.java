@@ -172,7 +172,11 @@ public final class ScreenAccount {
         LinearLayout kakao = Ui.group(a);
         final boolean reg = KakaoAccount.ready(a);
         final boolean again = com.buseong.kakaoauto.engine.SenderSync.needsRegister(a);
-        final String regValue = again ? "다시 등록" : (reg ? "등록됨" : "등록 필요");
+        final String hint = KakaoAccount.accountId(a);
+        final int accounts = KakaoSlots.count(a);
+        final String regValue = again ? "다시 등록"
+                : (reg ? (hint.length() > 0 ? hint : "등록됨") + (accounts > 1 ? " · " + accounts + "개" : "")
+                : "등록 필요");
         final int regColor = (reg && !again) ? Theme.OK : Theme.AMBER;
         kakao.addView(Ui.navRow(a, Icon.KEY, fc, "카카오 계정 등록",
                 regValue, regColor, new Runnable() {

@@ -123,9 +123,27 @@ async function authBegin(p) {
     }
   }
 
-  if (r.error === 'bad_credentials') return { state: 'bad_credentials', message: r.message || '' }
-  if (r.error === 'login_failed' && !forced) return { state: 'slot_occupied', message: r.message || '' }
-  return { state: 'failed', code: r.error || 'login_failed', message: r.message || '' }
+  if (r.error === 'bad_credentials') return withStatus('bad_credentials', r.message || '', r.status)
+  if (r.error === 'login_failed' && !forced) return withStatus('slot_occupied', r.message || '', r.status)
+  return failBody(r.error || 'login_failed', r.message || '', r.status)
+}
+
+function withStatus(state, message, status) {
+  const out = failBody('', message, status)
+  out.state = state
+  delete out.code
+  return out
+}
+
+function failBody(code, message, status) {
+  const out = { state: 'failed', code: code || 'login_failed', message: message || '' }
+  let n = typeof status === 'number' ? status : null
+  if (n == null) {
+    const hit = String(message || '').match(/status (-?\d+)/)
+    if (hit) n = Number(hit[1])
+  }
+  if (n != null && !Number.isNaN(n)) out.status = n
+  return out
 }
 
 // Waits (up to ~a minute) for the user to confirm the code in KakaoTalk on the phone.
@@ -139,13 +157,13 @@ async function authConfirm(p) {
   if (reg.error === 'registration_timeout') return { state: 'waiting' }
   if (reg.error) {
     pendingLogins.delete(id)
-    return { state: 'failed', code: reg.error, message: reg.message || '' }
+    return failBody(reg.error, reg.message || '', reg.status)
   }
 
   const r = await attemptLogin(pl.email, pl.password, pl.deviceUuid, pl.deviceType, pl.forced)
   pendingLogins.delete(id)
   if (r.authenticated && r.credentials) return loginOk(r, pl.deviceUuid)
-  return { state: 'failed', code: r.error || 'login_failed', message: r.message || '' }
+  return failBody(r.error || 'login_failed', r.message || '', r.status)
 }
 
 function authCancel(p) {

@@ -458,7 +458,11 @@ public final class MainActivity extends Activity {
 
     private static void fillHome(final MainActivity a, LinearLayout col) {
         col.addView(Ui.pageHead(a, null, "홈", null, Theme.F_HOME));
-        TextView who = Ui.sub(a, Device.deviceName() + " · " + activeSummary(a));
+        String acc = KakaoAccount.accountId(a);
+        String whoLine = Device.deviceName();
+        if (acc.length() > 0) whoLine = whoLine + " · " + acc;
+        whoLine = whoLine + " · " + activeSummary(a);
+        TextView who = Ui.sub(a, whoLine);
         who.setSingleLine(true);
         who.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(MATCH, WRAP);

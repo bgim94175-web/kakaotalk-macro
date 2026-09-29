@@ -103,6 +103,56 @@ if old_size in mt:
 elif new_size not in mt:
     raise SystemExit("POST size site missing")
 media.write_text(mt)
+login = root / "auth/kakao-login.js"
+lt = login.read_text()
+helper = """function kakaoSentence(data) {
+    const m = data && typeof data.message === 'string' ? data.message.trim() : '';
+    return m;
+}
+"""
+if "function kakaoSentence" not in lt:
+    needle = "const STATUS_DEVICE_NOT_REGISTERED = -100;\n"
+    if needle not in lt:
+        raise SystemExit("passcode status site missing")
+    lt = lt.replace(needle, needle + helper, 1)
+repls = [
+(
+"""            message: typeof data.message === 'string'
+                ? `Login failed: ${data.message}`
+                : 'Login failed: incorrect email or password.',
+        };""",
+"""            message: kakaoSentence(data) || 'Login failed: incorrect email or password.',
+            status: data.status,
+        };""",
+),
+(
+"""        message: `Login failed with status ${data.status}`,
+    };""",
+"""        message: kakaoSentence(data) || `Login failed with status ${data.status}`,
+        status: data.status,
+    };""",
+),
+(
+"""        message: `Passcode request failed with status ${data.status ?? 'unknown'}`,
+    };""",
+"""        message: kakaoSentence(data) || `Passcode request failed with status ${data.status ?? 'unknown'}`,
+        status: data.status,
+    };""",
+),
+(
+"""                message: `Device registration failed with status ${data.status}`,
+            };""",
+"""                message: kakaoSentence(data) || `Device registration failed with status ${data.status}`,
+                status: data.status,
+            };""",
+),
+]
+for old, new in repls:
+    if old in lt:
+        lt = lt.replace(old, new, 1)
+    elif new not in lt:
+        raise SystemExit("kakao login message site missing")
+login.write_text(lt)
 PY
 
 mkdir -p "$OUT/assets/engine"

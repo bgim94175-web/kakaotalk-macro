@@ -83,42 +83,78 @@ public final class ScreenKakaoRegister {
     }
 
     private static void fill(final MainActivity a, LinearLayout col) {
-        boolean ok = KakaoAccount.ready(a);
-        String id = KakaoAccount.accountId(a);
+        final java.util.List<KakaoSlots.Slot> slots = KakaoSlots.all(a);
+        final KakaoSlots.Slot sel = KakaoSlots.selected(a);
+        boolean ok = sel != null;
+        String id = ok ? sel.hint : "";
         LinearLayout hero = Ui.hero(a, Theme.F_ACCOUNT, Icon.KEY, "ACCOUNT", "카카오 계정 등록",
-                ok ? "카카오톡에서 인증코드 확인이 끝났습니다. 이제 매크로와 다른 기능을 설정할 수 있습니다."
+                ok ? "고른 계정의 방과 매크로만 이 화면에 따라 바뀝니다. 다른 계정은 서버에서 그대로 발송합니다."
                         : "카카오 계정으로 로그인한 뒤, 앱에 표시된 인증코드를 카카오톡에 입력하면 등록이 끝납니다.");
         hero.addView(Ui.heroRule(a, Theme.F_ACCOUNT));
         LinearLayout stats = Ui.row(a);
         stats.setPadding(0, Theme.dp(a, 10), 0, 0);
-        stats.addView(Ui.stat(a, "상태", ok ? "등록됨" : "등록 필요", ok ? Theme.OK : Theme.AMBER));
-        stats.addView(Ui.stat(a, "계정", (ok && id.length() > 0) ? id : "—", Theme.TEXT));
+        stats.addView(Ui.stat(a, "선택 계정", (ok && id.length() > 0) ? id : (ok ? "등록됨" : "—"),
+                ok ? Theme.TEXT : Theme.AMBER));
+        stats.addView(Ui.stat(a, "계정", slots.size() + "개", Theme.TEXT));
         hero.addView(stats);
         int keep = Theme.accent();
         Theme.setAccent(Theme.F_ACCOUNT);
-        if (!ok) {
-            hero.addView(Nav.wideBtn(a, "로그인", true, new Runnable() {
-                @Override public void run() { login(a); }
-            }));
-        } else {
-            hero.addView(Nav.wideBtn(a, "등록 해제", false, new Runnable() {
+        hero.addView(Nav.wideBtn(a, ok ? "계정 추가" : "로그인", true, new Runnable() {
+            @Override public void run() { login(a, null); }
+        }));
+        if (ok) {
+            hero.addView(Nav.wideBtn(a, "이 계정만 해제", false, new Runnable() {
                 @Override public void run() { confirmClear(a); }
             }));
         }
         Theme.setAccent(keep);
         col.addView(hero);
 
-        col.addView(Ui.sectionHeader(a, null, "순서"));
-        LinearLayout g = Ui.group(a);
-        g.addView(Ui.navRow(a, "1. 로그인", ok ? "완료" : "계정과 비밀번호", ok ? Theme.OK : Theme.TEXT, null));
-        g.addView(Ui.navRow(a, "2. 인증코드", ok ? "완료" : "카카오톡에 입력", ok ? Theme.OK : Theme.TEXT, null));
-        col.addView(g);
+        if (!slots.isEmpty()) {
+            col.addView(Ui.sectionHeader(a, null, "등록된 계정"));
+            LinearLayout list = Ui.group(a);
+            for (int i = 0; i < slots.size(); i++) {
+                final KakaoSlots.Slot one = slots.get(i);
+                final boolean on = sel != null && sel.id.equals(one.id);
+                final boolean again = com.buseong.kakaoauto.engine.SenderSync.needsRegister(a, one.senderKey);
+                String value = again ? "다시 등록" : (on ? "사용 중" : "선택");
+                int color = again ? Theme.AMBER : (on ? Theme.OK : Theme.TEXT);
+                list.addView(Ui.navRow(a, Icon.KEY, Theme.F_ACCOUNT,
+                        one.hint.length() > 0 ? one.hint : "카카오 계정",
+                        value, color, new Runnable() {
+                            @Override public void run() {
+                                if (again) {
+                                    login(a, one.id);
+                                    return;
+                                }
+                                if (on) return;
+                                KakaoSlots.select(a, one.id);
+                                Ui.toast(a, "계정을 바꿨습니다. 이 계정의 방과 매크로를 보여 줍니다.");
+                                refresh();
+                                try { Nav.reload(); } catch (Throwable ignore) { }
+                            }
+                        }));
+            }
+            col.addView(list);
+            if (sel != null && com.buseong.kakaoauto.engine.SenderSync.needsRegister(a, sel.senderKey)) {
+                col.addView(Nav.note(a, "선택한 계정의 카카오 로그인이 끊겼습니다. 그 계정만 다시 등록하십시오.",
+                        Theme.AMBER, "다시 로그인", new Runnable() {
+                            @Override public void run() { login(a, sel.id); }
+                        }));
+            }
+        } else {
+            col.addView(Ui.sectionHeader(a, null, "순서"));
+            LinearLayout g = Ui.group(a);
+            g.addView(Ui.navRow(a, "1. 로그인", "계정과 비밀번호", Theme.TEXT, null));
+            g.addView(Ui.navRow(a, "2. 인증코드", "카카오톡에 입력", Theme.TEXT, null));
+            col.addView(g);
+        }
 
-        col.addView(Nav.note(a, "비밀번호는 저장하지 않습니다. 카카오톡에서 코드 확인이 끝나기 전에는"
-                + " 매크로 설정 화면으로 들어가지 않습니다.", Theme.ACCENT2, null, null));
+        col.addView(Nav.note(a, "비밀번호는 저장하지 않습니다. 계정을 추가하거나 바꿔도 다른 계정의 방, 매크로, 이미지는 지워지지 않습니다."
+                + " 폰을 꺼도 등록된 계정은 서버에서 각자 발송합니다.", Theme.ACCENT2, null, null));
     }
 
-    private static void login(final MainActivity a) {
+    private static void login(final MainActivity a, final String reauthId) {
         LinearLayout body = Nav.col(a);
         TextView help = Ui.sub(a, "카카오 계정(이메일 또는 전화번호)과 비밀번호를 입력하십시오."
                 + " 다음 화면에 인증코드가 표시됩니다.");
@@ -149,22 +185,35 @@ public final class ScreenKakaoRegister {
                 pw.setText("");
                 if (acc.length() == 0) return "카카오 계정을 입력하십시오.";
                 if (pass.length() == 0) return "비밀번호를 입력하십시오.";
-                begin(a, acc, pass, false);
+                begin(a, acc, pass, false, reauthId);
                 return null;
             }
         });
     }
 
-    private static void begin(final MainActivity a, final String acc, final String pass, final boolean force) {
+    private static void begin(final MainActivity a, final String acc, final String pass, final boolean force,
+                               final String reauthId) {
+        if (!force) {
+            if (reauthId == null) {
+                if (KakaoSlots.armNew(a) == null) {
+                    fail(a, "계정을 추가하지 못했습니다", "계정은 " + KakaoSlots.MAX + "개까지 등록할 수 있습니다.");
+                    return;
+                }
+            } else if (KakaoSlots.arm(a, reauthId) == null) {
+                fail(a, "로그인하지 못했습니다", "다시 등록할 계정을 찾지 못했습니다.");
+                return;
+            }
+        }
+        final String uuid = KakaoSlots.armedUuid();
         final AlertDialog wait = progress(a, "카카오 서버에 연결하는 중입니다…");
         IO.execute(new Runnable() {
             @Override public void run() {
                 KakaoEngine.LoginStep step = null;
                 String err = null;
                 try {
-                    step = Engine.get(a).beginLogin(acc, pass, force);
+                    step = Engine.get(a).beginLogin(acc, pass, force, uuid);
                 } catch (EngineException e) {
-                    err = e.userText();
+                    err = AuthText.of(e);
                 } catch (Throwable t) {
                     err = String.valueOf(t);
                 }
@@ -179,7 +228,7 @@ public final class ScreenKakaoRegister {
                             Nav.confirm(a, "태블릿 로그인 사용 중",
                                     "이 계정은 다른 태블릿에 로그인되어 있습니다. 계속하면 그 기기의 카카오톡이 로그아웃됩니다.",
                                     "계속", new Runnable() {
-                                        @Override public void run() { begin(a, acc, pass, true); }
+                                        @Override public void run() { begin(a, acc, pass, true, reauthId); }
                                     });
                             return;
                         }
@@ -203,15 +252,13 @@ public final class ScreenKakaoRegister {
                 showCode(a, account, s);
                 return;
             case BAD_CREDENTIALS:
-                fail(a, "로그인하지 못했습니다", "카카오 계정 또는 비밀번호가 일치하지 않습니다.");
+                fail(a, "로그인하지 못했습니다", AuthText.of(s));
                 return;
             case EXPIRED:
-                fail(a, "확인 시간 초과", "인증코드가 만료되었습니다. 처음부터 다시 로그인하십시오.");
+                fail(a, "확인 시간 초과", AuthText.of(s));
                 return;
             default:
-                String why = (s == null || s.message == null) ? "" : s.message.trim();
-                if (why.length() == 0) why = "카카오 서버가 실패 원인을 주지 않았습니다.";
-                fail(a, "로그인하지 못했습니다", why);
+                fail(a, "로그인하지 못했습니다", AuthText.of(s));
         }
     }
 
@@ -257,7 +304,7 @@ public final class ScreenKakaoRegister {
                     try {
                         s = Engine.get(a).awaitPhoneConfirm(first.pendingId);
                     } catch (EngineException e) {
-                        err = e.userText();
+                        err = AuthText.of(e);
                         break;
                     } catch (Throwable t) {
                         err = String.valueOf(t);
@@ -375,15 +422,14 @@ public final class ScreenKakaoRegister {
     }
 
     private static void confirmClear(final MainActivity a) {
-        Nav.confirm(a, "등록 해제", "이 기기의 카카오 계정 등록을 해제합니다."
-                + " 매크로와 다른 기능 설정은 다시 계정 등록 후에 열립니다.", "해제", new Runnable() {
+        Nav.confirm(a, "이 계정만 해제", "선택한 카카오 계정만 등록 해제합니다."
+                + " 다른 계정의 방, 매크로, 이미지, 쿨타임은 그대로 둡니다.", "해제", new Runnable() {
             @Override public void run() {
                 try { Engine.get(a).unlink(); } catch (Throwable t) {
                     Log.add(a, "카카오 연결 해제에 실패했습니다: " + t);
                 }
-                KakaoAccount.clear(a);
                 try { com.buseong.kakaoauto.engine.LocoInbox.ensure(a); } catch (Throwable ignore) { }
-                Log.add(a, "카카오 계정 등록을 해제했습니다.");
+                Log.add(a, "선택한 카카오 계정 등록을 해제했습니다.");
                 Ui.toast(a, "등록을 해제했습니다.");
                 refresh();
                 try { Nav.reload(); } catch (Throwable t) { /* 탭은 다음에 다시 그린다 */ }
@@ -401,7 +447,8 @@ public final class ScreenKakaoRegister {
     }
 
     private static void fail(MainActivity a, String title, String why) {
-        String msg = (why == null || why.trim().length() == 0) ? "원인을 확인하지 못했습니다." : why;
+        KakaoSlots.abandon();
+        String msg = (why == null || why.trim().length() == 0) ? "카카오 서버가 실패 원인을 주지 않았습니다." : why;
         Ui.showDark(Ui.dialog(a, title).setMessage(msg).setPositiveButton("확인", null));
     }
 }

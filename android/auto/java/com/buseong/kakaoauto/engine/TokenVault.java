@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 
 import com.buseong.kakaoauto.Crypto;
+import com.buseong.kakaoauto.KakaoSlots;
 import com.buseong.kakaoauto.Prefs;
 
 import org.json.JSONObject;
@@ -42,12 +43,20 @@ final class TokenVault {
     static final String FLAG_REAUTH = "reauth";
 
     static boolean linked(Context c) {
-        String b = Prefs.getStr(c, K_TOK, "");
+        return linked(c, activeId(c));
+    }
+
+    static boolean linked(Context c, String id) {
+        String b = Prefs.getStr(c, tokKey(id), "");
         return b != null && b.length() > 0;
     }
 
     static JSONObject load(Context c) {
-        String blob = Prefs.getStr(c, K_TOK, "");
+        return load(c, activeId(c));
+    }
+
+    static JSONObject load(Context c, String id) {
+        String blob = Prefs.getStr(c, tokKey(id), "");
         if (blob == null || blob.length() == 0) return null;
         String plain = open(blob);
         if (plain == null) return null;
@@ -59,46 +68,83 @@ final class TokenVault {
     }
 
     static boolean save(Context c, JSONObject creds) {
-        if (creds == null) return false;
+        return save(c, activeId(c), creds);
+    }
+
+    static boolean save(Context c, String id, JSONObject creds) {
+        if (creds == null || id == null || id.length() == 0) return false;
         String blob = seal(creds.toString());
         if (blob == null) return false;
-        Prefs.putStr(c, K_TOK, blob);
+        Prefs.putStr(c, tokKey(id), blob);
         String uid = creds.optString("user_id", "");
-        if (uid.length() > 0) Prefs.putStr(c, K_USER, uid);
+        if (uid.length() > 0) Prefs.putStr(c, userKey(id), uid);
         String du = creds.optString("device_uuid", "");
-        if (du.length() > 0) Prefs.putStr(c, K_DUUID, du);
+        if (du.length() > 0) Prefs.putStr(c, duKey(id), du);
         return true;
     }
 
     static void markLinked(Context c, String accountHint) {
-        Prefs.putStr(c, K_HINT, accountHint == null ? "" : accountHint);
-        Prefs.putLong(c, K_AT, System.currentTimeMillis());
-        Prefs.remove(c, K_FLAG);
+        markLinked(c, activeId(c), accountHint);
     }
 
-    static String userId(Context c) { return Prefs.getStr(c, K_USER, ""); }
-    static String hint(Context c) { return Prefs.getStr(c, K_HINT, ""); }
-    static long linkedAt(Context c) { return Prefs.getLong(c, K_AT, 0L); }
-    static String deviceUuid(Context c) { return Prefs.getStr(c, K_DUUID, ""); }
-
-    static String flag(Context c) { return Prefs.getStr(c, K_FLAG, ""); }
-    static void setFlag(Context c, String f) {
-        if (f == null || f.length() == 0) Prefs.remove(c, K_FLAG);
-        else Prefs.putStr(c, K_FLAG, f);
+    static void markLinked(Context c, String id, String accountHint) {
+        Prefs.putStr(c, hintKey(id), accountHint == null ? "" : accountHint);
+        Prefs.putLong(c, atKey(id), System.currentTimeMillis());
+        Prefs.remove(c, flagKey(id));
     }
 
-    /** 연결 해제: 토큰·표시 정보만 지운다 (기기 UUID 는 남긴다) */
+    static String userId(Context c) { return Prefs.getStr(c, userKey(activeId(c)), ""); }
+    static String hint(Context c) { return Prefs.getStr(c, hintKey(activeId(c)), ""); }
+    static long linkedAt(Context c) { return Prefs.getLong(c, atKey(activeId(c)), 0L); }
+    static String deviceUuid(Context c) { return Prefs.getStr(c, duKey(activeId(c)), ""); }
+
+    static String flag(Context c) { return flag(c, activeId(c)); }
+    static String flag(Context c, String id) { return Prefs.getStr(c, flagKey(id), ""); }
+    static void setFlag(Context c, String f) { setFlag(c, activeId(c), f); }
+    static void setFlag(Context c, String id, String f) {
+        if (id == null || id.length() == 0) return;
+        if (f == null || f.length() == 0) Prefs.remove(c, flagKey(id));
+        else Prefs.putStr(c, flagKey(id), f);
+    }
+
+    /** 한 계정의 토큰만 지운다. 다른 계정과 KeyStore 키는 남긴다. */
     static void clear(Context c) {
+        clear(c, activeId(c));
+    }
+
+    static void clear(Context c, String id) {
+        if (id == null || id.length() == 0) return;
+        Prefs.remove(c, tokKey(id));
+        Prefs.remove(c, userKey(id));
+        Prefs.remove(c, hintKey(id));
+        Prefs.remove(c, atKey(id));
+        Prefs.remove(c, flagKey(id));
+    }
+
+    /** 예전 한 계정 저장(kk_tok)을 슬롯 키로 옮긴다. 옛 키는 지우지 않는다. */
+    static void adoptLegacy(Context c, String id) {
+        if (c == null || id == null || id.length() == 0) return;
+        if (linked(c, id)) return;
+        String blob = Prefs.getStr(c, K_TOK, "");
+        if (blob == null || blob.length() == 0) return;
+        Prefs.putStr(c, tokKey(id), blob);
+        copyStr(c, K_USER, userKey(id));
+        copyStr(c, K_HINT, hintKey(id));
+        copyStr(c, K_DUUID, duKey(id));
+        copyStr(c, K_FLAG, flagKey(id));
+        long at = Prefs.getLong(c, K_AT, 0L);
+        if (at > 0) Prefs.putLong(c, atKey(id), at);
+    }
+
+    /** 라이선스 로그아웃: 모든 계정의 토큰 + KeyStore 키 */
+    static void wipe(Context c) {
+        java.util.List<KakaoSlots.Slot> slots = KakaoSlots.all(c);
+        for (int i = 0; i < slots.size(); i++) clear(c, slots.get(i).id);
         Prefs.remove(c, K_TOK);
         Prefs.remove(c, K_USER);
         Prefs.remove(c, K_HINT);
         Prefs.remove(c, K_AT);
         Prefs.remove(c, K_FLAG);
-    }
-
-    /** 라이선스 로그아웃: 전부 + KeyStore 키까지 */
-    static void wipe(Context c) {
-        clear(c);
         Prefs.remove(c, K_DUUID);
         try {
             KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
@@ -120,6 +166,23 @@ final class TokenVault {
         }
         if (a.length() >= 8) return a.substring(0, 3) + "****" + a.substring(a.length() - 4);
         return a.length() <= 2 ? "**" : a.substring(0, 1) + "***";
+    }
+
+    private static String activeId(Context c) {
+        String id = KakaoSlots.selectedId(c);
+        return (id == null || id.length() == 0) ? "main" : id;
+    }
+
+    private static String tokKey(String id) { return K_TOK + "." + id; }
+    private static String userKey(String id) { return K_USER + "." + id; }
+    private static String hintKey(String id) { return K_HINT + "." + id; }
+    private static String duKey(String id) { return K_DUUID + "." + id; }
+    private static String atKey(String id) { return K_AT + "." + id; }
+    private static String flagKey(String id) { return K_FLAG + "." + id; }
+
+    private static void copyStr(Context c, String from, String to) {
+        String v = Prefs.getStr(c, from, "");
+        if (v != null && v.length() > 0) Prefs.putStr(c, to, v);
     }
 
     private static String seal(String plain) {

@@ -15,14 +15,16 @@ public final class KakaoAccount {
     private static final String K_OK = "kakao_reg_ok";
     private static final String K_ID = "kakao_reg_id";
 
-    /** 로그인 뒤 인증코드까지 끝났는가. */
+    /** 로그인 뒤 인증코드까지 끝난 계정이 하나라도 선택돼 있는가. */
     public static boolean ready(Context c) {
-        return c != null && Prefs.getBool(c, K_OK, false);
+        return c != null && KakaoSlots.selected(c) != null;
     }
 
-    /** 등록에 쓴 계정. 없으면 빈 문자열. */
+    /** 지금 고른 계정의 표시 이름. 없으면 빈 문자열. */
     public static String accountId(Context c) {
         if (c == null) return "";
+        KakaoSlots.Slot s = KakaoSlots.selected(c);
+        if (s != null && s.hint.length() > 0) return s.hint;
         String v = Prefs.getStr(c, K_ID, "");
         return (v == null) ? "" : v;
     }

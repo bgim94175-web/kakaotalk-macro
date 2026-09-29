@@ -31,6 +31,46 @@ public final class RoomLinks {
     private static final String SLOT_LINKS = "kakao_links";
     private static final String SLOT_ROOMS = "kakao_rooms";
 
+    static String linksKey(Context c) {
+        String id = com.buseong.kakaoauto.KakaoSlots.selectedId(c);
+        if (id == null || id.length() == 0) return SLOT_LINKS;
+        return SLOT_LINKS + "." + id;
+    }
+
+    static String roomsKey(Context c) {
+        String id = com.buseong.kakaoauto.KakaoSlots.selectedId(c);
+        if (id == null || id.length() == 0) return SLOT_ROOMS;
+        return SLOT_ROOMS + "." + id;
+    }
+
+    /** 계정을 바꾸면 메모리 목록을 버린다. */
+    public static void invalidate() {
+        synchronized (LOCK) {
+            cache = null;
+            cacheSlot = null;
+        }
+    }
+
+    /** 첫 계정의 예전 방 연결을 그 슬롯으로 옮긴다. 옛 키는 지우지 않는다. */
+    public static void adoptLegacy(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        copyIfEmpty(c, SLOT_LINKS, SLOT_LINKS + "." + slotId);
+        copyIfEmpty(c, SLOT_ROOMS, SLOT_ROOMS + "." + slotId);
+    }
+
+    public static void dropSlot(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        Prefs.secRemove(c, SLOT_LINKS + "." + slotId);
+        Prefs.secRemove(c, SLOT_ROOMS + "." + slotId);
+    }
+
+    private static void copyIfEmpty(Context c, String from, String to) {
+        String have = Prefs.secGet(c, to);
+        if (have != null && have.length() > 0) return;
+        String old = Prefs.secGet(c, from);
+        if (old != null && old.length() > 0) Prefs.secPut(c, to, old);
+    }
+
     /** 연결 1건 */
     public static final class Link {
         public final String roomKey;
@@ -64,6 +104,7 @@ public final class RoomLinks {
 
     private static final Object LOCK = new Object();
     private static Map<String, Link> cache;
+    private static String cacheSlot;
 
     public static Link get(Context c, RoomRef ref) {
         if (c == null || ref == null || !ref.valid()) return null;
@@ -75,9 +116,33 @@ public final class RoomLinks {
         return (l == null) ? null : l.chatId;
     }
 
+    /** 선택 계정과 다른 슬롯의 연결표. 화면 캐시는 바꾸지 않는다. */
+    static Map<String, Link> linksFor(Context c, String slotId) {
+        LinkedHashMap<String, Link> m = new LinkedHashMap<String, Link>();
+        if (c == null || slotId == null || slotId.length() == 0) return m;
+        String key = SLOT_LINKS + "." + slotId;
+        String raw = Prefs.secGet(c, key);
+        if ((raw == null || raw.length() == 0) && "main".equals(slotId)) raw = Prefs.secGet(c, SLOT_LINKS);
+        if (raw == null) return m;
+        try {
+            JSONObject o = new JSONObject(raw);
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                JSONObject v = o.getJSONObject(k);
+                m.put(k, new Link(k, v.optString("id"), v.optString("n"), v.optString("k"), v.optLong("at")));
+            }
+        } catch (Throwable ignore) { }
+        return m;
+    }
+
     public static Map<String, Link> all(Context c) {
         synchronized (LOCK) {
-            if (cache == null) cache = read(c);
+            String slot = linksKey(c);
+            if (cache == null || !slot.equals(cacheSlot)) {
+                cache = read(c);
+                cacheSlot = slot;
+            }
             return new LinkedHashMap<String, Link>(cache);
         }
     }
@@ -91,6 +156,7 @@ public final class RoomLinks {
             m.put(ref.key(), new Link(ref.key(), room.chatId, room.name(), room.kind, System.currentTimeMillis()));
             write(c, m);
             cache = m;
+            cacheSlot = linksKey(c);
         }
         return true;
     }
@@ -102,15 +168,17 @@ public final class RoomLinks {
             if (m.remove(ref.key()) == null) return;
             write(c, m);
             cache = m;
+            cacheSlot = linksKey(c);
         }
     }
 
-    /** 카카오 계정 연결을 해제할 때: 연결표와 방 목록을 같이 비운다 (다른 계정의 방 번호가 남지 않게) */
+    /** 지금 고른 계정의 연결표와 방 목록만 비운다. */
     static void clearAll(Context c) {
         synchronized (LOCK) {
-            Prefs.secRemove(c, SLOT_LINKS);
-            Prefs.secRemove(c, SLOT_ROOMS);
+            Prefs.secRemove(c, linksKey(c));
+            Prefs.secRemove(c, roomsKey(c));
             cache = new LinkedHashMap<String, Link>();
+            cacheSlot = linksKey(c);
         }
     }
 
@@ -174,12 +242,13 @@ public final class RoomLinks {
         } catch (Throwable t) {
             return;
         }
-        Prefs.secPut(c, SLOT_ROOMS, a.toString());
+        Prefs.secPut(c, roomsKey(c), a.toString());
     }
 
     static List<KakaoEngine.KakaoRoom> cachedRooms(Context c) {
         ArrayList<KakaoEngine.KakaoRoom> out = new ArrayList<KakaoEngine.KakaoRoom>();
-        String raw = Prefs.secGet(c, SLOT_ROOMS);
+        String raw = Prefs.secGet(c, roomsKey(c));
+        if ((raw == null || raw.length() == 0) && !SLOT_ROOMS.equals(roomsKey(c))) raw = Prefs.secGet(c, SLOT_ROOMS);
         if (raw == null) return out;
         try {
             JSONArray a = new JSONArray(raw);
@@ -197,7 +266,9 @@ public final class RoomLinks {
 
     private static Map<String, Link> read(Context c) {
         LinkedHashMap<String, Link> m = new LinkedHashMap<String, Link>();
-        String raw = (c == null) ? null : Prefs.secGet(c, SLOT_LINKS);
+        String key = (c == null) ? SLOT_LINKS : linksKey(c);
+        String raw = (c == null) ? null : Prefs.secGet(c, key);
+        if ((raw == null || raw.length() == 0) && c != null && !SLOT_LINKS.equals(key)) raw = Prefs.secGet(c, SLOT_LINKS);
         if (raw == null) return m;
         try {
             JSONObject o = new JSONObject(raw);
@@ -225,6 +296,6 @@ public final class RoomLinks {
         } catch (Throwable t) {
             return;
         }
-        Prefs.secPut(c, SLOT_LINKS, o.toString());
+        Prefs.secPut(c, linksKey(c), o.toString());
     }
 }

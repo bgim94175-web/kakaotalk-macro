@@ -676,6 +676,7 @@ public final class Settings {
 
     /** 리스너 서비스가 알림마다 읽으니까 매번 복호화하지 않고 캐시한다 */
     private static volatile Settings cached;
+    private static volatile String cachedFor;
 
     /** 기본값 인스턴스 */
     public static Settings defaults() {
@@ -685,6 +686,44 @@ public final class Settings {
     /** 캐시를 버린다. 다른 곳에서 설정을 갈아치웠거나 설정키가 바뀌었으면 호출. */
     public static void invalidate() {
         cached = null;
+        cachedFor = null;
+    }
+
+    /** 지금 고른 카카오 계정의 설정 슬롯. */
+    public static String slotName(Context c) {
+        String id = KakaoSlots.selectedId(c);
+        if (id == null || id.length() == 0) return SLOT;
+        return SLOT + "." + id;
+    }
+
+    /** 계정을 바꾸기 전의 설정 파일을 그 계정 슬롯으로 옮긴다. 옛 키는 지우지 않는다. */
+    public static void adoptLegacy(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        String key = SLOT + "." + slotId;
+        String have = Prefs.secGet(c, key);
+        if (have != null && have.length() > 0) return;
+        String old = Prefs.secGet(c, SLOT);
+        if (old != null && old.length() > 0) Prefs.secPut(c, key, old);
+    }
+
+    public static void dropSlot(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        try { Prefs.secRemove(c, SLOT + "." + slotId); } catch (Throwable ignore) { }
+    }
+
+    /** 화면 캐시를 건드리지 않고 그 계정의 설정만 읽는다. */
+    public static Settings readSlot(Context c, String slotId) {
+        String sel = KakaoSlots.selectedId(c);
+        if (slotId != null && slotId.equals(sel)) return load(c);
+        String key = (slotId == null || slotId.length() == 0) ? SLOT : (SLOT + "." + slotId);
+        try {
+            String raw = Prefs.secGet(c, key);
+            if (raw != null && raw.length() > 0) {
+                Settings out = fromJson(raw);
+                if (out != null) return out;
+            }
+        } catch (Throwable ignore) { }
+        return defaults();
     }
 
     /**
@@ -692,14 +731,16 @@ public final class Settings {
      * 암호화 설정이 없고 v1.8 평문 설정이 남아있으면 그걸 옮겨온다.
      */
     public static Settings load(Context c) {
+        String slot = (c == null) ? SLOT : slotName(c);
         Settings s = cached;
-        if (s != null) return s;
+        if (s != null && slot.equals(cachedFor)) return s;
         if (c == null) return defaults();
         synchronized (Settings.class) {
-            if (cached != null) return cached;
+            if (cached != null && slot.equals(cachedFor)) return cached;
             Settings out = null;
             try {
-                String raw = Prefs.secGet(c, SLOT);
+                String raw = Prefs.secGet(c, slot);
+                if ((raw == null || raw.length() == 0) && !SLOT.equals(slot)) raw = Prefs.secGet(c, SLOT);
                 if (raw != null && raw.length() > 0) {
                     out = fromJson(raw);
                     if (out == null) Log.add(c, "설정 파일이 손상되어 기본값으로 시작합니다.");
@@ -710,6 +751,7 @@ public final class Settings {
             }
             if (out == null) out = migrate(c);
             cached = out;
+            cachedFor = slot;
             return out;
         }
     }
@@ -745,8 +787,10 @@ public final class Settings {
                 return false;
             }
             String json = toJson();
-            Prefs.secPut(c, SLOT, json);
-            String back = Prefs.secGet(c, SLOT);
+            String slot = slotName(c);
+            Prefs.secPut(c, slot, json);
+            cachedFor = slot;
+            String back = Prefs.secGet(c, slot);
             if (back == null || !back.equals(json)) {
                 Log.add(c, "설정 저장을 확인하지 못했습니다. 다시 저장하십시오.");
                 return false;

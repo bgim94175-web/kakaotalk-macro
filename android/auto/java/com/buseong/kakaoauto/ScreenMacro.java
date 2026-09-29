@@ -91,6 +91,18 @@ public final class ScreenMacro {
         }
 
         final Settings s = Settings.load(a);
+        final KakaoSlots.Slot slot = KakaoSlots.selected(a);
+        if (slot != null) {
+            col.addView(Ui.sectionHeader(a, null, "카카오 계정"));
+            LinearLayout who = Ui.group(a);
+            String hint = slot.hint.length() > 0 ? slot.hint : "등록된 계정";
+            int n = KakaoSlots.count(a);
+            who.addView(Ui.navRow(a, Icon.KEY, Theme.F_ACCOUNT, "사용 계정",
+                    n > 1 ? (hint + " · " + n + "개") : hint, Theme.TEXT, new Runnable() {
+                        @Override public void run() { ScreenKakaoRegister.open(a); }
+                    }));
+            col.addView(who);
+        }
 
         col.addView(autoCard(a, s));
 

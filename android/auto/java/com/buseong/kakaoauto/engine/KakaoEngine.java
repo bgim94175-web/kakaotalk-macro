@@ -75,13 +75,21 @@ public interface KakaoEngine {
         /** 코드 남은 시간(초). 모르면 -1 */
         public final int remainingSeconds;
         public final String message;
+        /** 카카오 상태 코드. 없으면 {@link Integer#MIN_VALUE}. */
+        public final int kakaoStatus;
 
         public LoginStep(Kind kind, String pendingId, String passcode, int remainingSeconds, String message) {
+            this(kind, pendingId, passcode, remainingSeconds, message, Integer.MIN_VALUE);
+        }
+
+        public LoginStep(Kind kind, String pendingId, String passcode, int remainingSeconds, String message,
+                         int kakaoStatus) {
             this.kind = kind;
             this.pendingId = pendingId == null ? "" : pendingId;
             this.passcode = passcode == null ? "" : passcode;
             this.remainingSeconds = remainingSeconds;
             this.message = message == null ? "" : message;
+            this.kakaoStatus = kakaoStatus;
         }
     }
 
@@ -169,6 +177,12 @@ public interface KakaoEngine {
      * @param forceSlot 태블릿 슬롯을 다른 기기가 쓰고 있어도 가져온다 (그 기기의 카카오톡이 로그아웃된다)
      */
     LoginStep beginLogin(String account, String password, boolean forceSlot) throws EngineException;
+
+    /**
+     * {@code deviceUuid} 가 비어 있으면 엔진이 새 기기 번호를 만든다.
+     * 이미 등록한 계정을 다시 로그인할 때만 그 계정의 번호를 넘긴다.
+     */
+    LoginStep beginLogin(String account, String password, boolean forceSlot, String deviceUuid) throws EngineException;
 
     /** 폰에서 코드를 확인할 때까지 최대 약 1분 기다린다. WAITING 이면 다시 부른다. */
     LoginStep awaitPhoneConfirm(String pendingId) throws EngineException;
