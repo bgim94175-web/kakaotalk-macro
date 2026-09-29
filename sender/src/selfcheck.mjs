@@ -4,7 +4,17 @@ import { roomListKind } from './room-kind.mjs'
 import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
-import { macroRoomsDue, noteMacroSent, onInbound, parseRoomKey } from './features.mjs'
+import {
+  guardCanStopKicks,
+  guardDue,
+  guardFinishHalt,
+  guardNotices,
+  guardOnChat,
+  macroRoomsDue,
+  noteMacroSent,
+  onInbound,
+  parseRoomKey,
+} from './features.mjs'
 
 process.env.SENDER_KEY = process.env.SENDER_KEY || '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 
@@ -74,6 +84,97 @@ if (noteMacroSent(neverImages, roomKey, Date.now()) !== true) throw new Error('N
 neverImages.config.macro.images = []
 neverImages.runtime = {}
 if (noteMacroSent(neverImages, roomKey, Date.now()) !== false) throw new Error('no images must not send')
+
+const guardKey = parseRoomKey('0\u0001관리').key
+function guardRecord(over) {
+  return {
+    features: { macro: true },
+    config: {
+      accounts: [],
+      guard: Object.assign({
+        rooms: [guardKey],
+        presenceOn: true,
+        presenceMin: 30,
+        kickOn: true,
+        kickCount: 3,
+        kickSecs: 30,
+        floodOn: true,
+        floodCount: 3,
+        floodSecs: 10,
+        floodSlowSecs: 60,
+        floodText: '천천히',
+        churnOn: true,
+        churnCount: 3,
+        churnSecs: 20,
+        churnQuietSecs: 120,
+        churnText: '',
+        welcomeOn: true,
+        welcomeText: '어서 오세요',
+        noticeOn: true,
+        noticeText: '공지입니다',
+        noticeMin: 60,
+      }, over || {}),
+    },
+    rooms: [{ key: guardKey, chat_id: '555', name: '관리방', kind: 'group' }],
+    runtime: {},
+  }
+}
+const t0 = 1_700_000_000_000
+const welcome = guardOnChat(guardRecord(), { kind: 'join', chatId: '555', authorId: '7', now: t0 })
+if (welcome.sends.length !== 1 || welcome.sends[0].text !== '어서 오세요') throw new Error('welcome')
+const again = guardOnChat(guardRecord(), { kind: 'join', chatId: '999', authorId: '7', now: t0 })
+if (again.sends.length !== 0) throw new Error('guard must ignore a room that is off')
+const noWelcome = guardRecord({ welcomeText: '  ' })
+if (guardOnChat(noWelcome, { kind: 'join', chatId: '555', authorId: '7', now: t0 }).sends.length !== 0) {
+  throw new Error('empty welcome must not send')
+}
+const flood = guardRecord()
+for (let i = 0; i < 2; i++) {
+  if (guardOnChat(flood, { kind: 'msg', chatId: '555', text: 'a', authorId: '7', messageType: 1, now: t0 + i }).sends.length !== 0) {
+    throw new Error('flood early')
+  }
+}
+const flooded = guardOnChat(flood, { kind: 'msg', chatId: '555', text: 'a', authorId: '7', messageType: 1, now: t0 + 2 })
+if (flooded.sends.length !== 1 || flooded.sends[0].text !== '천천히') throw new Error('flood notice')
+if (guardOnChat(flood, { kind: 'msg', chatId: '555', text: 'a', authorId: '7', messageType: 1, now: t0 + 3 }).sends.length !== 0) {
+  throw new Error('slowed member must not get another notice')
+}
+const silentFlood = guardRecord({ floodText: '' })
+for (let i = 0; i < 3; i++) guardOnChat(silentFlood, { kind: 'msg', chatId: '555', text: 'a', authorId: '7', messageType: 1, now: t0 + i })
+if (guardNotices(silentFlood).length !== 0) throw new Error('flood must not invent a customer notice')
+const churn = guardRecord()
+guardOnChat(churn, { kind: 'join', chatId: '555', authorId: '1', now: t0 })
+guardOnChat(churn, { kind: 'leave', chatId: '555', authorId: '1', now: t0 + 1 })
+const third = guardOnChat(churn, { kind: 'join', chatId: '555', authorId: '2', now: t0 + 2 })
+if (third.sends.some((s) => s.text === '어서 오세요')) throw new Error('join flood must not welcome')
+if (third.sends.length !== 0) throw new Error('empty churn text must not send')
+const kicked = guardRecord()
+guardOnChat(kicked, { kind: 'msg', chatId: '555', text: '김님을 내보냈습니다', messageType: 0, now: t0 })
+guardOnChat(kicked, { kind: 'msg', chatId: '555', text: '이님을 내보냈습니다', messageType: 0, now: t0 + 1 })
+const wave = guardOnChat(kicked, { kind: 'msg', chatId: '555', text: '박님을 강퇴했습니다', messageType: 0, now: t0 + 2 })
+if (!wave.askHalt || wave.askHalt.count < 3) throw new Error('kick wave')
+const said = guardRecord()
+if (guardOnChat(said, { kind: 'msg', chatId: '555', text: '강퇴했습니다', messageType: 1, now: t0 }).askHalt) {
+  throw new Error('a normal message must not count as a kick')
+}
+guardFinishHalt(kicked, '555', true, t0 + 4, '관리방', 3)
+const notes = guardNotices(kicked)
+if (notes.length !== 1 || notes[0].text.indexOf('강퇴를 멈췄습니다') < 0) throw new Error('halt notice')
+const denied = guardRecord()
+guardFinishHalt(denied, '555', false, t0, '관리방', 3)
+if (guardNotices(denied)[0].text.indexOf('권한이 없습니다') < 0) throw new Error('no permission notice')
+if (!guardCanStopKicks(1) || !guardCanStopKicks(4) || guardCanStopKicks(2) || guardCanStopKicks(8) || guardCanStopKicks(null)) {
+  throw new Error('kick permission')
+}
+const guardDueNow = guardDue(guardRecord(), t0)
+if (guardDueNow.presence.length !== 1 || guardDueNow.presence[0] !== '555') throw new Error('presence')
+if (guardDueNow.sends.length !== 1 || guardDueNow.sends[0].text !== '공지입니다') throw new Error('notice')
+const held = guardRecord()
+guardDue(held, t0)
+const later = guardDue(held, t0 + 1000)
+if (later.presence.length !== 0 || later.sends.length !== 0) throw new Error('presence and notice must wait')
+const blankNotice = guardRecord({ noticeText: '' })
+if (guardDue(blankNotice, t0).sends.length !== 0) throw new Error('empty notice must not send')
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

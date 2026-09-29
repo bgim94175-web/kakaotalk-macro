@@ -1,5 +1,6 @@
 import express from 'express'
 
+import { guardNotices } from './features.mjs'
 import { Hub } from './runner.mjs'
 import { assertKey } from './store.mjs'
 
@@ -66,6 +67,7 @@ app.get('/v1/status', async (req, res) => {
       linked: !rec.needs_register && !!(rec.credentials && rec.credentials.access_token),
       needs_register: !!rec.needs_register,
       reason: rec.reason || 'ok',
+      notices: guardNotices(rec),
     })
   }
   res.json({ ok: true, ...st })

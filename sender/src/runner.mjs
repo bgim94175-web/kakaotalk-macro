@@ -8,6 +8,11 @@ import {
 } from 'agent-messenger/kakaotalk'
 
 import {
+  guardCanStopKicks,
+  guardDue,
+  guardFinishHalt,
+  guardNotices,
+  guardOnChat,
   macroMinMessages,
   macroRoomsDue,
   noteMacroRetry,
@@ -73,6 +78,7 @@ export class Hub {
       linked: !slot.record.needs_register,
       needs_register: !!slot.record.needs_register,
       reason: slot.record.reason || (slot.record.needs_register ? 'reauth' : 'ok'),
+      notices: guardNotices(slot.record),
     }
   }
 
@@ -215,6 +221,8 @@ class Slot {
     this.stopped = false
     this.chain = Promise.resolve()
     this.refreshed = false
+    this.linkIds = new Map()
+    this.lastLog = new Map()
   }
 
   async start() {
@@ -223,6 +231,7 @@ class Slot {
       this.enqueue(async () => {
         await this.ensure()
         await this.macroTick()
+        await this.guardTick()
       }).catch((e) => log(this.id, e && e.message ? e.message : e))
     }, 20000)
     if (this.timer.unref) this.timer.unref()
@@ -242,6 +251,15 @@ class Slot {
     this.listener = new KakaoTalkListener(this.client)
     this.listener.on('message', (ev) => {
       this.enqueue(() => this.onMessage(ev)).catch((e) => log(this.id, e && e.message ? e.message : e))
+    })
+    this.listener.on('member_joined', (ev) => {
+      this.enqueue(() => this.onMember('join', ev)).catch((e) => log(this.id, e && e.message ? e.message : e))
+    })
+    this.listener.on('member_left', (ev) => {
+      this.enqueue(() => this.onMember('leave', ev)).catch((e) => log(this.id, e && e.message ? e.message : e))
+    })
+    this.listener.on('kakaotalk_event', (ev) => {
+      this.noteLink(ev)
     })
     this.listener.on('error', (err) => {
       this.enqueue(() => this.onError(err)).catch(() => {})
@@ -359,15 +377,97 @@ class Slot {
   async onMessage(ev) {
     if (this.record.needs_register || !ev) return
     const creds = credsOf(this.record)
+    const chatId = String(ev.chat_id || '')
     const author = ev.author_id == null ? '' : String(ev.author_id)
+    if (ev.log_id) this.lastLog.set(chatId, String(ev.log_id))
     const sends = onInbound(this.record, {
-      chatId: String(ev.chat_id || ''),
+      chatId,
       text: ev.message || '',
       authorName: ev.author_name || '',
       mine: author.length > 0 && author === creds.user_id,
     })
+    const guard = guardOnChat(this.record, {
+      kind: 'msg',
+      chatId,
+      text: ev.message || '',
+      authorId: author,
+      mine: author.length > 0 && author === creds.user_id,
+      messageType: ev.message_type,
+      now: Date.now(),
+    })
     await saveRecord(this.id, this.record)
     for (const s of sends) await this.deliver(s)
+    await this.finishGuard(guard)
+  }
+
+  async onMember(kind, ev) {
+    if (this.record.needs_register || !ev) return
+    const creds = credsOf(this.record)
+    const author = ev.member && ev.member.user_id != null ? String(ev.member.user_id) : ''
+    const guard = guardOnChat(this.record, {
+      kind,
+      chatId: String(ev.chat_id || ''),
+      text: '',
+      authorId: author,
+      mine: author.length > 0 && author === creds.user_id,
+      now: Date.now(),
+    })
+    await this.finishGuard(guard)
+  }
+
+  async finishGuard(guard) {
+    if (!guard || !guard.active) return
+    for (const s of guard.sends || []) await this.deliver(s)
+    if (guard.askHalt) await this.stopKickWave(guard.askHalt)
+    await saveRecord(this.id, this.record)
+  }
+
+  async stopKickWave(ask) {
+    let allowed = false
+    try {
+      const snap = await this.client.getMemberSnapshot(ask.chatId)
+      const me = credsOf(this.record).user_id
+      const row = (snap.members || []).find((m) => m && String(m.user_id) === me)
+      allowed = guardCanStopKicks(row && row.open_permission)
+    } catch (e) {
+      await this.onError(e)
+    }
+    guardFinishHalt(this.record, ask.chatId, allowed, Date.now(), ask.roomName, ask.count)
+    log(this.id, allowed ? 'kick wave halted' : 'kick wave noticed')
+  }
+
+  noteLink(ev) {
+    if (!ev) return
+    const chatId = ev.chatId != null ? ev.chatId : ev.chat_id
+    const li = ev.linkId != null ? ev.linkId : ev.li
+    if (chatId == null || li == null || li === '') return
+    this.linkIds.set(String(chatId), String(li))
+  }
+
+  async guardTick() {
+    if (this.record.needs_register || !this.client) return
+    const due = guardDue(this.record, Date.now())
+    for (const chatId of due.presence) await this.presence(chatId)
+    for (const s of due.sends) await this.deliver(s)
+    if (due.presence.length || due.sends.length) await saveRecord(this.id, this.record)
+  }
+
+  async presence(chatId) {
+    const linkId = this.linkIds.get(String(chatId))
+    const opts = linkId ? { linkId } : undefined
+    try {
+      await this.client.sendTyping(chatId, opts)
+      return
+    } catch (e) {
+      await this.onError(e)
+    }
+    const logId = this.lastLog.get(String(chatId))
+    if (!logId) return
+    try {
+      await this.client.markRead(chatId, logId, opts)
+    } catch (e) {
+      await this.onError(e)
+    }
   }
 
   async deliver(s) {

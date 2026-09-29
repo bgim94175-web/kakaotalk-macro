@@ -166,10 +166,29 @@ public final class SenderSync {
                             setReauth(c, key, null);
                             if (key.equals(pendingKey(c))) setPending(c, "");
                         }
+                        noteGuard(c, key, o.optJSONArray("notices"));
                     } catch (Throwable ignore) { }
                 }
             }
         });
+    }
+
+    /** 상시 발송이 남긴 방 관리봇 알림을 활동 로그에 한 번씩 옮긴다. */
+    private static void noteGuard(Context c, String key, org.json.JSONArray notes) {
+        if (c == null || key == null || notes == null) return;
+        String slot = "guard_seen." + key;
+        long seen = Prefs.getLong(c, slot, 0L);
+        long max = seen;
+        for (int i = 0; i < notes.length(); i++) {
+            org.json.JSONObject one = notes.optJSONObject(i);
+            if (one == null) continue;
+            long at = one.optLong("at", 0L);
+            String text = one.optString("text", "").trim();
+            if (at <= seen || text.length() == 0) continue;
+            Log.add(c, text);
+            if (at > max) max = at;
+        }
+        if (max > seen) Prefs.putLong(c, slot, max);
     }
 
     public static void awaitHandoff(Context c, long timeoutMs) {

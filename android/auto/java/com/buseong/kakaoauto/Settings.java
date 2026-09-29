@@ -629,11 +629,52 @@ public final class Settings {
 
     // ── 최상위 필드 ───────────────────────────────────────────────────────────
 
+    /** 방 관리봇. 고른 방에서만 동작하고, 항목마다 켜짐이 따로다. */
+    public static final class GuardCfg {
+        public List<String> rooms = new ArrayList<String>();
+        public boolean presenceOn = false;
+        public int presenceMin = 30;
+        public boolean kickOn = false;
+        public int kickCount = 5;
+        public int kickSecs = 30;
+        public boolean floodOn = false;
+        public int floodCount = 8;
+        public int floodSecs = 10;
+        public int floodSlowSecs = 60;
+        public String floodText = "";
+        public boolean churnOn = false;
+        public int churnCount = 8;
+        public int churnSecs = 20;
+        public int churnQuietSecs = 120;
+        public String churnText = "";
+        public boolean welcomeOn = false;
+        public String welcomeText = "";
+        public boolean noticeOn = false;
+        public String noticeText = "";
+        public int noticeMin = 60;
+
+        public List<RoomRef> roomRefs() { return refsOf(rooms); }
+
+        public void setRoomRefs(List<RoomRef> list) { rooms = keysOf(list); }
+
+        public int enabledCount() {
+            int n = 0;
+            if (presenceOn) n++;
+            if (kickOn) n++;
+            if (floodOn) n++;
+            if (churnOn) n++;
+            if (welcomeOn) n++;
+            if (noticeOn) n++;
+            return n;
+        }
+    }
+
     public Macro macro = new Macro();
     public AutoReplyCfg autoreply = new AutoReplyCfg();
     public List<TriggerCfg> triggers = new ArrayList<TriggerCfg>();
     public RoomBotCfg roombot = new RoomBotCfg();
     public MiniGameCfg minigame = new MiniGameCfg();
+    public GuardCfg guard = new GuardCfg();
 
     /**
      * 대상 카카오톡 계정 키 목록 (듀얼 메신저 등 다중 계정).
@@ -954,6 +995,30 @@ public final class Settings {
             g.put("dailyLimit", minigame.dailyLimit);
             o.put("minigame", g);
 
+            JSONObject gd = new JSONObject();
+            gd.put("rooms", arr(guard.rooms));
+            gd.put("presenceOn", guard.presenceOn);
+            gd.put("presenceMin", guard.presenceMin);
+            gd.put("kickOn", guard.kickOn);
+            gd.put("kickCount", guard.kickCount);
+            gd.put("kickSecs", guard.kickSecs);
+            gd.put("floodOn", guard.floodOn);
+            gd.put("floodCount", guard.floodCount);
+            gd.put("floodSecs", guard.floodSecs);
+            gd.put("floodSlowSecs", guard.floodSlowSecs);
+            gd.put("floodText", guard.floodText);
+            gd.put("churnOn", guard.churnOn);
+            gd.put("churnCount", guard.churnCount);
+            gd.put("churnSecs", guard.churnSecs);
+            gd.put("churnQuietSecs", guard.churnQuietSecs);
+            gd.put("churnText", guard.churnText);
+            gd.put("welcomeOn", guard.welcomeOn);
+            gd.put("welcomeText", guard.welcomeText);
+            gd.put("noticeOn", guard.noticeOn);
+            gd.put("noticeText", guard.noticeText);
+            gd.put("noticeMin", guard.noticeMin);
+            o.put("guard", gd);
+
             return o.toString();
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "설정 직렬화 실패", t);
@@ -1075,6 +1140,31 @@ public final class Settings {
             s.minigame.quiz = g.optBoolean("quiz", s.minigame.quiz);
             s.minigame.cooldownMs = Math.max(0L, g.optLong("cooldownMs", s.minigame.cooldownMs));
             s.minigame.dailyLimit = clamp(g.optInt("dailyLimit", s.minigame.dailyLimit), 0, 9999);
+        }
+
+        JSONObject gd = o.optJSONObject("guard");
+        if (gd != null) {
+            s.guard.rooms = list(gd, "rooms");
+            s.guard.presenceOn = gd.optBoolean("presenceOn", s.guard.presenceOn);
+            s.guard.presenceMin = clamp(gd.optInt("presenceMin", s.guard.presenceMin), 10, 240);
+            s.guard.kickOn = gd.optBoolean("kickOn", s.guard.kickOn);
+            s.guard.kickCount = clamp(gd.optInt("kickCount", s.guard.kickCount), 3, 30);
+            s.guard.kickSecs = clamp(gd.optInt("kickSecs", s.guard.kickSecs), 5, 300);
+            s.guard.floodOn = gd.optBoolean("floodOn", s.guard.floodOn);
+            s.guard.floodCount = clamp(gd.optInt("floodCount", s.guard.floodCount), 3, 50);
+            s.guard.floodSecs = clamp(gd.optInt("floodSecs", s.guard.floodSecs), 3, 120);
+            s.guard.floodSlowSecs = clamp(gd.optInt("floodSlowSecs", s.guard.floodSlowSecs), 10, 600);
+            s.guard.floodText = str(gd, "floodText", s.guard.floodText);
+            s.guard.churnOn = gd.optBoolean("churnOn", s.guard.churnOn);
+            s.guard.churnCount = clamp(gd.optInt("churnCount", s.guard.churnCount), 3, 50);
+            s.guard.churnSecs = clamp(gd.optInt("churnSecs", s.guard.churnSecs), 5, 300);
+            s.guard.churnQuietSecs = clamp(gd.optInt("churnQuietSecs", s.guard.churnQuietSecs), 30, 600);
+            s.guard.churnText = str(gd, "churnText", s.guard.churnText);
+            s.guard.welcomeOn = gd.optBoolean("welcomeOn", s.guard.welcomeOn);
+            s.guard.welcomeText = str(gd, "welcomeText", s.guard.welcomeText);
+            s.guard.noticeOn = gd.optBoolean("noticeOn", s.guard.noticeOn);
+            s.guard.noticeText = str(gd, "noticeText", s.guard.noticeText);
+            s.guard.noticeMin = clamp(gd.optInt("noticeMin", s.guard.noticeMin), 5, 1440);
         }
         return s;
     }

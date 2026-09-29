@@ -579,11 +579,10 @@ public final class MainActivity extends Activity {
                         @Override public void run() { ScreenKakaoRegister.open(a); }
                     }));
         }
-        if (!any) {
-            col.addView(Nav.note(a, "사용 가능한 기능이 없습니다. 내정보에서 라이선스를 확인하십시오.",
-                    Theme.ACCENT2, null, null));
-            return;
-        }
+        g.addView(Ui.fnRow(a, Theme.F_ROOMBOT, Icon.SHIELD, "방 관리봇", "등록 후 설정",
+                Theme.SUB, "사용 가능", new Runnable() {
+                    @Override public void run() { ScreenKakaoRegister.open(a); }
+                }));
         col.addView(g);
     }
 
@@ -635,6 +634,18 @@ public final class MainActivity extends Activity {
                     }));
             col.addView(reply);
         }
+
+        Settings guardSettings = Settings.load(a);
+        col.addView(Ui.sectionHeader(a, null, "방 관리봇"));
+        LinearLayout guard = Ui.group(a);
+        final int guardOn = guardSettings.guard.enabledCount();
+        guard.addView(Ui.fnRow(a, Theme.F_ROOMBOT, Icon.SHIELD, "방 관리봇", ScreenGuard.summary(guardSettings),
+                (guardOn > 0 && guardSettings.guard.roomRefs().size() > 0) ? Theme.SUB : Theme.DIM, null,
+                new Runnable() {
+                    @Override public void run() { Nav.push(a, "방 관리봇", ScreenGuard.open(a)); }
+                }));
+        col.addView(guard);
+
         col.addView(Ui.sectionHeader(a, null, "봇"));
         LinearLayout g = Ui.group(a);
         botRow(a, g, Features.ROOMBOT, ScreenBot.NAME_ROOMBOT,

@@ -958,4 +958,227 @@ export function macroMinMessages(record) {
   return n < 0 || Number.isNaN(n) ? 0 : n
 }
 
+// ── 방 관리봇 ──────────────────────────────────────────────────────────────
+// Acts only in rooms the customer turned on. Does not kick, spam, mention-bomb,
+// or rewrite text. Empty customer text means that action sends nothing.
+
+const GUARD_HALT_MS = 10 * 60 * 1000
+const KICK_PHRASE = /내보냈|강퇴했|강퇴하였/
+
+function num(v, lo, hi, def) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return def
+  return Math.max(lo, Math.min(hi, Math.trunc(n)))
+}
+
+function guardCfg(record) {
+  const c = record && record.config && record.config.guard
+  return c && typeof c === 'object' ? c : null
+}
+
+function gstate(record) {
+  const state = rt(record)
+  if (!state.guard || typeof state.guard !== 'object') state.guard = {}
+  const g = state.guard
+  g.presenceAt = g.presenceAt || {}
+  g.noticeAt = g.noticeAt || {}
+  g.slow = g.slow || {}
+  g.quiet = g.quiet || {}
+  g.halt = g.halt || {}
+  g.kickAsked = g.kickAsked || {}
+  g.kicks = g.kicks || {}
+  g.flood = g.flood || {}
+  g.churn = g.churn || {}
+  g.joined = g.joined || {}
+  if (!Array.isArray(g.notices)) g.notices = []
+  return g
+}
+
+function pushNotice(g, now, text) {
+  const line = String(text || '').trim()
+  if (!line) return
+  const last = g.notices[g.notices.length - 1]
+  if (last && last.text === line && now - Number(last.at || 0) < 10 * 60 * 1000) return
+  g.notices.push({ at: now, text: line })
+  if (g.notices.length > 20) g.notices.splice(0, g.notices.length - 20)
+}
+
+function stamp(map, key, now, windowMs) {
+  const list = Array.isArray(map[key]) ? map[key].filter((t) => now - Number(t) <= windowMs) : []
+  list.push(now)
+  if (list.length > 40) list.splice(0, list.length - 40)
+  map[key] = list
+  return list
+}
+
+function enabledRooms(record, cfg) {
+  const out = []
+  const keys = Array.isArray(cfg.rooms) ? cfg.rooms : []
+  for (const key of keys) {
+    const chatId = chatForRoom(record.rooms, key)
+    if (!realId(chatId)) continue
+    const room = roomByChat(record.rooms, chatId)
+    if (!room || !coversList(cfg.rooms, room.key)) continue
+    out.push(room)
+  }
+  return out
+}
+
+function roomOf(record, chatId) {
+  const cfg = guardCfg(record)
+  if (!cfg) return null
+  const room = roomByChat(record.rooms, chatId)
+  if (!room || !realId(String(room.chat_id))) return null
+  if (!coversList(cfg.rooms, room.key)) return null
+  return room
+}
+
+function roomLabel(room) {
+  const name = room && (room.name || room.title)
+  const s = name == null ? '' : String(name).trim()
+  return s || '대화방'
+}
+
+function isKickFeed(text, messageType) {
+  const body = String(text || '').trim()
+  if (!body || body.length > 80) return false
+  if (!KICK_PHRASE.test(body)) return false
+  return messageType == null || Number(messageType) === 0
+}
+
+export function guardNotices(record) {
+  const g = record && record.runtime && record.runtime.guard
+  const list = g && Array.isArray(g.notices) ? g.notices : []
+  return list
+    .map((n) => ({ at: Number(n && n.at) || 0, text: n && n.text ? String(n.text) : '' }))
+    .filter((n) => n.at > 0 && n.text)
+    .slice(-20)
+}
+
+/** Periodic presence and notices. Updates the next-due marks. */
+export function guardDue(record, now) {
+  const presence = []
+  const sends = []
+  const cfg = guardCfg(record)
+  if (!cfg) return { presence, sends }
+  const g = gstate(record)
+  const rooms = enabledRooms(record, cfg)
+  if (cfg.presenceOn === true) {
+    const every = num(cfg.presenceMin, 10, 240, 30) * 60000
+    for (const room of rooms) {
+      const last = Number(g.presenceAt[room.key] || 0)
+      if (last && now - last < every) continue
+      g.presenceAt[room.key] = now
+      presence.push(String(room.chat_id))
+    }
+  }
+  const notice = String(cfg.noticeText || '').trim()
+  if (cfg.noticeOn === true && notice) {
+    const every = num(cfg.noticeMin, 5, 1440, 60) * 60000
+    for (const room of rooms) {
+      const last = Number(g.noticeAt[room.key] || 0)
+      if (last && now - last < every) continue
+      g.noticeAt[room.key] = now
+      sends.push({ chatId: String(room.chat_id), text: notice })
+    }
+  }
+  return { presence, sends }
+}
+
+/**
+ * One inbound chat, join, or leave.
+ * kind: 'msg' | 'join' | 'leave'
+ * askHalt is set when a kick wave should be stopped if this account is allowed.
+ */
+export function guardOnChat(record, ev) {
+  const sends = []
+  let askHalt = null
+  const cfg = guardCfg(record)
+  if (!cfg || !ev) return { sends, askHalt, active: false }
+  const room = roomOf(record, ev.chatId)
+  if (!room) return { sends, askHalt, active: false }
+  const now = Number(ev.now) || Date.now()
+  const g = gstate(record)
+  const chatId = String(room.chat_id)
+  const mine = !!ev.mine
+  const author = ev.authorId == null ? '' : String(ev.authorId)
+
+  if (ev.kind === 'msg' && !mine && cfg.kickOn === true && isKickFeed(ev.text, ev.messageType)) {
+    const windowMs = num(cfg.kickSecs, 5, 300, 30) * 1000
+    const need = num(cfg.kickCount, 3, 30, 5)
+    const times = stamp(g.kicks, chatId, now, windowMs)
+    const halted = Number(g.halt[chatId] || 0)
+    const asked = Number(g.kickAsked[chatId] || 0)
+    if (times.length >= need && now >= halted && now - asked >= 15000) {
+      g.kickAsked[chatId] = now
+      askHalt = { chatId, roomName: roomLabel(room), count: times.length }
+    }
+  }
+
+  if (ev.kind === 'msg' && !mine && author && cfg.floodOn === true) {
+    const key = `${chatId}${SEP}${author}`
+    if (now >= Number(g.slow[key] || 0)) {
+      const windowMs = num(cfg.floodSecs, 3, 120, 10) * 1000
+      const need = num(cfg.floodCount, 3, 50, 8)
+      const times = stamp(g.flood, key, now, windowMs)
+      if (times.length >= need) {
+        g.slow[key] = now + num(cfg.floodSlowSecs, 10, 600, 60) * 1000
+        g.flood[key] = []
+        const text = String(cfg.floodText || '').trim()
+        if (text) sends.push({ chatId, text })
+      }
+    }
+  }
+
+  if ((ev.kind === 'join' || ev.kind === 'leave') && cfg.churnOn === true) {
+    const quietUntil = Number(g.quiet[chatId] || 0)
+    if (now >= quietUntil) {
+      const windowMs = num(cfg.churnSecs, 5, 300, 20) * 1000
+      const need = num(cfg.churnCount, 3, 50, 8)
+      const times = stamp(g.churn, chatId, now, windowMs)
+      if (times.length >= need) {
+        g.quiet[chatId] = now + num(cfg.churnQuietSecs, 30, 600, 120) * 1000
+        g.churn[chatId] = []
+        const text = String(cfg.churnText || '').trim()
+        if (text) sends.push({ chatId, text })
+      }
+    }
+  }
+
+  if (ev.kind === 'join' && !mine && cfg.welcomeOn === true) {
+    const text = String(cfg.welcomeText || '').trim()
+    const quiet = now < Number(g.quiet[chatId] || 0)
+    const seenKey = `${chatId}${SEP}${author || 'join'}`
+    const seen = Number(g.joined[seenKey] || 0)
+    if (text && !quiet && now - seen >= 30000) {
+      g.joined[seenKey] = now
+      sends.push({ chatId, text })
+    }
+  }
+
+  return { sends, askHalt, active: true }
+}
+
+/** Record that this account has stopped kicking, and the sentence for the customer. */
+export function guardFinishHalt(record, chatId, allowed, now, roomName, count) {
+  const g = gstate(record)
+  const id = String(chatId || '')
+  g.halt[id] = now + GUARD_HALT_MS
+  g.kickAsked[id] = 0
+  const room = roomName && String(roomName).trim() ? String(roomName).trim() : '대화방'
+  const n = Number(count) || 0
+  const text = allowed
+    ? `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈췄습니다.`
+    : `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈출 권한이 없습니다.`
+  pushNotice(g, now, text)
+  return text
+}
+
+/** Owner or manager of an open chat. This account never sends a kick. */
+export function guardCanStopKicks(openPermission) {
+  const p = Number(openPermission)
+  if (!Number.isFinite(p)) return false
+  return (p & 1) !== 0 || (p & 4) !== 0
+}
+
 export { realId }
