@@ -10,6 +10,7 @@ import {
   guardFinishHalt,
   guardNotices,
   guardOnChat,
+  macroNotifyReply,
   macroRoomsDue,
   noteMacroSent,
   onInbound,
@@ -70,6 +71,13 @@ const due = macroRoomsDue(record, Date.now())
 if (due.length !== 1 || due[0].chatId !== '12345') throw new Error('macro due')
 noteMacroSent(record, roomKey, Date.now())
 if (macroRoomsDue(record, Date.now()).length !== 0) throw new Error('cooldown')
+if (macroNotifyReply(record)) throw new Error('notify reply defaults off')
+record.config.macro.notifyReply = true
+if (!macroNotifyReply(record)) throw new Error('notify reply on')
+record.config.macro.notifyReply = false
+if (macroNotifyReply(record)) throw new Error('notify reply off')
+delete record.config.macro.notifyReply
+if (macroNotifyReply(record)) throw new Error('notify reply absent')
 
 const neverImages = {
   features: { macro: true },

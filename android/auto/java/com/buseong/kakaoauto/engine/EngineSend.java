@@ -7,6 +7,7 @@ import android.os.PowerManager;
 
 import com.buseong.kakaoauto.ImageSender;
 import com.buseong.kakaoauto.KakaoAccount;
+import com.buseong.kakaoauto.KakaoListener;
 import com.buseong.kakaoauto.Log;
 import com.buseong.kakaoauto.RoomRef;
 
@@ -118,6 +119,18 @@ public final class EngineSend {
         });
     }
 
+    /**
+     * 매크로 글을 보낼 수 있는 방. 알림 답장이 켜져 있고 상시 발송이 세션을 갖고 있어도
+     * 방 번호가 있으면 포함한다. 기록을 읽을 수 없으면 제외한다.
+     */
+    public static boolean macroTarget(Context c, RoomRef ref, boolean notifyReply) {
+        if (c == null || ref == null || !ref.valid()) return false;
+        if (!KakaoAccount.ready(c)) return false;
+        if (!realChatId(RoomLinks.chatIdFor(c, ref))) return false;
+        if (!notifyReply) return Engine.ready(c);
+        return Engine.ready(c) || SenderSync.blocksPhoneFeatures(c);
+    }
+
     /** 알림 답장 세션이 없는 방에 텍스트를 보낸다. 블로킹 — 백그라운드 스레드에서만. */
     public static boolean sendText(Context c, RoomRef ref, String text) {
         if (!handles(c, ref)) return false;
@@ -131,16 +144,135 @@ public final class EngineSend {
     }
 
     /**
+     * 매크로 글. 알림 답장이 꺼져 있으면 {@link #sendText}.
+     * 켜져 있으면 답장할 알림이 있고, 넣은 뒤 카카오 메시지 번호가 확인될 때만 true.
+     * 블로킹 — 백그라운드 스레드에서만.
+     */
+    public static boolean sendMacroText(Context c, RoomRef ref, String text, boolean notifyReply) {
+        if (!notifyReply) return sendText(c, ref, text);
+        if (c == null || ref == null) return false;
+        String label = ref.label(c);
+        String chatId = RoomLinks.chatIdFor(c, ref);
+        if (!realChatId(chatId) || !canReadChat(c)) {
+            Log.add(c, "「" + label + "」 대화 기록을 읽을 수 없어 알림 답장을 보내지 않았습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        String floor;
+        try {
+            floor = newestId(readRecent(c, chatId));
+        } catch (EngineException e) {
+            Log.add(c, "「" + label + "」 대화 기록을 읽을 수 없어 알림 답장을 보내지 않았습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        if (!KakaoListener.queueReply(c, ref, text)) return false;
+        for (int i = 0; i < 3; i++) {
+            try {
+                Thread.sleep(1200L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            try {
+                String id = confirmedId(readRecent(c, chatId), text, floor);
+                if (id != null) {
+                    Log.add(c, "「" + label + "」 알림 답장으로 보냈습니다. 메시지 " + id);
+                    return true;
+                }
+            } catch (EngineException ignore) { }
+        }
+        Log.add(c, "「" + label + "」 알림 답장은 넣었으나 카카오 메시지 번호가 없습니다. 발송으로 세지 않았습니다.");
+        return false;
+    }
+
+    private static boolean canReadChat(Context c) {
+        return Engine.ready(c) || SenderSync.blocksPhoneFeatures(c);
+    }
+
+    private static List<KakaoEngine.Inbound> readRecent(Context c, String chatId) throws EngineException {
+        if (SenderSync.blocksPhoneFeatures(c)) return SenderSync.recent(c, chatId);
+        return Engine.get(c).recent(chatId, "");
+    }
+
+    /**
      * 내 마지막 메시지 뒤 남의 메시지 수를 카카오 서버 기록으로 센다. 모르면 -1.
      * 알림 기반 계산은 앱이 켜진 뒤 받은 알림만 알지만, 이건 방의 실제 기록이다.
      */
     public static int othersSinceMine(Context c, RoomRef ref) {
+        return othersSinceMine(c, ref, false);
+    }
+
+    /**
+     * 알림 답장이고 상시 발송이 세션을 갖고 있으면 서버 기록으로 센다.
+     * 폰 LOCO 는 그 슬롯을 다시 열지 않는다.
+     */
+    public static int othersSinceMine(Context c, RoomRef ref, boolean notifyReply) {
+        if (notifyReply && c != null && SenderSync.blocksPhoneFeatures(c)) {
+            String id = (ref == null) ? null : RoomLinks.chatIdFor(c, ref);
+            if (!realChatId(id)) return -1;
+            try {
+                return countOthers(SenderSync.recent(c, id));
+            } catch (EngineException e) {
+                return -1;
+            }
+        }
         if (!handles(c, ref)) return -1;
         try {
             return Engine.get(c).activity(RoomLinks.chatIdFor(c, ref)).othersSinceMine;
         } catch (EngineException e) {
             return -1;
         }
+    }
+
+    private static int countOthers(List<KakaoEngine.Inbound> msgs) {
+        if (msgs == null) return -1;
+        String mineId = "";
+        for (int i = 0; i < msgs.size(); i++) {
+            KakaoEngine.Inbound m = msgs.get(i);
+            if (m == null || !m.mine) continue;
+            if (newerThan(m.logId, mineId)) mineId = m.logId;
+        }
+        int others = 0;
+        for (int i = 0; i < msgs.size(); i++) {
+            KakaoEngine.Inbound m = msgs.get(i);
+            if (m == null || !NodeEngine.isMessageId(m.logId)) continue;
+            if (mineId.length() > 0 && !newerThan(m.logId, mineId)) continue;
+            if (!m.mine) others++;
+        }
+        return others;
+    }
+
+    private static String newestId(List<KakaoEngine.Inbound> msgs) {
+        String best = "";
+        if (msgs == null) return best;
+        for (int i = 0; i < msgs.size(); i++) {
+            KakaoEngine.Inbound m = msgs.get(i);
+            if (m != null && newerThan(m.logId, best)) best = m.logId;
+        }
+        return best;
+    }
+
+    private static String confirmedId(List<KakaoEngine.Inbound> msgs, String text, String floor) {
+        String want = text == null ? "" : text.trim();
+        String hit = null;
+        if (msgs == null) return null;
+        for (int i = 0; i < msgs.size(); i++) {
+            KakaoEngine.Inbound m = msgs.get(i);
+            if (m == null || !m.mine) continue;
+            String body = m.text == null ? "" : m.text.trim();
+            if (!want.equals(body)) continue;
+            if (!newerThan(m.logId, floor)) continue;
+            if (hit == null || newerThan(m.logId, hit)) hit = m.logId;
+        }
+        return hit;
+    }
+
+    /** 앞자리가 0이 아닌 십진 메시지 번호. 자릿수가 길면 더 크다. */
+    private static boolean newerThan(String id, String floor) {
+        if (!NodeEngine.isMessageId(id)) return false;
+        if (floor == null || floor.length() == 0) return true;
+        if (!NodeEngine.isMessageId(floor)) return true;
+        if (id.length() != floor.length()) return id.length() > floor.length();
+        return id.compareTo(floor) > 0;
     }
 
     private static PowerManager.WakeLock wake(Context c) {

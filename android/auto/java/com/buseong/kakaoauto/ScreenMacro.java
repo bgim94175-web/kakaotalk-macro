@@ -130,6 +130,18 @@ public final class ScreenMacro {
                     @Override public void run() { Nav.push(a, "최소 신규 메시지", MacroDetail.minMessages(a)); }
                 }));
 
+        block(a, col, "알림 답장", Ui.navRowSwitch(a, "알림 답장으로 보내기",
+                "켜면 글은 카카오톡 알림 답장으로 보냅니다. 끄면 등록한 계정으로 보냅니다. "
+                        + "답장할 알림이 없거나 카카오 메시지 번호가 없으면 보낸 것으로 세지 않습니다.",
+                s.macro.notifyReply, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        s.macro.notifyReply = v;
+                        apply(a, s);
+                        Log.add(a, v ? "알림 답장으로 보내기를 켰습니다." : "알림 답장으로 보내기를 껐습니다.");
+                        refresh();
+                    }
+                }));
+
         col.addView(Nav.note(a, "방별 쿨타임은 보낼 방에서 그 방을 엽니다."
                 + " 지정하지 않은 방은 발송 쿨타임을 사용합니다."
                 + " 경쟁사 저격과 갠톡 자동응답은 홈의 기능에 있습니다.", Theme.ACCENT2, null, null));
@@ -383,7 +395,9 @@ public final class ScreenMacro {
                     String label = room.label(a);
                     boolean sent = false;
                     try {
-                        if (!com.buseong.kakaoauto.engine.EngineSend.handles(a, room)) {
+                        if (s.macro.notifyReply) {
+                            sent = com.buseong.kakaoauto.engine.EngineSend.sendMacroText(a, room, msg, true);
+                        } else if (!com.buseong.kakaoauto.engine.EngineSend.handles(a, room)) {
                             Log.add(a, "「" + label + "」 " + com.buseong.kakaoauto.engine.EngineSend.unavailableReason(a, room));
                         } else {
                             sent = com.buseong.kakaoauto.engine.EngineSend.sendText(a, room, msg);

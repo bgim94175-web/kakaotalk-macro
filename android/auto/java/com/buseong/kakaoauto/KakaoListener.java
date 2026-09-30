@@ -25,9 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 카톡 알림을 읽어서 (1) 방별 RemoteInput 세션을 기억하고 (2) 트리거·자동응답·봇으로 넘긴다.
  *
- * 이 앱이 카톡에 글을 쓸 수 있는 유일한 통로가 알림의 RemoteInput(답장창)이다.
- * 그래서 **그 방의 카톡 알림이 최근에 한 번은 와야** 발송이 가능하다. 세션은 메모리에만 두고,
- * 앱(프로세스)이 죽으면 사라진다 — 카톡 알림이 다시 오면 저절로 복구되니까 그게 정상 동작이다.
+ * 글 매크로는 설정이 켜져 있을 때만 알림 답장으로 넣는다. 그 외 발송은 등록한 카카오 계정이다.
+ * 답장 세션은 그 방 알림이 한 번은 와야 생긴다. 세션은 메모리에만 두고,
+ * 앱(프로세스)이 죽으면 사라진다 — 카톡 알림이 다시 오면 저절로 복구된다.
  *
  * 규칙 두 개만 지킨다.
  *   1) onNotificationPosted 안에서 절대 블로킹하지 않는다 → 파싱/세션갱신만 하고 나머지는 BG 스레드로 넘긴다.
@@ -39,7 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code RoomRef.parse()} 로 위임하고, 기본 계정에서 못 찾으면 이름이 유일할 때만 다른 계정도 뒤진다.
  *
  * 다른 클래스가 쓰는 공개 API
- *   boolean        sendTo(ctx, ref|room, text)   — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
+ *   boolean        queueReply(ctx, ref, text)    — 매크로 글을 알림 답장에 넣기 (접수만, 성공 아님)
+ *   boolean        sendTo(ctx, ref|room, text)   — 쓰지 않음. 항상 false
  *   Set&lt;String&gt; imageTypesFor(ref|room)     — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
  *   boolean        sendImageTo(ctx, ref|room, uri) — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
  *   PendingIntent  openIntentFor(ref|room)        — 그 대화방을 여는 인텐트 (카톡 알림의 contentIntent)
@@ -1298,7 +1299,35 @@ public final class KakaoListener extends NotificationListenerService {
         return v.replaceAll("\\s+", "").toLowerCase(java.util.Locale.KOREA);
     }
 
-    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 구버전 저장값 호환용이다. */
+    /**
+     * 매크로 글만 그 방의 카카오톡 알림 답장에 넣는다.
+     * true 는 카카오톡이 답장을 접수했다는 뜻이다. 카카오 메시지 번호가 없으므로 발송 성공이 아니다.
+     */
+    public static boolean queueReply(Context ctx, RoomRef ref, String text) {
+        if (ctx == null) return false;
+        if (ref == null || !ref.valid()) {
+            Log.add(ctx, "발송 실패: 방이 지정되지 않았습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        if (!accountAllowed(ctx, ref.acc)) {
+            Log.add(ctx, "발송 취소: " + ref.label(ctx)
+                    + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        final String r = ref.label(ctx);
+        if (text == null || text.trim().length() == 0) {
+            Log.add(ctx, "발송 실패: 「" + r + "」 발송할 내용이 비어 있습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        Session s = session(ref);
+        if (!live(s) || !bound) {
+            Log.add(ctx, "「" + r + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        return enqueue(ctx, r, text, s);
+    }
+
+    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 알림 답장 발송은 매크로 스위치만 쓴다. */
     public static boolean sendTo(Context ctx, String room, String text) {
         if (ctx != null) {
             Log.add(ctx, "알림 답장으로는 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
@@ -1322,34 +1351,12 @@ public final class KakaoListener extends NotificationListenerService {
         return false;
     }
 
-    private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
-        if (ref == null || !ref.valid()) {
-            Log.add(ctx, "발송 실패: 방이 지정되지 않았습니다.");
-            return false;
-        }
-        // 계정 사용 여부는 여기 한 곳에서만 검사한다.
-        // 엔진마다 흩어놓으면 빠지는 경로가 생긴다 — 실제로 경쟁사 저격의 '다른 대화방으로 발송'
-        // 경로가 수신 대화방만 검사하고 발송 대상 계정은 검사하지 않아 미사용 계정으로 나갔다.
-        if (!accountAllowed(ctx, ref.acc)) {
-            Log.add(ctx, "발송 취소: " + ref.label(ctx) + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다.");
-            return false;
-        }
-        final String r = ref.label(ctx);
-        if (text == null || text.trim().length() == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 발송할 내용이 비어 있습니다.");
-            return false;
-        }
+    /** 답장 인텐트만 넣는다. 발송 완료로 적지 않고, 마지막 발송 시각도 올리지 않는다. */
+    private static boolean enqueue(Context ctx, String label, String text, Session s) {
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 대화방 세션이 없습니다. "
-                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+            Log.add(ctx, "「" + label + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
             return false;
         }
-        if (!bound) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 알림 접근 권한이 비활성 상태입니다. "
-                    + "설정에서 권한을 허용하십시오.");
-            return false;
-        }
-
         PendingIntent pi = s.pending;
         RemoteInput[] inputs = s.inputs;
         try {
@@ -1362,39 +1369,24 @@ public final class KakaoListener extends NotificationListenerService {
                 results.putCharSequence(key, text);
             }
             if (results.isEmpty()) {
-                Log.add(ctx, "발송 실패: 「" + r + "」 답장 입력란을 찾지 못했습니다.");
+                Log.add(ctx, "「" + label + "」 답장 입력란을 찾지 못했습니다. 발송으로 세지 않았습니다.");
                 return false;
             }
             RemoteInput.addResultsToIntent(inputs, filled, results);
             if (Build.VERSION.SDK_INT >= 28) {
-                // 카톡이 "사람이 직접 입력한 답장"으로 인식하게 출처를 붙인다
                 RemoteInput.setResultsSource(filled, RemoteInput.SOURCE_FREE_FORM_INPUT);
             }
             pi.send(ctx, 0, filled);
-
-            long now = System.currentTimeMillis();
-            s.lastMine = now;
-            s.othersSinceMine = 0;
-            s.lastSentText = text;
-            Log.add(ctx, "「" + r + "」 발송 완료: " + preview(text));
             return true;
         } catch (PendingIntent.CanceledException e) {
-            // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
             s.pending = null;
             s.inputs = null;
-            Log.add(ctx, "발송 실패: 「" + r + "」 답장창이 만료되었습니다. "
-                    + "카카오톡 알림이 다시 수신되면 복구됩니다.");
+            Log.add(ctx, "「" + label + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
             return false;
         } catch (Throwable t) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 " + t);
+            Log.add(ctx, "「" + label + "」 알림 답장을 넣지 못했습니다. 발송으로 세지 않았습니다.");
             return false;
         }
-    }
-
-    private static String preview(String text) {
-        String one = text.replace('\n', ' ').replace('\r', ' ').trim();
-        if (one.length() <= 24) return one;
-        return one.substring(0, 24) + "…";
     }
 
     // ── 조회용 API ────────────────────────────────────────────────────────────

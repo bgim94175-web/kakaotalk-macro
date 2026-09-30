@@ -246,6 +246,29 @@ public final class SenderSync {
         return new KakaoEngine.SendResult(o.optString("kind", "text"), id, System.currentTimeMillis());
     }
 
+    /** 상시 발송 세션의 최근 글. 보내기 전에 메시지 번호를 확인하고, 알림 답장 뒤에 다시 읽는다. */
+    public static List<KakaoEngine.Inbound> recent(Context c, String chatId) throws EngineException {
+        HttpResult r = open(c, "GET", base(c) + "/v1/recent?device_id=" + enc(senderKey(c))
+                + "&chat_id=" + enc(chatId), null, 30000);
+        JSONObject o = readOk(r);
+        if (o.optBoolean("needs_register", false)) {
+            applyReauth(c, o.optString("reason", "reauth"));
+            throw new EngineException("reauth_required", "카카오 로그인이 끊겼습니다. 계정을 다시 등록하십시오.");
+        }
+        JSONArray a = o.optJSONArray("messages");
+        ArrayList<KakaoEngine.Inbound> out = new ArrayList<KakaoEngine.Inbound>();
+        if (a == null) return out;
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject one = a.optJSONObject(i);
+            if (one == null) continue;
+            String id = one.optString("log_id", "");
+            if (!NodeEngine.isMessageId(id)) continue;
+            out.add(new KakaoEngine.Inbound(id, "", one.optString("message", ""),
+                    one.optBoolean("mine"), toMillis(one.optLong("sent_at"))));
+        }
+        return out;
+    }
+
     public static KakaoEngine.SendResult sendImages(Context c, String chatId, List<File> files) throws EngineException {
         JSONObject body = new JSONObject();
         try {

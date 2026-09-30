@@ -146,12 +146,12 @@ public final class Scheduler {
         // 설정을 못 읽는 상황(설정키 없음)에서도, 매크로가 꺼져 있어도 하트비트는 살아 있어야 한다.
         ensureHeartbeat(c);
 
-        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c)) {
+        Settings.Macro m = macro(c);
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c)
+                && (m == null || !m.notifyReply)) {
             cancelAlarmOnly(c);
             return;
         }
-
-        Settings.Macro m = macro(c);
         if (m == null) return;
 
         if (!m.enabled) {
@@ -237,6 +237,11 @@ public final class Scheduler {
 
         Settings.Macro m = macro(c);
         if (m == null) return;
+
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c) && !m.notifyReply) {
+            cancelAlarmOnly(c);
+            return;
+        }
 
         if (!m.enabled || !License.allowed(c, Features.MACRO)) {
             cancel(c);
@@ -545,14 +550,18 @@ public final class Scheduler {
             return;
         }
 
-        // 6) 등록된 카카오 계정의 LOCO 세션으로만 보낸다. 알림 답장은 쓰지 않는다.
+        // 알림 답장이 켜져 있으면 글만 그 경로로 보낸다. 꺼져 있으면 LOCO 또는 상시 발송이다.
         List<RoomRef> viaEngine = new ArrayList<RoomRef>();
         for (int i = 0; i < rooms.size(); i++) {
-            if (EngineSend.handles(c, rooms.get(i))) viaEngine.add(rooms.get(i));
+            if (EngineSend.macroTarget(c, rooms.get(i), m.notifyReply)) viaEngine.add(rooms.get(i));
         }
         rooms = viaEngine;
         if (rooms.isEmpty()) {
-            Log.add(c, "등록한 카카오 계정으로 보낼 수 있는 대화방이 없습니다. 계정을 등록하고 대화방을 연결하십시오.");
+            if (m.notifyReply) {
+                Log.add(c, "알림 답장으로 확인해서 보낼 대화방이 없습니다. 카카오 계정과 대화방 연결을 확인하십시오.");
+            } else {
+                Log.add(c, "등록한 카카오 계정으로 보낼 수 있는 대화방이 없습니다. 계정을 등록하고 대화방을 연결하십시오.");
+            }
             deferOpenRooms(c, s, now);
             return;
         }
@@ -578,10 +587,13 @@ public final class Scheduler {
             long due = m.dueAt(room);
             if (due > now) continue;
 
-            // 내 마지막 발송 뒤 남의 새 메시지는 LOCO 기록으로만 센다.
-            int others = EngineSend.othersSinceMine(c, room);
+            int others = EngineSend.othersSinceMine(c, room, m.notifyReply);
             if (others < 0) {
-                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. " + EngineSend.unavailableReason(c, room));
+                if (m.notifyReply) {
+                    Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다.");
+                } else {
+                    Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. " + EngineSend.unavailableReason(c, room));
+                }
             }
             if (others < minNeed) {
                 waiting++;
@@ -592,8 +604,10 @@ public final class Scheduler {
 
             boolean sent = false;
             try {
-                sent = EngineSend.sendText(c, room, msg);
-                if (!sent) Log.add(c, "「" + label + "」 " + EngineSend.unavailableReason(c, room));
+                sent = EngineSend.sendMacroText(c, room, msg, m.notifyReply);
+                if (!sent && !m.notifyReply) {
+                    Log.add(c, "「" + label + "」 " + EngineSend.unavailableReason(c, room));
+                }
             } catch (Throwable t) {
                 Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }

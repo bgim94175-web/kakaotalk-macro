@@ -181,6 +181,11 @@ public final class Settings {
         public String quietTo = "";
         /** 하루 최대 발송 수 */
         public int dailyLimit = 200;
+        /**
+         * 글 매크로만 카카오톡 알림 답장으로 보낸다. 기본은 꺼짐.
+         * 꺼져 있으면 지금처럼 LOCO 또는 상시 발송 서버로 보낸다.
+         */
+        public boolean notifyReply = false;
 
         /** 발송 대상 방 (RoomRef 목록) */
         public List<RoomRef> roomRefs() {
@@ -922,6 +927,7 @@ public final class Settings {
             m.put("quietFrom", macro.quietFrom);
             m.put("quietTo", macro.quietTo);
             m.put("dailyLimit", macro.dailyLimit);
+            m.put("notifyReply", macro.notifyReply);
             m.put("roomCooldownMin", intMap(macro.roomCooldownMin));
             m.put("roomDueAt", longMap(macro.roomDueAt));
             m.put("roomLastSent", longMap(macro.roomLastSent));
@@ -1065,6 +1071,7 @@ public final class Settings {
             s.macro.quietFrom = hhmmOrEmpty(str(m, "quietFrom", ""));
             s.macro.quietTo = hhmmOrEmpty(str(m, "quietTo", ""));
             s.macro.dailyLimit = clamp(m.optInt("dailyLimit", s.macro.dailyLimit), 0, 9999);
+            s.macro.notifyReply = m.optBoolean("notifyReply", false);
             readIntMap(m, "roomCooldownMin", s.macro.roomCooldownMin);
             readLongMap(m, "roomDueAt", s.macro.roomDueAt);
             readLongMap(m, "roomLastSent", s.macro.roomLastSent);

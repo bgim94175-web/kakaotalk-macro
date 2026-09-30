@@ -14,6 +14,7 @@ import {
   guardNotices,
   guardOnChat,
   macroMinMessages,
+  macroNotifyReply,
   macroRoomsDue,
   noteMacroRetry,
   noteMacroSent,
@@ -150,6 +151,25 @@ export class Hub {
       members: ch.active_members,
       last_at: ch.last_message ? ch.last_message.sent_at : 0,
     }))
+  }
+
+  async recent(id, chatId) {
+    const slot = this.requireLive(id)
+    const msgs = await slot.client.getMessages(chatId, { count: 20 })
+    const self = credsOf(slot.record).user_id
+    const out = []
+    for (const m of msgs || []) {
+      const logId = realLogId(m && m.log_id)
+      if (!logId) continue
+      const authorId = m.author_id == null ? '' : String(m.author_id)
+      out.push({
+        log_id: logId,
+        message: typeof m.message === 'string' ? m.message : '',
+        mine: self.length > 0 && authorId === self,
+        sent_at: m.sent_at || 0,
+      })
+    }
+    return out
   }
 
   async sendText(id, chatId, text) {
@@ -484,6 +504,7 @@ class Slot {
 
   async macroTick() {
     if (this.record.needs_register || !this.client) return
+    if (macroNotifyReply(this.record)) return
     const now = Date.now()
     const rooms = macroRoomsDue(this.record, now)
     const macro = this.record.config && this.record.config.macro

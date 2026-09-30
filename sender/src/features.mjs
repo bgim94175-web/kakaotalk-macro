@@ -911,6 +911,12 @@ export async function othersSinceMine(client, chatId, userId) {
   return others
 }
 
+/** Text macros go out as a KakaoTalk notification reply on the phone. The server must not also send. */
+export function macroNotifyReply(record) {
+  const macro = record && record.config && record.config.macro
+  return !!(macro && macro.notifyReply === true)
+}
+
 export function macroRoomsDue(record, now) {
   const macro = record.config && record.config.macro
   if (!macro || !macro.enabled) return []
