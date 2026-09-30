@@ -1,6 +1,7 @@
 package com.buseong.kakaoauto;
 
 import android.content.Context;
+import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -32,9 +33,9 @@ import java.util.concurrent.Executors;
 /**
  * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `보낼 방 ›` 에서 Nav.push 로 열린다.
  *
- * 등록한 카카오 계정의 LOCO 대화방을 세 목록으로 나눠 보여 준다.
+ * 등록한 카카오 계정의 LOCO 대화방과, 알림·채팅 목록에서 감지한 방을 세 목록으로 나눠 보여 준다.
  * 오픈채팅방, 일반 채팅방, 오픈프로필로 온 갠톡. 칸을 바꿔도 선택은 유지된다.
- * 체크하면 그 방 번호로 연결하고 보낼 방에 넣는다. 발송은 그 세션으로만 한다.
+ * 답장 알림이 없는 방도 목록에 남긴다. 그 방을 알림 답장으로 보내면 왜 못 보냈는지 적는다.
  */
 public final class ScreenRooms {
     private ScreenRooms() {}
@@ -88,9 +89,13 @@ public final class ScreenRooms {
         long lastAt;
         /** LOCO 목록의 방. 알림에서만 온 방이면 null. */
         KakaoEngine.KakaoRoom room;
-        /** 알림 답장으로 감지한 방. LOCO 연결과는 별개다. */
+        /** 알림으로 감지한 방. LOCO 연결과는 별개다. */
         boolean fromNotification;
+        /** 채팅 목록에서 읽은 방. */
+        boolean fromList;
         boolean replyable;
+        /** 종류를 확인했다. 아니면 일반 채팅방에 두고 미확인이라고 적는다. */
+        boolean kindKnown = true;
         String listKind = RoomKind.NORMAL;
     }
 
@@ -133,6 +138,8 @@ public final class ScreenRooms {
     // ── 본문 ────────────────────────────────────────────────────────────────
 
     private static void fill(final MainActivity a, LinearLayout col) {
+        try { KakaoListener.capturePhoneAccounts(); } catch (Throwable ignore) { }
+        try { KakaoAccessibility.requestHarvest(); } catch (Throwable ignore) { }
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "라이선스 인증 전에는 설정이 저장되지 않습니다. "
                     + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
@@ -161,7 +168,7 @@ public final class ScreenRooms {
 
         if (!ready) {
             col.addView(Nav.note(a, "카카오 계정을 등록하면 그 계정의 대화방도 불러옵니다. "
-                    + "알림에서 감지한 방은 인증 없이 아래 목록에 있습니다.",
+                    + "알림이나 채팅 목록에서 감지한 방은 인증 없이 아래 목록에 있습니다.",
                     Theme.ACCENT2, null, null));
         } else if (inflight && LOADED == null) {
             col.addView(Nav.note(a, "대화방 목록을 불러오는 중입니다.", Theme.ACCENT2, null, null));
@@ -172,6 +179,7 @@ public final class ScreenRooms {
             col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
                     Theme.AMBER, null, null));
         }
+        if (listed == 0) col.addView(emptyPerms(a));
         int[] counts = kindCounts(rows);
         col.addView(kindTabs(a, counts));
         List<Row> visible = ofKind(rows, TAB_KIND[TAB]);
@@ -199,9 +207,10 @@ public final class ScreenRooms {
         });
         col.addView(add);
 
-        TextView help = Ui.sub(a, "등록한 계정의 대화방과, 알림에서 감지한 방이 함께 있습니다. "
-                + "알림에서 감지한 방은 인증코드 등록 없이 알림 답장으로 고를 수 있습니다. "
-                + "답장할 알림이 없는 방은 보낸 것으로 세지 않습니다. "
+        TextView help = Ui.sub(a, "대화방은 카카오톡 알림과 채팅 목록에서 자동으로 등록됩니다. "
+                + "답장 알림이 없어도 목록에는 남습니다. "
+                + "알림 답장으로 보낼 때는 그 방의 답장 알림이 있어야 하며, 없으면 발송으로 세지 않습니다. "
+                + "각 줄의 계정은 그 방이 속한 카카오톡입니다. "
                 + "따로 지정하지 않은 방은 기본 발송 쿨타임을 사용합니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
@@ -226,12 +235,7 @@ public final class ScreenRooms {
                     ? new String[] { r.group ? "단체" : "1:1" }
                     : null;
             String cool = Settings.load(a).macro.cooldownLabel(r.ref);
-            String sub;
-            if (r.fromNotification) {
-                sub = "알림에서 감지" + (r.replyable ? "" : " · 답장 알림 없음") + " · " + cool;
-            } else {
-                sub = r.detected ? cool : ("이 목록에 없음 · " + cool);
-            }
+            String sub = r.detected ? rowSub(a, r, cool) : ("이 목록에 없음 · " + accountText(a, r) + " · " + cool);
             g.addView(Ui.checkRow(a, r.ref.name, sub,
                     badges, r.selected, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
@@ -376,24 +380,97 @@ public final class ScreenRooms {
             if (PENDING.containsKey(note.ref.key())) continue;
             Row have = findRow(map, note.ref);
             if (have != null) {
-                have.fromNotification = true;
-                have.replyable = note.replyable;
-                if (have.room == null) have.listKind = note.listKind;
+                have.fromNotification = !note.fromList || have.fromNotification;
+                have.fromList = note.fromList || have.fromList;
+                have.replyable = note.replyable || have.replyable;
+                if (have.room == null) {
+                    have.listKind = note.listKind;
+                    have.kindKnown = note.kindKnown;
+                }
                 continue;
             }
             Row n = new Row();
             n.ref = note.ref;
             n.detected = true;
-            n.fromNotification = true;
+            n.fromNotification = !note.fromList;
+            n.fromList = note.fromList;
             n.replyable = note.replyable;
-            n.groupKnown = true;
+            n.groupKnown = !note.fromList;
             n.group = note.group;
             n.lastAt = note.lastAt;
+            n.kindKnown = note.kindKnown;
             n.listKind = (note.listKind == null) ? RoomKind.NORMAL : note.listKind;
             n.selected = settings.macro.coversRoom(note.ref);
             map.put("nt:" + note.ref.key(), n);
         }
         return new ArrayList<Row>(map.values());
+    }
+
+    /** 빈 목록이면 빠져 있는 권한을 적는다. 둘 다 있으면 다음에 어떻게 채워지는지 적는다. */
+    private static LinearLayout emptyPerms(final MainActivity a) {
+        LinearLayout box = Nav.col(a);
+        boolean noti = KakaoListener.connected(a);
+        boolean ax = ImageSender.accessibilityOn(a);
+        if (!noti) {
+            box.addView(Nav.note(a, "알림 접근 권한이 없습니다. "
+                    + "이 권한이 없으면 카카오톡 알림의 대화방이 자동으로 등록되지 않습니다.",
+                    Theme.AMBER, "알림 접근 설정", new Runnable() {
+                        @Override public void run() {
+                            Nav.openIntent(a, new Intent(android.provider.Settings
+                                    .ACTION_NOTIFICATION_LISTENER_SETTINGS), "알림 접근 설정");
+                        }
+                    }));
+        }
+        if (!ax) {
+            box.addView(Nav.note(a, "접근성 권한이 없습니다. "
+                    + "이 권한이 없으면 카카오톡 채팅 목록의 대화방이 자동으로 등록되지 않습니다.",
+                    Theme.AMBER, "접근성 설정", new Runnable() {
+                        @Override public void run() {
+                            Nav.openIntent(a, new Intent(android.provider.Settings
+                                    .ACTION_ACCESSIBILITY_SETTINGS), "접근성 설정");
+                        }
+                    }));
+        }
+        if (noti || ax) {
+            box.addView(Nav.note(a, "아직 감지된 대화방이 없습니다. "
+                    + "카카오톡 채팅 목록을 열거나 메시지를 받으면 여기에 표시됩니다. "
+                    + "답장 알림이 없어도 목록에는 남습니다.",
+                    Theme.ACCENT2, null, null));
+        }
+        return box;
+    }
+
+    private static String rowSub(Context c, Row r, String cool) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(accountText(c, r));
+        if (r.fromList && !r.fromNotification && r.room == null) sb.append(" · 채팅 목록");
+        else if (r.fromNotification) sb.append(" · 알림");
+        else if (r.room != null) sb.append(" · 등록 계정");
+        if (r.room == null && !r.kindKnown) sb.append(" · 종류 미확인");
+        if ((r.fromNotification || r.fromList) && !r.replyable) sb.append(" · 답장 알림 없음");
+        sb.append(" · ").append(cool);
+        return sb.toString();
+    }
+
+    /** 그 줄의 카카오톡 계정. 폰에서 본 이름, 등록 계정, 둘 다 없으면 계정 미확인. */
+    private static String accountText(Context c, Row r) {
+        String phone = "";
+        if (r != null && r.ref != null && !KakaoListener.LIST_ACC.equals(r.ref.acc)) {
+            phone = KakaoListener.phoneName(c, r.ref.acc);
+            if (phone.length() == 0 && Accounts.known(c, r.ref.acc)) {
+                String named = Accounts.nameOf(c, r.ref.acc);
+                if (named != null && named.length() > 0 && !"미확인 계정".equals(named)) phone = named;
+            }
+        }
+        String loco = "";
+        if (r != null && r.room != null) {
+            loco = KakaoAccount.accountId(c);
+            if (loco.length() == 0) loco = "등록 계정";
+        }
+        if (phone.length() > 0 && loco.length() > 0 && !phone.equals(loco)) return phone + " · " + loco;
+        if (phone.length() > 0) return phone;
+        if (loco.length() > 0) return loco;
+        return "계정 미확인";
     }
 
     private static String rowKind(Row r) {

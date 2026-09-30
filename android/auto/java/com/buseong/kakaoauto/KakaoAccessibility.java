@@ -957,10 +957,85 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     // ── 이벤트 ──────────────────────────────────────────────────────────────
 
+    /** 채팅 목록을 마지막으로 읽은 시각. 예약 중에는 읽지 않는다. */
+    private long harvestAt = 0L;
+    /** 마지막으로 본 카카오톡 창 클래스. 채팅방인지 가를 때 쓴다. */
+    private String harvestClass = "";
+
+    /**
+     * 보낼 방 화면이 열릴 때 지금 떠 있는 카카오톡 채팅 목록을 한 번 읽는다.
+     * 서비스가 없으면 아무 것도 하지 않는다.
+     */
+    public static void requestHarvest() {
+        final KakaoAccessibility me = INSTANCE;
+        if (me == null) return;
+        me.h.post(new Runnable() {
+            @Override public void run() {
+                me.harvestAt = 0L;
+                me.harvestChatList();
+            }
+        });
+    }
+
+    /** 보이기만 한다. 탭·스크롤·입력은 하지 않는다. 이미지 전송 예약 중에는 트리를 건드리지 않는다. */
+    private void scheduleHarvest(AccessibilityEvent e) {
+        if (isArmed() || e == null) return;
+        int type;
+        try { type = e.getEventType(); } catch (Throwable t) { return; }
+        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                && type != AccessibilityEvent.TYPE_VIEW_SCROLLED) return;
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            try {
+                CharSequence cls = e.getClassName();
+                if (cls != null && cls.length() > 0) harvestClass = cls.toString();
+            } catch (Throwable ignore) { }
+        }
+        long now = SystemClock.uptimeMillis();
+        if (now - harvestAt < 1200L) return;
+        harvestAt = now;
+        harvestChatList();
+    }
+
+    private void harvestChatList() {
+        if (isArmed()) return;
+        ArrayList<AccessibilityNodeInfo> rs = roots();
+        try {
+            final List<ChatListScan.Hit> hits = ChatListScan.read(rs, screenH(), harvestClass);
+            if (hits.isEmpty()) return;
+            final Context app = getApplicationContext();
+            final ArrayList<ChatListScan.Hit> copy = new ArrayList<ChatListScan.Hit>(hits);
+            KakaoListener.post(new Runnable() {
+                @Override public void run() {
+                    String only = KakaoListener.onlyPhoneAccount(app);
+                    for (int i = 0; i < copy.size(); i++) {
+                        ChatListScan.Hit hit = copy.get(i);
+                        if (hit == null || hit.name == null || hit.name.length() == 0) continue;
+                        String acc = only;
+                        if (acc.length() == 0) acc = KakaoListener.accountForListedName(app, hit.name);
+                        if (acc.length() == 0) acc = KakaoListener.LIST_ACC;
+                        KakaoListener.noteListRoom(app, acc, hit.name, hit.kind, hit.kindKnown);
+                    }
+                }
+            }, 0);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "채팅 목록 읽기 실패", t);
+        } finally {
+            for (int i = 0; i < rs.size(); i++) {
+                try { rs.get(i).recycle(); } catch (Throwable ignore) { }
+            }
+        }
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e == null) return;
-        if (!isArmed()) return;             // ★ 예약 없으면 손대지 않는다
+        CharSequence earlyPkg = null;
+        try { earlyPkg = e.getPackageName(); } catch (Throwable ignore) { }
+        if (!isArmed()) {
+            if (earlyPkg != null && KAKAO.contentEquals(earlyPkg)) scheduleHarvest(e);
+            return;
+        }
 
         CharSequence pkg = null;
         try { pkg = e.getPackageName(); } catch (Throwable ignore) { }

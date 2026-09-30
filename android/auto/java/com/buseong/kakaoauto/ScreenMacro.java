@@ -133,12 +133,13 @@ public final class ScreenMacro {
                     @Override public void run() { Nav.push(a, "최소 신규 메시지", MacroDetail.minMessages(a)); }
                 }));
 
-        String phone = KakaoListener.phoneAccountLine(a);
+        String phone = KakaoListener.phoneNamesLine(a);
         boolean phoneKnown = phone.length() > 0;
         block(a, col, "폰 카카오톡 계정", accountLine(a, "알림 답장 계정",
                 phoneKnown ? (phone + " · 감지됨") : "아직 없음", phoneKnown ? Theme.TEXT : Theme.DIM));
         if (phoneKnown) {
-            col.addView(Nav.note(a, "알림에서 자동으로 감지한 계정입니다. 알림 답장은 이 계정으로 나갑니다. "
+            col.addView(Nav.note(a, "알림에서 자동으로 감지한 계정입니다. "
+                    + "알림 답장은 그 방이 속한 계정으로 나갑니다. "
                     + "등록한 카카오 계정과는 별개입니다.", Theme.ACCENT2, null, null));
         }
 
