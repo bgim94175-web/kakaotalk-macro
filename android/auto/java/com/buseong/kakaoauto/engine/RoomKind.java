@@ -29,6 +29,27 @@ public final class RoomKind {
         return NORMAL;
     }
 
+    /**
+     * 알림이 방 종류 토큰을 줬을 때만 그 칸으로 간다.
+     * 모르는 문자열은 null. 호출한 쪽이 일반 채팅방으로 둔다.
+     */
+    public static String knownType(String chatType) {
+        if (chatType == null) return null;
+        String s = chatType.trim();
+        if (s.length() == 0 || "null".equals(s)) return null;
+        if (is(s, "OD") || is(s, "OpenDirect") || is(s, "OpenDirectChat") || is(s, "14") || is(s, "16")) {
+            return OPEN_DM;
+        }
+        if (is(s, "OM") || is(s, "OpenMulti") || is(s, "OpenMultiChat") || is(s, "2") || is(s, "13") || is(s, "15")) {
+            return OPEN_ROOM;
+        }
+        if (is(s, "DirectChat") || is(s, "MultiChat") || is(s, "PlusChat") || is(s, "MemoChat")
+                || is(s, "10") || is(s, "11")) {
+            return NORMAL;
+        }
+        return null;
+    }
+
     /** type 이 없으면 null. 있으면 인원 수를 보지 않는다. */
     static String fromType(String chatType) {
         if (chatType == null) return null;

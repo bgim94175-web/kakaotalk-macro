@@ -83,8 +83,9 @@ public final class ScreenMacro {
             return;
         }
         if (!KakaoAccount.ready(a)) {
-            col.addView(ScreenKakaoRegister.prompt(a));
-            return;
+            col.addView(Nav.note(a, "등록한 계정으로 보내는 발송은 카카오 계정 등록 후에 됩니다. "
+                    + "알림 답장은 알림에서 감지한 계정과 방으로 보내며, 인증코드 등록은 하지 않습니다.",
+                    Theme.ACCENT2, null, null));
         }
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
@@ -134,8 +135,12 @@ public final class ScreenMacro {
 
         String phone = KakaoListener.phoneAccountLine(a);
         boolean phoneKnown = phone.length() > 0;
-        block(a, col, "폰 카카오톡 계정", accountLine(a, "이 폰의 카카오톡",
-                phoneKnown ? phone : "아직 없음", phoneKnown ? Theme.TEXT : Theme.DIM));
+        block(a, col, "폰 카카오톡 계정", accountLine(a, "알림 답장 계정",
+                phoneKnown ? (phone + " · 감지됨") : "아직 없음", phoneKnown ? Theme.TEXT : Theme.DIM));
+        if (phoneKnown) {
+            col.addView(Nav.note(a, "알림에서 자동으로 감지한 계정입니다. 알림 답장은 이 계정으로 나갑니다. "
+                    + "등록한 카카오 계정과는 별개입니다.", Theme.ACCENT2, null, null));
+        }
 
         block(a, col, "알림 답장", Ui.navRowSwitch(a, "알림 답장으로 보내기",
                 "켜면 글은 카카오톡 알림 답장으로 보냅니다. 끄면 등록한 계정으로 보냅니다. "

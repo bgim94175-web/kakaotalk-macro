@@ -86,8 +86,12 @@ public final class ScreenRooms {
         boolean group;
         boolean selected;
         long lastAt;
-        /** LOCO 목록의 방. 목록에 없는 선택 방이면 null. */
+        /** LOCO 목록의 방. 알림에서만 온 방이면 null. */
         KakaoEngine.KakaoRoom room;
+        /** 알림 답장으로 감지한 방. LOCO 연결과는 별개다. */
+        boolean fromNotification;
+        boolean replyable;
+        String listKind = RoomKind.NORMAL;
     }
 
     // ── 셸 ──────────────────────────────────────────────────────────────────
@@ -156,32 +160,31 @@ public final class ScreenRooms {
         col.addView(hero);
 
         if (!ready) {
-            col.addView(Nav.note(a, "카카오 계정을 등록하고 인증을 마치면 그 계정의 대화방을 모두 불러옵니다.",
-                    Theme.AMBER, null, null));
+            col.addView(Nav.note(a, "카카오 계정을 등록하면 그 계정의 대화방도 불러옵니다. "
+                    + "알림에서 감지한 방은 인증 없이 아래 목록에 있습니다.",
+                    Theme.ACCENT2, null, null));
         } else if (inflight && LOADED == null) {
             col.addView(Nav.note(a, "대화방 목록을 불러오는 중입니다.", Theme.ACCENT2, null, null));
         } else if (LOAD_ERR != null && (LOADED == null || LOADED.isEmpty())) {
             col.addView(Nav.note(a, "대화방 목록을 불러오지 못했습니다. " + LOAD_ERR,
                     Theme.AMBER, null, null));
+        } else if (LOAD_ERR != null) {
+            col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
+                    Theme.AMBER, null, null));
+        }
+        int[] counts = kindCounts(rows);
+        col.addView(kindTabs(a, counts));
+        List<Row> visible = ofKind(rows, TAB_KIND[TAB]);
+        col.addView(Ui.sectionHeader(a, null, TAB_LABEL[TAB] + " " + counts[TAB] + "개"));
+        if (visible.isEmpty()) {
+            col.addView(emptyLine(a, "이 종류에 대화방이 없습니다."));
         } else {
-            if (LOAD_ERR != null) {
-                col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
-                        Theme.AMBER, null, null));
-            }
-            int[] counts = kindCounts(rows);
-            col.addView(kindTabs(a, counts));
-            List<Row> visible = ofKind(rows, TAB_KIND[TAB]);
-            col.addView(Ui.sectionHeader(a, null, TAB_LABEL[TAB] + " " + counts[TAB] + "개"));
-            if (visible.isEmpty()) {
-                col.addView(emptyLine(a, "이 종류에 대화방이 없습니다."));
-            } else {
-                col.addView(section(a, visible));
-            }
-            List<Row> missing = orphans(rows);
-            if (!missing.isEmpty()) {
-                col.addView(Ui.sectionHeader(a, null, "목록에 없는 선택"));
-                col.addView(section(a, missing));
-            }
+            col.addView(section(a, visible));
+        }
+        List<Row> missing = orphans(rows);
+        if (!missing.isEmpty()) {
+            col.addView(Ui.sectionHeader(a, null, "목록에 없는 선택"));
+            col.addView(section(a, missing));
         }
 
         if (ready) {
@@ -196,7 +199,9 @@ public final class ScreenRooms {
         });
         col.addView(add);
 
-        TextView help = Ui.sub(a, "목록은 등록한 카카오 계정의 대화방입니다. "
+        TextView help = Ui.sub(a, "등록한 계정의 대화방과, 알림에서 감지한 방이 함께 있습니다. "
+                + "알림에서 감지한 방은 인증코드 등록 없이 알림 답장으로 고를 수 있습니다. "
+                + "답장할 알림이 없는 방은 보낸 것으로 세지 않습니다. "
                 + "따로 지정하지 않은 방은 기본 발송 쿨타임을 사용합니다.");
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
@@ -221,7 +226,12 @@ public final class ScreenRooms {
                     ? new String[] { r.group ? "단체" : "1:1" }
                     : null;
             String cool = Settings.load(a).macro.cooldownLabel(r.ref);
-            String sub = r.detected ? cool : ("이 목록에 없음 · " + cool);
+            String sub;
+            if (r.fromNotification) {
+                sub = "알림에서 감지" + (r.replyable ? "" : " · 답장 알림 없음") + " · " + cool;
+            } else {
+                sub = r.detected ? cool : ("이 목록에 없음 · " + cool);
+            }
             g.addView(Ui.checkRow(a, r.ref.name, sub,
                     badges, r.selected, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
@@ -271,9 +281,10 @@ public final class ScreenRooms {
         int[] counts = new int[TAB_KIND.length];
         for (int i = 0; i < rows.size(); i++) {
             Row r = rows.get(i);
-            if (!r.detected || r.room == null) continue;
+            if (!r.detected) continue;
+            String kind = rowKind(r);
             for (int k = 0; k < TAB_KIND.length; k++) {
-                if (TAB_KIND[k].equals(r.room.listKind)) counts[k]++;
+                if (TAB_KIND[k].equals(kind)) counts[k]++;
             }
         }
         return counts;
@@ -284,8 +295,8 @@ public final class ScreenRooms {
         ArrayList<Row> out = new ArrayList<Row>();
         for (int i = 0; i < rows.size(); i++) {
             Row r = rows.get(i);
-            if (!r.detected || r.room == null) continue;
-            if (kind.equals(r.room.listKind)) out.add(r);
+            if (!r.detected) continue;
+            if (kind.equals(rowKind(r))) out.add(r);
         }
         sort(out);
         return out;
@@ -358,7 +369,44 @@ public final class ScreenRooms {
             n.selected = true;
             map.put("sel:" + ref.key(), n);
         }
+        List<KakaoListener.NotifyRoom> notes = KakaoListener.notifyRooms(c);
+        for (int i = 0; i < notes.size(); i++) {
+            KakaoListener.NotifyRoom note = notes.get(i);
+            if (note == null || note.ref == null || !note.ref.valid()) continue;
+            if (PENDING.containsKey(note.ref.key())) continue;
+            Row have = findRow(map, note.ref);
+            if (have != null) {
+                have.fromNotification = true;
+                have.replyable = note.replyable;
+                if (have.room == null) have.listKind = note.listKind;
+                continue;
+            }
+            Row n = new Row();
+            n.ref = note.ref;
+            n.detected = true;
+            n.fromNotification = true;
+            n.replyable = note.replyable;
+            n.groupKnown = true;
+            n.group = note.group;
+            n.lastAt = note.lastAt;
+            n.listKind = (note.listKind == null) ? RoomKind.NORMAL : note.listKind;
+            n.selected = settings.macro.coversRoom(note.ref);
+            map.put("nt:" + note.ref.key(), n);
+        }
         return new ArrayList<Row>(map.values());
+    }
+
+    private static String rowKind(Row r) {
+        if (r.room != null && r.room.listKind != null && r.room.listKind.length() > 0) return r.room.listKind;
+        if (r.listKind != null && r.listKind.length() > 0) return r.listKind;
+        return RoomKind.NORMAL;
+    }
+
+    private static Row findRow(Map<String, Row> map, RoomRef ref) {
+        for (Row r : map.values()) {
+            if (r.ref != null && r.ref.equals(ref)) return r;
+        }
+        return null;
     }
 
     private static boolean listed(Map<String, Row> map, RoomRef ref) {

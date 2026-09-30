@@ -125,10 +125,18 @@ public final class EngineSend {
      */
     public static boolean macroTarget(Context c, RoomRef ref, boolean notifyReply) {
         if (c == null || ref == null || !ref.valid()) return false;
+        if (notifyReply && notifyRoom(c, ref)) return true;
         if (!KakaoAccount.ready(c)) return false;
         if (!realChatId(RoomLinks.chatIdFor(c, ref))) return false;
         if (!notifyReply) return Engine.ready(c);
         return Engine.ready(c) || SenderSync.blocksPhoneFeatures(c);
+    }
+
+    /** 알림이 알려준 방이면 인증 없이도 알림 답장 대상이다. */
+    private static boolean notifyRoom(Context c, RoomRef ref) {
+        if (KakaoListener.isNotifyRoom(c, ref)) return true;
+        RoomRef as = KakaoListener.replyTarget(c, ref);
+        return as != null && (KakaoListener.isNotifyRoom(c, as) || KakaoListener.hasSession(as));
     }
 
     /** 알림 답장 세션이 없는 방에 텍스트를 보낸다. 블로킹 — 백그라운드 스레드에서만. */
@@ -152,34 +160,50 @@ public final class EngineSend {
         if (!notifyReply) return sendText(c, ref, text);
         if (c == null || ref == null) return false;
         String label = ref.label(c);
+        RoomRef as = KakaoListener.replyTarget(c, ref);
+        if (as == null) {
+            Log.add(c, "「" + label + "」 알림에서 감지된 폰 카카오톡 계정이 없습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        if (!KakaoListener.hasSession(as)) {
+            KakaoListener.queueReply(c, as, text);
+            return false;
+        }
         String chatId = RoomLinks.chatIdFor(c, ref);
-        if (!realChatId(chatId) || !canReadChat(c)) {
-            Log.add(c, "「" + label + "」 대화 기록을 읽을 수 없어 알림 답장을 보내지 않았습니다. 발송으로 세지 않았습니다.");
-            return false;
-        }
-        String floor;
-        try {
-            floor = newestId(readRecent(c, chatId));
-        } catch (EngineException e) {
-            Log.add(c, "「" + label + "」 대화 기록을 읽을 수 없어 알림 답장을 보내지 않았습니다. 발송으로 세지 않았습니다.");
-            return false;
-        }
-        if (!KakaoListener.queueReply(c, ref, text)) return false;
-        for (int i = 0; i < 3; i++) {
+        if (!realChatId(chatId)) chatId = RoomLinks.chatIdFor(c, as);
+        if (realChatId(chatId) && canReadChat(c)) {
+            String floor;
             try {
-                Thread.sleep(1200L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+                floor = newestId(readRecent(c, chatId));
+            } catch (EngineException e) {
+                Log.add(c, "「" + label + "」 대화 기록을 읽을 수 없어 알림 답장을 보내지 않았습니다. 발송으로 세지 않았습니다.");
+                return false;
             }
-            try {
-                String id = confirmedId(readRecent(c, chatId), text, floor);
-                if (id != null) {
-                    Log.add(c, "「" + label + "」 알림 답장으로 보냈습니다. 메시지 " + id);
-                    return true;
+            if (!KakaoListener.queueReply(c, as, text)) return false;
+            for (int i = 0; i < 3; i++) {
+                try {
+                    Thread.sleep(1200L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
-            } catch (EngineException ignore) { }
+                try {
+                    String id = confirmedId(readRecent(c, chatId), text, floor);
+                    if (id != null) {
+                        Log.add(c, "「" + label + "」 알림 답장으로 보냈습니다. 메시지 " + id);
+                        return true;
+                    }
+                } catch (EngineException ignore) { }
+            }
+            Log.add(c, "「" + label + "」 알림 답장은 넣었으나 카카오 메시지 번호가 없습니다. 발송으로 세지 않았습니다.");
+            return false;
         }
+        if (KakaoListener.queuedRecently(as, text)) {
+            Log.add(c, "「" + label + "」 알림 답장은 넣었으나 카카오 메시지 번호가 없습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        if (!KakaoListener.queueReply(c, as, text)) return false;
+        KakaoListener.noteQueued(as, text);
         Log.add(c, "「" + label + "」 알림 답장은 넣었으나 카카오 메시지 번호가 없습니다. 발송으로 세지 않았습니다.");
         return false;
     }
@@ -206,6 +230,11 @@ public final class EngineSend {
      * 폰 LOCO 는 그 슬롯을 다시 열지 않는다.
      */
     public static int othersSinceMine(Context c, RoomRef ref, boolean notifyReply) {
+        if (notifyReply && c != null && notifyRoom(c, ref)
+                && !realChatId(RoomLinks.chatIdFor(c, ref))) {
+            RoomRef as = KakaoListener.replyTarget(c, ref);
+            return KakaoListener.othersSinceMine(as != null ? as : ref);
+        }
         if (notifyReply && c != null && SenderSync.blocksPhoneFeatures(c)) {
             String id = (ref == null) ? null : RoomLinks.chatIdFor(c, ref);
             if (!realChatId(id)) return -1;
