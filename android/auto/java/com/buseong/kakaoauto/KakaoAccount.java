@@ -5,9 +5,9 @@ import android.content.Context;
 /**
  * 카카오 계정 등록 상태.
  *
- * 고객 순서는 라이선스 키 → 기능 잠금 해제 → 계정 등록(로그인 다음 인증코드) → 그 다음에야
- * 매크로와 다른 기능을 설정한다. 인증코드 단계가 끝나기 전에는 {@link #ready} 가 false 다.
- * 비밀번호는 저장하지 않는다.
+ * 고객 순서는 라이선스 키 → 기능 잠금 해제 → 계정 등록(로그인 다음 카카오톡 확인) → 그 다음에야
+ * 매크로와 다른 기능을 설정한다. 카카오톡 확인이 끝나기 전에는 {@link #ready} 가 false 다.
+ * 인증코드는 앱이 보여주고 고객이 카카오톡에 입력한다. 비밀번호와 인증코드는 저장하지 않는다.
  */
 public final class KakaoAccount {
     private KakaoAccount() {}
@@ -15,14 +15,16 @@ public final class KakaoAccount {
     private static final String K_OK = "kakao_reg_ok";
     private static final String K_ID = "kakao_reg_id";
 
-    /** 로그인 뒤 인증코드까지 끝났는가. */
+    /** 로그인 뒤 인증코드까지 끝난 계정이 하나라도 선택돼 있는가. */
     public static boolean ready(Context c) {
-        return c != null && Prefs.getBool(c, K_OK, false);
+        return c != null && KakaoSlots.selected(c) != null;
     }
 
-    /** 등록에 쓴 계정. 없으면 빈 문자열. */
+    /** 지금 고른 계정의 표시 이름. 없으면 빈 문자열. */
     public static String accountId(Context c) {
         if (c == null) return "";
+        KakaoSlots.Slot s = KakaoSlots.selected(c);
+        if (s != null && s.hint.length() > 0) return s.hint;
         String v = Prefs.getStr(c, K_ID, "");
         return (v == null) ? "" : v;
     }

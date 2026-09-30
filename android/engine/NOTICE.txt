@@ -1,0 +1,16 @@
+KakaoAuto on-device engine — third-party software
+
+agent-messenger 2.38.0 (kakaotalk module)
+  https://github.com/agent-messenger/agent-messenger
+  License: MIT (as stated in the project README)
+
+bson, zod (bundled dependencies of agent-messenger)
+  License: Apache-2.0 (bson), MIT (zod)
+
+nodejs-mobile 18.20.4 (libnode.so)
+  https://github.com/nodejs-mobile/nodejs-mobile
+  License: MIT, with the licenses of Node.js and its bundled dependencies (V8, libuv, OpenSSL, ICU, ...)
+  https://github.com/nodejs-mobile/nodejs-mobile/blob/main/LICENSE
+
+LLVM libc++ (libc++_shared.so, from the Android NDK)
+  License: Apache-2.0 WITH LLVM-exception

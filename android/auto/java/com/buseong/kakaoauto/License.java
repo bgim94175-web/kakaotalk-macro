@@ -434,6 +434,8 @@ public final class License {
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "설정 삭제 실패", t);
         }
+        // 카카오 로그인 토큰·방 연결도 같이 지운다 (설정키를 지우기 전에 — 방 연결은 설정키로 봉인돼 있다)
+        com.buseong.kakaoauto.engine.Engine.wipe(app);
         try {
             Keystore.clear(app);     // 설정키 삭제 + Prefs 캐시 비움
         } catch (Throwable t) {
@@ -534,6 +536,7 @@ public final class License {
                 Prefs.clearCache();
             }
         }
+        try { com.buseong.kakaoauto.engine.SenderSync.noteLicense(c, o); } catch (Throwable ignore) { }
         invalidate();
         // 설정키가 생겼으니 옛 평문 설정을 옮기고 암호화 저장까지 해둔다
         try {
@@ -548,6 +551,7 @@ public final class License {
      * full=true (하트비트) 면 세션·lastOk 까지 갱신하고, false (새로고침) 면 features 만 갱신한다.
      */
     private static void saveTick(Context c, JSONObject o, boolean full) {
+        try { com.buseong.kakaoauto.engine.SenderSync.noteLicense(c, o); } catch (Throwable ignore) { }
         saveFeats(c, o.optJSONObject("features"));
         long exp = o.optLong("expires_at", -1L);
         if (exp >= 0) Prefs.putLong(c, K_EXPIRES, exp);

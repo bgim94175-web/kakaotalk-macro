@@ -152,6 +152,17 @@ public final class App extends Application {
                 } catch (Throwable t) {
                     Log.add(c, "발송 예약을 확인하지 못했습니다: " + t);
                 }
+                try {
+                    com.buseong.kakaoauto.engine.SenderSync.refreshStatus(c);
+                } catch (Throwable t) {
+                    Log.add(c, "상시 발송 상태를 확인하지 못했습니다: " + t);
+                }
+                try {
+                    com.buseong.kakaoauto.engine.LocoInbox.ensure(c);
+                    com.buseong.kakaoauto.engine.LocoInbox.poll(c);
+                } catch (Throwable t) {
+                    Log.add(c, "카카오 수신을 시작하지 못했습니다: " + t);
+                }
             }
         };
         try {

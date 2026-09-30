@@ -1,0 +1,17 @@
+{
+  "name": "kakaoauto-engine",
+  "private": true,
+  "version": "1.0.0",
+  "description": "On-device KakaoTalk engine for KakaoAuto. Runs inside the app on nodejs-mobile (Node 18); bundled into one file by build-engine.sh.",
+  "type": "module",
+  "scripts": {
+    "bundle": "esbuild src/main.mjs --bundle --platform=node --target=node18 --format=cjs --legal-comments=eof --outfile=dist/main.js",
+    "check": "node --check src/main.mjs"
+  },
+  "dependencies": {
+    "agent-messenger": "2.38.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

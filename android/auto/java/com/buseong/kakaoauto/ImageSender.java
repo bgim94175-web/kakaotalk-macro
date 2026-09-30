@@ -18,63 +18,15 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 이미지 1~5장 전송 오케스트레이션. 경로가 세 계열이고 <b>이 순서로</b> 시도한다.
+ * 이미지 1~5장 전송. 경로는 온디바이스 LOCO 엔진({@code agent-messenger}) 하나뿐이다.
  *
- * <h3>경로 A — 알림 답장에 사진 첨부 (화면이 아예 안 움직인다)</h3>
- * 카톡이 알림 답장 {@code RemoteInput} 에 이미지 데이터 타입을 허용해뒀으면
- * ({@link KakaoListener#imageTypesFor}) 공유창도 접근성도 안 쓰고 그냥 실어 보낸다.
- * MIME 하나당 URI 하나라서 <b>한 장씩 순서대로</b> 보낸다.
- * 되는지 안 되는지는 기기/카톡 버전마다 다르니 <b>런타임에 확인해서 로그로 알려준다.</b>
+ * 1장은 {@code sendPhoto}, 2~5장은 {@code sendMultiPhoto} 한 건이다. 카카오가 양의 메시지
+ * 번호를 돌려주지 않으면 실패다. 공유창, {@code ACTION_SEND}, 접근성 첨부, 알림 답장
+ * 이미지 전송은 쓰지 않는다. 엔진을 쓸 수 없거나 전송이 실패하면 그 이유를 완료 콜백에
+ * 넘기고 카카오톡을 열지 않는다.
  *
- * <h3>경로 B — 채팅방 내부 첨부 시트 (현장에서 유일하게 관측된 화면)</h3>
- * 근거: {@code docs/field/kakao-attach-sheet-26.8.2.md} (실기기 뷰 트리).
- * 알림 contentIntent({@link KakaoListener#openIntentFor})로 채팅방을 열고,
- * {@code KakaoAccessibility.armAttach} 가 첨부(+) → {@code 사진} → 썸네일 선택 → {@code btn_send} 를 밟는다.
- * 사진은 <b>촬영/저장 시각</b>으로 지목한다 — 썸네일 {@code contentDescription} 이
- * {@code "사진, 9월 28일 오전 8:20"} 형식이라 {@link ImagePicker#kakaoDescList} 가 만든 문자열과
- * 정확 일치로 찾을 수 있다. 시각을 못 읽는 사진은 <b>이 경로로 지목할 수 없다</b>.
- *
- * <h3>경로 C — 공유창 + 접근성 조작 (폴백)</h3>
- * <b>실기기 두 번의 시도에서 카톡 공유 대상 선택 화면이 한 번도 관측되지 않았다</b>
- * (안드로이드 16 + 백그라운드 실행 제한으로 판단된다). 그래서 기본 경로가 아니라 폴백이고,
- * {@link #SHARE_SHOW_MS} 안에 카톡 창이 안 보이면 다음 경로로 <b>빠르게</b> 넘어간다.
- * 예전에는 이 경로가 기본이어서, 안 뜨는 창을 9초씩 기다리다 40초를 통째로 버렸다.
- *
- * 여기가 현장에서 제일 많이 깨지는 자리다. 그래서 <b>한 번 던져보고 실패로 끝내지 않고</b>
- * 실행 경로를 순서대로 올라간다. 어느 경로로 성공했는지는 반드시 로그에 남긴다.
- *
- *   0. 받을 액티비티가 실제로 있는지 {@code queryIntentActivities} 로 먼저 확인한다.
- *      없으면 어떤 경로로도 안 되므로 여기서 끝낸다 (= 원인 (a)).
- *   1. {@link KakaoAccessibility#arm} 으로 "다음 카톡 공유창에서 이 방 골라라" 예약
- *   2. 앱이 화면에 표시된 상태면 <b>직접 실행</b>. 아니면 {@link WakeActivity} <b>경유 실행</b> —
- *      우리 액티비티를 먼저 띄워 포그라운드 호출자로 만든 다음 공유 인텐트를 던진다.
- *   3. WakeActivity 가 뜨지도 않았으면 <b>시스템이 우리 액티비티 실행을 차단</b>한 것이다
- *      (= 원인 (b)). 백그라운드 액티비티 차단은 예외를 던지지 않으므로 이 신호로만 구별된다.
- *   4. 그래도 안 되면 컴포넌트를 명시해서 한 번 더 던진다.
- *   5. 공유창은 떴는데 접근성이 못 봤거나 방을 못 고른 경우는 접근성 쪽 덤프가 원인을 말한다
- *      (= 원인 (c)).
- *
- * <h3>어느 경로를 탔는지 반드시 남긴다</h3>
- * 경로가 세 개라 "실패했다" 만 적으면 아무것도 고칠 수 없다. 그래서 경로마다
- * <b>시도했는지 · 건너뛰었으면 왜 · 실패했으면 어디서</b> 를 {@code Job.routes} 에 쌓아
- * 로그와 진단({@link #diag})에 같이 찍는다. 포그라운드/백그라운드도 같은 자리에 적는다 —
- * 예약 발송과 수동 발송은 실패 원인이 완전히 다르다.
- *
- * 한 번에 한 건만 돌린다(카톡 공유창이 겹치면 둘 다 망한다). 겹쳐 들어온 요청은 줄 세워서 순서대로.
- * 어느 스레드에서 불러도 된다 — 내부 상태는 전부 메인 루퍼에서만 만진다.
- *
- * <h3>대화방 값 규칙 (중요)</h3>
- * 여기 들어오는 대화방은 {@link RoomRef} 다. 세 용도를 절대 섞지 않는다.
- *   <ul>
- *     <li><b>화면 매칭</b> = {@code ref.name} — 카톡 화면에 실제로 보이는 문자열</li>
- *     <li><b>세션 조회</b> = {@code ref} — 계정까지 맞춰야 엉뚱한 계정으로 안 나간다</li>
- *     <li><b>사용자 표시</b> = {@code ref.label(ctx)}</li>
- *   </ul>
- * 예전에는 {@code RoomRef.key()}(= {@code "0␁방이름"})를 그대로 화면 매칭에 넘겨서
- * 카톡 화면의 어떤 텍스트와도 일치할 수 없었다. 문자열 한 종류로 뭉쳐 쓰면 같은 사고가 반복된다.
- *
- * 실패하면 <b>어느 단계에서 왜</b> 를 반드시 남긴다. 공유창이 뜨기 전에 죽는 경로는 접근성 쪽
- * 화면 덤프가 없으니까 여기서 최소 진단을 만들어 같은 자리에 저장한다({@link #diag}).
+ * 대화방은 {@link RoomRef} 다. 화면 매칭은 {@code ref.name}, 계정 구분은 {@code ref} 전체,
+ * 사용자 표시는 {@code ref.label(ctx)} 이다. {@code key()} 문자열을 화면 매칭에 넘기지 않는다.
  */
 public final class ImageSender {
     private ImageSender() {}
@@ -348,59 +300,15 @@ public final class ImageSender {
             Log.add(c, "이미지는 최대 " + MAX + "장까지 전송됩니다. 앞의 " + ok.size() + "장만 전송합니다.");
         }
 
-        // 타사 접근성 자동화 앱은 차단하지 않는다. 다만 클릭이 서로 엉켜 실패하는 사례가 있어
-        // 전송을 시작하는 시점에 한 번은 반드시 알린다 (진단에도 같은 항목이 들어간다).
-        warnOtherAccessibility(c);
-
-        // 알림 답장으로 사진을 보낼 수 있는 방이면 접근성·오버레이·화면 상태가 전부 필요 없다.
-        // 그래서 그 경우에는 여기서 막지 않는다 (막으면 제일 좋은 경로를 스스로 닫는 셈이다).
-        if (!replyImageReady(c, ref)) {
-            if (!accessibilityOn(c)) {
-                Log.add(c, "접근성 권한이 비활성 상태여서 이미지를 전송하지 못했습니다. "
-                        + "설정 › 접근성 › 설치된 앱 › 카톡 오토 · 자동 조작 을 활성화하십시오.");
-                fire(onDone, false, "접근성 권한이 비활성 상태입니다.");
-                return;
-            }
-            if (!overlayOn(c)) {
-                // 앱을 직접 보고 있을 때는 이게 없어도 공유창이 뜬다. 그래서 막지는 않고 경고만 한다.
-                Log.add(c, "「다른 앱 위에 표시」 권한이 비활성 상태입니다. 앱이 화면에 표시된 상태에서는 "
-                        + "동작할 수 있으나, 예약 발송에서는 시스템이 공유창 실행을 차단할 수 있습니다. 설정에서 활성화하십시오.");
-            }
+        // 이미지는 카카오 계정 LOCO 로만 보낸다. 계정이 없거나 방이 연결되지 않았으면
+        // 그 이유를 기록하고 끝낸다. 공유창·첨부 시트·알림 답장으로 넘어가지 않는다.
+        if (!com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) {
+            String why = com.buseong.kakaoauto.engine.EngineSend.unavailableReason(c, ref);
+            Log.add(c, "이미지 전송 실패: " + why);
+            fire(onDone, false, why);
+            return;
         }
-
-        // 채팅방 첨부 경로가 쓸 "사진 지목 문자열" 을 여기서 미리 만든다.
-        //  ★ 반드시 여기서 만든다 — MediaStore 조회와 EXIF 읽기는 파일 I/O 이고,
-        //    대기열 처리는 메인 루퍼에서 돌기 때문에 거기서 하면 사진 5장에 ANR 위험이 생긴다.
-        //    (여기는 호출자 스레드다: 예약 발송은 백그라운드, 수동 발송은 UI 스레드이며
-        //     UI 스레드에서는 바로 위 alive() 검사도 이미 같은 수준의 I/O 를 한다.)
-        final ArrayList<List<String>> descs = new ArrayList<List<String>>(MAX);
-        int missing = 0;
-        for (int i = 0; i < ok.size(); i++) {
-            List<String> cand = ImagePicker.kakaoDescList(c, ok.get(i));
-            if (cand == null || cand.isEmpty()) {
-                missing++;
-                Log.add(c, "이미지의 촬영·저장 시각을 읽지 못했습니다 — " + ImagePicker.shortUri(ok.get(i))
-                        + ". 채팅방 첨부 경로로는 이 사진을 지목할 수 없습니다.");
-                continue;
-            }
-            descs.add(cand);
-        }
-
-        final ArrayList<String> list = ok;
-        final int noTime = missing;
-        main().post(new Runnable() {
-            @Override public void run() {
-                if (QUEUE.size() >= MAX_QUEUE) {
-                    Log.add(c, "이미지 전송 대기열이 한도(" + MAX_QUEUE + "건)에 도달했습니다. 대화방 "
-                            + label + " 건은 취소되었습니다.");
-                    fire(onDone, false, "전송 대기열이 한도에 도달했습니다.");
-                    return;
-                }
-                seq++;
-                QUEUE.add(new Job(seq, c, ref, label, list, descs, noTime, onDone));
-                pump();
-            }
-        });
+        com.buseong.kakaoauto.engine.EngineSend.sendImages(c, ref, ok, onDone);
     }
 
     /** 지금 전송 중인가 */
@@ -541,14 +449,14 @@ public final class ImageSender {
      * 세 조건이 동시에 맞을 때만 true 다 — 조건 하나라도 다르면 시도해봐야 한다.
      *   <ol>
      *     <li>백그라운드 전송 불가로 이미 확정됐다 ({@link #BG_FAIL_LIMIT} 회 연속 실패)</li>
-     *     <li>그 방은 알림 답장으로 사진을 못 받는다 (답장 경로는 화면 상태와 무관하다)</li>
+     *     <li>알림 답장은 전달 확인이 안 되므로 이 판정을 풀지 않는다</li>
      *     <li>지금 앱이 화면에 없다 (화면에 있으면 공유창은 뜬다)</li>
      *   </ol>
      */
     public static boolean blockedInBackground(Context c, RoomRef ref) {
         if (c == null || ref == null || !ref.valid()) return false;
+        if (com.buseong.kakaoauto.engine.EngineSend.handles(c, ref)) return false;
         if (backgroundBlockedAt(c) <= 0L) return false;
-        if (replyImageReady(c, ref)) return false;
         if (foregroundNow(c)) return false;
         return true;
     }
@@ -612,26 +520,15 @@ public final class ImageSender {
     }
 
     /**
-     * 경로 선택. <b>A(알림 답장) → B(채팅방 첨부) → C(공유창)</b> 순서다.
+     * 경로 선택. <b>B(채팅방 첨부) → C(공유창)</b> 순서다. 알림 답장(A)은 시도하지 않는다.
      *
      * 공유창이 마지막인 이유는 실기기에서 한 번도 안 떴기 때문이다(확정된 사실).
      * 건너뛴 경로도 <b>왜 건너뛰었는지</b> 를 남긴다 — 그게 없으면 "채팅방 첨부를 시도했는데
      * 실패한 것" 과 "애초에 재료가 없어서 시도조차 못 한 것" 이 로그에서 똑같이 보인다.
      */
     private static void start(final Job j) {
-        // 포그라운드 여부를 여기서 한 번 확정한다. 어느 경로로 가든 진단에 이 값이 필요하다
-        // (예약 발송과 수동 발송은 실패 원인이 완전히 다르다).
-        j.fg = foregroundNow(j.app);
-        Log.add(j.app, "이미지 " + j.uris.size() + "장 전송을 시작합니다. 대화방: " + j.label
-                + " · 앱 상태: " + fgText(j.fg) + " · 화면: " + screenState(j.app));
-
-        // 경로 A — 되면 화면이 아예 안 움직인다.
-        if (replyImageReady(j.app, j.ref)) {
-            sendByReply(j, 0, 0);
-            return;
-        }
-        route(j, R_REPLY, replyWhy(j.app, j.ref));
-        afterReply(j);
+        // 이미지 전송은 LOCO 만 쓴다. 대기열에 남은 옛 작업이 있어도 카카오톡을 열지 않는다.
+        finish(j.id, false, "이미지 전송은 카카오 계정 직접 전송만 사용합니다. 카카오톡을 열지 않았습니다.");
     }
 
     /**
@@ -719,9 +616,8 @@ public final class ImageSender {
 
     /**
      * 알림 답장 사진 경로를 켜고 끈다.
-     * 카톡이 "이미지 받는다" 고 선언해놓고 실제로는 무시하는 경우가 있을 수 있는데,
-     * 그러면 앱은 보낸 줄 알고 성공으로 보고한다(카톡이 올렸는지 확인할 API 가 없다).
-     * 사용자가 "로그엔 보냈다는데 카톡엔 안 올라왔다" 를 발견하면 이걸 꺼서 공유창 경로로 되돌린다.
+     * 이 경로는 더 이상 성공으로 끝나지 않는다. 카톡이 이미지 타입을 선언해도
+     * 답장 인텐트 접수는 메시지 번호가 없고, 사진이 방에 없는 채로 성공이 된 적이 있다.
      */
     public static void setReplyImageEnabled(Context c, boolean on) {
         Prefs.putBool(c, K_REPLY_IMG_OFF, !on);
@@ -751,21 +647,27 @@ public final class ImageSender {
     }
 
     /**
-     * 사진을 한 장씩 알림 답장으로 보낸다. 메인 스레드에서만 돈다.
+     * 사진을 한 장씩 알림 답장으로 넘긴다. 메인 스레드에서만 돈다.
      *
-     * 한 장도 못 보냈으면 공유창 경로로 폴백한다. 이미 몇 장 나갔으면 폴백하지 않는다 —
-     * 공유창으로 다시 보내면 나간 장이 중복된다(그게 더 나쁘다).
-     *
-     * 카톡이 실제로 올렸는지는 확인할 방법이 없으니 <b>어느 경로로 보냈는지 로그에 남긴다.</b>
+     * {@link KakaoListener#sendImageTo} 가 true 여도 성공이 아니다. 그건 로컬 답장 큐에
+     * 넣은 것이고 카카오 메시지 번호가 없다. 호출부가 이 메서드를 다시 이어 붙이면
+     * 여기서 실패로 끝낸다 — 성공으로 바꾸지 말 것.
      */
     private static void sendByReply(final Job j, final int idx, final int sent) {
+        finish(j.id, false, "알림 답장으로는 이미지를 보내지 않습니다. 카카오 계정 직접 전송만 사용합니다.");
+        return;
+    }
+
+    @SuppressWarnings("unused")
+    private static void sendByReplyRetired(final Job j, final int idx, final int sent) {
         if (current == null || current.id != j.id) return;   // 이미 끝난 건
 
         if (idx >= j.uris.size()) {
-            route(j, R_REPLY, "성공(" + sent + "장)");
-            Log.add(j.app, "이미지 " + sent + "장을 알림 답장으로 전송했습니다. 대화방: " + j.label
-                    + " · 화면 조작은 발생하지 않았습니다. 카카오톡에서 실제 업로드 여부를 확인하십시오.");
-            finish(j.id, true, "알림 답장으로 " + sent + "장을 전송했습니다(화면 조작 없음). 카카오톡에서 업로드 여부를 확인하십시오.");
+            route(j, R_REPLY, "접수만 됨(" + sent + "장, 메시지 번호 없음)");
+            String why = "알림 답장으로는 사진이 대화방에 올라갔는지 확인할 수 없습니다. "
+                    + "카카오가 답장을 접수만 하고 이미지는 표시하지 않았습니다.";
+            Log.add(j.app, "이미지 전송 실패: " + why + " 대화방: " + j.label);
+            finish(j.id, false, why);
             return;
         }
 
@@ -781,12 +683,12 @@ public final class ImageSender {
                 afterReply(j);
                 return;
             }
-            route(j, R_REPLY, "부분 성공(" + sent + "/" + j.uris.size() + "장)");
-            Log.add(j.app, "알림 답장으로 " + sent + "/" + j.uris.size() + "장만 전송했습니다. 대화방: " + j.label
-                    + ". 남은 " + (j.uris.size() - sent) + "장은 직접 전송하십시오"
-                    + "(중복 발송 방지를 위해 공유창 경로로 재시도하지 않습니다).");
-            diag(j, "알림 답장 " + (idx + 1) + "번째 이미지에서 실패", 0L, "앞의 " + sent + "장은 이미 전송되었습니다.");
-            finish(j.id, false, "알림 답장으로 " + sent + "장만 전송했습니다. 남은 이미지는 직접 전송하십시오.");
+            route(j, R_REPLY, "접수 중단(" + sent + "/" + j.uris.size() + "장, 메시지 번호 없음)");
+            String why = "알림 답장으로는 사진이 대화방에 올라갔는지 확인할 수 없습니다. "
+                    + "카카오가 답장을 접수만 하고 이미지는 표시하지 않았습니다.";
+            Log.add(j.app, "이미지 전송 실패: " + why + " 대화방: " + j.label);
+            diag(j, "알림 답장 " + (idx + 1) + "번째 이미지에서 실패", 0L, why);
+            finish(j.id, false, why);
             return;
         }
 
@@ -851,6 +753,12 @@ public final class ImageSender {
      *         이유를 {@code j.routes} 에 적었으니 호출부가 다음 경로로 내려가야 한다.
      */
     private static boolean startAttach(final Job j) {
+        route(j, R_ATTACH, "사용 안 함(이미지는 카카오 계정 직접 전송만 사용)");
+        return false;
+    }
+
+    @SuppressWarnings("unused")
+    private static boolean startAttachRetired(final Job j) {
         if (!attachEnabled(j.app)) {
             route(j, R_ATTACH, "건너뜀(설정에서 비활성)");
             return false;
@@ -1096,6 +1004,13 @@ public final class ImageSender {
     // ── 경로 C: 공유창 + 접근성 조작 (폴백) ────────────────────────────────────
 
     private static void startShare(final Job j) {
+        route(j, R_SHARE, "사용 안 함(이미지는 카카오 계정 직접 전송만 사용)");
+        finish(j.id, false, "공유창으로는 이미지를 보내지 않습니다. 카카오 계정 직접 전송만 사용합니다.");
+        return;
+    }
+
+    @SuppressWarnings("unused")
+    private static void startShareRetired(final Job j) {
         // 여기까지 왔으면 접근성이 반드시 필요하다.
         // (대기열에 들어갈 때는 알림 답장 경로가 살아있어서 접근성 검사를 안 했을 수 있고,
         //  그 사이 세션이 죽어서 이리로 떨어지기도 한다. 그때 40초를 통째로 버리면 안 된다.)

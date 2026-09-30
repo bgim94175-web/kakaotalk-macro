@@ -2,8 +2,8 @@
 <!-- 카톡 오토 (사용자앱) · 라이브러리 의존성 0 · AndroidX 없음 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.buseong.kakaoauto"
-    android:versionCode="20"
-    android:versionName="2.0">
+    android:versionCode="38"
+    android:versionName="2.1.17">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 
@@ -26,7 +26,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- 카카오 연결 유지 서비스 (engine/EngineService). 34+ 는 타입별 권한이 따로 필요하다 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 알림 읽기 권한 설정 화면으로 보내기 -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
@@ -51,7 +53,9 @@
         android:fullBackupContent="false"
         android:supportsRtl="false"
         android:hardwareAccelerated="true"
-        android:extractNativeLibs="false">
+        android:extractNativeLibs="true">
+        <!-- extractNativeLibs=true 여야 한다: 카카오 엔진 실행파일(lib/<abi>/libkmnode.so)은
+             설치 때 nativeLibraryDir 로 풀려야 exec 할 수 있다 (안드로이드 10+ 는 그 밖에서 exec 금지). -->
 
         <activity
             android:name=".MainActivity"
@@ -106,6 +110,17 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility" />
+        </service>
+
+        <!-- 카카오 계정 연결 유지 (포그라운드 서비스). 매크로가 켜져 있고 카카오 계정이 연결됐을 때만 돈다.
+             exported=false : 우리 앱만 시작/정지한다. -->
+        <service
+            android:name=".engine.EngineService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the user's own KakaoTalk session and scheduled message sending alive in the background." />
         </service>
 
         <!-- 주기 발송 알람 · 라이선스 하트비트 알람 전용.

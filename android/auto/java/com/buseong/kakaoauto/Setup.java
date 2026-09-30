@@ -59,14 +59,6 @@ public final class Setup {
     static List<Step> steps(final Context c, final MainActivity a) {
         ArrayList<Step> out = new ArrayList<Step>();
 
-        boolean noti;
-        try { noti = KakaoListener.connected(c); } catch (Throwable t) { noti = false; }
-        out.add(new Step("알림 접근 허용",
-                "카카오톡 알림으로 대화방을 확인하고 답장으로 발송합니다. 모든 기능의 전제 조건입니다.",
-                "허용", noti, false, (a == null) ? null : new Runnable() {
-                    @Override public void run() { openListener(a); }
-                }));
-
         out.add(new Step("배터리 최적화 제외",
                 "화면이 꺼진 상태에서도 예약 발송과 봇 응답이 중단되지 않도록 제외 항목으로 등록합니다.",
                 "제외", ignoringBattery(c), false, (a == null) ? null : new Runnable() {
@@ -88,15 +80,6 @@ public final class Setup {
                         @Override public void run() { askPostNoti(a); }
                     }));
         }
-
-        int rooms;
-        try { rooms = KakaoListener.knownRooms(c).size(); } catch (Throwable t) { rooms = 0; }
-        out.add(new Step("대화방 감지",
-                (rooms > 0) ? ("대화방 " + rooms + "개가 감지되었습니다.")
-                        : "카카오톡 메시지를 1회 수신하면 대화방이 자동으로 등록됩니다. 대화방 이름을 직접 입력할 수도 있습니다.",
-                "카카오톡", rooms > 0, true, (a == null) ? null : new Runnable() {
-                    @Override public void run() { openKakao(a); }
-                }));
 
         if (License.allowed(c, Features.MACRO) && KakaoAccount.ready(c)) {
             Settings s = Settings.load(c);
@@ -239,7 +222,7 @@ public final class Setup {
                 });
     }
 
-    private static void askBattery(final MainActivity a) {
+    public static void askBattery(final MainActivity a) {
         Nav.confirm(a, "배터리 최적화 제외",
                 "다음 창에서 「허용」 을 선택하십시오. 절전 상태에서도 예약 알람이 유지됩니다.",
                 "계속", new Runnable() {

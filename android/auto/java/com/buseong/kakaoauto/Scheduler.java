@@ -18,6 +18,9 @@ import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import com.buseong.kakaoauto.engine.EngineSend;
+import com.buseong.kakaoauto.engine.EngineService;
+
 /**
  * 주기 자동발송 스케줄러 + 라이선스 하트비트 스케줄러.
  *
@@ -144,6 +147,11 @@ public final class Scheduler {
         ensureHeartbeat(c);
 
         Settings.Macro m = macro(c);
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c)
+                && (m == null || !m.notifyReply)) {
+            cancelAlarmOnly(c);
+            return;
+        }
         if (m == null) return;
 
         if (!m.enabled) {
@@ -160,12 +168,25 @@ public final class Scheduler {
         long next = earliestAlarm(m, now);
         setNext(c, m, next);
         arm(c, next);
+        EngineService.sync(c);
     }
 
     /**
      * 발송 알람만 끈다. 예정 시각도 지운다.
      * 하트비트 알람은 <b>건드리지 않는다</b> — 매크로를 껐다고 라이선스 확인을 멈추면 3일 뒤 전부 잠긴다.
      */
+    /** 발송 알람만 끈다. 설정은 건드리지 않는다. 상시 발송 서버가 주기를 맡길 때 쓴다. */
+    private static void cancelAlarmOnly(Context c) {
+        try {
+            AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+            PendingIntent pi = pending(c);
+            if (am != null && pi != null) am.cancel(pi);
+            if (pi != null) pi.cancel();
+        } catch (Throwable t) {
+            Log.add(c, "발송 알람 해제에 실패했습니다. (" + t + ")");
+        }
+    }
+
     public static void cancel(Context ctx) {
         Context c = app(ctx);
         if (c == null) return;
@@ -178,6 +199,7 @@ public final class Scheduler {
         } catch (Throwable t) {
             Log.add(c, "발송 알람 해제에 실패했습니다. (" + t + ")");
         }
+        EngineService.sync(c);
 
         Prefs.putLong(c, K_NEXT, 0L);
         try {
@@ -216,6 +238,11 @@ public final class Scheduler {
         Settings.Macro m = macro(c);
         if (m == null) return;
 
+        if (com.buseong.kakaoauto.engine.SenderSync.blocksPhoneFeatures(c) && !m.notifyReply) {
+            cancelAlarmOnly(c);
+            return;
+        }
+
         if (!m.enabled || !License.allowed(c, Features.MACRO)) {
             cancel(c);
             return;
@@ -224,6 +251,7 @@ public final class Scheduler {
         long at = earliestAlarm(m, System.currentTimeMillis());
         setNext(c, m, at);
         arm(c, at);
+        EngineService.sync(c);
     }
 
     /**
@@ -522,12 +550,17 @@ public final class Scheduler {
             return;
         }
 
-        // 6) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
-        if (!KakaoListener.listenerBound()) {
-            if (KakaoListener.connected(c)) {
-                Log.add(c, "알림 리스너가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
+        // 알림 답장이 켜져 있으면 글만 그 경로로 보낸다. 꺼져 있으면 LOCO 또는 상시 발송이다.
+        List<RoomRef> viaEngine = new ArrayList<RoomRef>();
+        for (int i = 0; i < rooms.size(); i++) {
+            if (EngineSend.macroTarget(c, rooms.get(i), m.notifyReply)) viaEngine.add(rooms.get(i));
+        }
+        rooms = viaEngine;
+        if (rooms.isEmpty()) {
+            if (m.notifyReply) {
+                Log.add(c, "알림 답장으로 확인해서 보낼 대화방이 없습니다. 카카오 계정과 대화방 연결을 확인하십시오.");
             } else {
-                Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
+                Log.add(c, "등록한 카카오 계정으로 보낼 수 있는 대화방이 없습니다. 계정을 등록하고 대화방을 연결하십시오.");
             }
             deferOpenRooms(c, s, now);
             return;
@@ -554,12 +587,13 @@ public final class Scheduler {
             long due = m.dueAt(room);
             if (due > now) continue;
 
-            // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 minNeed 개 이상 쌓인 방에만 보낸다
-            int others = 0;
-            try {
-                others = KakaoListener.othersSinceMine(room);
-            } catch (Throwable t) {
-                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. (" + t + ")");
+            int others = EngineSend.othersSinceMine(c, room, m.notifyReply);
+            if (others < 0) {
+                if (m.notifyReply) {
+                    Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다.");
+                } else {
+                    Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. " + EngineSend.unavailableReason(c, room));
+                }
             }
             if (others < minNeed) {
                 waiting++;
@@ -570,7 +604,10 @@ public final class Scheduler {
 
             boolean sent = false;
             try {
-                sent = KakaoListener.sendTo(c, room, msg);
+                sent = EngineSend.sendMacroText(c, room, msg, m.notifyReply);
+                if (!sent && !m.notifyReply) {
+                    Log.add(c, "「" + label + "」 " + EngineSend.unavailableReason(c, room));
+                }
             } catch (Throwable t) {
                 Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }
@@ -590,13 +627,7 @@ public final class Scheduler {
                 final String imgLabel = label;
                 final boolean wantImages = m.imagesThisTime(seq);
                 try {
-                    if (wantImages && ImageSender.blockedInBackground(c, imgRoom, m.images)) {
-                        // 공유창도 안 뜨고 채팅방 첨부 경로의 재료도 없는 백그라운드 상태다.
-                        // 매 주기 같은 실패를 되풀이하는 대신 텍스트만 보내고 이 사실을 하루 1회만 알린다.
-                        // (images 를 같이 넘기는 이유: 채팅방 첨부 경로는 공유창과 무관하게 동작하므로
-                        //  "공유창 불가 확정" 만으로 이미지를 포기하면 실제로 되는 경로를 스스로 닫는다.)
-                        noteImageSkipped(c, imgLabel);
-                    } else if (wantImages) {
+                    if (wantImages) {
                         // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
                         //   여기서 결과를 기록하지 않으면 사진이 안 갔다는 걸 사용자가 영원히 모른다.
                         ImageSender.sendWithResult(c, imgRoom, m.images, new ImageSender.Done() {

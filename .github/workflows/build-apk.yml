@@ -28,7 +28,21 @@ jobs:
       - name: 안드로이드 SDK 설치
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0'
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;27.2.12479018'
+
+      # 폰 내장 카카오 엔진 번들(esbuild)과 nodejs-mobile 런타임 캐시
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: android/engine/package-lock.json
+
+      - name: 엔진 런타임 캐시
+        uses: actions/cache@v4
+        with:
+          path: android/.cache
+          key: nodejs-mobile-${{ hashFiles('android/engine/build-engine.sh') }}
 
       - name: 빌드 스크립트 실행권한
         run: chmod +x android/build.sh

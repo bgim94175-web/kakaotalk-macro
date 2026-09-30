@@ -48,11 +48,12 @@ public final class Settings {
     public static final int MAX_TRIGGERS = 30;
 
     // ── 이미지 첨부 모드 (SPEC 8.4 A) ─────────────────────────────────────────
-    public static final String IMG_NEVER = "NEVER";      // 안 보냄
+    /** 예전 저장값. 화면에는 없다. 이미지가 있으면 매번으로, 없으면 보내지 않는다. */
+    public static final String IMG_NEVER = "NEVER";
     public static final String IMG_EVERY = "EVERY";      // 매 발송마다
     public static final String IMG_EVERY_N = "EVERY_N";  // N번째 발송마다
     public static final String IMG_MANUAL = "MANUAL";    // 수동 전송만
-    public static final String[] IMG_MODES = { IMG_NEVER, IMG_EVERY, IMG_EVERY_N, IMG_MANUAL };
+    public static final String[] IMG_MODES = { IMG_EVERY, IMG_EVERY_N, IMG_MANUAL };
 
     // ── 자동응답 적용 대상 (SPEC 8.4 B) ───────────────────────────────────────
     public static final String SCOPE_ALL = "ALL";          // 모든 1:1
@@ -169,8 +170,8 @@ public final class Settings {
         public int minMessages = 1;
         /** 다음 알람 시각 (epoch ms). 방별 쿨타임 중 가장 빠른 시각. 0 이면 아직 안 잡힘. */
         public long nextAt = 0L;
-        /** 이미지 첨부 모드 — IMG_* 중 하나 */
-        public String sendImages = IMG_NEVER;
+        /** 이미지 첨부 모드 — IMG_MODES 중 하나. 이미지가 없으면 보내지 않는다. */
+        public String sendImages = IMG_EVERY;
         /** EVERY_N 일 때 몇 번째 발송마다 붙일지 */
         public int imageEveryN = 3;
         /** 첨부 이미지 URI (최대 5장) */
@@ -180,6 +181,11 @@ public final class Settings {
         public String quietTo = "";
         /** 하루 최대 발송 수 */
         public int dailyLimit = 200;
+        /**
+         * 글 매크로만 카카오톡 알림 답장으로 보낸다. 기본은 꺼짐.
+         * 꺼져 있으면 지금처럼 LOCO 또는 상시 발송 서버로 보낸다.
+         */
+        public boolean notifyReply = false;
 
         /** 발송 대상 방 (RoomRef 목록) */
         public List<RoomRef> roomRefs() {
@@ -238,11 +244,11 @@ public final class Settings {
             else roomDueAt.put(room.key(), Long.valueOf(at));
         }
 
-        /** 목록에 보여줄 쿨타임. 방 값이 없으면 기본 간격으로 적는다. */
+        /** 목록에 보여줄 쿨타임. 방 값이 없으면 기본 발송 쿨타임을 쓴다고 적는다. */
         public String cooldownLabel(RoomRef room) {
             int own = cooldownMin(room);
-            if (own > 0) return own + "분";
-            return baseText();
+            if (own > 0) return "이 방 " + own + "분";
+            return "기본 발송 쿨타임 " + baseText();
         }
 
         /** 기본 간격 표시. 예: ~1분 */
@@ -300,12 +306,13 @@ public final class Settings {
         /** 이번 발송(sendCount 번째, 1부터)에 이미지를 붙여야 하나 */
         public boolean imagesThisTime(int sendCount) {
             if (images.isEmpty()) return false;
-            if (IMG_EVERY.equals(sendImages)) return true;
-            if (IMG_EVERY_N.equals(sendImages)) {
+            String mode = IMG_NEVER.equals(sendImages) ? IMG_EVERY : sendImages;
+            if (IMG_EVERY.equals(mode)) return true;
+            if (IMG_EVERY_N.equals(mode)) {
                 int n = (imageEveryN < 1) ? 1 : imageEveryN;
                 return sendCount > 0 && sendCount % n == 0;
             }
-            return false;   // NEVER · MANUAL
+            return false;   // MANUAL
         }
 
         /** 방해금지 시간대인가 (자정 넘김도 처리). 설정이 없으면 항상 false. */
@@ -627,11 +634,52 @@ public final class Settings {
 
     // ── 최상위 필드 ───────────────────────────────────────────────────────────
 
+    /** 방 관리봇. 고른 방에서만 동작하고, 항목마다 켜짐이 따로다. */
+    public static final class GuardCfg {
+        public List<String> rooms = new ArrayList<String>();
+        public boolean presenceOn = false;
+        public int presenceMin = 30;
+        public boolean kickOn = false;
+        public int kickCount = 5;
+        public int kickSecs = 30;
+        public boolean floodOn = false;
+        public int floodCount = 8;
+        public int floodSecs = 10;
+        public int floodSlowSecs = 60;
+        public String floodText = "";
+        public boolean churnOn = false;
+        public int churnCount = 8;
+        public int churnSecs = 20;
+        public int churnQuietSecs = 120;
+        public String churnText = "";
+        public boolean welcomeOn = false;
+        public String welcomeText = "";
+        public boolean noticeOn = false;
+        public String noticeText = "";
+        public int noticeMin = 60;
+
+        public List<RoomRef> roomRefs() { return refsOf(rooms); }
+
+        public void setRoomRefs(List<RoomRef> list) { rooms = keysOf(list); }
+
+        public int enabledCount() {
+            int n = 0;
+            if (presenceOn) n++;
+            if (kickOn) n++;
+            if (floodOn) n++;
+            if (churnOn) n++;
+            if (welcomeOn) n++;
+            if (noticeOn) n++;
+            return n;
+        }
+    }
+
     public Macro macro = new Macro();
     public AutoReplyCfg autoreply = new AutoReplyCfg();
     public List<TriggerCfg> triggers = new ArrayList<TriggerCfg>();
     public RoomBotCfg roombot = new RoomBotCfg();
     public MiniGameCfg minigame = new MiniGameCfg();
+    public GuardCfg guard = new GuardCfg();
 
     /**
      * 대상 카카오톡 계정 키 목록 (듀얼 메신저 등 다중 계정).
@@ -674,6 +722,7 @@ public final class Settings {
 
     /** 리스너 서비스가 알림마다 읽으니까 매번 복호화하지 않고 캐시한다 */
     private static volatile Settings cached;
+    private static volatile String cachedFor;
 
     /** 기본값 인스턴스 */
     public static Settings defaults() {
@@ -683,6 +732,44 @@ public final class Settings {
     /** 캐시를 버린다. 다른 곳에서 설정을 갈아치웠거나 설정키가 바뀌었으면 호출. */
     public static void invalidate() {
         cached = null;
+        cachedFor = null;
+    }
+
+    /** 지금 고른 카카오 계정의 설정 슬롯. */
+    public static String slotName(Context c) {
+        String id = KakaoSlots.selectedId(c);
+        if (id == null || id.length() == 0) return SLOT;
+        return SLOT + "." + id;
+    }
+
+    /** 계정을 바꾸기 전의 설정 파일을 그 계정 슬롯으로 옮긴다. 옛 키는 지우지 않는다. */
+    public static void adoptLegacy(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        String key = SLOT + "." + slotId;
+        String have = Prefs.secGet(c, key);
+        if (have != null && have.length() > 0) return;
+        String old = Prefs.secGet(c, SLOT);
+        if (old != null && old.length() > 0) Prefs.secPut(c, key, old);
+    }
+
+    public static void dropSlot(Context c, String slotId) {
+        if (c == null || slotId == null || slotId.length() == 0) return;
+        try { Prefs.secRemove(c, SLOT + "." + slotId); } catch (Throwable ignore) { }
+    }
+
+    /** 화면 캐시를 건드리지 않고 그 계정의 설정만 읽는다. */
+    public static Settings readSlot(Context c, String slotId) {
+        String sel = KakaoSlots.selectedId(c);
+        if (slotId != null && slotId.equals(sel)) return load(c);
+        String key = (slotId == null || slotId.length() == 0) ? SLOT : (SLOT + "." + slotId);
+        try {
+            String raw = Prefs.secGet(c, key);
+            if (raw != null && raw.length() > 0) {
+                Settings out = fromJson(raw);
+                if (out != null) return out;
+            }
+        } catch (Throwable ignore) { }
+        return defaults();
     }
 
     /**
@@ -690,14 +777,16 @@ public final class Settings {
      * 암호화 설정이 없고 v1.8 평문 설정이 남아있으면 그걸 옮겨온다.
      */
     public static Settings load(Context c) {
+        String slot = (c == null) ? SLOT : slotName(c);
         Settings s = cached;
-        if (s != null) return s;
+        if (s != null && slot.equals(cachedFor)) return s;
         if (c == null) return defaults();
         synchronized (Settings.class) {
-            if (cached != null) return cached;
+            if (cached != null && slot.equals(cachedFor)) return cached;
             Settings out = null;
             try {
-                String raw = Prefs.secGet(c, SLOT);
+                String raw = Prefs.secGet(c, slot);
+                if ((raw == null || raw.length() == 0) && !SLOT.equals(slot)) raw = Prefs.secGet(c, SLOT);
                 if (raw != null && raw.length() > 0) {
                     out = fromJson(raw);
                     if (out == null) Log.add(c, "설정 파일이 손상되어 기본값으로 시작합니다.");
@@ -708,6 +797,7 @@ public final class Settings {
             }
             if (out == null) out = migrate(c);
             cached = out;
+            cachedFor = slot;
             return out;
         }
     }
@@ -743,12 +833,15 @@ public final class Settings {
                 return false;
             }
             String json = toJson();
-            Prefs.secPut(c, SLOT, json);
-            String back = Prefs.secGet(c, SLOT);
+            String slot = slotName(c);
+            Prefs.secPut(c, slot, json);
+            cachedFor = slot;
+            String back = Prefs.secGet(c, slot);
             if (back == null || !back.equals(json)) {
                 Log.add(c, "설정 저장을 확인하지 못했습니다. 다시 저장하십시오.");
                 return false;
             }
+            try { com.buseong.kakaoauto.engine.SenderSync.onSettingsSaved(c); } catch (Throwable ignore) { }
             return true;
         } catch (Throwable t) {
             Log.add(c, "설정 저장에 실패했습니다. (" + t + ")");
@@ -761,6 +854,7 @@ public final class Settings {
         Settings s = cached;
         if (s == null) s = load(c);
         if (s != null) s.save(c);
+        try { com.buseong.kakaoauto.engine.LocoInbox.ensure(c); } catch (Throwable ignore) { }
     }
 
     /** 라이선스 인증 직후 호출: 설정키가 생겼으니 옛 평문 설정을 옮기고 암호화 저장해둔다. */
@@ -833,6 +927,7 @@ public final class Settings {
             m.put("quietFrom", macro.quietFrom);
             m.put("quietTo", macro.quietTo);
             m.put("dailyLimit", macro.dailyLimit);
+            m.put("notifyReply", macro.notifyReply);
             m.put("roomCooldownMin", intMap(macro.roomCooldownMin));
             m.put("roomDueAt", longMap(macro.roomDueAt));
             m.put("roomLastSent", longMap(macro.roomLastSent));
@@ -906,6 +1001,30 @@ public final class Settings {
             g.put("dailyLimit", minigame.dailyLimit);
             o.put("minigame", g);
 
+            JSONObject gd = new JSONObject();
+            gd.put("rooms", arr(guard.rooms));
+            gd.put("presenceOn", guard.presenceOn);
+            gd.put("presenceMin", guard.presenceMin);
+            gd.put("kickOn", guard.kickOn);
+            gd.put("kickCount", guard.kickCount);
+            gd.put("kickSecs", guard.kickSecs);
+            gd.put("floodOn", guard.floodOn);
+            gd.put("floodCount", guard.floodCount);
+            gd.put("floodSecs", guard.floodSecs);
+            gd.put("floodSlowSecs", guard.floodSlowSecs);
+            gd.put("floodText", guard.floodText);
+            gd.put("churnOn", guard.churnOn);
+            gd.put("churnCount", guard.churnCount);
+            gd.put("churnSecs", guard.churnSecs);
+            gd.put("churnQuietSecs", guard.churnQuietSecs);
+            gd.put("churnText", guard.churnText);
+            gd.put("welcomeOn", guard.welcomeOn);
+            gd.put("welcomeText", guard.welcomeText);
+            gd.put("noticeOn", guard.noticeOn);
+            gd.put("noticeText", guard.noticeText);
+            gd.put("noticeMin", guard.noticeMin);
+            o.put("guard", gd);
+
             return o.toString();
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "설정 직렬화 실패", t);
@@ -944,12 +1063,15 @@ public final class Settings {
             }
             s.macro.minMessages = clamp(m.optInt("minMessages", s.macro.minMessages), 0, 999);
             s.macro.nextAt = m.optLong("nextAt", s.macro.nextAt);
-            s.macro.sendImages = oneOf(str(m, "sendImages", s.macro.sendImages), IMG_MODES, IMG_NEVER);
+            String imgMode = str(m, "sendImages", s.macro.sendImages);
+            if (IMG_NEVER.equals(imgMode)) imgMode = IMG_EVERY;
+            s.macro.sendImages = oneOf(imgMode, IMG_MODES, IMG_EVERY);
             s.macro.imageEveryN = clamp(m.optInt("imageEveryN", s.macro.imageEveryN), 1, 99);
             s.macro.images = clampStrings(list(m, "images"), MAX_IMAGES);
             s.macro.quietFrom = hhmmOrEmpty(str(m, "quietFrom", ""));
             s.macro.quietTo = hhmmOrEmpty(str(m, "quietTo", ""));
             s.macro.dailyLimit = clamp(m.optInt("dailyLimit", s.macro.dailyLimit), 0, 9999);
+            s.macro.notifyReply = m.optBoolean("notifyReply", false);
             readIntMap(m, "roomCooldownMin", s.macro.roomCooldownMin);
             readLongMap(m, "roomDueAt", s.macro.roomDueAt);
             readLongMap(m, "roomLastSent", s.macro.roomLastSent);
@@ -1025,6 +1147,31 @@ public final class Settings {
             s.minigame.quiz = g.optBoolean("quiz", s.minigame.quiz);
             s.minigame.cooldownMs = Math.max(0L, g.optLong("cooldownMs", s.minigame.cooldownMs));
             s.minigame.dailyLimit = clamp(g.optInt("dailyLimit", s.minigame.dailyLimit), 0, 9999);
+        }
+
+        JSONObject gd = o.optJSONObject("guard");
+        if (gd != null) {
+            s.guard.rooms = list(gd, "rooms");
+            s.guard.presenceOn = gd.optBoolean("presenceOn", s.guard.presenceOn);
+            s.guard.presenceMin = clamp(gd.optInt("presenceMin", s.guard.presenceMin), 10, 240);
+            s.guard.kickOn = gd.optBoolean("kickOn", s.guard.kickOn);
+            s.guard.kickCount = clamp(gd.optInt("kickCount", s.guard.kickCount), 3, 30);
+            s.guard.kickSecs = clamp(gd.optInt("kickSecs", s.guard.kickSecs), 5, 300);
+            s.guard.floodOn = gd.optBoolean("floodOn", s.guard.floodOn);
+            s.guard.floodCount = clamp(gd.optInt("floodCount", s.guard.floodCount), 3, 50);
+            s.guard.floodSecs = clamp(gd.optInt("floodSecs", s.guard.floodSecs), 3, 120);
+            s.guard.floodSlowSecs = clamp(gd.optInt("floodSlowSecs", s.guard.floodSlowSecs), 10, 600);
+            s.guard.floodText = str(gd, "floodText", s.guard.floodText);
+            s.guard.churnOn = gd.optBoolean("churnOn", s.guard.churnOn);
+            s.guard.churnCount = clamp(gd.optInt("churnCount", s.guard.churnCount), 3, 50);
+            s.guard.churnSecs = clamp(gd.optInt("churnSecs", s.guard.churnSecs), 5, 300);
+            s.guard.churnQuietSecs = clamp(gd.optInt("churnQuietSecs", s.guard.churnQuietSecs), 30, 600);
+            s.guard.churnText = str(gd, "churnText", s.guard.churnText);
+            s.guard.welcomeOn = gd.optBoolean("welcomeOn", s.guard.welcomeOn);
+            s.guard.welcomeText = str(gd, "welcomeText", s.guard.welcomeText);
+            s.guard.noticeOn = gd.optBoolean("noticeOn", s.guard.noticeOn);
+            s.guard.noticeText = str(gd, "noticeText", s.guard.noticeText);
+            s.guard.noticeMin = clamp(gd.optInt("noticeMin", s.guard.noticeMin), 5, 1440);
         }
         return s;
     }

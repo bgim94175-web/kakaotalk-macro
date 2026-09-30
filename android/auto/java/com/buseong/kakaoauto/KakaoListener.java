@@ -14,6 +14,11 @@ import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 
+import com.buseong.kakaoauto.engine.RoomKind;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -25,9 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 카톡 알림을 읽어서 (1) 방별 RemoteInput 세션을 기억하고 (2) 트리거·자동응답·봇으로 넘긴다.
  *
- * 이 앱이 카톡에 글을 쓸 수 있는 유일한 통로가 알림의 RemoteInput(답장창)이다.
- * 그래서 **그 방의 카톡 알림이 최근에 한 번은 와야** 발송이 가능하다. 세션은 메모리에만 두고,
- * 앱(프로세스)이 죽으면 사라진다 — 카톡 알림이 다시 오면 저절로 복구되니까 그게 정상 동작이다.
+ * 글 매크로는 설정이 켜져 있을 때만 알림 답장으로 넣는다. 그 외 발송은 등록한 카카오 계정이다.
+ * 답장 세션은 그 방 알림이 한 번은 와야 생긴다. 세션은 메모리에만 두고,
+ * 앱(프로세스)이 죽으면 사라진다 — 카톡 알림이 다시 오면 저절로 복구된다.
  *
  * 규칙 두 개만 지킨다.
  *   1) onNotificationPosted 안에서 절대 블로킹하지 않는다 → 파싱/세션갱신만 하고 나머지는 BG 스레드로 넘긴다.
@@ -39,7 +44,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code RoomRef.parse()} 로 위임하고, 기본 계정에서 못 찾으면 이름이 유일할 때만 다른 계정도 뒤진다.
  *
  * 다른 클래스가 쓰는 공개 API
- *   boolean        sendTo(ctx, ref|room, text)   — 그 방으로 발송 (Scheduler·Trigger·AutoReply·봇이 호출)
+ *   boolean        queueReply(ctx, ref, text)    — 매크로 글을 알림 답장에 넣기 (접수만, 성공 아님)
+ *   boolean        sendTo(ctx, ref|room, text)   — 쓰지 않음. 항상 false
  *   Set&lt;String&gt; imageTypesFor(ref|room)     — 그 방 답장창이 받아주는 사진 MIME (비었으면 사진 첨부 불가)
  *   boolean        sendImageTo(ctx, ref|room, uri) — 답장창에 사진 한 장 실어 보내기 (ImageSender 가 호출)
  *   PendingIntent  openIntentFor(ref|room)        — 그 대화방을 여는 인텐트 (카톡 알림의 contentIntent)
@@ -144,6 +150,8 @@ public final class KakaoListener extends NotificationListenerService {
         public volatile java.util.Set<String> dataTypes = java.util.Collections.emptySet();
         /** 내가 이 방으로 마지막으로 보낸 시각 */
         public volatile long lastMine;
+        /** 알림 답장을 넣었지만 카카오 메시지 번호는 아직 없는 시각 */
+        public volatile long lastQueuedAt;
         /** 내 마지막 발송 뒤 남이 올린 메시지 수 */
         public volatile int othersSinceMine;
         /** 이 방 알림을 마지막으로 본 시각 */
@@ -221,6 +229,47 @@ public final class KakaoListener extends NotificationListenerService {
     private static final ConcurrentHashMap<String, String> SELF =
             new ConcurrentHashMap<String, String>();
 
+    /**
+     * 알림이 알려준 이 폰 카카오톡의 표시 이름. 계정키 → 이름.
+     * 등록 계정·상시 발송과는 따로 둔다. 이름이 없으면 넣지 않는다.
+     */
+    private static final String K_PHONE = "K_PHONE_KAKAO";
+    private static final String K_PHONE_REPLY = "K_PHONE_REPLY";
+    private static final LinkedHashMap<String, String> PHONE = new LinkedHashMap<String, String>();
+    private static boolean phoneLoaded = false;
+    /** 알림이 가장 최근에 알려준 계정. 알림 답장은 이 계정으로 나간다. */
+    private static String replyAcc = "";
+    private static volatile KakaoListener LIVE;
+
+    /** 답장 액션이 있던 알림 방. LOCO 방 목록과 따로 둔다. */
+    private static final String K_NOTIFY_ROOMS = "K_NOTIFY_ROOMS";
+    private static final LinkedHashMap<String, NRoom> NOTIFY = new LinkedHashMap<String, NRoom>();
+    private static boolean notifyLoaded = false;
+
+    private static final class NRoom {
+        RoomRef ref;
+        boolean group;
+        String listKind = RoomKind.NORMAL;
+        long lastAt;
+    }
+
+    /** 보낼 방에 뿌리는 알림 감지 방. 답장 가능 여부는 지금 세션으로 계산한다. */
+    public static final class NotifyRoom {
+        public final RoomRef ref;
+        public final boolean group;
+        public final String listKind;
+        public final long lastAt;
+        public final boolean replyable;
+
+        NotifyRoom(RoomRef ref, boolean group, String listKind, long lastAt, boolean replyable) {
+            this.ref = ref;
+            this.group = group;
+            this.listKind = listKind == null ? RoomKind.NORMAL : listKind;
+            this.lastAt = lastAt;
+            this.replyable = replyable;
+        }
+    }
+
     /** 리스너가 시스템에 붙어 있는지 (메모리 플래그 — 프로세스 죽으면 false 로 돌아간다) */
     private static volatile boolean bound = false;
 
@@ -264,8 +313,15 @@ public final class KakaoListener extends NotificationListenerService {
     @Override
     public void onCreate() {
         super.onCreate();
+        LIVE = this;
         APP = getApplicationContext();
         loadRooms(APP);
+    }
+
+    @Override
+    public void onDestroy() {
+        if (LIVE == this) LIVE = null;
+        super.onDestroy();
     }
 
     @Override
@@ -274,6 +330,7 @@ public final class KakaoListener extends NotificationListenerService {
         bound = true;
         APP = getApplicationContext();
         loadRooms(APP);
+        noteActivePhones();
         Log.add(APP, "알림 접근 권한이 연결되었습니다. 카카오톡 알림 감지를 시작합니다.");
     }
 
@@ -346,7 +403,9 @@ public final class KakaoListener extends NotificationListenerService {
 
         final Msg m = parse(ex, sbn.getPostTime(), shortcutLabel, acc);
         if (m == null) return;
-        if (m.room.length() == 0 || m.text.length() == 0) return;
+        final Context seen = ctxOrApp();
+        notePhone(seen, m.acc, m.selfName);
+        if (m.room.length() == 0) return;
 
         // 세션 갱신 (여기까지는 아주 싸다 — 메인 스레드에서 해도 된다)
         final String skey = m.ref.key();
@@ -365,7 +424,9 @@ public final class KakaoListener extends NotificationListenerService {
             s.dataTypes = r.dataTypes;
             // 사진을 알림 답장으로 보낼 수 있나 — 이 앱이 살아있는 동안 딱 한 번만 알려준다
             probeImageOnce(ctxOrApp(), r.dataTypes);
+            if (m.roomTrusted) noteNotifyRoom(seen, m, n);
         }
+        if (m.text.length() == 0) return;
         // 대화방 열기 인텐트. 새 알림에 없으면 이전에 받아둔 것을 그대로 둔다 —
         // 쓸 수 있는 인텐트를 null 로 덮는 건 손실뿐이다.
         try {
@@ -419,66 +480,8 @@ public final class KakaoListener extends NotificationListenerService {
 
     /** 트리거 / 자동응답 / 봇으로 넘긴다. BG 스레드에서만 호출된다. */
     private static void dispatch(Context ctx, Msg m) {
-        // 계정 레지스트리 갱신 (Prefs 를 쓰니까 알림 콜백이 아니라 여기서 한다)
-        try {
-            Accounts.seen(ctx, m.acc, m.selfName);
-        } catch (Throwable t) {
-            Log.add(ctx, "카카오톡 계정 기록 중 오류: " + t);
-        }
-
-        // 판정 근거 로그는 여기서 남긴다 (Log.add 가 Prefs 를 동기로 쓰니까 메인 스레드에서 안 부른다)
-        whyLog(ctx, m);
-
-        // 매크로(트리거·자동응답)
-        try {
-            if (License.allowed(ctx, Features.MACRO)) {
-                try {
-                    // 그룹 여부·내 메시지 여부를 여기서 이미 판정했으니 둘 다 넘긴다
-                    Trigger.onMessage(ctx, m.ref, m.sender, m.text, m.group, m.fromMe);
-                } catch (Throwable t) {
-                    Log.add(ctx, "경쟁사 저격 처리 중 오류: " + t);
-                }
-                // 자동응답은 1:1 전용이다. 여기서 group==false 를 한 번 더 확인한다.
-                if (!m.group && !m.fromMe && safeForAutoReply(ctx, m)) {
-                    try {
-                        AutoReply.onDirectMessage(ctx, m.ref, m.sender, m.text);
-                    } catch (Throwable t) {
-                        Log.add(ctx, "자동응답 처리 중 오류: " + t);
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            Log.add(ctx, "매크로 사용 권한 확인 실패: " + t);
-        }
-
-        // 봇은 내 메시지에 반응하면 자기 말에 자기가 답하는 루프가 생긴다 → 내 메시지는 안 넘긴다
-        if (!m.fromMe) {
-            try {
-                if (License.allowed(ctx, Features.ROOMBOT)) {
-                    RoomBot.onMessage(ctx, m.ref, m.sender, m.text, m.group);
-                }
-            } catch (Throwable t) {
-                Log.add(ctx, "대화방 관리봇 처리 중 오류: " + t);
-            }
-            try {
-                if (License.allowed(ctx, Features.MINIGAME)) {
-                    MiniGame.onMessage(ctx, m.ref, m.sender, m.text, m.group);
-                }
-            } catch (Throwable t) {
-                Log.add(ctx, "미니게임봇 처리 중 오류: " + t);
-            }
-        }
-
-        // 방 캐시는 **디스패치 뒤에** 넣는다.
-        // 자동응답의 "모르는 사람만" 판정이 isKnownRoom() 을 쓰기 때문에,
-        // 먼저 캐시하면 처음 온 사람도 이미 아는 방으로 잡혀서 판정이 항상 거짓이 된다.
-        // 방 목록(방 관리 화면)에는 **믿을 수 있는 방 이름만** 넣는다.
-        // 단체방인데 title 밖에 못 읽은 경우를 넣으면 목록에 멤버 이름이 쌓인다.
-        if (m.roomTrusted) {
-            remember(ctx, m.ref, m.group, m.at);
-        } else {
-            roomSrcWarn(ctx, m);
-        }
+        // 수신·발송·계정 자동 연결은 등록된 카카오 계정의 LOCO 세션만 쓴다.
+        // 알림으로 계정을 만들거나 기능을 돌리지 않는다.
     }
 
     // ── 파싱 ──────────────────────────────────────────────────────────────────
@@ -577,10 +580,7 @@ public final class KakaoListener extends NotificationListenerService {
         m.roomTrusted = !"title".equals(roomSrc);
 
         // 내 표시이름 (내 메시지 판정에 쓴다). 계정마다 프로필 이름이 다르니 계정별로 기억한다.
-        String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
-        if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
-            me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
-        }
+        String me = selfFrom(ex);
         if (me.length() > 0) {
             selfName = me;
             SELF.put(m.acc, me);
@@ -1129,12 +1129,18 @@ public final class KakaoListener extends NotificationListenerService {
      * 우리가 확인할 방법이 없다. 그래서 호출자가 어느 경로로 보냈는지 로그에 꼭 남겨야 한다.
      */
     public static boolean sendImageTo(Context ctx, String room, Uri uri) {
-        return sendImageTo(ctx, RoomRef.parse(room), uri, lookup(room));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 이미지를 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     /** 계정까지 지정해서 보내는 버전 */
     public static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri) {
-        return sendImageTo(ctx, ref, uri, findSession(ref, false));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 이미지를 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     private static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri, Session s) {
@@ -1350,9 +1356,40 @@ public final class KakaoListener extends NotificationListenerService {
         return v.replaceAll("\\s+", "").toLowerCase(java.util.Locale.KOREA);
     }
 
-    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 구버전 저장값 호환용이다. */
+    /**
+     * 매크로 글만 그 방의 카카오톡 알림 답장에 넣는다.
+     * true 는 카카오톡이 답장을 접수했다는 뜻이다. 카카오 메시지 번호가 없으므로 발송 성공이 아니다.
+     */
+    public static boolean queueReply(Context ctx, RoomRef ref, String text) {
+        if (ctx == null) return false;
+        if (ref == null || !ref.valid()) {
+            Log.add(ctx, "발송 실패: 방이 지정되지 않았습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        if (!isPhoneAccount(ctx, ref.acc) && !accountAllowed(ctx, ref.acc)) {
+            Log.add(ctx, "발송 취소: " + ref.label(ctx)
+                    + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        final String r = ref.label(ctx);
+        if (text == null || text.trim().length() == 0) {
+            Log.add(ctx, "발송 실패: 「" + r + "」 발송할 내용이 비어 있습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        Session s = session(ref);
+        if (!live(s) || !bound) {
+            Log.add(ctx, "「" + r + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
+            return false;
+        }
+        return enqueue(ctx, r, text, s);
+    }
+
+    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 알림 답장 발송은 매크로 스위치만 쓴다. */
     public static boolean sendTo(Context ctx, String room, String text) {
-        return sendTo(ctx, RoomRef.parse(room), text, lookup(room));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
     /**
@@ -1365,38 +1402,18 @@ public final class KakaoListener extends NotificationListenerService {
      * (여러 계정에 같은 이름이 있으면 findSession 이 null 을 돌려주므로 오발송은 없다).
      */
     public static boolean sendTo(Context ctx, RoomRef ref, String text) {
-        boolean crossAcc = (ref != null && ref.isDefault());
-        return sendTo(ctx, ref, text, findSession(ref, crossAcc));
+        if (ctx != null) {
+            Log.add(ctx, "알림 답장으로는 보내지 않습니다. 등록한 카카오 계정으로만 발송합니다.");
+        }
+        return false;
     }
 
-    private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
-        if (ref == null || !ref.valid()) {
-            Log.add(ctx, "발송 실패: 방이 지정되지 않았습니다.");
-            return false;
-        }
-        // 계정 사용 여부는 여기 한 곳에서만 검사한다.
-        // 엔진마다 흩어놓으면 빠지는 경로가 생긴다 — 실제로 경쟁사 저격의 '다른 대화방으로 발송'
-        // 경로가 수신 대화방만 검사하고 발송 대상 계정은 검사하지 않아 미사용 계정으로 나갔다.
-        if (!accountAllowed(ctx, ref.acc)) {
-            Log.add(ctx, "발송 취소: " + ref.label(ctx) + " — 해당 카카오톡 계정이 사용 대상에서 제외되어 있습니다.");
-            return false;
-        }
-        final String r = ref.label(ctx);
-        if (text == null || text.trim().length() == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 발송할 내용이 비어 있습니다.");
-            return false;
-        }
+    /** 답장 인텐트만 넣는다. 발송 완료로 적지 않고, 마지막 발송 시각도 올리지 않는다. */
+    private static boolean enqueue(Context ctx, String label, String text, Session s) {
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 대화방 세션이 없습니다. "
-                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+            Log.add(ctx, "「" + label + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
             return false;
         }
-        if (!bound) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 알림 접근 권한이 비활성 상태입니다. "
-                    + "설정에서 권한을 허용하십시오.");
-            return false;
-        }
-
         PendingIntent pi = s.pending;
         RemoteInput[] inputs = s.inputs;
         try {
@@ -1409,39 +1426,24 @@ public final class KakaoListener extends NotificationListenerService {
                 results.putCharSequence(key, text);
             }
             if (results.isEmpty()) {
-                Log.add(ctx, "발송 실패: 「" + r + "」 답장 입력란을 찾지 못했습니다.");
+                Log.add(ctx, "「" + label + "」 답장 입력란을 찾지 못했습니다. 발송으로 세지 않았습니다.");
                 return false;
             }
             RemoteInput.addResultsToIntent(inputs, filled, results);
             if (Build.VERSION.SDK_INT >= 28) {
-                // 카톡이 "사람이 직접 입력한 답장"으로 인식하게 출처를 붙인다
                 RemoteInput.setResultsSource(filled, RemoteInput.SOURCE_FREE_FORM_INPUT);
             }
             pi.send(ctx, 0, filled);
-
-            long now = System.currentTimeMillis();
-            s.lastMine = now;
-            s.othersSinceMine = 0;
-            s.lastSentText = text;
-            Log.add(ctx, "「" + r + "」 발송 완료: " + preview(text));
             return true;
         } catch (PendingIntent.CanceledException e) {
-            // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
             s.pending = null;
             s.inputs = null;
-            Log.add(ctx, "발송 실패: 「" + r + "」 답장창이 만료되었습니다. "
-                    + "카카오톡 알림이 다시 수신되면 복구됩니다.");
+            Log.add(ctx, "「" + label + "」에 답장할 카카오톡 알림이 없습니다. 발송으로 세지 않았습니다.");
             return false;
         } catch (Throwable t) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 " + t);
+            Log.add(ctx, "「" + label + "」 알림 답장을 넣지 못했습니다. 발송으로 세지 않았습니다.");
             return false;
         }
-    }
-
-    private static String preview(String text) {
-        String one = text.replace('\n', ' ').replace('\r', ' ').trim();
-        if (one.length() <= 24) return one;
-        return one.substring(0, 24) + "…";
     }
 
     // ── 조회용 API ────────────────────────────────────────────────────────────
@@ -1533,6 +1535,339 @@ public final class KakaoListener extends NotificationListenerService {
             if (live(s)) out.add(s.ref);
         }
         return out;
+    }
+
+    /**
+     * 지금 떠 있는 카카오톡 알림에서 이 폰의 표시 이름만 읽는다.
+     * 계정 등록이나 발송에는 쓰지 않는다.
+     */
+    public static void capturePhoneAccounts() {
+        KakaoListener svc = LIVE;
+        if (svc == null || !bound) return;
+        svc.noteActivePhones();
+    }
+
+    /**
+     * 알림이 알려준 이름 중, 알림 답장으로 나가는 계정.
+     * 알림이 이름을 준 적이 없으면 "". 순번이나 기본 계정으로 채우지 않는다.
+     */
+    public static String phoneAccountLine(Context c) {
+        capturePhoneAccounts();
+        synchronized (PHONE) {
+            loadPhone(c);
+            String k = replyKeyLocked();
+            if (k == null) return "";
+            String name = PHONE.get(k);
+            return (name == null) ? "" : name;
+        }
+    }
+
+    /** 알림 답장에 쓸 방. 그 방 알림의 계정이면 그대로, 아니면 감지된 폰 계정으로 돌린다. */
+    public static RoomRef replyTarget(Context c, RoomRef ref) {
+        if (c == null || ref == null || !ref.valid()) return null;
+        synchronized (PHONE) {
+            loadPhone(c);
+            if (named(ref.acc)) return ref;
+            String k = replyKeyLocked();
+            if (k == null) return null;
+            return RoomRef.of(k, ref.name);
+        }
+    }
+
+    /** 알림이 이름을 알려준 폰 계정인가. 등록 계정 목록과는 별개다. */
+    public static boolean isPhoneAccount(Context c, String acc) {
+        if (c == null || acc == null) return false;
+        synchronized (PHONE) {
+            loadPhone(c);
+            return named(acc.trim());
+        }
+    }
+
+    private static boolean named(String acc) {
+        if (acc == null || acc.length() == 0) return false;
+        String n = PHONE.get(acc);
+        return n != null && n.length() > 0;
+    }
+
+    /** PHONE 잠금 안에서. 이름이 있는 감지 계정만. */
+    private static String replyKeyLocked() {
+        if (named(replyAcc)) return replyAcc;
+        String last = null;
+        Iterator<Map.Entry<String, String>> it = PHONE.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, String> e = it.next();
+            if (e.getValue() != null && e.getValue().length() > 0) last = e.getKey();
+        }
+        return last;
+    }
+
+    private void noteActivePhones() {
+        StatusBarNotification[] all;
+        try { all = getActiveNotifications(); } catch (Throwable t) { return; }
+        if (all == null) return;
+        Context ctx = ctxOrApp();
+        for (int i = 0; i < all.length; i++) {
+            StatusBarNotification sbn = all[i];
+            if (sbn == null || !KAKAO.equals(sbn.getPackageName())) continue;
+            Notification n = sbn.getNotification();
+            if (n == null || n.extras == null) continue;
+            if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+            if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) continue;
+            String acc = Accounts.keyOf(sbn);
+            notePhone(ctx, acc, selfFrom(n.extras));
+            String shortcut = "";
+            try { shortcut = shortcutLabel(sbn); } catch (Throwable ignore) { }
+            Msg m = parse(n.extras, sbn.getPostTime(), shortcut, acc);
+            if (m == null || m.room.length() == 0 || !m.roomTrusted) continue;
+            Reply reply = findReply(n);
+            if (reply == null) continue;
+            Session s = SESSIONS.get(m.ref.key());
+            if (s == null) {
+                Session fresh = new Session(m.ref);
+                Session prev = SESSIONS.putIfAbsent(m.ref.key(), fresh);
+                s = (prev != null) ? prev : fresh;
+            }
+            s.pending = reply.pending;
+            s.inputs = reply.inputs;
+            s.dataTypes = reply.dataTypes;
+            s.lastAt = m.at;
+            noteNotifyRoom(ctx, m, n);
+        }
+    }
+
+    /** 알림이 준 이름만 기억한다. 비어 있으면 무시하고, 등록 계정 목록에는 넣지 않는다. */
+    private static void notePhone(Context ctx, String acc, String name) {
+        if (ctx == null || name == null) return;
+        String n = name.trim();
+        if (n.length() == 0) return;
+        String k = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
+        boolean changed;
+        synchronized (PHONE) {
+            loadPhone(ctx);
+            changed = !n.equals(PHONE.get(k)) || !k.equals(replyAcc);
+            PHONE.remove(k);
+            PHONE.put(k, n);
+            replyAcc = k;
+            if (!changed) return;
+            savePhone(ctx);
+            Prefs.putStr(ctx, K_PHONE_REPLY, k);
+        }
+        SELF.put(k, n);
+        selfName = n;
+        Log.add(ctx, "폰 카카오톡 계정을 알림에서 감지했습니다: " + n + ". 알림 답장은 이 계정으로 나갑니다.");
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                try { ScreenMacro.refresh(); } catch (Throwable ignore) { }
+            }
+        });
+    }
+
+    private static String selfFrom(Bundle ex) {
+        String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
+        if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
+            me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
+        }
+        return me;
+    }
+
+    private static void loadPhone(Context c) {
+        if (phoneLoaded || c == null) return;
+        phoneLoaded = true;
+        String raw = Prefs.getStr(c, K_PHONE, "");
+        if (raw == null || raw.length() == 0) return;
+        try {
+            JSONObject o = new JSONObject(raw);
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                String n = o.optString(k, "").trim();
+                if (k == null || k.length() == 0 || n.length() == 0) continue;
+                PHONE.put(k, n);
+                SELF.put(k, n);
+                selfName = n;
+            }
+            if (!named(replyAcc)) {
+                String saved = Prefs.getStr(c, K_PHONE_REPLY, "");
+                if (named(saved)) replyAcc = saved;
+            }
+        } catch (Throwable ignore) { }
+    }
+
+    private static void savePhone(Context c) {
+        JSONObject o = new JSONObject();
+        try {
+            Iterator<Map.Entry<String, String>> it = PHONE.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, String> e = it.next();
+                if (e.getKey() == null || e.getValue() == null || e.getValue().length() == 0) continue;
+                o.put(e.getKey(), e.getValue());
+            }
+        } catch (Throwable ignore) { }
+        Prefs.putStr(c, K_PHONE, o.toString());
+    }
+
+    /** 답장 액션이 있는 알림 방을 보낼 방 목록에 올린다. LOCO 연결은 만들지 않는다. */
+    private static void noteNotifyRoom(Context ctx, Msg m, Notification n) {
+        if (ctx == null || m == null || !m.ref.valid() || n == null) return;
+        String kind = notifyListKind(n, m.group);
+        boolean fresh;
+        synchronized (NOTIFY) {
+            loadNotify(ctx);
+            NRoom have = NOTIFY.get(m.ref.key());
+            fresh = (have == null);
+            if (have != null && kind.equals(have.listKind) && have.group == m.group) {
+                have.lastAt = m.at;
+                return;
+            }
+            NRoom r = new NRoom();
+            r.ref = m.ref;
+            r.group = m.group;
+            r.listKind = kind;
+            r.lastAt = m.at > 0 ? m.at : System.currentTimeMillis();
+            NOTIFY.remove(m.ref.key());
+            NOTIFY.put(m.ref.key(), r);
+            while (NOTIFY.size() > MAX_ROOMS) {
+                Iterator<String> it = NOTIFY.keySet().iterator();
+                if (!it.hasNext()) break;
+                it.next();
+                it.remove();
+            }
+            saveNotify(ctx);
+        }
+        if (!fresh) return;
+        Log.add(ctx, "「" + m.ref.name + "」을 알림에서 감지했습니다. " + kindLabel(kind) + "에 표시합니다.");
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                try { ScreenRooms.refresh(); } catch (Throwable ignore) { }
+            }
+        });
+    }
+
+    public static List<NotifyRoom> notifyRooms(Context c) {
+        ArrayList<NotifyRoom> out = new ArrayList<NotifyRoom>();
+        synchronized (NOTIFY) {
+            loadNotify(c);
+            Iterator<NRoom> it = NOTIFY.values().iterator();
+            while (it.hasNext()) {
+                NRoom r = it.next();
+                if (r == null || r.ref == null || !r.ref.valid()) continue;
+                out.add(new NotifyRoom(r.ref, r.group, r.listKind, r.lastAt, hasSession(r.ref)));
+            }
+        }
+        return out;
+    }
+
+    public static boolean isNotifyRoom(Context c, RoomRef ref) {
+        if (c == null || ref == null || !ref.valid()) return false;
+        synchronized (NOTIFY) {
+            loadNotify(c);
+            return NOTIFY.containsKey(ref.key());
+        }
+    }
+
+    /** 같은 글을 방금 넣었으면 다시 넣지 않는다. 메시지 번호가 없어도 두 번 보내지 않기 위해서다. */
+    public static boolean queuedRecently(RoomRef ref, String text) {
+        Session s = session(ref);
+        if (s == null || text == null) return false;
+        if (s.lastQueuedAt <= 0 || System.currentTimeMillis() - s.lastQueuedAt > 180000L) return false;
+        return text.equals(s.lastSentText);
+    }
+
+    /** 답장을 넣었다는 표시만 한다. 발송 성공으로 세지 않는다. */
+    public static void noteQueued(RoomRef ref, String text) {
+        Session s = session(ref);
+        if (s == null) return;
+        s.lastSentText = text == null ? "" : text;
+        s.lastMine = System.currentTimeMillis();
+        s.lastQueuedAt = s.lastMine;
+        s.othersSinceMine = 0;
+    }
+
+    private static String notifyListKind(Notification n, boolean group) {
+        Bundle ex = n.extras;
+        if (ex != null) {
+            String[] keys = new String[] {
+                    "chat_type", "room_type", "roomType", "link_type", "kakao.chat.type", "type"
+            };
+            for (int i = 0; i < keys.length; i++) {
+                String known = RoomKind.knownType(getCs(ex, keys[i]));
+                if (known != null) return known;
+            }
+            Iterator<String> it = ex.keySet().iterator();
+            while (it.hasNext()) {
+                String key = it.next();
+                if (key == null) continue;
+                Object v = ex.get(key);
+                if (!(v instanceof CharSequence)) continue;
+                String known = RoomKind.knownType(v.toString());
+                if (known != null && !RoomKind.NORMAL.equals(known)) return known;
+            }
+        }
+        String blob = "";
+        try {
+            if (n.getChannelId() != null) blob = n.getChannelId();
+        } catch (Throwable ignore) { }
+        if (ex != null) {
+            blob = blob + " " + getCs(ex, Notification.EXTRA_SUB_TEXT);
+            blob = blob + " " + getCs(ex, Notification.EXTRA_SUMMARY_TEXT);
+        }
+        if (blob.indexOf("오픈프로필") >= 0) return RoomKind.OPEN_DM;
+        if (blob.indexOf("오픈채팅") >= 0 || blob.indexOf("오픈챗") >= 0) {
+            return group ? RoomKind.OPEN_ROOM : RoomKind.OPEN_DM;
+        }
+        return RoomKind.NORMAL;
+    }
+
+    private static String kindLabel(String kind) {
+        if (RoomKind.OPEN_ROOM.equals(kind)) return "오픈채팅방";
+        if (RoomKind.OPEN_DM.equals(kind)) return "오픈프로필로 온 갠톡";
+        return "일반 채팅방";
+    }
+
+    private static void loadNotify(Context c) {
+        if (notifyLoaded || c == null) return;
+        notifyLoaded = true;
+        String raw = Prefs.getStr(c, K_NOTIFY_ROOMS, "");
+        if (raw == null || raw.length() == 0) return;
+        try {
+            JSONArray arr = new JSONObject(raw).optJSONArray("r");
+            if (arr == null) return;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject j = arr.optJSONObject(i);
+                if (j == null) continue;
+                RoomRef ref = RoomRef.of(j.optString("a", RoomRef.DEFAULT_ACC), j.optString("n", ""));
+                if (!ref.valid()) continue;
+                NRoom r = new NRoom();
+                r.ref = ref;
+                r.group = j.optInt("g", 0) != 0;
+                String kind = j.optString("k", RoomKind.NORMAL);
+                if (!RoomKind.OPEN_ROOM.equals(kind) && !RoomKind.OPEN_DM.equals(kind)) kind = RoomKind.NORMAL;
+                r.listKind = kind;
+                r.lastAt = j.optLong("t", 0L);
+                NOTIFY.put(ref.key(), r);
+            }
+        } catch (Throwable ignore) { }
+    }
+
+    private static void saveNotify(Context c) {
+        JSONArray arr = new JSONArray();
+        try {
+            Iterator<NRoom> it = NOTIFY.values().iterator();
+            while (it.hasNext()) {
+                NRoom r = it.next();
+                if (r == null || r.ref == null) continue;
+                JSONObject j = new JSONObject();
+                j.put("a", r.ref.acc);
+                j.put("n", r.ref.name);
+                if (r.group) j.put("g", 1);
+                j.put("k", r.listKind);
+                if (r.lastAt > 0) j.put("t", r.lastAt);
+                arr.put(j);
+            }
+            JSONObject o = new JSONObject();
+            o.put("r", arr);
+            Prefs.putStr(c, K_NOTIFY_ROOMS, o.toString());
+        } catch (Throwable ignore) { }
     }
 
     /** 마지막으로 본 내 표시이름. 모르면 "". */

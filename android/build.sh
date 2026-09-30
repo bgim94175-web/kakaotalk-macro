@@ -162,6 +162,20 @@ build_module() {
   rm -rf "$bdir" "$gdir"
   mkdir -p "$bdir/classes" "$bdir/dex" "$gdir" "$OUT"
 
+  # 6-0. 폰 내장 카카오 엔진 (auto 전용 · ENGINE=0 이면 건너뜀)
+  #  nodejs-mobile libnode + agent-messenger 번들을 만들어 assets/ 와 lib/<abi>/ 에 넣는다.
+  #  ABI 는 ENGINE_ABIS 로 고른다 (기본 arm64-v8a armeabi-v7a · 에뮬레이터는 x86_64 추가).
+  local eng_assets=()
+  if [ "$mod" = auto ] && [ "${ENGINE:-1}" != 0 ]; then
+    step "engine : 폰 내장 카카오 엔진 (${ENGINE_ABIS:-arm64-v8a armeabi-v7a})"
+    "$HERE/engine/build-engine.sh" "$bdir/engine" "$SDK" \
+      || die "엔진 빌드 실패. NDK 가 없으면 'sdkmanager \"ndk;27.2.12479018\"', Node 가 없으면 Node 18+ 를 설치해줘.
+   엔진 없이 빌드하려면 ENGINE=0 ./build.sh auto"
+    eng_assets=(-A "$bdir/engine/assets")
+  elif [ "$mod" = auto ]; then
+    warn "ENGINE=0 → 폰 내장 카카오 엔진 없이 빌드한다 (알림 답장 경로만 동작)"
+  fi
+
   # 6-1. 리소스 컴파일
   step "aapt2 compile : 리소스"
   "$AAPT2" compile --dir "$src/res" -o "$bdir/res.zip" \
@@ -175,6 +189,7 @@ build_module() {
     --manifest "$manifest" \
     --java "$gdir" \
     --auto-add-overlay \
+    ${eng_assets[@]+"${eng_assets[@]}"} \
     "$bdir/res.zip" \
     || die "$mod 링크 실패 (매니페스트나 리소스 참조를 확인해줘)"
 
@@ -215,6 +230,11 @@ build_module() {
   cp "$bdir/base.apk" "$unsigned"
   ( cd "$bdir/dex" && zip -q -X -j "$unsigned" classes*.dex ) \
     || die "$mod dex 삽입 실패"
+  if [ -d "$bdir/engine/lib" ]; then
+    step "zip : 엔진 네이티브 라이브러리 삽입"
+    ( cd "$bdir/engine" && zip -q -X -r "$unsigned" lib ) \
+      || die "$mod 엔진 라이브러리 삽입 실패"
+  fi
 
   # 6-6. 정렬
   step "zipalign : 4바이트 정렬"

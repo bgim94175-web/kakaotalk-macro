@@ -122,7 +122,22 @@ function okBody(o) {
     purchase: o.purchase,
     nonce: o.nonce,
     ts: o.ts,
+    // 앱이 세션을 올릴 주소. SENDER_PUBLIC_URL 이 없으면 이 서비스 공개 주소를 쓴다.
+    // 발송 자식 환경이 없으면 null 이고, 앱은 폰이 켜져 있는 동안만 발송한다.
+    sender_url: senderPublicUrl(),
+    sender_token: process.env.SENDER_TOKEN || null,
   });
+}
+
+function senderPublicUrl() {
+  let raw = String(process.env.SENDER_PUBLIC_URL || '').trim();
+  if (!raw && process.env.SENDER_TOKEN && process.env.SENDER_KEY) {
+    raw = String(process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL || '').trim();
+  }
+  if (!raw) return null;
+  const url = raw.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) return null;
+  return url;
 }
 
 function failBody(reason, nonce, ts) {
@@ -434,4 +449,4 @@ module.exports.bustSigCache = bustSigCache;
 module.exports.RECHECK_MS = RECHECK_MS;
 module.exports.GRACE_MS = GRACE_MS;
 // 테스트용 훅 (서명 검사 강도를 단독으로 검증한다)
-module.exports.__test = { sigProblem: sigProblem, sigMode: sigMode, allowedSigs: allowedSigs };
+module.exports.__test = { sigProblem: sigProblem, sigMode: sigMode, allowedSigs: allowedSigs, senderPublicUrl: senderPublicUrl };

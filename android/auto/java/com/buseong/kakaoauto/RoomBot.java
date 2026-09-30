@@ -756,7 +756,7 @@ public final class RoomBot {
             remember(rk, msg, now);
             save(c);
         }
-        boolean ok = KakaoListener.sendTo(c, room, msg);
+        boolean ok = com.buseong.kakaoauto.engine.EngineSend.sendText(c, room, msg);
         if (!ok) {
             synchronized (RoomBot.class) {
                 if (sentToday > 0) sentToday = sentToday - 1;

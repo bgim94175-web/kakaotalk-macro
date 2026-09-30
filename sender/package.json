@@ -1,0 +1,19 @@
+{
+  "name": "kakao-sender",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kakao send loop spawned by the license server. Sessions live in the existing Neon database.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "check": "node --check src/index.mjs && node --check src/store.mjs && node --check src/word.mjs && node --check src/quiz.mjs && node --check src/features.mjs && node --check src/runner.mjs && node --check src/room-kind.mjs && node src/selfcheck.mjs"
+  },
+  "dependencies": {
+    "agent-messenger": "2.38.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}

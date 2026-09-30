@@ -86,9 +86,9 @@ public final class AutoReply {
         final String who = (sender == null) ? "" : sender.trim();
         final String label = room.label(c);
 
-        // 그룹방이면 자동응답 대상이 아니다 (리스너가 본 방 정보로 한 번 더 확인)
-        KakaoListener.Session s = KakaoListener.session(room);
-        if (s != null && s.group) return;
+        com.buseong.kakaoauto.engine.RoomLinks.Link link =
+                com.buseong.kakaoauto.engine.RoomLinks.get(c, room);
+        if (link != null && ("group".equals(link.kind) || "open".equals(link.kind))) return;
 
         // 내 메시지면 무시
         String me = KakaoListener.selfName(room.acc);
@@ -147,7 +147,7 @@ public final class AutoReply {
         final long wait = delayOf(cfg.delayMaxMs);
         KakaoListener.post(new Runnable() {
             @Override public void run() {
-                boolean ok = KakaoListener.sendTo(c, room, msg);
+                boolean ok = com.buseong.kakaoauto.engine.EngineSend.sendText(c, room, msg);
                 if (ok) {
                     Log.add(c, "자동응답 발송 · 「" + label + "」 (금일 " + count() + "건)");
                 } else {
