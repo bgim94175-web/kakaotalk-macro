@@ -14,6 +14,8 @@ import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -222,6 +224,15 @@ public final class KakaoListener extends NotificationListenerService {
     private static final ConcurrentHashMap<String, String> SELF =
             new ConcurrentHashMap<String, String>();
 
+    /**
+     * 알림이 알려준 이 폰 카카오톡의 표시 이름. 계정키 → 이름.
+     * 등록 계정·상시 발송과는 따로 둔다. 이름이 없으면 넣지 않는다.
+     */
+    private static final String K_PHONE = "K_PHONE_KAKAO";
+    private static final LinkedHashMap<String, String> PHONE = new LinkedHashMap<String, String>();
+    private static boolean phoneLoaded = false;
+    private static volatile KakaoListener LIVE;
+
     /** 리스너가 시스템에 붙어 있는지 (메모리 플래그 — 프로세스 죽으면 false 로 돌아간다) */
     private static volatile boolean bound = false;
 
@@ -265,8 +276,15 @@ public final class KakaoListener extends NotificationListenerService {
     @Override
     public void onCreate() {
         super.onCreate();
+        LIVE = this;
         APP = getApplicationContext();
         loadRooms(APP);
+    }
+
+    @Override
+    public void onDestroy() {
+        if (LIVE == this) LIVE = null;
+        super.onDestroy();
     }
 
     @Override
@@ -275,6 +293,7 @@ public final class KakaoListener extends NotificationListenerService {
         bound = true;
         APP = getApplicationContext();
         loadRooms(APP);
+        noteActivePhones();
         Log.add(APP, "알림 접근 권한이 연결되었습니다. 카카오톡 알림 감지를 시작합니다.");
     }
 
@@ -347,6 +366,7 @@ public final class KakaoListener extends NotificationListenerService {
 
         final Msg m = parse(ex, sbn.getPostTime(), shortcutLabel, acc);
         if (m == null) return;
+        notePhone(ctxOrApp(), m.acc, m.selfName);
         if (m.room.length() == 0 || m.text.length() == 0) return;
 
         // 세션 갱신 (여기까지는 아주 싸다 — 메인 스레드에서 해도 된다)
@@ -520,10 +540,7 @@ public final class KakaoListener extends NotificationListenerService {
         m.roomTrusted = !"title".equals(roomSrc);
 
         // 내 표시이름 (내 메시지 판정에 쓴다). 계정마다 프로필 이름이 다르니 계정별로 기억한다.
-        String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
-        if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
-            me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
-        }
+        String me = selfFrom(ex);
         if (me.length() > 0) {
             selfName = me;
             SELF.put(m.acc, me);
@@ -1478,6 +1495,113 @@ public final class KakaoListener extends NotificationListenerService {
             if (live(s)) out.add(s.ref);
         }
         return out;
+    }
+
+    /**
+     * 지금 떠 있는 카카오톡 알림에서 이 폰의 표시 이름만 읽는다.
+     * 계정 등록이나 발송에는 쓰지 않는다.
+     */
+    public static void capturePhoneAccounts() {
+        KakaoListener svc = LIVE;
+        if (svc == null || !bound) return;
+        svc.noteActivePhones();
+    }
+
+    /**
+     * 알림이 실제로 알려준 이 폰 카카오톡 이름. 여러 프로필이면 ` · ` 로 잇는다.
+     * 알림이 이름을 준 적이 없으면 "". 순번이나 기본 계정으로 채우지 않는다.
+     */
+    public static String phoneAccountLine(Context c) {
+        capturePhoneAccounts();
+        synchronized (PHONE) {
+            loadPhone(c);
+            StringBuilder sb = new StringBuilder();
+            Iterator<Map.Entry<String, String>> it = PHONE.entrySet().iterator();
+            while (it.hasNext()) {
+                String name = it.next().getValue();
+                if (name == null || name.length() == 0) continue;
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append(name);
+            }
+            return sb.toString();
+        }
+    }
+
+    private void noteActivePhones() {
+        StatusBarNotification[] all;
+        try { all = getActiveNotifications(); } catch (Throwable t) { return; }
+        if (all == null) return;
+        Context ctx = ctxOrApp();
+        for (int i = 0; i < all.length; i++) {
+            StatusBarNotification sbn = all[i];
+            if (sbn == null || !KAKAO.equals(sbn.getPackageName())) continue;
+            Notification n = sbn.getNotification();
+            if (n == null || n.extras == null) continue;
+            if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+            notePhone(ctx, Accounts.keyOf(sbn), selfFrom(n.extras));
+        }
+    }
+
+    /** 알림이 준 이름만 기억한다. 비어 있으면 무시하고, 등록 계정 목록에는 넣지 않는다. */
+    private static void notePhone(Context ctx, String acc, String name) {
+        if (ctx == null || name == null) return;
+        String n = name.trim();
+        if (n.length() == 0) return;
+        String k = (acc == null || acc.trim().length() == 0) ? RoomRef.DEFAULT_ACC : acc.trim();
+        synchronized (PHONE) {
+            loadPhone(ctx);
+            if (n.equals(PHONE.get(k))) return;
+            PHONE.put(k, n);
+            savePhone(ctx);
+        }
+        SELF.put(k, n);
+        selfName = n;
+        Log.add(ctx, "폰 카카오톡 계정: " + n);
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                try { ScreenMacro.refresh(); } catch (Throwable ignore) { }
+            }
+        });
+    }
+
+    private static String selfFrom(Bundle ex) {
+        String me = getCs(ex, Notification.EXTRA_SELF_DISPLAY_NAME);
+        if (me.length() == 0 && Build.VERSION.SDK_INT >= 28) {
+            me = personName(getParcel(ex, Notification.EXTRA_MESSAGING_PERSON));
+        }
+        return me;
+    }
+
+    private static void loadPhone(Context c) {
+        if (phoneLoaded || c == null) return;
+        phoneLoaded = true;
+        String raw = Prefs.getStr(c, K_PHONE, "");
+        if (raw == null || raw.length() == 0) return;
+        try {
+            JSONObject o = new JSONObject(raw);
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                String n = o.optString(k, "").trim();
+                if (k == null || k.length() == 0 || n.length() == 0) continue;
+                PHONE.put(k, n);
+                SELF.put(k, n);
+                selfName = n;
+            }
+        } catch (Throwable ignore) { }
+    }
+
+    private static void savePhone(Context c) {
+        JSONObject o = new JSONObject();
+        try {
+            Iterator<Map.Entry<String, String>> it = PHONE.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, String> e = it.next();
+                if (e.getKey() == null || e.getValue() == null || e.getValue().length() == 0) continue;
+                o.put(e.getKey(), e.getValue());
+            }
+        } catch (Throwable ignore) { }
+        Prefs.putStr(c, K_PHONE, o.toString());
     }
 
     /** 마지막으로 본 내 표시이름. 모르면 "". */

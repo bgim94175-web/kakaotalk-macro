@@ -1,6 +1,8 @@
 package com.buseong.kakaoauto;
 
 import android.content.Intent;
+import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -130,6 +132,11 @@ public final class ScreenMacro {
                     @Override public void run() { Nav.push(a, "최소 신규 메시지", MacroDetail.minMessages(a)); }
                 }));
 
+        String phone = KakaoListener.phoneAccountLine(a);
+        boolean phoneKnown = phone.length() > 0;
+        block(a, col, "폰 카카오톡 계정", accountLine(a, "이 폰의 카카오톡",
+                phoneKnown ? phone : "아직 없음", phoneKnown ? Theme.TEXT : Theme.DIM));
+
         block(a, col, "알림 답장", Ui.navRowSwitch(a, "알림 답장으로 보내기",
                 "켜면 글은 카카오톡 알림 답장으로 보냅니다. 끄면 등록한 계정으로 보냅니다. "
                         + "답장할 알림이 없거나 카카오 메시지 번호가 없으면 보낸 것으로 세지 않습니다.",
@@ -155,6 +162,38 @@ public final class ScreenMacro {
             @Override public void onClick(View v) { sendNow(a, s, send); }
         });
         col.addView(send);
+    }
+
+    /**
+     * 알림에서 읽은 이 폰의 카카오톡 이름. 누르면 이동하지 않는다.
+     * 등록한 카카오 계정 줄과 구분되도록 제목에 폰을 붙인다.
+     */
+    private static LinearLayout accountLine(MainActivity a, String title, String value, int color) {
+        LinearLayout r = Ui.row(a);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setMinimumHeight(Theme.dp(a, 56));
+        int ph = Theme.dp(a, 16);
+        r.setPadding(ph, Theme.dp(a, 12), ph, Theme.dp(a, 12));
+        r.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        TextView t = Ui.body(a, title);
+        t.setTextColor(Theme.TEXT);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        r.addView(t);
+
+        TextView v = Ui.sub(a, value);
+        v.setTextColor(color);
+        v.setGravity(Gravity.END);
+        v.setSingleLine(true);
+        v.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        vp.leftMargin = Theme.dp(a, 12);
+        v.setLayoutParams(vp);
+        r.addView(v);
+        r.setContentDescription(title + ", " + value);
+        return r;
     }
 
     /** 기능 하나 = 제목 하나 + 행 하나. 여러 설정을 한 목록에 섞지 않는다. */
