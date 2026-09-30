@@ -440,9 +440,10 @@ public final class KakaoListener extends NotificationListenerService {
         }
         if (m.text.length() == 0) {
             if (m.roomTrusted) {
+                final String signals = roomSignals(sbn);
                 post(new Runnable() {
                     @Override public void run() {
-                        noteNotifyRoom(seen, m, n);
+                        noteNotifyRoom(seen, m, signals);
                         remember(seen, m.ref, m.group, m.at);
                     }
                 }, 0);
@@ -494,11 +495,12 @@ public final class KakaoListener extends NotificationListenerService {
         if (!m.fromMe) s.othersSinceMine = s.othersSinceMine + 1;
 
         final Context ctx = ctxOrApp();
+        final String signals = roomSignals(sbn);
         // 무거운 건 전부 BG 로. 방 등록은 답장 액션이 없어도 한다.
         post(new Runnable() {
             @Override public void run() {
                 if (m.roomTrusted) {
-                    noteNotifyRoom(ctx, m, n);
+                    noteNotifyRoom(ctx, m, signals);
                     remember(ctx, m.ref, m.group, m.at);
                 } else if (m.room.length() > 0) {
                     roomSrcWarn(ctx, m);
@@ -1666,7 +1668,7 @@ public final class KakaoListener extends NotificationListenerService {
                 s.dataTypes = reply.dataTypes;
                 s.lastAt = m.at;
             }
-            noteNotifyRoom(ctx, m, n);
+            noteNotifyRoom(ctx, m, roomSignals(sbn));
             remember(ctx, m.ref, m.group, m.at);
         }
     }
@@ -1773,15 +1775,21 @@ public final class KakaoListener extends NotificationListenerService {
     }
 
     /** 믿을 수 있는 방 이름을 보낼 방 목록에 올린다. 답장 액션은 요구하지 않는다. */
-    private static void noteNotifyRoom(Context ctx, Msg m, Notification n) {
-        if (ctx == null || m == null || !m.ref.valid() || n == null) return;
-        KindRead read = readKind(n, m.group);
+    private static void noteNotifyRoom(Context ctx, Msg m, String signals) {
+        if (ctx == null || m == null || !m.ref.valid()) return;
+        KindRead read = readKind(signals);
         if (!LIST_ACC.equals(m.ref.acc)) dropListTwin(ctx, m.ref);
-        boolean fresh = putDetected(ctx, m.ref, m.group, read.kind, read.known, m.at, false);
-        if (!fresh) return;
-        String where = read.known ? kindLabel(read.kind) : "일반 채팅방";
-        String tail = read.known ? "" : " 종류는 확인되지 않았습니다.";
-        Log.add(ctx, "「" + m.ref.name + "」을 알림에서 감지했습니다. " + where + "에 표시합니다." + tail);
+        int put = putDetected(ctx, m.ref, m.group, read.kind, read.known, m.at, false);
+        if (put == PUT_SAME) return;
+        if (read.known && RoomKind.OPEN_DM.equals(read.kind)) {
+            Log.add(ctx, "「" + m.ref.name + "」은 오픈프로필 개인톡이라 보낼 방 목록에는 표시하지 않습니다.");
+        } else if (put == PUT_ADDED) {
+            String where = read.known ? kindLabel(read.kind) : "일반 채팅방";
+            String tail = read.known ? "" : " 종류는 확인되지 않았습니다.";
+            Log.add(ctx, "「" + m.ref.name + "」을 알림에서 감지했습니다. " + where + "에 표시합니다." + tail);
+        } else {
+            Log.add(ctx, "「" + m.ref.name + "」 종류를 " + kindLabel(read.kind) + "으로 고쳤습니다.");
+        }
         refreshRooms();
     }
 
@@ -1801,12 +1809,18 @@ public final class KakaoListener extends NotificationListenerService {
             if (!RoomKind.NORMAL.equals(kind)) known = false;
         }
         if (!LIST_ACC.equals(ref.acc)) dropListTwin(ctx, ref);
-        boolean fresh = putDetected(ctx, ref, false, k, known, System.currentTimeMillis(), true);
+        int put = putDetected(ctx, ref, false, k, known, System.currentTimeMillis(), true);
         remember(ctx, ref, false, System.currentTimeMillis());
-        if (!fresh) return;
-        String where = known ? kindLabel(k) : "일반 채팅방";
-        String tail = known ? "" : " 종류는 확인되지 않았습니다.";
-        Log.add(ctx, "「" + ref.name + "」을 채팅 목록에서 감지했습니다. " + where + "에 표시합니다." + tail);
+        if (put == PUT_SAME) return;
+        if (known && RoomKind.OPEN_DM.equals(k)) {
+            Log.add(ctx, "「" + ref.name + "」은 오픈프로필 개인톡이라 보낼 방 목록에는 표시하지 않습니다.");
+        } else if (put == PUT_ADDED) {
+            String where = known ? kindLabel(k) : "일반 채팅방";
+            String tail = known ? "" : " 종류는 확인되지 않았습니다.";
+            Log.add(ctx, "「" + ref.name + "」을 채팅 목록에서 감지했습니다. " + where + "에 표시합니다." + tail);
+        } else {
+            Log.add(ctx, "「" + ref.name + "」 종류를 " + kindLabel(k) + "으로 고쳤습니다.");
+        }
         refreshRooms();
     }
 
@@ -1882,10 +1896,14 @@ public final class KakaoListener extends NotificationListenerService {
         }
     }
 
-    /** @return 이번에 처음 넣은 방이면 true */
-    private static boolean putDetected(Context ctx, RoomRef ref, boolean group, String kind,
-                                       boolean kindKnown, long at, boolean fromList) {
-        if (ctx == null || ref == null || !ref.valid()) return false;
+    private static final int PUT_SAME = 0;
+    private static final int PUT_ADDED = 1;
+    private static final int PUT_UPDATED = 2;
+
+    /** @return {@link #PUT_ADDED}, {@link #PUT_UPDATED}, {@link #PUT_SAME} */
+    private static int putDetected(Context ctx, RoomRef ref, boolean group, String kind,
+                                   boolean kindKnown, long at, boolean fromList) {
+        if (ctx == null || ref == null || !ref.valid()) return PUT_SAME;
         String k = (kind == null) ? RoomKind.NORMAL : kind;
         if (!RoomKind.OPEN_ROOM.equals(k) && !RoomKind.OPEN_DM.equals(k)) k = RoomKind.NORMAL;
         long now = at > 0 ? at : System.currentTimeMillis();
@@ -1894,11 +1912,13 @@ public final class KakaoListener extends NotificationListenerService {
             NRoom have = NOTIFY.get(ref.key());
             if (have != null) {
                 boolean save = false;
+                boolean kindChanged = false;
                 if (now > have.lastAt) have.lastAt = now;
-                if (kindKnown && !have.kindKnown) {
+                if (kindKnown && (!have.kindKnown || !k.equals(have.listKind))) {
                     have.listKind = k;
                     have.kindKnown = true;
                     have.group = group;
+                    kindChanged = true;
                     save = true;
                 }
                 if (!fromList && have.fromList) {
@@ -1907,7 +1927,7 @@ public final class KakaoListener extends NotificationListenerService {
                     save = true;
                 }
                 if (save) saveNotify(ctx);
-                return false;
+                return kindChanged ? PUT_UPDATED : PUT_SAME;
             }
             NRoom r = new NRoom();
             r.ref = ref;
@@ -1925,7 +1945,7 @@ public final class KakaoListener extends NotificationListenerService {
             }
             saveNotify(ctx);
         }
-        return true;
+        return PUT_ADDED;
     }
 
     private static void refreshRooms() {
@@ -1987,40 +2007,95 @@ public final class KakaoListener extends NotificationListenerService {
         }
     }
 
-    /** 알림이 종류를 말해 주면 known. 못 가르면 일반 채팅방이고 known 은 거짓이다. */
-    private static KindRead readKind(Notification n, boolean group) {
-        Bundle ex = n == null ? null : n.extras;
-        if (ex != null) {
-            String[] keys = new String[] {
-                    "chat_type", "room_type", "roomType", "link_type", "kakao.chat.type", "type"
-            };
-            for (int i = 0; i < keys.length; i++) {
-                String known = RoomKind.knownType(getCs(ex, keys[i]));
-                if (known != null) return new KindRead(known, true);
-            }
-            Iterator<String> it = ex.keySet().iterator();
-            while (it.hasNext()) {
-                String key = it.next();
-                if (key == null) continue;
-                Object v = ex.get(key);
-                if (!(v instanceof CharSequence)) continue;
-                String known = RoomKind.knownType(v.toString());
-                if (known != null && !RoomKind.NORMAL.equals(known)) return new KindRead(known, true);
-            }
-        }
-        String blob = "";
-        try {
-            if (n != null && n.getChannelId() != null) blob = n.getChannelId();
-        } catch (Throwable ignore) { }
-        if (ex != null) {
-            blob = blob + " " + getCs(ex, Notification.EXTRA_SUB_TEXT);
-            blob = blob + " " + getCs(ex, Notification.EXTRA_SUMMARY_TEXT);
-        }
-        if (blob.indexOf("오픈프로필") >= 0) return new KindRead(RoomKind.OPEN_DM, true);
-        if (blob.indexOf("오픈채팅") >= 0 || blob.indexOf("오픈챗") >= 0) {
-            return new KindRead(group ? RoomKind.OPEN_ROOM : RoomKind.OPEN_DM, true);
-        }
+    /**
+     * 알림의 채널·바로가기·묶음·부가 텍스트로 종류를 가른다.
+     * 오픈채팅은 단체 여부와 상관없이 오픈채팅방이다. 1:1 이라고 오픈프로필로 내리지 않는다.
+     * 종류 토큰도 그 단어도 없으면 일반 채팅방이고 known 은 거짓이다.
+     */
+    private static KindRead readKind(String signals) {
+        RoomListKind.Read read = RoomListKind.classify(signals, false);
+        if (read.known) return new KindRead(read.kind, true);
         return new KindRead(RoomKind.NORMAL, false);
+    }
+
+    /**
+     * 오픈채팅 알림을 가르는 문자열. 메시지 본문은 넣지 않는다.
+     * 본문에 "오픈채팅" 이 있다고 일반 방을 오픈채팅으로 올리지 않기 위해서다.
+     */
+    private String roomSignals(StatusBarNotification sbn) {
+        StringBuilder sb = new StringBuilder();
+        Notification n = sbn == null ? null : sbn.getNotification();
+        if (n != null) {
+            try { appendSignal(sb, n.getChannelId()); } catch (Throwable ignore) { }
+            try { appendSignal(sb, n.getGroup()); } catch (Throwable ignore) { }
+            try { appendSignal(sb, n.getShortcutId()); } catch (Throwable ignore) { }
+            if (Build.VERSION.SDK_INT >= 29) {
+                try {
+                    android.content.LocusId locus = n.getLocusId();
+                    if (locus != null) appendSignal(sb, locus.getId());
+                } catch (Throwable ignore) { }
+            }
+            Bundle ex = n.extras;
+            if (ex != null) {
+                String[] typeKeys = new String[] {
+                        "chat_type", "room_type", "roomType", "link_type", "kakao.chat.type", "type"
+                };
+                for (int i = 0; i < typeKeys.length; i++) {
+                    String known = RoomKind.knownType(getCs(ex, typeKeys[i]));
+                    if (RoomKind.OPEN_ROOM.equals(known)) appendSignal(sb, "open_chat");
+                    else if (RoomKind.OPEN_DM.equals(known)) appendSignal(sb, "open_direct");
+                }
+                try {
+                    Iterator<String> it = ex.keySet().iterator();
+                    while (it.hasNext()) {
+                        String key = it.next();
+                        if (key == null || messageExtra(key)) continue;
+                        appendSignal(sb, key);
+                        Object v = ex.get(key);
+                        if (!(v instanceof CharSequence)) continue;
+                        String s = v.toString();
+                        if (s.length() > 80) continue;
+                        appendSignal(sb, s);
+                    }
+                } catch (Throwable ignore) { }
+            }
+        }
+        appendShortcut(sb, sbn);
+        return sb.toString();
+    }
+
+    private static boolean messageExtra(String key) {
+        return Notification.EXTRA_TEXT.equals(key)
+                || Notification.EXTRA_BIG_TEXT.equals(key)
+                || Notification.EXTRA_TITLE.equals(key)
+                || Notification.EXTRA_TITLE_BIG.equals(key)
+                || Notification.EXTRA_TEXT_LINES.equals(key)
+                || "android.messages".equals(key)
+                || "android.messages.historic".equals(key);
+    }
+
+    private static void appendSignal(StringBuilder sb, String s) {
+        if (s == null || s.length() == 0) return;
+        if (sb.length() > 0) sb.append(' ');
+        sb.append(s);
+    }
+
+    /** 대화 바로가기 id 와 카테고리. 라벨(방 이름)은 넣지 않는다. */
+    private void appendShortcut(StringBuilder sb, StatusBarNotification sbn) {
+        if (sbn == null || Build.VERSION.SDK_INT < 30) return;
+        try {
+            NotificationListenerService.RankingMap rm = getCurrentRanking();
+            if (rm == null) return;
+            NotificationListenerService.Ranking r = new NotificationListenerService.Ranking();
+            if (!rm.getRanking(sbn.getKey(), r)) return;
+            android.content.pm.ShortcutInfo si = r.getConversationShortcutInfo();
+            if (si == null) return;
+            appendSignal(sb, si.getId());
+            java.util.Set<String> cats = si.getCategories();
+            if (cats == null) return;
+            Iterator<String> it = cats.iterator();
+            while (it.hasNext()) appendSignal(sb, it.next());
+        } catch (Throwable ignore) { }
     }
 
     private static String kindLabel(String kind) {

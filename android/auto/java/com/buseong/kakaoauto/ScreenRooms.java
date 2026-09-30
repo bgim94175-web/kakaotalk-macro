@@ -33,8 +33,9 @@ import java.util.concurrent.Executors;
 /**
  * 방 관리 화면 (UI_V3 5장). 매크로 탭의 `보낼 방 ›` 에서 Nav.push 로 열린다.
  *
- * 등록한 카카오 계정의 LOCO 대화방과, 알림·채팅 목록에서 감지한 방을 세 목록으로 나눠 보여 준다.
- * 오픈채팅방, 일반 채팅방, 오픈프로필로 온 갠톡. 칸을 바꿔도 선택은 유지된다.
+ * 알림 답장 매크로의 방만 보여 준다. 카카오 서버 방 목록은 쓰지 않는다.
+ * 오픈채팅방, 일반 채팅방. 오픈프로필 개인톡은 이 화면에 두지 않는다.
+ * 칸을 바꿔도 선택은 유지된다.
  * 답장 알림이 없는 방도 목록에 남긴다. 그 방을 알림 답장으로 보내면 왜 못 보냈는지 적는다.
  */
 public final class ScreenRooms {
@@ -52,13 +53,13 @@ public final class ScreenRooms {
     private static final Handler H = new Handler(Looper.getMainLooper());
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
 
-    /** 0 오픈채팅방, 1 일반 채팅방, 2 오픈프로필로 온 갠톡. 화면을 다시 그려도 유지한다. */
+    /** 0 오픈채팅방, 1 일반 채팅방. 화면을 다시 그려도 유지한다. */
     private static int TAB = 1;
     private static final String[] TAB_KIND = {
-            RoomKind.OPEN_ROOM, RoomKind.NORMAL, RoomKind.OPEN_DM
+            RoomKind.OPEN_ROOM, RoomKind.NORMAL
     };
     private static final String[] TAB_LABEL = {
-            "오픈채팅방", "일반 채팅방", "오픈프로필로 온 갠톡"
+            "오픈채팅방", "일반 채팅방"
     };
 
     /** 이번에 받은 카카오 대화방 목록. null 이면 아직 없다. */
@@ -140,13 +141,11 @@ public final class ScreenRooms {
     private static void fill(final MainActivity a, LinearLayout col) {
         try { KakaoListener.capturePhoneAccounts(); } catch (Throwable ignore) { }
         try { KakaoAccessibility.requestHarvest(); } catch (Throwable ignore) { }
+        if (TAB < 0 || TAB >= TAB_KIND.length) TAB = 0;
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "라이선스 인증 전에는 설정이 저장되지 않습니다. "
                     + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
         }
-
-        final boolean ready = KakaoAccount.ready(a) && Engine.ready(a);
-        if (ready && LOADED == null && LOAD_ERR == null && !inflight) startLoad(a);
 
         final List<Row> rows = rows(a);
         int listed = 0;
@@ -166,19 +165,6 @@ public final class ScreenRooms {
         hero.addView(stats);
         col.addView(hero);
 
-        if (!ready) {
-            col.addView(Nav.note(a, "카카오 계정을 등록하면 그 계정의 대화방도 불러옵니다. "
-                    + "알림이나 채팅 목록에서 감지한 방은 인증 없이 아래 목록에 있습니다.",
-                    Theme.ACCENT2, null, null));
-        } else if (inflight && LOADED == null) {
-            col.addView(Nav.note(a, "대화방 목록을 불러오는 중입니다.", Theme.ACCENT2, null, null));
-        } else if (LOAD_ERR != null && (LOADED == null || LOADED.isEmpty())) {
-            col.addView(Nav.note(a, "대화방 목록을 불러오지 못했습니다. " + LOAD_ERR,
-                    Theme.AMBER, null, null));
-        } else if (LOAD_ERR != null) {
-            col.addView(Nav.note(a, "목록을 다시 불러오지 못했습니다. 이전에 받은 목록을 보여 줍니다. " + LOAD_ERR,
-                    Theme.AMBER, null, null));
-        }
         if (listed == 0) col.addView(emptyPerms(a));
         int[] counts = kindCounts(rows);
         col.addView(kindTabs(a, counts));
@@ -195,19 +181,8 @@ public final class ScreenRooms {
             col.addView(section(a, missing));
         }
 
-        if (ready) {
-            TextView reload = Nav.wideBtn(a, "목록 다시 불러오기", false, new Runnable() {
-                @Override public void run() { reload(a); }
-            });
-            col.addView(reload);
-        }
-
-        TextView add = Nav.wideBtn(a, "이름으로 찾기", false, new Runnable() {
-            @Override public void run() { addDialog(a); }
-        });
-        col.addView(add);
-
         TextView help = Ui.sub(a, "대화방은 카카오톡 알림과 채팅 목록에서 자동으로 등록됩니다. "
+                + "오픈채팅 알림과 오픈채팅 목록의 방은 오픈채팅방에 표시됩니다. "
                 + "답장 알림이 없어도 목록에는 남습니다. "
                 + "알림 답장으로 보낼 때는 그 방의 답장 알림이 있어야 하며, 없으면 발송으로 세지 않습니다. "
                 + "각 줄의 계정은 그 방이 속한 카카오톡입니다. "
@@ -251,7 +226,7 @@ public final class ScreenRooms {
         return g;
     }
 
-    /** 세 목록. 칸의 숫자는 그 종류에 있는 대화방 수다. */
+    /** 두 목록. 칸의 숫자는 그 종류에 있는 대화방 수다. */
     private static View kindTabs(final MainActivity a, int[] counts) {
         LinearLayout g = Ui.group(a);
         for (int i = 0; i < TAB_KIND.length; i++) g.addView(kindTab(a, i, counts[i]));
@@ -333,60 +308,56 @@ public final class ScreenRooms {
         return name + " · 선택 " + sel + "개";
     }
 
+    /** 오픈프로필 개인톡으로 확인된 방. 보낼 방에는 넣지 않는다. */
+    private static boolean openProfile(List<KakaoListener.NotifyRoom> notes, RoomRef ref) {
+        if (notes == null || ref == null) return false;
+        for (int i = 0; i < notes.size(); i++) {
+            KakaoListener.NotifyRoom note = notes.get(i);
+            if (note == null || note.ref == null || !note.kindKnown) continue;
+            if (!RoomKind.OPEN_DM.equals(note.listKind)) continue;
+            if (ref.equals(note.ref)) return true;
+        }
+        return false;
+    }
+
     // ── 목록 만들기 ─────────────────────────────────────────────────────────
 
     /**
-     * 등록 계정의 LOCO 대화방 전체 + 목록에 없는 선택 방.
-     * 선택된 방은 목록에서 빠져도 보여 준다. 안 보이면 해제할 방법이 없다.
+     * 알림과 채팅 목록에서 감지한 방 + 목록에 없는 선택 방.
+     * 오픈프로필 개인톡은 빼 둔다. 선택된 방은 목록에서 빠져도 보여 준다.
      */
     private static List<Row> rows(Context c) {
         LinkedHashMap<String, Row> map = new LinkedHashMap<String, Row>();
-        List<KakaoEngine.KakaoRoom> src = LOADED;
-        if (src != null) bindSelected(c, src);
         Settings settings = Settings.load(c);
-        if (src != null) {
-            for (int i = 0; i < src.size(); i++) {
-                KakaoEngine.KakaoRoom k = src.get(i);
-                if (k == null || !realChatId(k.chatId)) continue;
-                RoomRef ref = refFor(c, k);
-                if (ref == null || !ref.valid()) continue;
-                if (PENDING.containsKey(ref.key())) continue;
-                Row r = new Row();
-                r.ref = ref;
-                r.detected = true;
-                r.groupKnown = !"unknown".equals(k.kind);
-                r.group = k.isGroup();
-                r.lastAt = k.lastAt;
-                r.selected = settings.macro.coversRoom(ref);
-                r.room = k;
-                map.put(k.chatId, r);
-            }
-        }
+        List<KakaoListener.NotifyRoom> notes = KakaoListener.notifyRooms(c);
         List<RoomRef> sel = settings.macro.roomRefs();
         for (int i = 0; i < sel.size(); i++) {
             RoomRef ref = sel.get(i);
             if (ref == null || !ref.valid()) continue;
             if (PENDING.containsKey(ref.key())) continue;
+            if (openProfile(notes, ref)) continue;
             if (listed(map, ref)) continue;
             Row n = new Row();
             n.ref = ref;
             n.selected = true;
             map.put("sel:" + ref.key(), n);
         }
-        List<KakaoListener.NotifyRoom> notes = KakaoListener.notifyRooms(c);
         for (int i = 0; i < notes.size(); i++) {
             KakaoListener.NotifyRoom note = notes.get(i);
             if (note == null || note.ref == null || !note.ref.valid()) continue;
+            if (note.kindKnown && RoomKind.OPEN_DM.equals(note.listKind)) continue;
             if (PENDING.containsKey(note.ref.key())) continue;
             Row have = findRow(map, note.ref);
             if (have != null) {
+                have.detected = true;
                 have.fromNotification = !note.fromList || have.fromNotification;
                 have.fromList = note.fromList || have.fromList;
                 have.replyable = note.replyable || have.replyable;
-                if (have.room == null) {
-                    have.listKind = note.listKind;
-                    have.kindKnown = note.kindKnown;
-                }
+                have.listKind = (note.listKind == null) ? RoomKind.NORMAL : note.listKind;
+                have.kindKnown = note.kindKnown;
+                have.groupKnown = !note.fromList || have.groupKnown;
+                have.group = note.group;
+                if (note.lastAt > have.lastAt) have.lastAt = note.lastAt;
                 continue;
             }
             Row n = new Row();

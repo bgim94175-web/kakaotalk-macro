@@ -3,8 +3,6 @@ package com.buseong.kakaoauto;
 import android.graphics.Rect;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import com.buseong.kakaoauto.engine.RoomKind;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +37,7 @@ final class ChatListScan {
         if (roots == null || roots.isEmpty()) return out;
         int h = screenH > 0 ? screenH : 2000;
         boolean chatTab = false;
+        boolean openTab = false;
         boolean otherTab = false;
         boolean composer = false;
         ArrayList<AccessibilityNodeInfo> titles = new ArrayList<AccessibilityNodeInfo>();
@@ -52,7 +51,8 @@ final class ChatListScan {
             String label = KakaoAccessibility.textOnly(n).trim();
             if (label.length() > 0 && label.length() <= 8) {
                 Tab t = tabOf(n, h, extra);
-                if (t == Tab.CHAT) chatTab = true;
+                if (t == Tab.OPEN) openTab = true;
+                else if (t == Tab.CHAT) chatTab = true;
                 else if (t == Tab.OTHER) otherTab = true;
             }
             if (composerId(n) && shown(n)) {
@@ -68,15 +68,19 @@ final class ChatListScan {
         }
 
         boolean inRoom = composer || classLooksLikeRoom(className);
-        boolean listOk = chatTab && !otherTab;
+        boolean openList = openTab && !chatTab;
+        boolean listOk = (chatTab || openTab) && !otherTab;
+        boolean openRoom = classLooksOpen(className);
         LinkedHashMap<String, Hit> uniq = new LinkedHashMap<String, Hit>();
         if (inRoom) {
-            Hit one = toolbar(titles, extra, h);
+            Hit one = toolbar(titles, extra, h, openRoom);
             if (one != null) uniq.put(one.name, one);
+        } else if (openList) {
+            addTitles(titles, extra, uniq, false, true);
         } else if (listOk) {
-            addTitles(titles, extra, uniq, false);
+            addTitles(titles, extra, uniq, false, false);
         } else if (!otherTab) {
-            addTitles(titles, extra, uniq, true);
+            addTitles(titles, extra, uniq, true, false);
         }
         recycle(extra, roots);
         return new ArrayList<Hit>(uniq.values());
@@ -84,19 +88,20 @@ final class ChatListScan {
 
     private static void addTitles(List<AccessibilityNodeInfo> titles,
                                   List<AccessibilityNodeInfo> extra,
-                                  LinkedHashMap<String, Hit> uniq, boolean needTime) {
+                                  LinkedHashMap<String, Hit> uniq, boolean needTime,
+                                  boolean openTab) {
         for (int i = 0; i < titles.size(); i++) {
             AccessibilityNodeInfo n = titles.get(i);
             if (!titleId(n) || !shown(n)) continue;
             String blob = rowBlob(n, extra);
             if (needTime && !hasTime(blob)) continue;
-            Hit hit = hitOf(n, blob);
+            Hit hit = hitOf(n, blob, openTab);
             if (hit != null && !uniq.containsKey(hit.name)) uniq.put(hit.name, hit);
         }
     }
 
     private static Hit toolbar(List<AccessibilityNodeInfo> titles,
-                               List<AccessibilityNodeInfo> extra, int screenH) {
+                               List<AccessibilityNodeInfo> extra, int screenH, boolean openRoom) {
         Hit best = null;
         int bestW = 0;
         int limit = screenH * 22 / 100;
@@ -105,7 +110,7 @@ final class ChatListScan {
             if (!titleId(n) || !shown(n)) continue;
             Rect r = bounds(n);
             if (r.top > limit) continue;
-            Hit hit = hitOf(n, rowBlob(n, extra));
+            Hit hit = hitOf(n, rowBlob(n, extra), openRoom);
             if (hit == null) continue;
             int w = r.width();
             if (best == null || w > bestW) { best = hit; bestW = w; }
@@ -113,7 +118,7 @@ final class ChatListScan {
         return best;
     }
 
-    private static Hit hitOf(AccessibilityNodeInfo n, String blob) {
+    private static Hit hitOf(AccessibilityNodeInfo n, String blob, boolean openTab) {
         String name = KakaoAccessibility.textOnly(n).trim();
         if (name.length() == 0) {
             String d = KakaoAccessibility.desc(n).trim();
@@ -122,41 +127,57 @@ final class ChatListScan {
         }
         name = name.replace('\n', ' ').trim();
         if (!roomName(name)) return null;
-        String kind = RoomKind.NORMAL;
-        boolean known = false;
-        String blobL = blob == null ? "" : blob;
-        if (blobL.indexOf("오픈프로필") >= 0) {
-            kind = RoomKind.OPEN_DM;
-            known = true;
-        } else if (blobL.indexOf("오픈채팅") >= 0 || blobL.indexOf("오픈챗") >= 0) {
-            kind = RoomKind.OPEN_ROOM;
-            known = true;
-        }
-        return new Hit(name, kind, known);
+        RoomListKind.Read read = RoomListKind.classify(blob, openTab);
+        return new Hit(name, read.kind, read.known);
     }
 
+    /** 제목의 부모와 그 자식·손자. 오픈채팅 배지는 제목의 형제가 아니라 손자인 경우가 있다. */
     private static String rowBlob(AccessibilityNodeInfo n, List<AccessibilityNodeInfo> extra) {
         StringBuilder sb = new StringBuilder();
-        append(sb, KakaoAccessibility.textOnly(n));
-        append(sb, KakaoAccessibility.desc(n));
+        appendNode(sb, n);
         AccessibilityNodeInfo p = null;
         try { p = n.getParent(); } catch (Throwable ignore) { }
         if (p == null) return sb.toString();
         extra.add(p);
-        append(sb, KakaoAccessibility.text2(p));
-        append(sb, KakaoAccessibility.desc(p));
-        int cc = 0;
-        try { cc = p.getChildCount(); } catch (Throwable ignore) { }
-        if (cc > 12) cc = 12;
+        appendNode(sb, p);
+        int cc = childCount(p, 12);
         for (int i = 0; i < cc; i++) {
-            AccessibilityNodeInfo ch = null;
-            try { ch = p.getChild(i); } catch (Throwable ignore) { }
+            AccessibilityNodeInfo ch = childAt(p, i);
             if (ch == null) continue;
             extra.add(ch);
-            append(sb, KakaoAccessibility.textOnly(ch));
-            append(sb, KakaoAccessibility.desc(ch));
+            appendNode(sb, ch);
+            int gc = childCount(ch, 8);
+            for (int j = 0; j < gc; j++) {
+                AccessibilityNodeInfo g = childAt(ch, j);
+                if (g == null) continue;
+                extra.add(g);
+                appendNode(sb, g);
+            }
         }
         return sb.toString();
+    }
+
+    private static void appendNode(StringBuilder sb, AccessibilityNodeInfo n) {
+        append(sb, KakaoAccessibility.textOnly(n));
+        append(sb, KakaoAccessibility.desc(n));
+        append(sb, idTail(n));
+    }
+
+    private static String idTail(AccessibilityNodeInfo n) {
+        String id = KakaoAccessibility.viewId(n);
+        int slash = id.lastIndexOf('/');
+        return slash >= 0 ? id.substring(slash + 1) : id;
+    }
+
+    private static int childCount(AccessibilityNodeInfo n, int cap) {
+        int cc = 0;
+        try { cc = n.getChildCount(); } catch (Throwable ignore) { }
+        if (cc > cap) cc = cap;
+        return cc;
+    }
+
+    private static AccessibilityNodeInfo childAt(AccessibilityNodeInfo n, int i) {
+        try { return n.getChild(i); } catch (Throwable ignore) { return null; }
     }
 
     private static boolean hasTime(String blob) {
@@ -210,7 +231,7 @@ final class ChatListScan {
                 || "Chats".equals(t) || "Friends".equals(t);
     }
 
-    private enum Tab { NONE, CHAT, OTHER }
+    private enum Tab { NONE, CHAT, OPEN, OTHER }
 
     private static Tab tabOf(AccessibilityNodeInfo n, int screenH, List<AccessibilityNodeInfo> extra) {
         if (n == null || !shown(n)) return Tab.NONE;
@@ -221,8 +242,10 @@ final class ChatListScan {
         String text = KakaoAccessibility.textOnly(n).trim();
         String desc = KakaoAccessibility.desc(n).trim();
         if (!picked(n, desc, extra)) return Tab.NONE;
-        if ("채팅".equals(text) || "오픈채팅".equals(text) || "Chats".equals(text)
-                || desc.startsWith("채팅") || desc.startsWith("오픈채팅")) return Tab.CHAT;
+        String descLow = desc.toLowerCase();
+        if ("오픈채팅".equals(text) || "오픈챗".equals(text) || "Open Chat".equals(text)
+                || desc.startsWith("오픈채팅") || descLow.startsWith("open chat")) return Tab.OPEN;
+        if ("채팅".equals(text) || "Chats".equals(text) || desc.startsWith("채팅")) return Tab.CHAT;
         if ("친구".equals(text) || "더보기".equals(text) || "쇼핑".equals(text) || "통화".equals(text)
                 || "Friends".equals(text) || desc.startsWith("친구") || desc.startsWith("쇼핑")) {
             return Tab.OTHER;
@@ -247,7 +270,13 @@ final class ChatListScan {
     private static boolean classLooksLikeRoom(String className) {
         if (className == null) return false;
         String s = className.toLowerCase();
-        return s.indexOf("chatroom") >= 0 || s.indexOf("chat_room") >= 0;
+        return s.indexOf("chatroom") >= 0 || s.indexOf("chat_room") >= 0 || classLooksOpen(className);
+    }
+
+    private static boolean classLooksOpen(String className) {
+        if (className == null) return false;
+        String s = className.toLowerCase();
+        return s.indexOf("openchat") >= 0 || s.indexOf("open_chat") >= 0 || s.indexOf("openlink") >= 0;
     }
 
     private static boolean titleId(AccessibilityNodeInfo n) {
