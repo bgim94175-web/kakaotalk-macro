@@ -1730,7 +1730,44 @@ public final class ImageSender {
         }
     }
 
-    /** 타사 접근성 자동화 앱이 켜져 있나 (매크로 화면 안내에 쓴다) */
+    /**
+     * 켜져 있는 다른 자동 조작 앱의 <b>앱 이름만</b>. 손님 화면·활동 로그에 쓴다.
+     * {@link #otherAccessibility} 는 패키지/서비스 전체 이름을 돌려주므로 진단 기록 전용이다 —
+     * 손님에게 "com.xxx.yyy/com.xxx.yyy.ZService" 는 읽을 수 없는 글자다.
+     */
+    public static String otherAccessibilityNames(Context c) {
+        if (c == null) return "";
+        try {
+            String flat = android.provider.Settings.Secure.getString(c.getContentResolver(),
+                    android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (flat == null || flat.trim().length() == 0) return "";
+            String mine = c.getPackageName();
+            StringBuilder out = new StringBuilder();
+            String[] parts = flat.split(":");
+            int n = 0;
+            for (int i = 0; i < parts.length && n < 6; i++) {
+                String p = (parts[i] == null) ? "" : parts[i].trim();
+                if (p.length() == 0) continue;
+                int slash = p.indexOf('/');
+                String pkg = (slash > 0) ? p.substring(0, slash) : p;
+                if (pkg.equals(mine)) continue;
+                String label = pkg;
+                try {
+                    android.content.pm.PackageManager pm = c.getPackageManager();
+                    CharSequence cs = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+                    if (cs != null && cs.length() > 0) label = cs.toString();
+                } catch (Throwable ignore) { }
+                if (out.length() > 0) out.append(", ");
+                out.append(label);
+                n++;
+            }
+            return out.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 다른 자동 조작 앱이 켜져 있나 (매크로 화면 안내에 쓴다) */
     public static boolean otherAccessibilityOn(Context c) {
         String v = otherAccessibility(c);
         return !("없음".equals(v) || v.startsWith("조회 실패"));
@@ -1745,7 +1782,9 @@ public final class ImageSender {
         String other = otherAccessibility(c);
         if ("없음".equals(other) || other.startsWith("조회 실패")) return;
         warnedOtherAcc = true;
-        Log.add(c, OTHER_ACC_HELP + " 활성 앱: " + other);
+        String names = otherAccessibilityNames(c);
+        Log.add(c, OTHER_ACC_HELP + ((names.length() > 0) ? (" 켜져 있는 앱: " + names) : ""));
+        android.util.Log.w("KakaoAuto", "other a11y: " + other);
     }
 
     /** 한 건 마무리. 같은 건에 대해 두 번 불려도 두 번째는 무시된다. */

@@ -58,8 +58,8 @@ public final class ScreenBot {
         col.addView(Ui.title(a, "봇"));
 
         if (!Settings.canSave(a)) {
-            col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
-                    + " 내정보 탭에서 라이선스를 다시 인증하십시오.", Theme.RED, "내정보 열기",
+            col.addView(Nav.note(a, "라이선스 인증이 완료되지 않아 설정을 저장할 수 없습니다."
+                    + " 내정보 탭에서 인증을 먼저 진행하십시오.", Theme.RED, "내정보 열기",
                     new Runnable() { @Override public void run() { Nav.go(Nav.ACCOUNT); } }));
         }
 

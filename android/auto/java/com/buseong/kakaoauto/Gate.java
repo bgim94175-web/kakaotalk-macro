@@ -90,7 +90,7 @@ public final class Gate {
     private static void needLicenseDialog(final Activity a, License.State s, final String feature) {
         String why = null;
         if (s != null && s.reason != null && s.reason.length() > 0) {
-            try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = null; }
+            try { why = License.reasonUserKr(s.reason); } catch (Throwable t) { why = null; }
         }
         String msg = ((why == null || why.length() == 0) ? "라이선스 인증이 완료되지 않았습니다." : why)
                 + "\n\n내정보 탭에서 라이선스 키를 등록하면 사용할 수 있습니다. 키가 없으면 구매 페이지에서 구매하십시오.";
@@ -109,7 +109,7 @@ public final class Gate {
     private static void lockedDialog(final Activity a, License.State s) {
         String why = null;
         if (s != null && s.reason != null && s.reason.length() > 0) {
-            try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = null; }
+            try { why = License.reasonUserKr(s.reason); } catch (Throwable t) { why = null; }
         }
         String msg = ((why == null || why.length() == 0) ? "현재 기기가 잠금 처리되었습니다." : why)
                 + "\n\n라이선스 키 1개당 기기 1대만 등록됩니다. 기기를 변경하거나 초기화한 경우 관리자에게 기기 초기화를 요청하십시오."
@@ -148,7 +148,7 @@ public final class Gate {
 
                 if (!ok) {
                     String why = null;
-                    try { why = License.reasonKr(reason); } catch (Throwable t) { why = null; }
+                    try { why = License.reasonUserKr(reason); } catch (Throwable t) { why = null; }
                     Ui.toast(a, "상태를 확인하지 못했습니다." + ((why == null || why.length() == 0) ? "" : " (" + why + ")"));
                 } else {
                     boolean on = true;

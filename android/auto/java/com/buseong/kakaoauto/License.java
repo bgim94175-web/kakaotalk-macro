@@ -44,11 +44,22 @@ public final class License {
     public static final String PUBLIC_KEY_B64 =
             "MCowBQYDK2VwAyEAcoFrR7SpOov/AURAxp35+uWBSQTE12WKdWYgXwRWrF8=";
 
-    /** 라이선스 서버 기본 주소. Prefs 평문 "server" 값이 있으면 그걸 먼저 쓴다. */
+    /**
+     * 라이선스 서버 주소. <b>앱에 고정이며 화면에서 바꿀 수 없다.</b>
+     * 손님이 주소를 바꿀 수 있으면 지원 문의만 늘고 (가짜 주소를 넣어 앱이 멈춘다)
+     * 변조 시도의 발판이 된다. 주소를 옮겨야 하면 앱을 다시 배포한다.
+     */
     public static final String SERVER = "https://kakaotalk-macro.onrender.com";
 
-    /** 서버 주소를 덮어쓰는 평문 Prefs 키 */
-    public static final String PREF_SERVER = "server";
+    /** 구버전이 서버 주소를 덮어쓰던 평문 Prefs 키. 지금은 읽지 않고 지우기만 한다. */
+    private static final String OLD_PREF_SERVER = "server";
+
+    /**
+     * 응답 검증 실패는 전부 이 한 문구로 적는다. 서명 없음 · 서명 불일치 · 해석 실패 ·
+     * 확인값 불일치를 구분해 적으면 "무엇을 바꿨을 때 어느 검사가 걸리는지" 를 알려주는
+     * 지표가 되고, 손님이 할 수 있는 조치는 어느 쪽이든 같다. 구분은 logcat 에만 남는다.
+     */
+    private static final String BAD_RESP = "서버 응답을 확인하지 못했습니다. 잠시 후 다시 시도하십시오.";
 
     private static final int TIMEOUT_MS = 15000;          // connect/read 둘 다 15초
     private static final long TS_SKEW_MS = 10 * 60 * 1000L;   // 응답 ts 허용 오차 ±10분
@@ -234,32 +245,17 @@ public final class License {
         return System.currentTimeMillis() >= lastOk + rc;
     }
 
-    /** 현재 서버 주소 (끝의 / 는 뗀다) */
+    /**
+     * 서버 주소. 항상 {@link #SERVER} 다 — 바꿀 수 있는 경로는 없다.
+     * 구버전에서 손님이 넣어둔 덮어쓰기 값이 남아 있으면 조용히 지운다.
+     */
     public static String server(Context c) {
-        String v = (c == null) ? null : Prefs.getStr(c, PREF_SERVER, null);
-        String base = (v == null) ? "" : v.trim();
-        if (!base.startsWith("http://") && !base.startsWith("https://")) base = SERVER;
-        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-        if (base.length() == 0) base = SERVER;
-        return base;
-    }
-
-    /** 서버 주소 바꾸기 (빈 값이면 기본값으로 되돌린다) */
-    public static void setServer(Context c, String url) {
-        if (c == null) return;
-        String u = (url == null) ? "" : url.trim();
-        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
-        if (u.length() == 0 || SERVER.equals(u)) {
-            Prefs.remove(c, PREF_SERVER);
-            Log.add(c, "서버 주소를 기본값으로 복원했습니다.");
-            return;
+        if (c != null) {
+            try {
+                if (Prefs.getStr(c, OLD_PREF_SERVER, null) != null) Prefs.remove(c, OLD_PREF_SERVER);
+            } catch (Throwable ignore) { }
         }
-        if (!u.startsWith("http://") && !u.startsWith("https://")) {
-            Log.add(c, "서버 주소는 http:// 또는 https:// 로 시작해야 합니다.");
-            return;
-        }
-        Prefs.putStr(c, PREF_SERVER, u);
-        Log.add(c, "서버 주소를 변경했습니다: " + u);
+        return SERVER;
     }
 
     // ── 활성화 (/verify) ──────────────────────────────────────────────────────
@@ -348,7 +344,8 @@ public final class License {
                         } else if (isHard(reason)) {
                             Log.add(app, "라이선스 확인 실패: " + reasonKr(reason));
                         } else {
-                            Log.add(app, "라이선스를 확인하지 못했습니다 (" + reasonKr(reason) + "). 유예기간 내에는 정상 동작합니다.");
+                            Log.add(app, "라이선스를 확인하지 못했습니다 (" + reasonKr(reason)
+                                    + "). 인터넷 연결을 확인하십시오.");
                         }
                     }
                 } catch (Throwable t) {
@@ -478,6 +475,37 @@ public final class License {
         return "알 수 없는 오류입니다. (" + r + ")";
     }
 
+    /**
+     * <b>화면에 띄울 문구</b>. {@link #reasonKr} 는 활동 로그·판매자 문의용이라 방어 장치의
+     * 판정 결과까지 적는다 — 앱 서명 불일치, 서버 응답 서명 불일치, 기기 시간 되돌리기,
+     * 오프라인 사용 기간 초과. 그 문장을 손님 화면에 그대로 띄우면 "무엇을 건드렸을 때
+     * 어느 검사가 걸리는지" 를 앱이 직접 알려주는 셈이고, 손님이 할 수 있는 조치도 없다.
+     * 그래서 화면에는 조치만 남긴 문장을 쓴다. 원래 사유는 활동 로그에 그대로 남는다.
+     */
+    public static String reasonUserKr(String reason) {
+        String r = (reason == null) ? "" : reason.trim();
+        if (r.length() == 0) return "";
+        if ("bad_app_sig".equals(r)) {
+            return "앱이 정상적으로 설치되지 않았습니다. 공식 설치 파일로 다시 설치한 후 인증하십시오.";
+        }
+        if ("bad_signature".equals(r)) {
+            return "서버 응답을 확인하지 못했습니다. 잠시 후 다시 시도하십시오.";
+        }
+        if ("clock_rollback".equals(r)) {
+            return "라이선스를 다시 인증해야 합니다. 라이선스 키 화면에서 재인증하십시오.";
+        }
+        if ("grace_expired".equals(r)) {
+            return "인터넷에 연결한 후 라이선스를 다시 확인하십시오.";
+        }
+        if ("too_large".equals(r)) {
+            return "설정이 너무 많습니다. 사용하지 않는 대화방·규칙을 삭제하십시오.";
+        }
+        String s = reasonKr(r);
+        // 서버가 모르는 사유를 내려보냈을 때 내부 코드를 화면에 노출하지 않는다
+        if (s.startsWith("알 수 없는 오류")) return "알 수 없는 오류입니다. 판매자에게 문의하십시오.";
+        return s;
+    }
+
     /** 서버가 내린 판정(상태를 바꿔야 하는 이유)인가. 통신/검증 실패는 아니다. */
     private static boolean isHard(String r) {
         if (r == null) return false;
@@ -578,7 +606,7 @@ public final class License {
                 Keystore.putConfigKey(c, ck);
                 Prefs.clearCache();
                 try { Settings.invalidate(); } catch (Throwable t) { /* 무시 */ }
-                Log.add(c, "서버 응답으로 설정키를 재수신하여 보관했습니다.");
+                Log.add(c, "라이선스 인증을 완료했습니다.");
             }
         }
         invalidate();
@@ -797,7 +825,8 @@ public final class License {
         Parsed p = new Parsed();
         if (r == null) { p.fail = "no_network"; return p; }
         if (r.err != null) {
-            Log.add(c, "서버 연결 실패: " + r.err);
+            Log.add(c, "서버에 연결하지 못했습니다. 인터넷 연결을 확인하십시오.");
+            android.util.Log.w("KakaoAuto", "server connect fail: " + r.err);
             p.fail = "no_network";
             return p;
         }
@@ -807,7 +836,8 @@ public final class License {
         }
         if (r.code != 200) {
             // 서버가 서명 안 한 응답(500/503 등)은 서명검증 대상이 아니다. 연결 실패로 취급한다.
-            Log.add(c, "서버가 HTTP " + r.code + " 로 응답했습니다." + snippet(r.raw));
+            Log.add(c, "서버가 응답을 거부했습니다. (" + r.code + ") 잠시 후 다시 시도하십시오.");
+            android.util.Log.w("KakaoAuto", "http " + r.code + snippet(r.raw));
             p.fail = (r.code >= 500) ? "server_error" : "no_network";
             return p;
         }
@@ -824,13 +854,15 @@ public final class License {
         String sigB64 = null;
         while (m.find()) { st = m.start(); en = m.end(); sigB64 = m.group(1); }
         if (sigB64 == null || sigB64.length() == 0) {
-            Log.add(c, "서버 응답에 서명이 없습니다." + snippet(raw));
+            Log.add(c, BAD_RESP);
+            android.util.Log.w("KakaoAuto", "resp: no sig" + snippet(raw));
             p.fail = "bad_signature";
             return p;
         }
         String signed = raw.substring(0, st) + raw.substring(en);
         if (!sigOk(c, signed, sigB64)) {
-            Log.add(c, "서버 응답 서명이 일치하지 않습니다. 전송 중 응답이 변조되었을 수 있습니다.");
+            Log.add(c, BAD_RESP);
+            android.util.Log.w("KakaoAuto", "resp: sig mismatch");
             p.fail = "bad_signature";
             return p;
         }
@@ -839,7 +871,8 @@ public final class License {
         try {
             o = new JSONObject(raw);
         } catch (Throwable t) {
-            Log.add(c, "서버 응답을 해석하지 못했습니다." + snippet(raw));
+            Log.add(c, BAD_RESP);
+            android.util.Log.w("KakaoAuto", "resp: not json" + snippet(raw));
             p.fail = "bad_signature";
             return p;
         }
@@ -847,7 +880,8 @@ public final class License {
         // ── nonce: 응답 재생(replay) 방어
         String back = str(o, "nonce", "");
         if (nonce != null && !nonce.equals(back)) {
-            Log.add(c, "응답 확인값이 일치하지 않습니다. 이전 응답이 재사용된 것으로 판단됩니다.");
+            Log.add(c, BAD_RESP);
+            android.util.Log.w("KakaoAuto", "resp: nonce mismatch");
             p.fail = "bad_signature";
             return p;
         }
@@ -891,8 +925,8 @@ public final class License {
         // 안드로이드 13(API 33) 아래 기기는 플랫폼에 Ed25519 가 아예 없다.
         // 그냥 실패시키면 안드로이드 8~12 사용자는 앱을 영구히 못 쓰니 직접 구현한 검증기로 한 번 더 본다.
         if (Ed25519.verifySpki(spki, data, sig)) return true;
-        if (last != null) Log.add(c, "이 기기에서 Ed25519 검증을 수행할 수 없습니다. (" + last + ")");
-        else Log.add(c, "서버 응답 서명이 일치하지 않습니다. (내장 Ed25519 검증기)");
+        // 어느 검증기가 돌았는지는 손님 로그에 남기지 않는다 (우회 시도의 단서가 된다).
+        android.util.Log.w("KakaoAuto", "ed25519 verify failed", last);
         return false;
     }
 

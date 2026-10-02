@@ -89,7 +89,7 @@ public final class BotDetail {
     /** 저장만 한다 (토글처럼 화면을 다시 그리면 안 되는 자리). 실패하면 false. */
     private static boolean store(MainActivity a, Settings s) {
         if (!Settings.canSave(a)) {
-            Log.add(a, "설정키가 없어 설정을 저장하지 못했습니다.");
+            Log.add(a, "라이선스 인증이 완료되지 않아 설정을 저장하지 못했습니다.");
             Ui.toast(a, "설정을 저장하지 못했습니다. 내정보 탭에서 라이선스를 인증하십시오.");
             return false;
         }
@@ -384,24 +384,6 @@ public final class BotDetail {
                                 Nav.push(a, "관리자 명단", words(a, WORDS_ADMIN));
                             }
                         }));
-                g2.addView(Ui.navRow(a, "하루 최대 발송", r.dailyLimit + "회", Theme.TEXT,
-                        new Runnable() {
-                            @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("하루 최대 발송 수", "300",
-                                        1, 5000, r.dailyLimit);
-                                Nav.editNums(a, "하루 최대 발송",
-                                        "봇이 1일에 발송할 수 있는 메시지 수입니다. 자정에 초기화됩니다.",
-                                        new Nav.NumField[] { n }, new Nav.OnNums() {
-                                            @Override public String ok() {
-                                                r.dailyLimit = n.value;
-                                                save(a, s);
-                                                Log.add(a, "대화방 관리봇 하루 최대 발송을 "
-                                                        + n.value + "회로 설정했습니다.");
-                                                return null;
-                                            }
-                                        });
-                            }
-                        }));
                 col.addView(g2);
             }
         });
@@ -498,34 +480,17 @@ public final class BotDetail {
                 g2.addView(Ui.navRow(a, "응답 쿨타임", Nav.dur(g.cooldownMs), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("쿨타임 (초)", "3", 0, 600,
+                                final Nav.NumField n = new Nav.NumField("쿨타임 (초)", "3", 3, 600,
                                         (int) (g.cooldownMs / 1000L));
                                 Nav.editNums(a, "응답 쿨타임",
-                                        "동일 대화방에서 이 시간 안에는 재응답하지 않습니다.",
+                                        "동일 대화방에서 이 시간 안에는 재응답하지 않습니다."
+                                                + " 3초 미만으로는 설정할 수 없습니다.",
                                         new Nav.NumField[] { n }, new Nav.OnNums() {
                                             @Override public String ok() {
                                                 g.cooldownMs = n.value * 1000L;
                                                 save(a, s);
                                                 Log.add(a, "미니게임봇 응답 쿨타임을 "
                                                         + n.value + "초로 설정했습니다.");
-                                                return null;
-                                            }
-                                        });
-                            }
-                        }));
-                g2.addView(Ui.navRow(a, "하루 최대 발송", g.dailyLimit + "회", Theme.TEXT,
-                        new Runnable() {
-                            @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("하루 최대 발송 수", "300",
-                                        1, 5000, g.dailyLimit);
-                                Nav.editNums(a, "하루 최대 발송",
-                                        "봇이 1일에 발송할 수 있는 메시지 수입니다. 자정에 초기화됩니다.",
-                                        new Nav.NumField[] { n }, new Nav.OnNums() {
-                                            @Override public String ok() {
-                                                g.dailyLimit = n.value;
-                                                save(a, s);
-                                                Log.add(a, "미니게임봇 하루 최대 발송을 "
-                                                        + n.value + "회로 설정했습니다.");
                                                 return null;
                                             }
                                         });
@@ -724,8 +689,8 @@ public final class BotDetail {
     /** 설정키가 없으면 저장이 안 된다 — 화면 맨 위에서 알린다 */
     private static void notSavable(final MainActivity a, LinearLayout col) {
         if (Settings.canSave(a)) return;
-        col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
-                + " 내정보 탭에서 라이선스를 다시 인증하십시오.", Theme.RED, "내정보 열기",
+        col.addView(Nav.note(a, "라이선스 인증이 완료되지 않아 설정을 저장할 수 없습니다."
+                + " 내정보 탭에서 인증을 먼저 진행하십시오.", Theme.RED, "내정보 열기",
                 new Runnable() { @Override public void run() { Nav.go(Nav.ACCOUNT); } }));
     }
 

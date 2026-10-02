@@ -450,7 +450,7 @@ public final class Settings {
                     Pattern.compile(pattern);
                 } catch (Throwable t) {
                     String why = t.getMessage();
-                    return "정규식(고급) 형식이 올바르지 않습니다."
+                    return "패턴 형식이 올바르지 않습니다."
                             + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
                 }
             }
@@ -541,7 +541,7 @@ public final class Settings {
                     Pattern.compile(pattern);
                 } catch (Throwable t) {
                     String why = t.getMessage();
-                    return "정규식(고급) 형식이 올바르지 않습니다."
+                    return "패턴 형식이 올바르지 않습니다."
                             + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
                 }
             }
@@ -940,7 +940,7 @@ public final class Settings {
         cached = this;
         try {
             if (!Prefs.secReady(c)) {
-                Log.add(c, "설정을 저장하지 못했습니다. 설정키가 없습니다 — 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.");
+                Log.add(c, "설정을 저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.");
                 return false;
             }
             String json = toJson();
@@ -1303,11 +1303,14 @@ public final class Settings {
                 t.mode = oneOf(str(j, "mode", MODE_CONTAINS), MODES, MODE_CONTAINS);
                 t.ignoreCase = j.optBoolean("ignoreCase", true);
                 t.rooms = list(j, "rooms");
-                t.fromMe = j.optBoolean("fromMe", false);
+                // 「본인 메시지 포함」 설정은 제거했다 — 본인 발송을 다시 감지하면
+                // 되돌이 발송 위험이 있고 손님이 켜서 얻을 것이 없다. 구버전 저장값도 끈다.
+                t.fromMe = false;
                 t.reply = str(j, "reply", "");
                 t.target = str(j, "target", "");
                 t.delayMs = clamp(j.optInt("delayMs", 0), 0, 60000);
-                t.cooldownMs = Math.max(0L, j.optLong("cooldownMs", 60000L));
+                // 하한 5초 — 0 이면 같은 규칙이 메시지마다 즉시 다시 반응한다
+                t.cooldownMs = Math.max(5000L, j.optLong("cooldownMs", 60000L));
                 t.oncePerRoom = j.optBoolean("oncePerRoom", false);
                 t.enabled = j.optBoolean("enabled", true);
                 s.triggers.add(t);
@@ -1345,7 +1348,9 @@ public final class Settings {
             s.minigame.dice = g.optBoolean("dice", s.minigame.dice);
             s.minigame.rps = g.optBoolean("rps", s.minigame.rps);
             s.minigame.quiz = g.optBoolean("quiz", s.minigame.quiz);
-            s.minigame.cooldownMs = Math.max(0L, g.optLong("cooldownMs", s.minigame.cooldownMs));
+            // 하한 3초 — 0 이면 방별 간격 제한이 통째로 무효가 되어 명령마다 즉시 발송한다
+            s.minigame.cooldownMs = Math.max(MiniGame.MIN_COOLDOWN_MS,
+                    g.optLong("cooldownMs", s.minigame.cooldownMs));
             s.minigame.dailyLimit = clamp(g.optInt("dailyLimit", s.minigame.dailyLimit), 0, 9999);
         }
         return s;

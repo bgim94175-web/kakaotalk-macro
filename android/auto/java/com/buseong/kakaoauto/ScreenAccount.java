@@ -2,14 +2,10 @@ package com.buseong.kakaoauto;
 
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.PowerManager;
 import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -24,8 +20,12 @@ import java.util.List;
  * 아코디언은 접혀 있으면 안에 뭐가 있는지 모르고, 펼치면 옆 카드와 섞여서 경계가 사라진다.
  * 그래서 이 화면은 「제목 · 지금 값 · ›」 행만 남기고 상세는 전부 {@link Nav#push} 서브화면으로 내보냈다.
  *
- * 섹션은 4개다 — 라이선스 / 카카오톡 / 기록 / 고급.
- * <b>아코디언은 '고급' 한 곳에서만</b> 쓴다 (UI_V3 10장이 허용한 유일한 예외).
+ * 섹션은 3개다 — 라이선스 / 카카오톡 / 기록. 아코디언은 쓰지 않는다.
+ *
+ * <b>'고급' 섹션은 없다.</b> 서버 주소·앱 서명·변조 지표는 손님이 바꿀 일도, 볼 일도 없다.
+ * 손님이 서버 주소를 바꿀 수 있으면 가짜 주소를 넣어 앱이 멈추고 문의만 늘며, 앱 서명과
+ * 변조 지표는 재서명 크랙에 쓸 정보를 그대로 알려주는 셈이다. 지원이 필요한 정보는
+ * 「활동 로그」와 「이미지 전송 진단」의 [복사] 로 충분하다.
  *
  * 값 요약 색 규칙: 손댈 게 없으면 ACCENT·TEXT, 조치가 필요하면 AMBER, 꺼진 건 DIM.
  */
@@ -38,9 +38,6 @@ public final class ScreenAccount {
     /** 새로고침 버튼 라벨 (진행 중에는 "확인 중…" 으로 바뀐다) */
     private static final String REFRESH_LABEL = "기능 새로고침";
 
-    /** '고급' 아코디언 펼침 상태 (화면을 다시 그려도 기억한다) */
-    private static final int F_ADV = 1;
-    private static int openBits = 0;
 
     private static WeakReference<MainActivity> ACT;
     private static WeakReference<LinearLayout> BODY;
@@ -138,7 +135,7 @@ public final class ScreenAccount {
         final License.State st = License.state(a);
         final boolean ok = st.licensed && !st.locked;
         if (!ok) {
-            String why = License.reasonKr(st.reason);
+            String why = License.reasonUserKr(st.reason);
             col.addView(Nav.note(a, (why.length() == 0 ? "라이선스가 인증되지 않았습니다." : why)
                     + "\n재인증이 필요한 경우 라이선스 키 화면에서 로그아웃 후 키를 다시 입력하십시오.",
                     Theme.RED, "라이선스 키 열기", new Runnable() {
@@ -189,9 +186,11 @@ public final class ScreenAccount {
         }));
         col.addView(rec);
 
-        // ── 고급 (아코디언 허용 구역) ──
-        col.addView(Nav.gap(a, 6));
-        col.addView(Nav.foldGroup(a, advFold(a)));
+    }
+
+    /** 매크로 탭의 「진단 기록」 행도 이 화면으로 온다 (입구를 한 곳으로 모은다) */
+    static View diagScreen(MainActivity a) {
+        return sub(a, DIAG);
     }
 
     private static void pushLicense(MainActivity a) {
@@ -333,13 +332,16 @@ public final class ScreenAccount {
                 }
             }));
 
+            // 마지막 확인 시각·오프라인 허용 기간은 올리지 않는다. 두 값을 합치면
+            // "서버 연결을 끊으면 언제까지 쓸 수 있는지" 가 계산된다. 지금 정상인지는
+            // 맨 위 인증 상태가 이미 말해 준다.
             if (ok) {
-                card.addView(Ui.divider(a));
-                card.addView(Ui.kv(a, "마지막 확인", Nav.when(st.lastOk)));
-                card.addView(Ui.kv(a, "오프라인 허용", Nav.dur(st.graceMs)));
-                if (st.expiresAt > 0) card.addView(Ui.kv(a, "키 만료", Nav.day(st.expiresAt)));
+                if (st.expiresAt > 0) {
+                    card.addView(Ui.divider(a));
+                    card.addView(Ui.kv(a, "키 만료", Nav.day(st.expiresAt)));
+                }
             } else {
-                String why = License.reasonKr(st.reason);
+                String why = License.reasonUserKr(st.reason);
                 card.addView(Nav.note(a, (why.length() == 0 ? "라이선스가 인증되지 않았습니다." : why)
                         + "\n로그아웃 후 키를 다시 입력하면 재인증이 진행됩니다.", Theme.RED, null, null));
             }
@@ -352,7 +354,7 @@ public final class ScreenAccount {
             dev.addView(Ui.kv(a, "기기 ID", shortId(st.deviceId)));
             long at = MainActivity.activatedAt(a);
             dev.addView(Ui.kv(a, "등록일", (at > 0) ? Nav.day(at) : "기록 없음"));
-            dev.addView(Ui.kv(a, "안드로이드", "SDK " + android.os.Build.VERSION.SDK_INT));
+            dev.addView(Ui.kv(a, "안드로이드", androidVer()));
             dev.addView(Nav.note(a, "라이선스 키 1개당 기기 1대만 등록됩니다.\n"
                     + "기기를 변경하거나 초기화한 경우 관리자에게 기기 초기화를 요청하십시오.",
                     Theme.ACCENT2, "기기 초기화 요청", new Runnable() {
@@ -398,6 +400,13 @@ public final class ScreenAccount {
             col.addView(out);
         }
     };
+
+    /** "15 (SDK 35)" — 손님은 SDK 번호를 모른다. 문의 때 쓸 값은 안드로이드 버전이다. */
+    private static String androidVer() {
+        String rel = android.os.Build.VERSION.RELEASE;
+        if (rel == null || rel.trim().length() == 0) rel = "확인 불가";
+        return rel + " (SDK " + android.os.Build.VERSION.SDK_INT + ")";
+    }
 
     private static String shortId(String id) {
         if (id == null || id.length() == 0) return "-";
@@ -719,8 +728,9 @@ public final class ScreenAccount {
             final boolean hasAny = (at > 0) || (fail != null);
 
             TextView lead = Ui.sub(a, "이미지 전송이 실패한 시점의 카카오톡 화면 구성을 보관합니다. "
-                    + "기록을 개발자에게 전달하면 원인 추정 없이 조치가 가능합니다. "
-                    + "보관 대상은 화면에 표시된 글자와 버튼 이름이며, 대화 내용은 수집하지 않습니다.");
+                    + "아래 [복사] 로 기록을 고객지원에 전달하면 원인 확인이 가능합니다. "
+                    + "기록에는 대화방·상대 이름과 버튼 글자가 들어가며, 대화 내용은 글자 수만 기록됩니다. "
+                    + "기록은 이 기기에만 보관되고, [복사] 를 실행할 때만 밖으로 나갑니다.");
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
             lp.bottomMargin = Theme.dp(a, 10);
             lead.setLayoutParams(lp);
@@ -741,17 +751,10 @@ public final class ScreenAccount {
             bp.topMargin = Theme.dp(a, 14);
             btns.setLayoutParams(bp);
 
-            TextView view = Ui.btn(a, "보기", false);
-            view.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-            view.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { ScreenMacro.showDiag(a); }
-            });
-            btns.addView(view);
-
+            // [보기] 는 없앴다 — 원문은 카카오톡 내부 뷰 id·좌표가 적힌 개발자용 자료이고
+            // 손님이 읽고 할 수 있는 일이 없다. 위 카드의 요약과 [복사] 로 충분하다.
             TextView copy = Ui.btn(a, "복사", false);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, WRAP, 1f);
-            cp.leftMargin = Theme.dp(a, 10);
-            copy.setLayoutParams(cp);
+            copy.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
             copy.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     Nav.copy(a, "이미지 전송 진단", ScreenMacro.diagText(a));
@@ -782,6 +785,9 @@ public final class ScreenAccount {
                                     Log.add(a, "이미지 전송 진단 기록을 삭제했습니다.");
                                     Ui.toast(a, "진단 기록을 삭제했습니다.");
                                     refresh();
+                                    // 매크로 탭의 「진단 기록」 행도 이 화면으로 오므로 같이 갱신한다
+                                    ScreenMacro.refresh();
+                                    MacroDetail.refresh();
                                 }
                             });
                 }
@@ -791,101 +797,4 @@ public final class ScreenAccount {
         }
     };
 
-    // ── 고급 (아코디언 · UI_V3 10장이 허용한 유일한 예외) ───────────────────
-
-    private static Nav.Fold advFold(final MainActivity a) {
-        final Nav.Fold f = Nav.fold(a, "고급", "서버 주소 · 앱 정보 · 최근 오류",
-                (openBits & F_ADV) != 0);
-        f.onToggle(new Ui.OnToggle() {
-            @Override public void on(boolean v) {
-                if (v) openBits |= F_ADV;
-                else openBits &= ~F_ADV;
-            }
-        });
-
-        f.body.addView(Ui.sub(a, "관리자 안내가 있는 경우에만 변경하십시오."));
-
-        f.body.addView(Nav.actionRow(a, "서버 주소", License.server(a), "변경", new Runnable() {
-            @Override public void run() { editServer(a); }
-        }));
-        f.body.addView(Ui.divider(a));
-
-        f.body.addView(Nav.actionRow(a, "앱 버전",
-                Device.appVersionName(a) + " (" + Device.appVersion(a) + ")", null, null));
-        f.body.addView(Ui.divider(a));
-
-        String sig = Device.appSigSha256(a);
-        final String full = (sig == null) ? "" : sig;
-        String shown = (full.length() < 12) ? "확인 불가" : full.substring(0, 12);
-        f.body.addView(Nav.actionRow(a, "서명 SHA-256", shown,
-                (full.length() == 0) ? null : "복사", new Runnable() {
-                    @Override public void run() { Nav.copy(a, "앱 서명 SHA-256", full); }
-                }));
-        f.body.addView(Ui.divider(a));
-
-        final String err = lastError(a);
-        f.body.addView(Nav.actionRow(a, "최근 오류", (err.length() == 0) ? "없음" : Nav.preview(err, 70),
-                (err.length() == 0) ? null : "복사", new Runnable() {
-                    @Override public void run() { Nav.copy(a, "최근 오류", err); }
-                }));
-
-        String tamper = Device.tamperFlags(a);
-        if (tamper != null && tamper.length() > 0) {
-            f.body.addView(Nav.note(a, "⚠ 변조 지표가 감지되었습니다: " + tamper + "\n"
-                    + "정식 APK가 아니거나 개발자 모드일 수 있습니다. 인증이 거부될 수 있습니다.",
-                    Theme.AMBER, null, null));
-        }
-        return f;
-    }
-
-    /** 활동 로그에서 가장 최근의 실패·오류 한 줄을 뽑는다. 없으면 "" */
-    private static String lastError(MainActivity a) {
-        String dump = Log.dump(a);
-        if (dump == null || dump.length() == 0) return "";
-        String[] lines = dump.split("\n");
-        for (int i = 0; i < lines.length; i++) {
-            String s = lines[i];
-            if (s == null) continue;
-            if (s.contains("실패") || s.contains("오류") || s.contains("거부")
-                    || s.contains("차단") || s.contains("잠금")) {
-                return s.trim();
-            }
-        }
-        return "";
-    }
-
-    private static void editServer(final MainActivity a) {
-        LinearLayout body = Nav.col(a);
-        body.addView(Ui.sub(a, "비워서 저장하면 기본 주소로 복원됩니다.\n기본값: " + License.SERVER));
-
-        TextView lb = Ui.label(a, "서버 주소");
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(a, 14);
-        lp.bottomMargin = Theme.dp(a, 6);
-        lb.setLayoutParams(lp);
-        body.addView(lb);
-
-        final EditText f = Ui.field(a, License.SERVER);
-        f.setSingleLine(true);
-        f.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        f.setText(License.server(a));
-        body.addView(f);
-        final TextView err = Nav.errLine(a);
-        body.addView(err);
-
-        Nav.form(a, "서버 주소", body, "저장", new Nav.OnSave() {
-            @Override public String save() {
-                Nav.errClear(err);
-                String v = f.getText().toString().trim();
-                if (v.length() > 0 && !v.startsWith("http://") && !v.startsWith("https://")) {
-                    Nav.errText(err, "http:// 또는 https:// 로 시작해야 합니다.");
-                    return "";
-                }
-                License.setServer(a, v);
-                Log.add(a, "서버 주소를 변경했습니다.");
-                refresh();
-                return null;
-            }
-        });
-    }
 }

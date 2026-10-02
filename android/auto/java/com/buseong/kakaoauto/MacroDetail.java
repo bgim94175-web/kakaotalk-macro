@@ -189,7 +189,7 @@ public final class MacroDetail {
     }
 
     private static void editMinMessages(final MainActivity a, final Settings s) {
-        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수 수", "1", 0, 200, s.macro.minMessages);
+        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수", "1", 0, 200, s.macro.minMessages);
         Nav.editNums(a, "새 메시지 최소 개수",
                 "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 대화방에만 발송합니다. 0은 항상 발송입니다.",
                 new Nav.NumField[] { mm }, new Nav.OnNums() {
@@ -255,43 +255,17 @@ public final class MacroDetail {
                                 @Override public void run() { editEveryN(a, s); }
                             }));
                 }
-                // 카카오톡이 "이미지를 받는다" 고 해놓고 무시하면 앱은 성공으로 보고한다 —
-                // 실제 업로드 여부를 확인할 방법이 없어서 사용자가 끌 수 있어야 한다.
-                boolean replyImg;
-                try { replyImg = ImageSender.replyImageEnabled(a); } catch (Throwable t) { replyImg = false; }
-                g.addView(Ui.navRowSwitch(a, "알림 답장 전송",
-                        "화면 전환 없이 전송합니다. 발송 기록만 남고 실제 전송이 되지 않으면 미사용으로 설정하십시오.",
-                        replyImg, new Ui.OnToggle() {
-                            @Override public void on(boolean v) {
-                                try {
-                                    ImageSender.setReplyImageEnabled(a, v);
-                                } catch (Throwable t) {
-                                    Log.add(a, "알림 답장 전송 설정을 저장하지 못했습니다: " + t);
-                                }
-                                Log.add(a, v ? "알림 답장 이미지 전송을 사용으로 변경했습니다."
-                                        : "알림 답장 이미지 전송을 미사용으로 변경했습니다.");
-                            }
-                        }));
-                // 채팅방 첨부 경로는 카카오톡 화면을 실제로 조작한다(채팅방이 열리고 시트가 떴다 닫힌다).
-                // 화면이 움직이는 것을 원하지 않는 사용자는 끌 수 있어야 한다.
-                boolean attachImg;
-                try { attachImg = ImageSender.attachEnabled(a); } catch (Throwable t) { attachImg = false; }
-                g.addView(Ui.navRowSwitch(a, "채팅방 첨부 전송",
-                        "대화방을 열어 이미지를 첨부합니다. 카카오톡 화면이 일시적으로 전환됩니다.",
-                        attachImg, new Ui.OnToggle() {
-                            @Override public void on(boolean v) {
-                                try {
-                                    ImageSender.setAttachEnabled(a, v);
-                                } catch (Throwable t) {
-                                    Log.add(a, "채팅방 첨부 전송 설정을 저장하지 못했습니다: " + t);
-                                }
-                            }
-                        }));
+                // 내부 전송 경로(알림 답장 · 채팅방 첨부)를 켜고 끄는 스위치 2개가 있었다.
+                // 손님은 어느 경로가 자기 기기에서 되는지 판단할 근거가 없고, 잘못 끄면
+                // "사진이 안 간다" 문의로 돌아왔다. 그래서 손님이 이해하는 결과 한 줄로 합쳤다.
+                g.addView(Ui.navRow(a, "보내는 방법", sendWayKr(a), Theme.TEXT, new Runnable() {
+                    @Override public void run() { pickSendWay(a); }
+                }));
                 col.addView(g);
 
                 // ── 점검 · 문제 해결 ──
                 // 권한/상태 경고 4건은 '전송 점검' 한 행으로 접고(값에 '주의 N건'),
-                // 진단 기록·전용 기기 설정·즉시 발송·전송 진단은 '전송 문제 해결' 서브화면으로 모은다.
+                // 진단 기록·전용 기기 설정·즉시 발송은 '전송 문제 해결' 서브화면으로 모은다.
                 // 상단 본문은 첨부 이미지·전송 방식 두 섹션만 남는다 (UI_V3 §3 화면당 ≤7 · 섹션 ≤3).
                 col.addView(Ui.sectionHeader(a, null, "점검 · 문제 해결"));
                 final int checks = imgCheckCount(a);
@@ -350,11 +324,11 @@ public final class MacroDetail {
                 // 타사 접근성 자동화 앱은 차단하지 않는다. 자동 클릭이 공유 화면을 함께 조작하면
                 // 전송이 실패하므로 사실만 알린다 (진단 기록에도 같은 항목이 들어간다).
                 String otherAcc;
-                try { otherAcc = ImageSender.otherAccessibilityOn(a) ? ImageSender.otherAccessibility(a) : ""; }
+                try { otherAcc = ImageSender.otherAccessibilityOn(a) ? ImageSender.otherAccessibilityNames(a) : ""; }
                 catch (Throwable t) { otherAcc = ""; }
                 if (otherAcc.length() > 0) {
                     any = true;
-                    col.addView(Nav.note(a, ImageSender.OTHER_ACC_HELP + "\n활성 앱: " + otherAcc,
+                    col.addView(Nav.note(a, ImageSender.OTHER_ACC_HELP + "\n켜져 있는 앱: " + otherAcc,
                             Theme.AMBER, null, null));
                 }
                 // 백그라운드 전송 불가로 확정된 상태 — 예약 발송에서는 이미지가 생략된다
@@ -362,8 +336,7 @@ public final class MacroDetail {
                 try { bgAt = ImageSender.backgroundBlockedAt(a); } catch (Throwable t) { bgAt = 0L; }
                 if (bgAt > 0L) {
                     any = true;
-                    col.addView(Nav.note(a, "예약 발송에서 카카오톡 공유창이 "
-                            + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다."
+                    col.addView(Nav.note(a, "예약 발송에서 카카오톡 공유 화면이 반복해서 열리지 않았습니다."
                             + " 현재 예약 발송은 이미지를 생략하고 텍스트만 발송합니다."
                             + " 전송 문제 해결의 즉시 이미지 발송으로 1회 전송에 성공하면 예약 발송이 다시 이미지를 첨부합니다.",
                             Theme.AMBER, null, null));
@@ -377,7 +350,7 @@ public final class MacroDetail {
         });
     }
 
-    /** 전송 문제 해결 — 진단 기록·전용 기기 설정·즉시 발송·전송 진단을 모은 서브화면 */
+    /** 전송 문제 해결 — 진단 기록·전용 기기 설정·즉시 발송을 모은 서브화면 */
     private static View troubleshoot(MainActivity a) {
         return screen(a, new Filler() {
             @Override public void fill(final MainActivity a, LinearLayout col) {
@@ -386,10 +359,14 @@ public final class MacroDetail {
                 col.addView(Ui.sectionHeader(a, null, "기록 · 안내"));
                 final long dumpAt = ScreenMacro.dumpAtSafe(a);
                 LinearLayout g = Ui.group(a);
+                // 입구는 한 곳(내정보 > 이미지 전송 진단)으로 모은다 — 같은 기록을 두 군데서
+                // 다르게 보여주면 한쪽만 손보는 사고가 난다.
                 g.addView(Ui.navRow(a, "진단 기록",
                         (dumpAt > 0) ? ScreenMacro.agoShort(dumpAt) : "없음",
                         (dumpAt > 0) ? Theme.TEXT : Theme.DIM, new Runnable() {
-                            @Override public void run() { ScreenMacro.showDiag(a); }
+                            @Override public void run() {
+                                Nav.push(a, "이미지 전송 진단", ScreenAccount.diagScreen(a));
+                            }
                         }));
                 g.addView(Ui.navRow(a, "전용 기기 설정 안내", null, 0, new Runnable() {
                     @Override public void run() { Nav.push(a, "전용 기기 설정", deviceGuide(a)); }
@@ -406,23 +383,56 @@ public final class MacroDetail {
                 });
                 col.addView(now);
 
-                final TextView diag = Ui.btn(a, "전송 진단", false);
-                LinearLayout.LayoutParams dp2 = new LinearLayout.LayoutParams(MATCH, WRAP);
-                dp2.topMargin = Theme.dp(a, 8);
-                diag.setLayoutParams(dp2);
-                diag.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) { ScreenMacro.runDiag(a, s, diag); }
-                });
-                col.addView(diag);
-
                 if (rooms.size() > 1) {
-                    col.addView(Ui.sub(a, "즉시 이미지 발송·전송 진단은 대상 대화방 중 첫 번째"
+                    col.addView(Ui.sub(a, "즉시 이미지 발송은 대상 대화방 중 첫 번째"
                             + "(「" + rooms.get(0).label(a) + "」)에만 전송됩니다."));
                 }
-                col.addView(Ui.sub(a, "전송 진단은 실제 전송을 1회 수행하며, 실패 시 카카오톡 화면 구성을 기록합니다."
-                        + " 기록된 내용을 개발자에게 전달하면 원인 분석이 가능합니다."));
+                col.addView(Ui.sub(a, "즉시 이미지 발송은 실제로 사진 1회를 전송합니다."
+                        + " 실패하면 원인 확인에 쓸 기록이 「진단 기록」에 저장됩니다."));
             }
         });
+    }
+
+    /**
+     * 사진을 보내는 방법 — 손님 눈에 보이는 차이(카카오톡 화면이 움직이나)로만 고른다.
+     * 내부로는 두 경로(알림 답장 · 채팅방 첨부)의 조합이지만 경로 이름은 화면에 올리지 않는다.
+     */
+    private static String sendWayKr(MainActivity a) {
+        boolean reply, attach;
+        try { reply = ImageSender.replyImageEnabled(a); } catch (Throwable t) { reply = true; }
+        try { attach = ImageSender.attachEnabled(a); } catch (Throwable t) { attach = true; }
+        if (reply && attach) return "자동";
+        if (attach) return "화면 열어 전송";
+        if (reply) return "화면 전환 없이";
+        return "자동";
+    }
+
+    private static void pickSendWay(final MainActivity a) {
+        boolean reply, attach;
+        try { reply = ImageSender.replyImageEnabled(a); } catch (Throwable t) { reply = true; }
+        try { attach = ImageSender.attachEnabled(a); } catch (Throwable t) { attach = true; }
+        int sel = (reply && attach) ? 0 : (attach ? 1 : 2);
+        Nav.choose(a, "보내는 방법",
+                new String[] { "자동", "화면 열어 전송", "화면 전환 없이" },
+                new String[] {
+                        "앱이 기기에 맞는 방법을 골라 보냅니다. 권장 설정입니다",
+                        "카카오톡을 열어 사진을 첨부합니다. 화면이 잠시 전환되지만 전송 여부를 눈으로 확인할 수 있습니다",
+                        "화면이 전환되지 않습니다. 기기에 따라 사진이 전송되지 않을 수 있습니다" },
+                sel, new Nav.OnPick() {
+                    @Override public void pick(int i) {
+                        boolean r = (i != 1);
+                        boolean at = (i != 2);
+                        try {
+                            ImageSender.setReplyImageEnabled(a, r);
+                            ImageSender.setAttachEnabled(a, at);
+                        } catch (Throwable t) {
+                            Log.add(a, "사진 보내는 방법을 저장하지 못했습니다: " + t);
+                            return;
+                        }
+                        Log.add(a, "사진 보내는 방법을 「" + sendWayKr(a) + "」 로 변경했습니다.");
+                        refresh();
+                    }
+                });
     }
 
     private static void paintThumbs(final MainActivity a, final Settings s, final LinearLayout strip) {
@@ -579,11 +589,11 @@ public final class MacroDetail {
                     boolean freshDump = ScreenMacro.dumpAtSafe(a) > dumpBefore;
                     String msg = freshDump
                             ? (why + "\n\n실패 시점의 카카오톡 화면 구성을 기록했습니다."
-                                + " 기록을 개발자에게 전달하면 원인 분석이 가능합니다.")
+                                + " 기록을 복사하여 고객지원에 전달하면 원인 확인이 가능합니다.")
                             : (why + "\n\n이번 시도의 화면 기록은 없습니다."
                                 + " 카카오톡 공유 화면에 도달하기 전에 종료되었습니다.");
-                    Nav.confirm(a, "이미지 전송 실패", msg, "진단 보기", new Runnable() {
-                        @Override public void run() { ScreenMacro.showDiag(a); }
+                    Nav.confirm(a, "이미지 전송 실패", msg, "기록 복사", new Runnable() {
+                        @Override public void run() { ScreenMacro.copyDiag(a); }
                     });
                     refresh();
                     ScreenMacro.refresh();
@@ -797,14 +807,6 @@ public final class MacroDetail {
                         ScreenMacro.apply(a, s);
                     }
                 }));
-                g1b.addView(Ui.navRowSwitch(a, "본인 메시지 포함",
-                        "본인 발송 메시지도 감지합니다. 반복 발송 위험이 있어 기본값은 미사용입니다.",
-                        t.fromMe, new Ui.OnToggle() {
-                            @Override public void on(boolean v) {
-                                t.fromMe = v;
-                                ScreenMacro.apply(a, s);
-                            }
-                        }));
                 col.addView(g1b);
 
                 // ── 발송 ──
@@ -944,17 +946,41 @@ public final class MacroDetail {
                 });
     }
 
+    /**
+     * 찾는 방식 선택 목록.
+     *
+     * 「정규식」 은 손님용 화면에서 내렸다 — 손님이 쓸 수 없는 문법이고 틀리면 그 규칙이
+     * 조용히 동작을 멈춘다. 다만 <b>이미 정규식으로 저장된 규칙</b>은 지금도 동작하므로,
+     * 그 규칙을 열었을 때만 선택지에 넣어 손님이 다른 방식으로 바꿀 수 있게 한다.
+     * 새 규칙에는 어떤 경로로도 정규식을 넣을 수 없다.
+     */
+    private static boolean modeShowRegex(String cur) {
+        return Settings.MODE_REGEX.equals(cur);
+    }
+
+    private static String[] modeLabels(String cur) {
+        if (modeShowRegex(cur)) {
+            return new String[] { "포함", "정확히", "시작", "정규식" };
+        }
+        return new String[] { "포함", "정확히", "시작" };
+    }
+
+    private static String[] modeDescs(String cur) {
+        String[] base = new String[] { "메시지에 포함되면 감지합니다",
+                "메시지 전체가 일치할 때만 감지합니다",
+                "메시지가 이 단어로 시작할 때 감지합니다" };
+        if (!modeShowRegex(cur)) return base;
+        return new String[] { base[0], base[1], base[2],
+                "이 규칙에 이미 설정된 방식입니다. 다른 방식으로 바꾸면 되돌릴 수 없습니다" };
+    }
+
     private static void pickTrigMode(final MainActivity a, final Settings s,
                                      final Settings.TriggerCfg t) {
         int sel = 0;
         for (int i = 0; i < Settings.MODES.length; i++) {
             if (Settings.MODES[i].equals(t.mode)) sel = i;
         }
-        Nav.choose(a, "찾는 방식", new String[] { "포함", "정확히", "시작", "정규식(고급)" },
-                new String[] { "메시지에 포함되면 감지합니다",
-                        "메시지 전체가 일치할 때만 감지합니다",
-                        "메시지가 이 단어로 시작할 때 감지합니다",
-                        "고급 패턴 문법으로 감지합니다. 잘 모르면 「포함」을 쓰십시오" },
+        Nav.choose(a, "찾는 방식", modeLabels(t.mode), modeDescs(t.mode),
                 sel, new Nav.OnPick() {
                     @Override public void pick(int index) {
                         if (index < 0 || index >= Settings.MODES.length) return;
@@ -991,9 +1017,11 @@ public final class MacroDetail {
 
     private static void editTrigCooldown(final MainActivity a, final Settings s,
                                          final Settings.TriggerCfg t) {
-        final Nav.NumField n = new Nav.NumField("다시 감지까지 대기 (초)", "60", 0, 86400,
+        // 0 을 허용하면 같은 규칙이 메시지마다 즉시 다시 반응한다 → 하한 5초
+        final Nav.NumField n = new Nav.NumField("다시 감지까지 대기 (초)", "60", 5, 86400,
                 (int) (t.cooldownMs / 1000L));
-        Nav.editNums(a, "다시 감지까지 대기", "이 시간 내에는 같은 규칙이 다시 발동하지 않습니다.",
+        Nav.editNums(a, "다시 감지까지 대기",
+                "이 시간 내에는 같은 규칙이 다시 반응하지 않습니다. 5초 미만으로는 설정할 수 없습니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         long old = t.cooldownMs;
@@ -1066,7 +1094,7 @@ public final class MacroDetail {
     private static String modeKr(String mode) {
         if (Settings.MODE_EXACT.equals(mode)) return "정확히";
         if (Settings.MODE_STARTS.equals(mode)) return "시작";
-        if (Settings.MODE_REGEX.equals(mode)) return "정규식(고급)";
+        if (Settings.MODE_REGEX.equals(mode)) return "정규식";
         return "포함";
     }
 
@@ -1396,11 +1424,7 @@ public final class MacroDetail {
         for (int i = 0; i < Settings.MODES.length; i++) {
             if (Settings.MODES[i].equals(k.mode)) sel = i;
         }
-        Nav.choose(a, "찾는 방식", new String[] { "포함", "정확히", "시작", "정규식(고급)" },
-                new String[] { "메시지에 포함되면 감지합니다",
-                        "메시지 전체가 일치할 때만 감지합니다",
-                        "메시지가 이 단어로 시작할 때 감지합니다",
-                        "고급 패턴 문법으로 감지합니다. 잘 모르면 「포함」을 쓰십시오" },
+        Nav.choose(a, "찾는 방식", modeLabels(k.mode), modeDescs(k.mode),
                 sel, new Nav.OnPick() {
                     @Override public void pick(int index) {
                         if (index < 0 || index >= Settings.MODES.length) return;

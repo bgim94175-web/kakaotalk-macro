@@ -283,17 +283,17 @@ public final class Trigger {
         if (t == null) return "규칙 내용이 비어 있습니다.";
         if (t.pattern == null || t.pattern.trim().length() == 0) return "감지할 글자을 입력하십시오.";
         if (t.reply == null || t.reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
-        if (!validMode(t.mode)) return "찾는 방식을 선택하십시오. (포함 · 정확히 · 시작 · 정규식(고급))";
+        if (!validMode(t.mode)) return "찾는 방식을 선택하십시오. (포함 · 정확히 · 시작)";
 
         if (Settings.MODE_REGEX.equals(t.mode)) {
             try {
                 Pattern.compile(t.pattern);
             } catch (Throwable e) {
                 String why = e.getMessage();
-                return "정규식(고급) 형식이 올바르지 않습니다."
+                return "패턴 형식이 올바르지 않습니다."
                         + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
             }
-            // 고쳐서 저장하는 경우가 많으니 "깨진 정규식(고급)" 표시를 풀어준다
+            // 고쳐서 저장하는 경우가 많으니 "깨진 패턴" 표시를 풀어준다
             forget(t.pattern);
         }
 

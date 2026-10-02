@@ -124,7 +124,7 @@ public final class Prefs {
         if (value == null) { remove(c, SEC_PREFIX + name); return; }
         byte[] k = key(c);
         if (k == null) {
-            Log.add(c, "설정키가 없어 저장을 건너뛰었습니다 (" + name + "). 라이선스 인증을 먼저 진행하십시오.");
+            Log.add(c, "라이선스 인증이 완료되지 않아 저장을 건너뛰었습니다 (" + name + ").");
             return;
         }
         String blob = Crypto.seal(k, value);
@@ -163,13 +163,13 @@ public final class Prefs {
             if (ck == null || ck.length() == 0) return null;
             byte[] ikm = Crypto.unb64(ck);
             if (ikm == null || ikm.length == 0) {
-                Log.add(c, "설정키 형식이 올바르지 않습니다. 라이선스 재인증이 필요합니다.");
+                Log.add(c, "저장 설정을 준비하지 못했습니다. 라이선스 재인증이 필요합니다.");
                 return null;
             }
             byte[] salt = Device.deviceId(c).getBytes(StandardCharsets.UTF_8);
             byte[] derived = Crypto.hkdf(ikm, salt, INFO, 32);
             if (derived == null) {
-                Log.add(c, "설정키 유도에 실패했습니다.");
+                Log.add(c, "저장 설정을 준비하지 못했습니다. 라이선스 재인증이 필요합니다.");
                 return null;
             }
             keyCache = derived;

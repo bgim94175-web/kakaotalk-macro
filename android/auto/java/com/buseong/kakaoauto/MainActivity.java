@@ -180,7 +180,7 @@ public final class MainActivity extends Activity {
         boolean locked = (s != null) && s.locked;
         if (locked) {
             String why = "";
-            try { why = License.reasonKr(s.reason); } catch (Throwable t) { why = ""; }
+            try { why = License.reasonUserKr(s.reason); } catch (Throwable t) { why = ""; }
             if (why == null || why.length() == 0) why = "현재 기기가 잠금 처리되었습니다";
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
@@ -252,7 +252,7 @@ public final class MainActivity extends Activity {
         card.addView(err);
         if (s != null && !locked && s.reason != null && s.reason.length() > 0
                 && !"no_license".equals(s.reason)) {
-            Nav.errText(err, License.reasonKr(s.reason));
+            Nav.errText(err, License.reasonUserKr(s.reason));
         }
 
         final TextView go = Ui.btn(this, "인증하기", true);
@@ -273,7 +273,7 @@ public final class MainActivity extends Activity {
                         Nav.busy(go, false, "확인 중…", locked ? "다시 인증하기" : "인증하기");
                         if (isFinishing()) return;
                         if (!ok) {
-                            Nav.errText(err, License.reasonKr(reason));
+                            Nav.errText(err, License.reasonUserKr(reason));
                             return;
                         }
                         afterActivated();
@@ -288,8 +288,8 @@ public final class MainActivity extends Activity {
         // 기기 정보 카드
         LinearLayout dev = Ui.card(this);
         dev.addView(Ui.label(this, "이 기기"));
+        // 기기 ID 는 인증 전 화면에 올리지 않는다 — 인증된 손님은 내정보 > 라이선스 키에서 본다.
         dev.addView(Ui.kv(this, "기기명", Device.deviceName()));
-        dev.addView(Ui.kv(this, "기기 ID", shortId(Device.deviceId(this))));
         col.addView(dev);
 
         col.addView(Nav.note(this, "라이선스 키는 최초 인증한 기기에 등록됩니다.\n"
@@ -452,9 +452,10 @@ public final class MainActivity extends Activity {
     /** 켜짐이면 `다음 발송 21:34 (12분 후) · 금일 8회 발송`, 꺼짐이면 `미사용` */
     private static String homeStatus(MainActivity a, Settings s) {
         if (!s.macro.enabled) return "미사용";
-        if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
-        if (activeRoomCount(s) == 0) return "활성 대화방 없음 · 발송 보류";
-        if (!hasSendableRoom(s)) return "메시지 미설정 · 발송 보류";
+        // 원인만 적으면 손님은 어디를 고쳐야 하는지 알 수 없다 → 갈 곳을 함께 적는다
+        if (s.macro.roomRefs().isEmpty()) return "매크로 탭에서 대상 대화방을 먼저 선택하십시오";
+        if (activeRoomCount(s) == 0) return "대상 대화방이 모두 미사용 · 매크로 탭에서 사용으로 변경하십시오";
+        if (!hasSendableRoom(s)) return "매크로 탭에서 발송 메시지를 먼저 입력하십시오";
         // v4: 전역 단일 nextAt 이 아니라 대상 방들 중 가장 이른 방별 nextAt 을 보여준다.
         long at = earliestRoomNextAt(s);
         String next = (at > 0) ? (ScreenMacro.hm(at) + " " + after(at)) : "대기";
@@ -848,9 +849,4 @@ public final class MainActivity extends Activity {
         return sb.toString();
     }
 
-    private static String shortId(String id) {
-        if (id == null || id.length() == 0) return "-";
-        if (id.length() <= 10) return id;
-        return id.substring(0, 6) + "…" + id.substring(id.length() - 4);
-    }
 }

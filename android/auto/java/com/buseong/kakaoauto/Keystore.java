@@ -44,11 +44,12 @@ public final class Keystore {
             byte[] fk = fallbackKey(c);
             String f = (fk == null) ? null : Crypto.seal(fk, b64);
             if (f == null) {
-                Log.add(c, "설정키를 안전하게 저장하지 못했습니다. 앱을 재시작하면 라이선스 재인증이 필요합니다.");
+                Log.add(c, "설정 저장을 준비하지 못했습니다. 앱을 재시작하면 라이선스 재인증이 필요합니다.");
                 return;
             }
             blob = "f1:" + f;
-            Log.add(c, "이 기기는 보안 키저장소를 사용할 수 없어 기기 고유정보 방식으로 설정키를 보관했습니다.");
+            // 어느 보관 방식을 썼는지는 손님 로그에 남기지 않는다 (보호 방식의 차이를 알려주는 셈이다)
+            android.util.Log.i("KakaoAuto", "config key: fallback storage");
         }
         Prefs.putStr(c, BLOB_KEY, blob);
         Prefs.clearCache();
@@ -69,7 +70,7 @@ public final class Keystore {
             v = (fk == null) ? null : Crypto.open(fk, blob.substring(3));
         }
         if (v == null) {
-            Log.add(c, "보관된 설정키를 열지 못했습니다. 라이선스 재인증이 필요합니다.");
+            Log.add(c, "저장된 설정을 열지 못했습니다. 라이선스 재인증이 필요합니다.");
             return null;
         }
         cache = v;

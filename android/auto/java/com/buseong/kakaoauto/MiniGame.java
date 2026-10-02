@@ -35,6 +35,12 @@ import java.util.Set;
  * 끝말잇기 판정은 {@link WordDict}, 퀴즈 문제는 {@link QuizBank} 가 들고 있다.
  */
 public final class MiniGame {
+
+    /**
+     * 같은 대화방 재응답 최소 간격. 0 을 허용하면 명령이 올라올 때마다 즉시 발송해
+     * 카카오톡 쪽에서 비정상 사용으로 판정될 수 있다. 화면에서도 3초 미만은 받지 않는다.
+     */
+    public static final long MIN_COOLDOWN_MS = 3000L;
     private MiniGame() {}
 
     /** 게임 상태 백업 슬롯 (평문) */
@@ -849,7 +855,9 @@ public final class MiniGame {
             return "봇이 동작할 대화방을 1개 이상 선택하십시오.";
         }
         if (cfg.cmdPrefix == null || cfg.cmdPrefix.trim().length() == 0) return "명령어 앞글자를 입력하십시오.";
-        if (cfg.cooldownMs < 0) return "쿨타임은 0 이상으로 입력하십시오.";
+        if (cfg.cooldownMs < MIN_COOLDOWN_MS) {
+            return "쿨타임은 " + (MIN_COOLDOWN_MS / 1000L) + "초 이상으로 입력하십시오.";
+        }
         if (cfg.dailyLimit < 0) return "일일 한도는 0 이상으로 입력하십시오.";
         boolean any = false;
         for (int i = 0; i < Settings.GAMES.length; i++) if (cfg.gameOn(Settings.GAMES[i])) any = true;
@@ -883,7 +891,7 @@ public final class MiniGame {
         if (msg == null || msg.trim().length() == 0) return false;
         if (r == null) return false;
         int limit = (cfg == null) ? 0 : cfg.dailyLimit;
-        long cool = (cfg == null || cfg.cooldownMs < 0) ? 0L : cfg.cooldownMs;
+        long cool = (cfg == null) ? MIN_COOLDOWN_MS : Math.max(MIN_COOLDOWN_MS, cfg.cooldownMs);
         final String rk = r.key();
         final String label = r.label(c);
         synchronized (MiniGame.class) {

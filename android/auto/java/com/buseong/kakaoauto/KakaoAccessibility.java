@@ -61,7 +61,7 @@ import java.util.Locale;
  * 받아둔 값)를 넘겨서 "이번 시도의 덤프인지" 를 확인하고 쓴다. id 를 모르면
  * {@link #lastDump(Context)} + {@link #lastDumpAt(Context)} 로 "언제 것인지" 를 같이 보여줘야 한다 —
  * 지난 덤프를 이번 실패 화면인 것처럼 보여주는 게 제일 나쁜 거짓말이다.
- * {@link #dumpScreen()} 은 <b>실패와 무관하게 지금 화면을 손으로 떠낼 때만</b> 쓰는 보조 API 다
+ * 화면 기록은 <b>전송이 실패한 순간에만</b> 떠낸다 (수동 수집 경로는 두지 않는다)
  * (떠낸 걸 저장도 같이 한다).
  *
  * <h3>실패를 성공으로 속이지 않는다</h3>
@@ -775,24 +775,10 @@ public final class KakaoAccessibility extends AccessibilityService {
 
     // ── 진단 덤프 공개 API ───────────────────────────────────────────────────
 
-    /**
-     * 지금 화면(카톡 창 + 위에 떠 있는 다이얼로그 창까지)을 사람이 읽을 수 있게 떠낸다.
-     * 서비스가 안 붙어있거나 카톡 화면이 아니면 짧은 안내 문구를 돌려준다.
-     * <b>armed 일 때만 실제 트리를 읽는다</b> — 평소 카톡 화면은 들여다보지 않는다.
-     */
-    public static String dumpScreen() {
-        KakaoAccessibility me = INSTANCE;
-        if (me == null) return "접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.";
-        if (!armed) return "예약(armed) 상태가 아니므로 화면을 읽지 않았습니다. 진단은 전송 시도 중에만 수집됩니다.";
-        try {
-            String d = me.buildDump(lastWhere);
-            // 손으로 떠낸 것도 저장해둔다 — 화면에서 바로 복사 못 하고 나중에 찾는 경우가 있다
-            try { saveDump(me, d, attempt); } catch (Throwable ignore) { }
-            return d;
-        } catch (Throwable t) {
-            return "화면 기록 생성에 실패했습니다. (" + t.getClass().getSimpleName() + ")";
-        }
-    }
+
+    // dumpScreen(수동 화면 수집)은 제거했다 — 호출하는 곳이 없는데 UI 한 줄만 붙으면
+    // "화면 기록은 전송 실패 시에만 저장됩니다" 라는 손님 대상 안내가 깨진다.
+    // 지원용 수동 수집이 필요해지면 손님용 앱이 아니라 관리자앱에 넣는다.
 
     /** 지금 시도(arm) 의 id. arm 이 돌려준 값과 같다. 예약 전이면 0. */
     public static long attemptId() {
@@ -1309,7 +1295,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                     : " · 하단 버튼 「" + cut(dis.label, 20) + "」 이 비활성 상태입니다(선택이 처리되지 않았습니다)";
             dumpAndFail("대화방 「" + cut(pickedName, 20) + "」 을 선택했으나 선택 상태와 화면이 변경되지 않았습니다"
                     + extra + ". 이름은 일치하나 선택 위치가 올바르지 않습니다." + nextStep()
-                    + " 증상이 반복되면 화면 진단을 복사하여 개발자에게 전달하십시오."
+                    + " 증상이 반복되면 진단 기록을 복사하여 고객지원에 전달하십시오."
                     + a11yTail());
             return;
         }
@@ -2810,6 +2796,16 @@ public final class KakaoAccessibility extends AccessibilityService {
      * 이게 메시지와 덤프에 없으면 엉뚱한 데를 고치게 된다.
      */
     private static String otherA11y(Context c) {
+        return otherA11y(c, true);
+    }
+
+    /**
+     * 켜져 있는 다른 접근성 앱 목록.
+     *
+     * @param withPkg 패키지명을 괄호로 붙이나. 진단 기록에는 붙이고(앱 이름이 같은 사칭 앱이 있다),
+     *                손님 화면 안내에는 붙이지 않는다 — 손님에게 패키지명은 읽을 수 없는 글자다.
+     */
+    private static String otherA11y(Context c, boolean withPkg) {
         if (c == null) return "";
         StringBuilder sb = new StringBuilder(96);
         int n = 0;
@@ -2826,7 +2822,8 @@ public final class KakaoAccessibility extends AccessibilityService {
                 String pkg = (slash > 0) ? p.substring(0, slash) : p;
                 if (pkg.equals(mine)) continue;         // 우리 건 뺀다
                 if (n > 0) sb.append(", ");
-                sb.append(appLabel(c, pkg)).append('(').append(pkg).append(')');
+                sb.append(appLabel(c, pkg));
+                if (withPkg) sb.append('(').append(pkg).append(')');
                 n++;
             }
         } catch (Throwable t) {
@@ -2840,11 +2837,11 @@ public final class KakaoAccessibility extends AccessibilityService {
      * 화면 조작 실패에서 제일 먼저 확인할 항목이라 덤프 상단에도 같은 값을 박는다({@link #a11yBlock}).
      */
     private String a11yTail() {
-        String o = otherA11y(this);
+        String o = otherA11y(this, false);
         if (o.length() == 0) return "";
-        return " · 참고: 타사 접근성 앱이 활성 상태입니다(" + o + "). 해당 앱은 자동 조작과 충돌하여"
-                + " 카카오톡 레이아웃이 변경된 것과 동일한 증상을 유발합니다."
-                + " 이미지 전송 중에는 해당 앱의 자동 클릭 동작을 중지하거나 접근성 권한을 일시 해제하십시오.";
+        return " · 참고: 다른 자동 조작 앱이 켜져 있습니다(" + o + ")."
+                + " 두 앱이 같은 화면을 동시에 조작하면 카카오톡 화면이 바뀐 것과 같은 증상이 발생합니다."
+                + " 사진 전송 중에는 해당 앱의 자동 클릭을 중지하거나 접근성 권한을 일시 해제하십시오.";
     }
 
     /**
@@ -3656,7 +3653,8 @@ public final class KakaoAccessibility extends AccessibilityService {
                 .append(seenNow.length() == 0 ? "없음" : seenNow).append('\n');
         out.append("화면에서 수집된 문자(중복 제거, 앞 ").append(Math.min(40, sc.leafTexts.size())).append("개):\n");
         for (int i = 0; i < sc.leafTexts.size() && i < 40; i++) {
-            out.append("  ").append(i + 1).append(". ").append(privacyCut(sc.leafTexts.get(i))).append('\n');
+            out.append("  ").append(i + 1).append(". ")
+                    .append(dumpText(sc.leafTexts.get(i), false)).append('\n');
         }
         ArrayList<Hit> hits = sc.bestHits();
         out.append("대화방 이름 후보: ").append(hits.size()).append("개");
@@ -3682,9 +3680,7 @@ public final class KakaoAccessibility extends AccessibilityService {
     private void dumpHead(StringBuilder out, String where) {
         String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
         out.append("=== 카카오톡 화면 진단 ").append(now).append(" ===\n");
-        out.append("※ 이 기록에는 당시 카카오톡 화면에 표시된 이름·문구가 포함됩니다.\n");
-        out.append("   전달 전 내용을 확인하고, 노출을 원하지 않는 항목은 삭제하십시오.\n");
-        out.append("   (대화 본문 등 장문은 앞 ").append(TEXT_KEEP).append("자만 기록됩니다)\n");
+        out.append("※ 대화방·상대 이름과 버튼 글자가 기록됩니다. 대화 내용은 글자 수만 기록됩니다.\n");
         out.append("시도 id: ").append(attempt).append(" · 전송 흐름: ").append(flowName()).append('\n');
         // 타사 접근성 앱은 화면 조작 실패에서 가장 먼저 봐야 하는 항목이다 → 맨 위에 둔다
         out.append(a11yBlock(this));
@@ -3739,10 +3735,10 @@ public final class KakaoAccessibility extends AccessibilityService {
                     StringBuilder l = new StringBuilder(DUMP_MAX_LINE_LEN);
                     for (int d = 0; d < depth && d < 12; d++) l.append(' ');
                     l.append('[').append(shortCls(className(n))).append(']');
-                    // 방/사람 이름은 통째로 남긴다(그게 있어야 셀렉터를 고친다).
-                    // 대화 본문처럼 긴 글자만 앞부분으로 자른다.
-                    if (tx.length() > 0) l.append(" text=\"").append(privacyCut(tx)).append('"');
-                    if (ds.length() > 0) l.append(" desc=\"").append(privacyCut(ds)).append('"');
+                    // 버튼 라벨은 남기고(그게 있어야 셀렉터를 고친다) 대화 본문 자리는 가린다.
+                    boolean clk = flag(n, 1);
+                    if (tx.length() > 0) l.append(" text=\"").append(dumpText(tx, clk)).append('"');
+                    if (ds.length() > 0) l.append(" desc=\"").append(dumpText(ds, clk)).append('"');
                     if (id.length() > 0) l.append(" id=").append(id);
                     l.append(" C=").append(bool(flag(n, 1)));
                     if (flag(n, 2)) l.append(" K=Y X=").append(bool(flag(n, 3)));
@@ -4086,6 +4082,64 @@ public final class KakaoAccessibility extends AccessibilityService {
         String t = s.replace('\n', ' ').replace('\r', ' ');
         if (t.length() <= NAME_MAX) return t;
         return t.substring(0, TEXT_KEEP) + "…(" + t.length() + "자)";
+    }
+
+    /**
+     * 덤프의 '대화 본문 자리' 를 가린다.
+     *
+     * 진단 기록은 손님이 [복사] 해서 밖으로 내보내는 자료다. 그런데 {@link #privacyCut} 은
+     * {@link #NAME_MAX}자 이하면 원문을 그대로 남기므로, 40자 이하인 카카오톡 메시지는
+     * 사실상 전문이 보관됐다. 화면 안내문이 "대화 내용은 수집하지 않습니다" 라고 적고 있었으니
+     * 문구가 사실과 달랐던 것이다.
+     *
+     * 셀렉터를 고치는 데 필요한 것은 "어느 뷰에 글자가 있었는지" 와 그 모양(글자 수·종류)이다.
+     * 내용 자체는 필요하지 않으므로 남기지 않는다. 다만 버튼 라벨은 남겨야 한다 —
+     * 카카오톡이 「사진」 을 「이미지」 로 바꾸면 그 사실을 덤프로만 알 수 있다.
+     * 그래서 <b>누를 수 있는 짧은 글자</b>(= UI 라벨)만 원문으로 남긴다.
+     *
+     * @param clickable 그 뷰를 누를 수 있나 (버튼·메뉴 항목이면 true)
+     */
+    static String dumpText(String s, boolean clickable) {
+        if (s == null) return "";
+        String t = s.replace('\n', ' ').replace('\r', ' ').trim();
+        if (t.length() == 0) return "";
+        if (clickable && t.length() <= UI_LABEL_MAX) return t;          // 버튼 라벨
+        if (isSelectorWord(t)) return t;                                 // 우리가 찾는 라벨
+        return shapeOf(t);
+    }
+
+    /** 누를 수 있는 글자가 이 길이 이하면 버튼 라벨로 본다 (「사진」 「앨범」 「전송」) */
+    private static final int UI_LABEL_MAX = 10;
+
+    /** 우리 셀렉터 표에 있는 라벨인가 (그 라벨은 가려버리면 수리가 불가능하다) */
+    private static boolean isSelectorWord(String s) {
+        String q = squash(s);
+        if (q.length() == 0) return false;
+        for (int i = 0; i < SEND_S.length; i++) if (q.equals(SEND_S[i])) return true;
+        for (int i = 0; i < TAB_CHAT_S.length; i++) if (q.equals(TAB_CHAT_S[i])) return true;
+        for (int i = 0; i < SEARCH_HINT_S.length; i++) {
+            if (SEARCH_HINT_S[i].length() > 0 && q.equals(SEARCH_HINT_S[i])) return true;
+        }
+        return false;
+    }
+
+    /** "[한글5자]" — 글자 수와 종류만 남긴다 */
+    private static String shapeOf(String t) {
+        boolean ko = false, en = false, num = false, etc = false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if ((c >= 0xAC00 && c <= 0xD7A3) || (c >= 0x3130 && c <= 0x318F)) ko = true;
+            else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) en = true;
+            else if (c >= '0' && c <= '9') num = true;
+            else if (c != ' ') etc = true;
+        }
+        StringBuilder k = new StringBuilder();
+        if (ko) k.append("한글");
+        if (en) { if (k.length() > 0) k.append('+'); k.append("영문"); }
+        if (num) { if (k.length() > 0) k.append('+'); k.append("숫자"); }
+        if (etc) { if (k.length() > 0) k.append('+'); k.append("기호"); }
+        if (k.length() == 0) k.append("공백");
+        return "[" + k + " " + t.length() + "자]";
     }
 
     /** 긴 글자는 앞부분만 (남의 대화를 개발자에게 넘기지 않게) */

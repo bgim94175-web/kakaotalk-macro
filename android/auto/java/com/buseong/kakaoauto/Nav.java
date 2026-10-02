@@ -379,125 +379,8 @@ public final class Nav {
 
     // ── 접히는 카드 ───────────────────────────────────────────────────────────
 
-    /** fold() 가 돌려주는 손잡이. card 를 화면에 붙이고, 내용은 body 에 넣는다. */
-    public static final class Fold {
-        public final LinearLayout card;
-        public final LinearLayout body;
-        private final TextView sum;
-        private final TextView caret;
-        Ui.OnToggle cb;
-
-        Fold(LinearLayout card, LinearLayout body, TextView sum, TextView caret) {
-            this.card = card;
-            this.body = body;
-            this.sum = sum;
-            this.caret = caret;
-        }
-
-        /** 펼침/접힘이 바뀔 때 알려준다 (화면을 다시 그려도 상태를 기억하려고) */
-        public void onToggle(Ui.OnToggle c) { this.cb = c; }
-
-        /** 접힌 상태에서 보이는 요약값 */
-        public void summary(String s) {
-            if (sum == null) return;
-            sum.setText((s == null) ? "" : s);
-            sum.setVisibility((s == null || s.length() == 0) ? View.GONE : View.VISIBLE);
-        }
-
-        public boolean isOpen() { return body.getVisibility() == View.VISIBLE; }
-
-        public void open(boolean b) {
-            body.setVisibility(b ? View.VISIBLE : View.GONE);
-            if (caret != null) caret.setText(b ? "▾" : "▸");
-        }
-    }
-
-    /**
-     * 제목 + 요약값만 보이는 카드. 머리를 누르면 body 가 펼쳐진다.
-     *
-     * ★ UI_V3 부터 아코디언은 **내정보 탭의 '고급' 한 곳에서만** 쓴다.
-     * 다른 화면에서 설정 상세를 열 때는 fold 가 아니라 {@link #push(MainActivity, String, View)} +
-     * {@code Ui.navRow} 를 써라 (접혀 있으면 안에 뭐가 있는지 모르고, 펼치면 경계가 사라진다).
-     */
-    public static Fold fold(Context c, String titleTxt, String summary, boolean open) {
-        LinearLayout card = Ui.card(c);
-
-        LinearLayout head = Ui.row(c);
-        head.setMinimumHeight(Theme.dp(c, 48));
-
-        LinearLayout left = new LinearLayout(c);
-        left.setOrientation(LinearLayout.VERTICAL);
-        left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-        left.addView(Ui.h2(c, titleTxt));
-
-        TextView sum = Ui.sub(c, (summary == null) ? "" : summary);
-        sum.setMaxLines(2);
-        sum.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        sp.topMargin = Theme.dp(c, 4);
-        sum.setLayoutParams(sp);
-        if (summary == null || summary.length() == 0) sum.setVisibility(View.GONE);
-        left.addView(sum);
-        head.addView(left);
-
-        TextView caret = new TextView(c);
-        caret.setText(open ? "▾" : "▸");
-        caret.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
-        caret.setTextColor(Theme.DIM);
-        caret.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        cp.leftMargin = Theme.dp(c, 12);
-        caret.setLayoutParams(cp);
-        head.addView(caret);
-
-        LinearLayout body = new LinearLayout(c);
-        body.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        bp.topMargin = Theme.dp(c, 6);
-        body.setLayoutParams(bp);
-        body.setVisibility(open ? View.VISIBLE : View.GONE);
-
-        final Fold f = new Fold(card, body, sum, caret);
-        head.setClickable(true);
-        head.setFocusable(true);
-        Ui.press(head);
-        head.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                f.open(!f.isOpen());
-                if (f.cb != null) {
-                    try { f.cb.on(f.isOpen()); } catch (Throwable t) { /* 상태 기억 실패는 무해 */ }
-                }
-            }
-        });
-
-        card.addView(head);
-        card.addView(body);
-        return f;
-    }
-
-    /**
-     * 접힘 카드 여러 개를 카드 하나로 묶는다 (구분선으로 나눈다).
-     * fold 와 같이 내정보 '고급' 전용이다. 목록 화면은 {@code Ui.group()} 을 쓴다.
-     */
-    public static LinearLayout foldGroup(Context c, Fold... folds) {
-        LinearLayout card = Ui.card(c);
-        boolean first = true;
-        if (folds != null) {
-            for (int i = 0; i < folds.length; i++) {
-                Fold f = folds[i];
-                if (f == null || f.card == null) continue;
-                List<View> kids = new ArrayList<View>();
-                for (int k = 0; k < f.card.getChildCount(); k++) kids.add(f.card.getChildAt(k));
-                f.card.removeAllViews();
-                if (!first) card.addView(Ui.divider(c));
-                for (int k = 0; k < kids.size(); k++) card.addView(kids.get(k));
-                first = false;
-            }
-        }
-        return card;
-    }
-
-    // ── 자잘한 조립 ───────────────────────────────────────────────────────────
+    // '고급' 아코디언(fold/foldGroup/Fold)은 제거했다 — 내정보에서 '고급' 섹션을 없앴고,
+    // 손님용 앱의 다른 화면은 아코디언을 쓰지 않는다 (UI_V3: 설정 상세는 전용 서브화면).
 
     /** 세로 컨테이너 (가로 꽉, 세로 내용만큼) */
     public static LinearLayout col(Context c) {
@@ -697,7 +580,7 @@ public final class Nav {
                 if (a.isFinishing()) return;
 
                 if (!ok) {
-                    String why = License.reasonKr(reason);
+                    String why = License.reasonUserKr(reason);
                     if (why == null || why.length() == 0) why = "확인 실패";
                     Log.add(a, "기능 새로고침 실패: " + why);
                     Ui.toast(a, why);
@@ -1199,30 +1082,10 @@ public final class Nav {
         Ui.showDark(b);
     }
 
-    /** 긴 글을 읽기만 하는 창 (로그 전체보기 등) */
-    public static void showText(Activity a, String titleTxt, String text, final Runnable onCopy) {
-        LinearLayout body = col(a);
-        TextView t = Ui.mono(a, (text == null || text.length() == 0) ? "(내용 없음)" : text);
-        body.addView(t);
-        AlertDialog.Builder b = Ui.dialog(a, titleTxt);
-        ScrollView sc = new ScrollView(a);
-        sc.setVerticalScrollBarEnabled(false);
-        LinearLayout wrap = new LinearLayout(a);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        int ph = Theme.dp(a, 18);
-        wrap.setPadding(ph, Theme.dp(a, 8), ph, Theme.dp(a, 8));
-        wrap.addView(body);
-        sc.addView(wrap, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        b.setView(sc);
-        if (onCopy != null) {
-            b.setPositiveButton("복사", new android.content.DialogInterface.OnClickListener() {
-                @Override public void onClick(android.content.DialogInterface d, int w) { onCopy.run(); }
-            });
-        }
-        b.setNegativeButton("닫기", null);
-        Ui.showDark(b);
-    }
+
+    // showText(원문 전문 보기 창)는 제거했다 — 쓰던 곳은 카카오톡 화면 덤프를 손님에게
+    // 그대로 띄우는 진단 창 둘뿐이었고, 둘 다 '요약 + [기록 복사]' 로 바꿨다.
+    // 손님에게 해석 불가능한 원문을 띄우는 화면은 다시 만들지 않는다.
 
     // ── 이미지 썸네일 ────────────────────────────────────────────────────────
 

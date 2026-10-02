@@ -83,8 +83,8 @@ public final class ScreenMacro {
             return;
         }
         if (!Settings.canSave(a)) {
-            col.addView(Nav.note(a, "설정키가 없어 설정을 저장할 수 없습니다."
-                    + " 내정보 탭에서 라이선스를 다시 인증하십시오.", Theme.RED, "내정보 열기",
+            col.addView(Nav.note(a, "라이선스 인증이 완료되지 않아 설정을 저장할 수 없습니다."
+                    + " 내정보 탭에서 인증을 먼저 진행하십시오.", Theme.RED, "내정보 열기",
                     new Runnable() { @Override public void run() { Nav.go(Nav.ACCOUNT); } }));
         }
 
@@ -492,8 +492,8 @@ public final class ScreenMacro {
         String txt = "⚠ 이미지 전송에 실패했습니다.\n"
                 + dayTime(fail.at) + " · " + room + " — " + Nav.preview(fail.why, 70) + "\n"
                 + "텍스트 발송은 정상 동작합니다.";
-        return Nav.note(a, txt, Theme.RED, "진단 보기", new Runnable() {
-            @Override public void run() { showDiag(a); }
+        return Nav.note(a, txt, Theme.RED, "기록 복사", new Runnable() {
+            @Override public void run() { copyDiag(a); }
         });
     }
 
@@ -507,119 +507,27 @@ public final class ScreenMacro {
 
     // ── 이미지 전송 진단 ────────────────────────────────────────────────────
 
-    /**
-     * 첫 번째 대상 대화방으로 실제로 한 번 전송해 보고, 끝나면 결과 + 화면 기록을 보여준다.
-     * 실패 시점의 카카오톡 화면 구성이 가장 중요한 정보라서 그대로 복사할 수 있게 한다.
-     */
-    static void runDiag(final MainActivity a, final Settings s, final TextView btn) {
-        if (!License.allowed(a, Features.MACRO)) { Gate.check(a, Features.MACRO); return; }
+    // runDiag(전송 진단)는 제거했다 — 「즉시 이미지 발송」과 실제 동작이 같은데
+    // '진단' 이라는 이름 때문에 손님이 발송 없는 점검으로 오해했다. 실패 기록은 그대로 남는다.
 
-        List<RoomRef> rooms = targets(a, s);
-        if (rooms.isEmpty()) {
-            Nav.confirm(a, "대상 대화방 없음",
-                    "진단은 실제 전송을 1회 수행합니다. 대상 대화방을 1개 이상 설정하십시오.",
-                    "확인", null);
-            return;
-        }
-        if (s.macro.images.isEmpty()) {
-            Nav.confirm(a, "이미지 없음",
-                    "진단은 실제 전송을 1회 수행합니다. 이미지를 1장 이상 선택하십시오.",
-                    "확인", null);
-            return;
-        }
+    // diagResult(진단 결과 창)도 runDiag 와 함께 제거했다 — 원문을 손님 화면에 띄우는
+    // 유일한 경로였다. 즉시 이미지 발송의 실패 안내는 MacroDetail 이 사람 말로 보여주고,
+    // 기록은 [기록 복사] 로만 나간다.
 
-        boolean accOn;
-        try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
-        if (!accOn) {
-            Nav.confirm(a, "접근성 권한 필요",
-                    "진단은 카카오톡 화면을 읽어야 하므로 접근성 권한이 필요합니다.",
-                    "권한 설정", new Runnable() {
-                        @Override public void run() { ImageSender.openSettings(a); }
-                    });
-            return;
-        }
-
-        final RoomRef room = rooms.get(0);
-        final String label = room.label(a);
-        final List<String> uris = new ArrayList<String>(s.macro.images);
-        Nav.confirm(a, "전송 진단 실행",
-                "「" + label + "」 에 이미지 " + uris.size() + "장을 실제로 전송합니다."
-                        + " 성공 시 실제 전송되며, 실패 시 카카오톡 화면 구성이 기록됩니다.\n"
-                        + "전송 중 카카오톡 공유 화면이 표시됩니다.",
-                "진단 시작", new Runnable() {
-            @Override public void run() {
-                final String idle = "전송 진단";
-                // ★ 시작 전 화면 기록 시각을 잡아둔다. 이게 있어야 끝난 뒤에
-                //   "이번에 새로 남은 기록" 과 "지난 기록" 을 구별할 수 있다.
-                final long dumpBefore = dumpAtSafe(a);
-                Nav.busy(btn, true, "진단 중…", idle);
-                Log.add(a, "이미지 전송 진단을 시작했습니다. (" + label + ")");
-                try {
-                    // ★ RoomRef 를 그대로 넘긴다. key() 를 넘기면 계정 구분자가 붙은 문자열이
-                    //   카톡 화면 매칭에 쓰여 어떤 텍스트와도 일치하지 않는다.
-                    ImageSender.sendWithResult(a, room, uris, new ImageSender.Done() {
-                        @Override public void done(boolean ok, String detail) {
-                            Nav.busy(btn, false, "진단 중…", idle);
-                            diagResult(a, room, ok, detail, dumpBefore);
-                        }
-                    });
-                } catch (Throwable t) {
-                    Nav.busy(btn, false, "진단 중…", idle);
-                    Scheduler.noteImageFail(a, label, "진단을 시작하지 못했습니다. " + t);
-                    Log.add(a, "이미지 전송 진단을 시작하지 못했습니다: " + t);
-                    Ui.toast(a, "진단을 시작하지 못했습니다.");
-                    refresh();
-                    MacroDetail.refresh();
-                }
-            }
-        });
-    }
 
     /**
-     * 진단 결과 + 화면 기록을 한 창에 보여준다 (복사 가능 · 스크롤 됨).
+     * 저장된 진단 기록을 클립보드로 복사한다.
      *
-     * @param dumpBefore 진단을 시작하기 <b>전</b>의 화면 기록 시각 (기록이 없었으면 0).
-     *        이보다 새 기록이 생겼을 때만 "이번 시도의 화면" 이라고 말한다.
-     *        지난 덤프를 이번 실패 화면인 것처럼 보여주는 게 제일 나쁜 거짓말이다.
+     * 원문을 화면에 띄우는 창(showDiag)은 없앴다. 그 본문은 카카오톡 내부 뷰 id·좌표와
+     * 우리 셀렉터 전략이 그대로 적힌 개발자용 자료여서 손님이 읽고 할 수 있는 일이 없었고,
+     * 실제로 손님에게 필요한 동작은 "고객지원에 전달" 하나뿐이다. 그래서 복사만 남긴다.
+     * 손님이 눈으로 확인할 요약(실패 시각·대화방·사유)은 진단 화면 카드에 이미 있다.
      */
-    private static void diagResult(final MainActivity a, RoomRef room, boolean ok, String detail,
-                                   long dumpBefore) {
-        String label = room.label(a);
-        // 결과를 기록에 반영한다 — 성공이면 지우고, 실패면 남긴다
-        if (ok) Scheduler.clearImageFail(a, label);
-        else Scheduler.noteImageFail(a, label, detail);
-
-        StringBuilder sb = new StringBuilder(2048);
-        sb.append(ok ? "■ 결과: 성공 (카카오톡에서 실제 전송 여부를 확인하십시오)" : "■ 결과: 실패").append('\n');
-        sb.append("■ 대화방: ").append(label).append('\n');
-        sb.append("■ 상세: ").append((detail == null || detail.length() == 0) ? "없음" : detail).append('\n');
-        sb.append("■ 접근성: ").append(ImageSender.accessibilityOn(a) ? "허용" : "비허용")
-                .append(" · 다른 앱 위에 표시: ").append(ImageSender.overlayOn(a) ? "허용" : "비허용").append('\n');
-        sb.append('\n');
-        sb.append(dumpSection(a, dumpBefore));
-
-        final String all = sb.toString();
-        Nav.showText(a, ok ? "진단 결과 · 성공" : "진단 결과 · 실패", all, new Runnable() {
-            @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
-        });
-        refresh();
-        MacroDetail.refresh();
+    static void copyDiag(final MainActivity a) {
+        Nav.copy(a, "이미지 전송 진단", diagText(a));
     }
 
-    /**
-     * 저장된 진단(마지막 실패 기록 + 화면 기록) 보기.
-     * 이건 "이번 시도" 라는 개념이 없으니 <b>언제 남은 기록인지</b>를 맨 위에 박는다.
-     */
-    static void showDiag(final MainActivity a) {
-        final String all = diagText(a);
-        long at = dumpAtSafe(a);
-        Nav.showText(a, "이미지 전송 진단 (" + ((at > 0) ? (agoShort(at) + " 기록") : "화면 기록 없음") + ")",
-                all, new Runnable() {
-                    @Override public void run() { Nav.copy(a, "이미지 전송 진단", all); }
-                });
-    }
-
-    /** showDiag 가 보여주는 본문. 내정보 화면의 [복사] 도 같은 글을 쓴다. */
+    /** 복사되는 본문. 내정보 진단 화면의 [복사] 도 같은 글을 쓴다. */
     static String diagText(MainActivity a) {
         StringBuilder sb = new StringBuilder(2048);
         Scheduler.ImageFail fail = lastFail(a);
@@ -771,7 +679,7 @@ public final class ScreenMacro {
     static void apply(MainActivity a, Settings s) {
         // Settings.save 는 설정키가 없으면 예외 없이 조용히 넘어간다 → 여기서 먼저 막고 알려준다
         if (!Settings.canSave(a)) {
-            Log.add(a, "설정키가 없어 설정을 저장하지 못했습니다.");
+            Log.add(a, "라이선스 인증이 완료되지 않아 설정을 저장하지 못했습니다.");
             Ui.toast(a, "설정을 저장하지 못했습니다. 내정보 탭에서 라이선스를 인증하십시오.");
             return;
         }

@@ -508,7 +508,7 @@ public final class ScreenAccounts {
 
     private static void editAccMin(final MainActivity a, final Settings s, final String accName,
                                    final Settings.AccountCfg ac) {
-        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수 수", "1", 0, 999, ac.minMessages);
+        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수", "1", 0, 999, ac.minMessages);
         Nav.editNums(a, "새 메시지 최소 개수",
                 "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 경우에만 발송합니다. 0은 항상 발송입니다.",
                 new Nav.NumField[] { mm }, new Nav.OnNums() {
