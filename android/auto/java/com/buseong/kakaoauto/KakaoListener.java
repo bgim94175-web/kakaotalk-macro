@@ -1364,7 +1364,70 @@ public final class KakaoListener extends NotificationListenerService {
      * 그래서 기본 계정 참조는 계정을 가로질러 찾되, 이름이 딱 하나 걸릴 때만 보낸다
      * (여러 계정에 같은 이름이 있으면 findSession 이 null 을 돌려주므로 오발송은 없다).
      */
+    // ── 계정 간 발송 간격(텀) ──────────────────────────────────────────────
+    // 듀얼 메신저로 두 계정이 같은 물리적 대화방에 들어가 있으면, 같은 방 이름으로
+    // 양쪽이 동시에 발송해 메시지가 중복된다. 한 계정이 보낸 뒤 설정한 간격 동안
+    // 다른 계정의 같은 이름 발송을 보류해 동시 중복을 막는다.
+    // (같은 계정의 재발송은 각 기능의 쿨다운이 담당하므로 여기서는 막지 않는다.)
+    private static final class NameStamp { final String acc; final long at; NameStamp(String a, long t) { acc = a; at = t; } }
+    private static final Map<String, NameStamp> NAME_SENT = new ConcurrentHashMap<String, NameStamp>();
+    private static final Map<String, Long> GAP_LOGGED = new ConcurrentHashMap<String, Long>();
+
+    private static long crossAccountGapMs(Context ctx) {
+        try { return Settings.load(ctx).crossAccountGapMs; } catch (Throwable t) { return 60000L; }
+    }
+
+    /** 다른 계정이 간격 안에 같은 방 이름으로 보냈으면 남은 대기 ms, 아니면 0. */
+    private static long heldRemainingMs(Context ctx, RoomRef ref) {
+        long gap = crossAccountGapMs(ctx);
+        if (gap <= 0 || ref == null) return 0L;
+        String name = normRoom(ref.name);
+        if (name.length() == 0) return 0L;
+        NameStamp st = NAME_SENT.get(name);
+        if (st == null) return 0L;
+        if (st.acc.equals(ref.acc)) return 0L;                  // 같은 계정의 재발송은 쿨다운 담당
+        long elapsed = System.currentTimeMillis() - st.at;
+        return (elapsed < gap) ? (gap - elapsed) : 0L;          // 다른 계정이 간격 안에 보냄 → 남은 시간
+    }
+
+    /** 발송 성공 시 그 방 이름의 마지막 발송 계정·시각을 기록한다. */
+    private static void stampAccountSend(RoomRef ref) {
+        if (ref == null) return;
+        String name = normRoom(ref.name);
+        if (name.length() == 0) return;
+        NAME_SENT.put(name, new NameStamp(ref.acc, System.currentTimeMillis()));
+    }
+
     public static boolean sendTo(Context ctx, RoomRef ref, String text) {
+        // 계정 간 간격: 다른 계정이 방금 같은 대화방에 보냈으면, 건너뛰지 않고
+        // 남은 간격만큼 미뤄서 둘 다 보내되 동시 발사만 피한다(사용자 선택).
+        long remaining = heldRemainingMs(ctx, ref);
+        if (remaining > 0) {
+            final Context c2 = (ctx.getApplicationContext() != null) ? ctx.getApplicationContext() : ctx;
+            final RoomRef r2 = ref;
+            final String t2 = text;
+            String nk = normRoom(ref.name);
+            Long lastLog = GAP_LOGGED.get(nk);
+            long now0 = System.currentTimeMillis();
+            if (lastLog == null || now0 - lastLog.longValue() > 60000L) {
+                GAP_LOGGED.put(nk, Long.valueOf(now0));
+                Log.add(ctx, "「" + ref.label(ctx) + "」 다른 계정이 방금 같은 대화방에 보내 "
+                        + ((remaining + 999) / 1000) + "초 뒤로 미룹니다(계정 간 간격).");
+            }
+            // 예정 발송 시각으로 스탬프를 찍어, 계정이 3개 이상이어도 서로 다른 시점으로 어긋나게 한다.
+            // (다음 계정은 이 미래 시각 기준으로 남은 간격을 재므로 delay 가 누적된다)
+            String nm = normRoom(ref.name);
+            if (nm.length() > 0) NAME_SENT.put(nm, new NameStamp(ref.acc, now0 + remaining));
+            post(new Runnable() {
+                @Override public void run() { sendToDirect(c2, r2, t2); }
+            }, remaining + 150L);
+            return true;   // 수락: 잠시 뒤 실제로 발송된다
+        }
+        return sendToDirect(ctx, ref, text);
+    }
+
+    /** 간격 가드를 거치지 않고 바로 발송한다(이미 미뤄진 재호출용). */
+    private static boolean sendToDirect(Context ctx, RoomRef ref, String text) {
         boolean crossAcc = (ref != null && ref.isDefault());
         return sendTo(ctx, ref, text, findSession(ref, crossAcc));
     }
@@ -1396,7 +1459,6 @@ public final class KakaoListener extends NotificationListenerService {
                     + "설정에서 권한을 허용하십시오.");
             return false;
         }
-
         PendingIntent pi = s.pending;
         RemoteInput[] inputs = s.inputs;
         try {
@@ -1423,6 +1485,7 @@ public final class KakaoListener extends NotificationListenerService {
             s.lastMine = now;
             s.othersSinceMine = 0;
             s.lastSentText = text;
+            stampAccountSend(ref);
             Log.add(ctx, "「" + r + "」 발송 완료: " + preview(text));
             return true;
         } catch (PendingIntent.CanceledException e) {

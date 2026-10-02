@@ -106,6 +106,38 @@ public final class ScreenAccounts {
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
         col.addView(help);
+
+        // 중복 발송 방지 — 두 계정이 같은 대화방에 들어가 있을 때의 간격(텀)
+        col.addView(Ui.sectionHeader(a, null, "중복 발송 방지"));
+        final Settings gs = Settings.load(a);
+        long sec = gs.crossAccountGapMs / 1000L;
+        String gapVal = (gs.crossAccountGapMs <= 0) ? "사용 안 함" : (sec + "초");
+        LinearLayout gg = Ui.group(a);
+        gg.addView(Ui.navRow(a, "계정 간 발송 간격", gapVal, 0, new Runnable() {
+            @Override public void run() { editGap(a); }
+        }));
+        col.addView(gg);
+        col.addView(Nav.note(a, "두 계정이 같은 대화방에 들어가 있으면, 한 계정이 보낸 뒤 이 시간 "
+                + "동안 다른 계정의 같은 대화방 발송을 건너뜁니다. 동시 중복 발송을 막습니다. "
+                + "0으로 두면 끕니다.", Theme.ACCENT2, null, null));
+    }
+
+    private static void editGap(final MainActivity a) {
+        final Settings s = Settings.load(a);
+        final Nav.NumField f = new Nav.NumField("간격 (초)", "60", 0, 3600,
+                (int) (s.crossAccountGapMs / 1000L));
+        Nav.editNums(a, "계정 간 발송 간격", "0으로 두면 끕니다. 같은 대화방 이름에만 적용됩니다.",
+                new Nav.NumField[] { f }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        s.crossAccountGapMs = (long) f.value * 1000L;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "계정 간 발송 간격을 " + f.value + "초로 변경했습니다.");
+                        Nav.reload();
+                        return null;
+                    }
+                });
     }
 
     /** 계정이 1개뿐일 때 — 고를 게 없으니 안내와 이름 수정만 둔다 (UI_V3 6장) */

@@ -546,6 +546,14 @@ public final class Settings {
     public List<String> accounts = new ArrayList<String>();
 
     /**
+     * 계정 간 발송 간격(텀). 듀얼 메신저로 두 계정이 같은 물리적 대화방에 들어가 있으면
+     * 같은 방 이름으로 양쪽이 동시에 발송해 메시지가 중복된다. 한 계정이 보낸 뒤
+     * 이 시간 동안 다른 계정의 같은 이름 발송을 보류한다. 0이면 끈다. 기본 60초.
+     * (같은 계정의 재발송은 각 기능의 쿨다운이 담당하므로 여기서 막지 않는다.)
+     */
+    public long crossAccountGapMs = 60000L;
+
+    /**
      * 이 계정이 발송·봇 대상인가. 목록이 비어 있으면 항상 true (전체 계정).
      * 계정 키를 못 읽는 기기는 기본 계정 "0" 으로 취급한다.
      */
@@ -722,6 +730,7 @@ public final class Settings {
             JSONObject o = new JSONObject();
             o.put("v", VERSION);
             o.put("accounts", arr(accounts));
+            o.put("crossAccountGapMs", crossAccountGapMs);
 
             JSONObject m = new JSONObject();
             m.put("enabled", macro.enabled);
@@ -827,6 +836,7 @@ public final class Settings {
 
         // 키가 없으면 빈 목록 그대로 = 전체 계정 대상 (기존 사용자가 자동으로 전부 포함된다)
         s.accounts = list(o, "accounts");
+        s.crossAccountGapMs = Math.max(0L, Math.min(3600000L, o.optLong("crossAccountGapMs", s.crossAccountGapMs)));
 
         JSONObject m = o.optJSONObject("macro");
         if (m != null) {
