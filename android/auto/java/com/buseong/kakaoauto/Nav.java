@@ -67,6 +67,10 @@ public final class Nav {
     /** 올라가 있는 서브화면들 (아래 → 위). 비어있으면 탭 화면을 보고 있는 것이다. */
     private static final ArrayList<View> SUBS = new ArrayList<View>();
 
+    /** 같은 행을 빠르게 두 번 눌러 같은 서브화면이 두 장 쌓이는 것을 막는 디바운스 창 */
+    private static final long PUSH_DEBOUNCE_MS = 300L;
+    private static long lastPushAt = 0L;
+
     /** 지금 보고 있는 탭 */
     public static int current() { return cur; }
 
@@ -196,6 +200,12 @@ public final class Nav {
     public static void push(MainActivity a, String title, View content) {
         ViewGroup host = host();
         if (a == null || a.isFinishing() || host == null || content == null) return;
+
+        // 연타 방지 — 페이드 애니메이션(140ms) 중에도 입력을 받으므로 같은 행을 두 번 누르면
+        // 같은 서브화면이 스택에 2장 쌓인다. 바로 직전 push 와 너무 가까우면 무시한다.
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastPushAt < PUSH_DEBOUNCE_MS) return;
+        lastPushAt = now;
 
         LinearLayout wrap = new LinearLayout(a);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -547,12 +557,7 @@ public final class Nav {
         left.setOrientation(LinearLayout.VERTICAL);
         left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
 
-        TextView t = new TextView(c);
-        t.setText((titleTxt == null) ? "" : titleTxt);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-        t.setTextColor(Theme.TEXT);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setIncludeFontPadding(false);
+        TextView t = Ui.rowTitle(c, titleTxt);
         left.addView(t, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         if (value != null && value.length() > 0) {
@@ -1143,7 +1148,7 @@ public final class Nav {
 
             View dot = new View(a);
             dot.setBackground(on ? Theme.pill(Theme.ACCENT, 0, a)
-                                 : Theme.pill(0x00000000, Theme.LINE2, a));
+                                 : Theme.pill(Theme.TRANSPARENT, Theme.LINE2, a));
             LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(a, 16), Theme.dp(a, 16));
             dp.rightMargin = Theme.dp(a, 12);
             r.addView(dot, dp);
@@ -1178,101 +1183,6 @@ public final class Nav {
         Ui.showDark(d);
     }
 
-    /** 방 고르기 창: 아는 방 목록에서 여러 개 + 직접 입력. 결과는 새로 고른 것만 돌아온다. */
-    public interface OnRooms { void rooms(List<String> picked); }
-
-    public static void pickRooms(final Activity a, String titleTxt, List<String> candidates,
-                                 final List<String> already, final OnRooms cb) {
-        LinearLayout body = col(a);
-
-        final ArrayList<String> pool = new ArrayList<String>();
-        if (candidates != null) {
-            for (int i = 0; i < candidates.size(); i++) {
-                String v = candidates.get(i);
-                if (v == null) continue;
-                v = v.trim();
-                if (v.length() == 0) continue;
-                if (already != null && already.contains(v)) continue;
-                if (!pool.contains(v)) pool.add(v);
-            }
-        }
-        final boolean[] checked = new boolean[pool.size()];
-
-        if (pool.isEmpty()) {
-            body.addView(Ui.sub(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 자동으로 등록됩니다.\n"
-                    + "대화방 이름을 직접 입력할 수도 있습니다. 카카오톡에 표시되는 이름과 정확히 일치해야 합니다."));
-        } else {
-            TextView lb = Ui.label(a, "최근 감지된 대화방");
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-            lp.bottomMargin = Theme.dp(a, 4);
-            lb.setLayoutParams(lp);
-            body.addView(lb);
-        }
-
-        for (int i = 0; i < pool.size(); i++) {
-            final int idx = i;
-            LinearLayout r = Ui.row(a);
-            r.setMinimumHeight(Theme.dp(a, 48));
-            int pv = Theme.dp(a, 8);
-            r.setPadding(0, pv, 0, pv);
-            r.setClickable(true);
-            r.setFocusable(true);
-            Ui.press(r);
-
-            final View box = new View(a);
-            box.setBackground(Theme.round(0x00000000, Theme.R_SM, Theme.LINE2, 1, a));
-            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(Theme.dp(a, 18), Theme.dp(a, 18));
-            bp.rightMargin = Theme.dp(a, 12);
-            r.addView(box, bp);
-
-            TextView nt = Ui.body(a, pool.get(i));
-            nt.setSingleLine(true);
-            nt.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-            nt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
-            r.addView(nt);
-
-            r.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    checked[idx] = !checked[idx];
-                    box.setBackground(checked[idx]
-                            ? Theme.round(Theme.ACCENT, Theme.R_SM, 0, 0, v.getContext())
-                            : Theme.round(0x00000000, Theme.R_SM, Theme.LINE2, 1, v.getContext()));
-                }
-            });
-            body.addView(r);
-        }
-
-        TextView lb2 = Ui.label(a, "직접 입력 (쉼표로 여러 개)");
-        LinearLayout.LayoutParams l2 = new LinearLayout.LayoutParams(MATCH, WRAP);
-        l2.topMargin = Theme.dp(a, 16);
-        l2.bottomMargin = Theme.dp(a, 6);
-        lb2.setLayoutParams(l2);
-        body.addView(lb2);
-
-        final EditText manual = Ui.field(a, "예) 우리반 단톡, 동아리방");
-        manual.setSingleLine(true);
-        manual.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        body.addView(manual);
-
-        form(a, titleTxt, body, "추가", new OnSave() {
-            @Override public String save() {
-                ArrayList<String> out = new ArrayList<String>();
-                for (int i = 0; i < pool.size(); i++) {
-                    if (checked[i]) out.add(pool.get(i));
-                }
-                String typed = manual.getText().toString();
-                String[] parts = typed.split(",");
-                for (int i = 0; i < parts.length; i++) {
-                    String v = (parts[i] == null) ? "" : parts[i].trim();
-                    if (v.length() == 0) continue;
-                    if (!out.contains(v)) out.add(v);
-                }
-                if (out.isEmpty()) return "추가할 대화방을 선택하거나 이름을 입력하십시오";
-                if (cb != null) cb.rooms(out);
-                return null;
-            }
-        });
-    }
 
     /** 예/아니오 확인창 */
     public static void confirm(Activity a, String titleTxt, String msg, String okLabel,

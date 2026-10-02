@@ -6,6 +6,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -264,13 +265,21 @@ public final class MainActivity extends Activity {
         top.addView(refresh);
         head.addView(top);
 
+        // 타일이 5개라 좁은 기기에서는 가로 스크롤로 담는다 (밀도 유지).
         statsRow = Ui.row(this);
+        statsRow.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        HorizontalScrollView statsScroll = new HorizontalScrollView(this);
+        statsScroll.setHorizontalScrollBarEnabled(false);
+        statsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         sp.topMargin = Theme.dp(this, 12);
-        statsRow.setLayoutParams(sp);
+        statsScroll.setLayoutParams(sp);
+        statsScroll.addView(statsRow, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         paintStats();
-        head.addView(statsRow);
+        head.addView(statsScroll);
 
         return head;
     }
@@ -323,7 +332,7 @@ public final class MainActivity extends Activity {
             if (!(b instanceof LinearLayout) || ((LinearLayout) b).getChildCount() < 2) continue;
             boolean active = (i == tab);
             View dot = ((LinearLayout) b).getChildAt(0);
-            dot.setBackground(Theme.circle(active ? Theme.PRIMARY : 0x00000000, this));
+            dot.setBackground(Theme.circle(active ? Theme.PRIMARY : Theme.TRANSPARENT, this));
             View lb = ((LinearLayout) b).getChildAt(1);
             if (lb instanceof TextView) {
                 ((TextView) lb).setTextColor(active ? Theme.TEXT : Theme.DIM);
@@ -408,20 +417,37 @@ public final class MainActivity extends Activity {
         String expiring = (s == null) ? "–" : Ui.num(s.optLong("expiring_7d", 0));
         long pendingN   = (s == null) ? 0 : s.optLong("pending_orders", 0);
         String pending  = (s == null) ? "–" : Ui.num(pendingN);
+        long depAttnN   = (s == null) ? 0 : s.optLong("deposits_attention", 0);
+        String depAttn  = (s == null) ? "–" : Ui.num(depAttnN);
 
         LinearLayout t1 = Ui.statTile(this, "총 키", total, Theme.TEXT);
         LinearLayout t2 = Ui.statTile(this, "활성", active, Theme.ACCENT);
         LinearLayout t3 = Ui.statTile(this, "7일내 만료", expiring, Theme.AMBER);
         LinearLayout t4 = Ui.statTile(this, "대기 주문", pending, pendingN > 0 ? Theme.PRIMARY : Theme.SUB);
+        // 확인 필요 입금 — 설정 화면과 같은 규칙으로 값>0 이면 RED (알림성 수치는 RED 로 통일).
+        LinearLayout t5 = Ui.statTile(this, "확인 입금", depAttn, depAttnN > 0 ? Theme.RED : Theme.SUB);
+
+        // 스크롤 컨테이너 안이라 가중치 대신 고정 폭을 준다.
+        LinearLayout[] tiles = { t1, t2, t3, t4, t5 };
+        int w = Theme.dp(this, 82);
+        for (int i = 0; i < tiles.length; i++) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) tiles[i].getLayoutParams();
+            lp.width = w;
+            lp.weight = 0f;
+            lp.rightMargin = (i == tiles.length - 1) ? 0 : Theme.dp(this, 6);
+            tiles[i].setLayoutParams(lp);
+        }
 
         tileGoes(t1, 0); tileGoes(t2, 0); tileGoes(t3, 0); tileGoes(t4, 1);
+        // 탭하면 주문 탭의 입금 세그먼트로 바로 들어간다.
+        t5.setClickable(true);
+        Ui.press(t5);
+        t5.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { goDeposits(); }
+        });
 
-        // 마지막 타일은 오른쪽 여백 없이
-        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) t4.getLayoutParams();
-        lp.rightMargin = 0;
-        t4.setLayoutParams(lp);
-
-        statsRow.addView(t1); statsRow.addView(t2); statsRow.addView(t3); statsRow.addView(t4);
+        statsRow.addView(t1); statsRow.addView(t2); statsRow.addView(t3);
+        statsRow.addView(t4); statsRow.addView(t5);
     }
 
     private void tileGoes(View tile, final int toTab) {
@@ -430,6 +456,13 @@ public final class MainActivity extends Activity {
         tile.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { goTab(toTab); }
         });
+    }
+
+    /** 주문 탭으로 이동한 뒤 입금 세그먼트를 연다 */
+    private void goDeposits() {
+        goTab(1);
+        Screen s = screens[1];
+        if (s instanceof ScreenOrders) ((ScreenOrders) s).focusDeposits();
     }
 
     // ── 공통 ──────────────────────────────────────────────────────────────────

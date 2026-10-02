@@ -38,7 +38,7 @@ public final class Features {
 
     /** 한 줄 설명 (카드용) */
     public static String desc(String id) {
-        if (MACRO.equals(id)) return "대화방별 주기 자동발송 · 이미지 첨부 · 메시지추적 · 오픈프로필 자동응답";
+        if (MACRO.equals(id)) return "대화방별 주기 자동발송 · 이미지 첨부 · 메시지 추적 · 오픈프로필 자동응답";
         if (ROOMBOT.equals(id)) return "입/퇴장 인사, 금지어 감지, 도배 감지, 공지 자동안내";
         if (MINIGAME.equals(id)) return "끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹";
         return "";

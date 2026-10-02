@@ -371,7 +371,7 @@ public final class Ui {
         TextView t = base(c, s, 14f, primary ? Theme.ON_PRIMARY : Theme.TEXT, primary);
         t.setBackground(primary
                 ? Theme.round(Theme.PRIMARY, Theme.R_MD, 0, 0, c)
-                : Theme.round(0x00000000, Theme.R_MD, Theme.LINE2, 1, c));
+                : Theme.round(Theme.TRANSPARENT, Theme.R_MD, Theme.LINE2, 1, c));
         t.setGravity(Gravity.CENTER);
         t.setPadding(Theme.dp(c, 18), Theme.dp(c, 14), Theme.dp(c, 18), Theme.dp(c, 14));
         t.setMinimumHeight(Theme.dp(c, 48));
@@ -725,7 +725,7 @@ public final class Ui {
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(Theme.dp(c, 5), Theme.dp(c, 5));
         dp.bottomMargin = Theme.dp(c, 5);
         dot.setLayoutParams(dp);
-        dot.setBackground(Theme.circle(active ? Theme.PRIMARY : 0x00000000, c));
+        dot.setBackground(Theme.circle(active ? Theme.PRIMARY : Theme.TRANSPARENT, c));
         l.addView(dot);
 
         TextView t = base(c, labelTxt, 12.5f, active ? Theme.TEXT : Theme.DIM, active);
@@ -1002,8 +1002,8 @@ public final class Ui {
         if (box == null) return;
         box.setText(on ? "✓" : "");
         box.setBackground(on
-                ? Theme.round(Theme.PRIMARY, 6, 0, 0, c)
-                : Theme.round(0x00000000, 6, Theme.LINE2, 1, c));
+                ? Theme.round(Theme.PRIMARY, Theme.R_XS, 0, 0, c)
+                : Theme.round(Theme.TRANSPARENT, Theme.R_XS, Theme.LINE2, 1, c));
     }
 
     private static TextView base(Context c, String s, float sizeSp, int color, boolean bold) {

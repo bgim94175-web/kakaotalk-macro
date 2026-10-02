@@ -66,12 +66,14 @@ public final class ScreenBot {
         col.addView(Nav.gap(a, 6));
         LinearLayout g = Ui.group(a);
 
-        g.addView(Ui.navRow(a, NAME_ROOMBOT, roomBotValue(a), roomBotColor(a), new Runnable() {
+        g.addView(Ui.navRow(a, Ui.GLYPH_ROOMBOT, Theme.FEAT_ROOMBOT, NAME_ROOMBOT,
+                roomBotValue(a), roomBotColor(a), new Runnable() {
             @Override public void run() {
                 Nav.push(a, NAME_ROOMBOT, BotDetail.roomBot(a));
             }
         }));
-        g.addView(Ui.navRow(a, NAME_MINIGAME, miniGameValue(a), miniGameColor(a), new Runnable() {
+        g.addView(Ui.navRow(a, Ui.GLYPH_MINIGAME, Theme.FEAT_MINIGAME, NAME_MINIGAME,
+                miniGameValue(a), miniGameColor(a), new Runnable() {
             @Override public void run() {
                 Nav.push(a, NAME_MINIGAME, BotDetail.miniGame(a));
             }

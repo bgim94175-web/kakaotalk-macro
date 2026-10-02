@@ -21,6 +21,10 @@ public final class Theme {
     public static final int LINE  = 0x14FFFFFF;
     public static final int LINE2 = 0x22FFFFFF;
 
+    // ── 투명 (채움 없음). 보더만 있는 배경을 그릴 때 fill 자리에 쓴다.
+    //    화면 코드에 0x00000000 리터럴을 박지 말고 이 토큰을 써라.
+    public static final int TRANSPARENT = 0x00000000;
+
     // ── 글자
     public static final int TEXT = 0xFFEAF0F7;
     public static final int SUB  = 0xFF93A2B5;
@@ -34,7 +38,14 @@ public final class Theme {
     public static final int VIOLET  = 0xFFA78BFA;
     public static final int ON_ACCENT = 0xFF07130D;
 
+    // ── 기능별 고정 액센트 (색만 봐도 어느 기능인지 구별된다)
+    //    매크로=민트 / 방 관리봇=블루 / 미니게임봇=바이올렛.
+    public static final int FEAT_MACRO    = ACCENT;
+    public static final int FEAT_ROOMBOT  = ACCENT2;
+    public static final int FEAT_MINIGAME = VIOLET;
+
     // ── 라운드 반경 (dp)
+    public static final int R_XS = 6;
     public static final int R_SM = 10;
     public static final int R_MD = 14;
     public static final int R_LG = 20;

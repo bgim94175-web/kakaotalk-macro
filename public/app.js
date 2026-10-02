@@ -20,7 +20,7 @@
   var FEATURES = [
     {
       id: 'macro', name: '자동발송 매크로', icon: '⚡', color: 'var(--accent)', tag: '추천',
-      desc: '대화방별 주기 자동발송 + 이미지 첨부 + 메시지추적 + 오픈프로필 자동응답',
+      desc: '대화방별 주기 자동발송 + 이미지 첨부 + 메시지 추적 + 오픈프로필 자동응답',
       bullets: [
         '대화방별로 주기(분 단위)와 메시지를 따로 지정',
         '이미지 최대 5장 첨부 발송',
@@ -808,13 +808,43 @@
 
   /* ══════════════════ 5. 랜딩 (/) ══════════════════ */
 
+  /* 가격 조회 중 상품 카드 자리표시 — 스켈레톤.
+     빈 '—' 나 단독 스피너 대신 카드 골격을 먼저 보여줘 '가격이 비어 보이는' 인상을 줄인다.
+     색·간격은 기존 토큰(--bg2,--line)만 쓴다. 장식이라 스크린리더에는 숨기고 aria-busy 로 상태를 알린다. */
+  function skeletonCards(mount) {
+    clear(mount);
+    mount.setAttribute('aria-busy', 'true');
+    FEATURES.forEach(function () {
+      var priceRows = PLANS.map(function () {
+        return el('div', { cls: 'pr' }, [
+          el('span', { cls: 'sk sk-pl' }),
+          el('span', { cls: 'sk sk-pv' })
+        ]);
+      });
+      mount.appendChild(el('article', { cls: 'card prod skel', 'aria-hidden': 'true' }, [
+        el('div', { cls: 'head' }, [
+          el('div', { cls: 'sk sk-ico' }),
+          el('div', { cls: 't', style: 'flex:1' }, [
+            el('div', { cls: 'sk sk-ln w40', style: 'margin-bottom:9px' }),
+            el('div', { cls: 'sk sk-ln w90' })
+          ])
+        ]),
+        el('div', { style: 'display:grid;gap:8px' }, [
+          el('div', { cls: 'sk sk-ln w70' }),
+          el('div', { cls: 'sk sk-ln w90' })
+        ]),
+        el('div', { cls: 'prices' }, priceRows)
+      ]));
+    });
+  }
+
   function pageHome() {
     var mount = $('#prods'), planMount = $('#planSeg'), sumMount = $('#sum');
-    var state = el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 조회 중…']);
-    mount.appendChild(state);
+    skeletonCards(mount);
 
     var q = qs();
     loadPrice().then(function () {
+      mount.removeAttribute('aria-busy');
       clear(mount);
       var pk = Picker({
         ids: qFeatures(q), plan: qPlan(q) || 'month',
@@ -825,6 +855,7 @@
       var bank = $('#bankLine');
       if (bank && PRICE.bank) bank.textContent = '입금 계좌 · ' + PRICE.bank;
     }).catch(function (e) {
+      mount.removeAttribute('aria-busy');
       clear(mount);
       mount.appendChild(el('div', { cls: 'card' }, [
         el('div', { cls: 'state bad', text: e.message || MSG_PRICE_FAIL }),

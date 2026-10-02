@@ -242,7 +242,10 @@ router.get('/admin/stats', wrap(async (req, res) => {
       WHERE t.m > $1 AND t.m <= $2`, [now, week])).rows[0].n;
   const byFeat = (await db.q(
     'SELECT feature, COUNT(*)::int AS n FROM entitlements WHERE expires_at > $1 GROUP BY feature', [now])).rows;
-  const pending = (await db.q("SELECT COUNT(*)::int AS n FROM orders WHERE status='pending'")).rows[0].n;
+  // 입금 대기(pending)와 입금 확인됨·발급 대기(paid, 수동 확인 모드)를 함께 집계한다.
+  // 수동 확인 모드에서 'paid' 주문은 관리자가 직접 발급해야 하므로 대시보드 뱃지에서 놓치면 안 된다.
+  const pending = (await db.q("SELECT COUNT(*)::int AS n FROM orders WHERE status IN ('pending','paid')")).rows[0].n;
+  const paidWaiting = (await db.q("SELECT COUNT(*)::int AS n FROM orders WHERE status='paid'")).rows[0].n;
   const revoked = (await db.q('SELECT COUNT(*)::int AS n FROM licenses WHERE COALESCE(revoked,FALSE)=TRUE')).rows[0].n;
   const blocked = (await db.q('SELECT COUNT(*)::int AS n FROM licenses WHERE blocked_reason IS NOT NULL')).rows[0].n;
   const deposits = (await db.q(
@@ -253,7 +256,7 @@ router.get('/admin/stats', wrap(async (req, res) => {
   for (const r of byFeat) if (by_feature[r.feature] !== undefined) by_feature[r.feature] = r.n;
 
   res.json({ ok: true, now: now, total: total, active: active, expiring_7d: expiring,
-             by_feature: by_feature, pending_orders: pending,
+             by_feature: by_feature, pending_orders: pending, paid_orders: paidWaiting,
              revoked: revoked, blocked: blocked, deposits_attention: deposits });
 }));
 

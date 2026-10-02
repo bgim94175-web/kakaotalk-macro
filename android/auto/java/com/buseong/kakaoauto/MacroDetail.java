@@ -272,7 +272,7 @@ public final class MacroDetail {
                 boolean attachImg;
                 try { attachImg = ImageSender.attachEnabled(a); } catch (Throwable t) { attachImg = false; }
                 g.addView(Ui.navRowSwitch(a, "채팅방 첨부 전송",
-                        "대화방을 열어 사진을 첨부합니다. 카카오톡 화면이 일시적으로 전환됩니다.",
+                        "대화방을 열어 이미지를 첨부합니다. 카카오톡 화면이 일시적으로 전환됩니다.",
                         attachImg, new Ui.OnToggle() {
                             @Override public void on(boolean v) {
                                 try {
@@ -284,9 +284,47 @@ public final class MacroDetail {
                         }));
                 col.addView(g);
 
+                // ── 점검 · 문제 해결 ──
+                // 권한/상태 경고 4건은 '전송 점검' 한 행으로 접고(값에 '주의 N건'),
+                // 진단 기록·전용 기기 설정·즉시 발송·전송 진단은 '전송 문제 해결' 서브화면으로 모은다.
+                // 상단 본문은 첨부 이미지·전송 방식 두 섹션만 남는다 (UI_V3 §3 화면당 ≤7 · 섹션 ≤3).
+                col.addView(Ui.sectionHeader(a, null, "점검 · 문제 해결"));
+                final int checks = imgCheckCount(a);
+                LinearLayout g2 = Ui.group(a);
+                g2.addView(Ui.navRow(a, "전송 점검",
+                        (checks > 0) ? ("주의 " + checks + "건") : "정상",
+                        (checks > 0) ? Theme.AMBER : Theme.ACCENT, new Runnable() {
+                            @Override public void run() { Nav.push(a, "전송 점검", transmitCheck(a)); }
+                        }));
+                g2.addView(Ui.navRow(a, "전송 문제 해결", null, 0, new Runnable() {
+                    @Override public void run() { Nav.push(a, "전송 문제 해결", troubleshoot(a)); }
+                }));
+                col.addView(g2);
+            }
+        });
+    }
+
+    /** '전송 점검' 행의 값에 쓸 주의 건수 (접근성·오버레이·타사 접근성·백그라운드 차단) */
+    private static int imgCheckCount(MainActivity a) {
+        int n = 0;
+        try { if (!ImageSender.accessibilityOn(a)) n++; } catch (Throwable t) { n++; }
+        try { if (!ImageSender.overlayOn(a)) n++; } catch (Throwable t) { n++; }
+        try { if (ImageSender.otherAccessibilityOn(a)) n++; } catch (Throwable t) { /* 무시 */ }
+        try { if (ImageSender.backgroundBlockedAt(a) > 0L) n++; } catch (Throwable t) { /* 무시 */ }
+        return n;
+    }
+
+    /** 전송 점검 — 권한/상태 경고를 한 화면에 모은다 (상단 본문에서 접어 내린 서브화면) */
+    private static View transmitCheck(MainActivity a) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                col.addView(Ui.sectionHeader(a, null, "전송 점검"));
+                boolean any = false;
+
                 boolean accOn;
                 try { accOn = ImageSender.accessibilityOn(a); } catch (Throwable t) { accOn = false; }
                 if (!accOn) {
+                    any = true;
                     col.addView(Nav.note(a, "접근성 권한이 비활성 상태입니다."
                             + " 이미지 전송이 불가하며, 텍스트 발송은 정상 동작합니다.",
                             Theme.AMBER, "권한 설정", new Runnable() {
@@ -296,6 +334,7 @@ public final class MacroDetail {
                 boolean ovOn;
                 try { ovOn = ImageSender.overlayOn(a); } catch (Throwable t) { ovOn = false; }
                 if (!ovOn) {
+                    any = true;
                     col.addView(Nav.note(a, "「다른 앱 위에 표시」 권한이 비활성 상태입니다."
                             + " 예약 발송에서 시스템이 공유창 실행을 차단할 수 있습니다."
                             + " 앱이 화면에 표시된 상태에서는 이 권한 없이도 동작할 수 있습니다.",
@@ -309,6 +348,7 @@ public final class MacroDetail {
                 try { otherAcc = ImageSender.otherAccessibilityOn(a) ? ImageSender.otherAccessibility(a) : ""; }
                 catch (Throwable t) { otherAcc = ""; }
                 if (otherAcc.length() > 0) {
+                    any = true;
                     col.addView(Nav.note(a, ImageSender.OTHER_ACC_HELP + "\n활성 앱: " + otherAcc,
                             Theme.AMBER, null, null));
                 }
@@ -316,26 +356,40 @@ public final class MacroDetail {
                 long bgAt;
                 try { bgAt = ImageSender.backgroundBlockedAt(a); } catch (Throwable t) { bgAt = 0L; }
                 if (bgAt > 0L) {
+                    any = true;
                     col.addView(Nav.note(a, "예약 발송에서 카카오톡 공유창이 "
                             + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다."
                             + " 현재 예약 발송은 이미지를 생략하고 텍스트만 발송합니다."
-                            + " 아래 즉시 발송으로 1회 전송에 성공하면 예약 발송이 다시 이미지를 첨부합니다.",
+                            + " 전송 문제 해결의 즉시 이미지 발송으로 1회 전송에 성공하면 예약 발송이 다시 이미지를 첨부합니다.",
                             Theme.AMBER, null, null));
                 }
 
-                // ── 전송 확인 ──
-                col.addView(Ui.sectionHeader(a, null, "전송 확인"));
+                if (!any) {
+                    col.addView(Nav.note(a, "현재 점검할 항목이 없습니다. 이미지 전송 준비가 완료된 상태입니다.",
+                            Theme.ACCENT2, null, null));
+                }
+            }
+        });
+    }
+
+    /** 전송 문제 해결 — 진단 기록·전용 기기 설정·즉시 발송·전송 진단을 모은 서브화면 */
+    private static View troubleshoot(MainActivity a) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final Settings s = Settings.load(a);
+
+                col.addView(Ui.sectionHeader(a, null, "기록 · 안내"));
                 final long dumpAt = ScreenMacro.dumpAtSafe(a);
-                LinearLayout g2 = Ui.group(a);
-                g2.addView(Ui.navRow(a, "진단 기록",
+                LinearLayout g = Ui.group(a);
+                g.addView(Ui.navRow(a, "진단 기록",
                         (dumpAt > 0) ? ScreenMacro.agoShort(dumpAt) : "없음",
                         (dumpAt > 0) ? Theme.TEXT : Theme.DIM, new Runnable() {
                             @Override public void run() { ScreenMacro.showDiag(a); }
                         }));
-                g2.addView(Ui.navRow(a, "전용 기기 설정", "안내", Theme.SUB, new Runnable() {
+                g.addView(Ui.navRow(a, "전용 기기 설정 안내", null, 0, new Runnable() {
                     @Override public void run() { Nav.push(a, "전용 기기 설정", deviceGuide(a)); }
                 }));
-                col.addView(g2);
+                col.addView(g);
 
                 final List<RoomRef> rooms = s.macro.roomRefs();
                 final TextView now = Ui.btn(a, "즉시 이미지 발송", false);
@@ -719,20 +773,26 @@ public final class MacroDetail {
                 g1.addView(Ui.navRow(a, "비교 방식", modeKr(t.mode), Theme.TEXT, new Runnable() {
                     @Override public void run() { pickTrigMode(a, s, t); }
                 }));
-                g1.addView(Ui.navRow(a, "감지 대화방", roomBadge(a, t.roomRefs()), Theme.TEXT,
+                col.addView(g1);
+
+                // ── 감지 범위 ──
+                // 핵심 3행(이름·문자열·비교)과 분리해 '감지 조건' 카드의 6행 과밀을 푼다.
+                col.addView(Ui.sectionHeader(a, null, "감지 범위"));
+                LinearLayout g1b = Ui.group(a);
+                g1b.addView(Ui.navRow(a, "감지 대화방", roomBadge(a, t.roomRefs()), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
                                 Nav.push(a, "감지 대화방", roomSelect(a, trigRooms(a, s, t),
                                         "선택하지 않으면 모든 대화방에서 감지합니다."));
                             }
                         }));
-                g1.addView(Ui.navRowSwitch(a, "대소문자 무시", null, t.ignoreCase, new Ui.OnToggle() {
+                g1b.addView(Ui.navRowSwitch(a, "대소문자 무시", null, t.ignoreCase, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         t.ignoreCase = v;
                         ScreenMacro.apply(a, s);
                     }
                 }));
-                g1.addView(Ui.navRowSwitch(a, "본인 메시지 포함",
+                g1b.addView(Ui.navRowSwitch(a, "본인 메시지 포함",
                         "본인 발송 메시지도 감지합니다. 반복 발송 위험이 있어 기본값은 미사용입니다.",
                         t.fromMe, new Ui.OnToggle() {
                             @Override public void on(boolean v) {
@@ -740,7 +800,7 @@ public final class MacroDetail {
                                 ScreenMacro.apply(a, s);
                             }
                         }));
-                col.addView(g1);
+                col.addView(g1b);
 
                 // ── 발송 ──
                 col.addView(Ui.sectionHeader(a, null, "발송"));

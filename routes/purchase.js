@@ -367,6 +367,10 @@ router.post('/api/deposit-hook',
     const auto = String(process.env.DEPOSIT_AUTO_APPROVE || '1') !== '0';
     if (!auto) {
       await setStatus('matched', usedAmount, matched.id);
+      // 수동 확인 모드(DEPOSIT_AUTO_APPROVE=0): 입금은 확인됐으나 발급은 관리자가 한다.
+      // 주문을 'paid'(입금 확인됨·발급 대기)로 전환한다 (SPEC 상태집합 pending|paid|done|canceled).
+      // pending 일 때만 전환해 이미 done/canceled 인 주문을 덮지 않는다.
+      await db.q("UPDATE orders SET status='paid' WHERE id=$1 AND status='pending'", [matched.id]);
       return res.json({ ok: true, status: 'matched', order: matched.id, amount: usedAmount,
                         key: null, auto_approve: false });
     }

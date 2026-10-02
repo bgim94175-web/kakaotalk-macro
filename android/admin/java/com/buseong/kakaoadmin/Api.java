@@ -616,7 +616,20 @@ public final class Api {
                 return r;
             }
             if (code == 404) return err(code, "서버에 해당 기능이 없습니다. 서버가 최신 버전으로 배포되었는지 확인하십시오.");
-            if (code >= 500) return err(code, "서버 오류 (" + code + ")" + shortTail(text));
+            // 레이트리밋. 서버가 내려준 조치 안내(detail)와 해제까지 남은 시간(Retry-After)을 그대로 보여준다.
+            if (code == 429) {
+                String d = jsonDetail(text);
+                String msg = (d != null) ? d : "요청이 일시적으로 제한되었습니다. 잠시 후 다시 시도하십시오.";
+                String hint = retryHint(conn.getHeaderField("Retry-After"));
+                if (hint != null) msg = msg + " (" + hint + ")";
+                return err(code, msg);
+            }
+            // 서버 오류(503 admin_disabled 포함). detail 이 있으면 기계 코드 대신 조치 안내를 보여준다.
+            if (code >= 500) {
+                String d = jsonDetail(text);
+                if (d != null) return err(code, d);
+                return err(code, "서버 오류 (" + code + ")" + shortTail(text));
+            }
 
             JSONObject json;
             try {
@@ -632,8 +645,10 @@ public final class Api {
             // 서버가 audit 종류 목록을 같이 내려주면 그걸 쓴다 (하드코딩은 폴백)
             if (r.ok) learnAudit(json);
             if (!r.ok) {
-                String e = json.optString("error", null);
-                if (e == null || e.length() == 0 || "null".equals(e)) e = "서버가 요청을 거부했습니다";
+                // detail(사람이 읽을 조치 안내)이 있으면 기계 코드 error 보다 우선한다.
+                String e = json.optString("detail", "");
+                if (e.length() == 0 || "null".equals(e)) e = json.optString("error", "");
+                if (e.length() == 0 || "null".equals(e)) e = "서버가 요청을 거부했습니다";
                 r.error = e;
             }
             return r;
@@ -680,6 +695,31 @@ public final class Api {
     private static void closeQuiet(java.io.Closeable c) {
         if (c == null) return;
         try { c.close(); } catch (Throwable ignore) { }
+    }
+
+    /** 오류 응답(JSON)의 detail 필드만 꺼낸다. 비었거나 JSON 이 아니면 null. */
+    private static String jsonDetail(String text) {
+        if (text == null) return null;
+        String t = text.trim();
+        if (t.length() == 0 || t.charAt(0) != '{') return null;
+        try {
+            String d = new JSONObject(t).optString("detail", "");
+            if (d.length() > 0 && !"null".equals(d)) return d;
+        } catch (Throwable ignore) { }
+        return null;
+    }
+
+    /** Retry-After(초) 를 사람이 읽는 문구로. 비거나 숫자가 아니면 null. */
+    private static String retryHint(String retryAfter) {
+        if (retryAfter == null) return null;
+        String s = retryAfter.trim();
+        if (s.length() == 0) return null;
+        long sec;
+        try { sec = Long.parseLong(s); }
+        catch (Throwable t) { return null; }
+        if (sec <= 0) return null;
+        if (sec < 60) return "해제까지 약 " + sec + "초";
+        return "해제까지 약 " + ((sec + 59) / 60) + "분";
     }
 
     /** 오류 메시지에 서버가 준 본문 앞부분을 조금 붙여서 원인을 보이게 한다 */

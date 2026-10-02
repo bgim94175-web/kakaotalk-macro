@@ -66,6 +66,35 @@ public final class Ui {
         return t;
     }
 
+    /**
+     * 목록 행 제목 15sp bold. navRow·actionRow·permRow·featureRow 가 전부 이걸 써서
+     * 같은 위계의 제목 크기가 한 가지로 통일된다 (화면마다 15/14.5/16sp 로 흔들리던 걸 잡는다).
+     * 한 줄 + 말줄임. 레이아웃 파라미터는 호출부가 붙인다.
+     */
+    public static TextView rowTitle(Context c, String s) {
+        TextView t = base(c, s, 15f, Theme.TEXT, true);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        return t;
+    }
+
+    /**
+     * 18sp bold 경고/강조 한 줄 (잠금 안내 등). 화면 코드에서 raw setTextSize 를 없애려고 둔다.
+     * 색은 호출부가 setTextColor 로 바꿔 쓴다 (기본 TEXT).
+     */
+    public static TextView headline(Context c, String s) {
+        TextView t = base(c, s, 18f, Theme.TEXT, true);
+        t.setLetterSpacing(-0.01f);
+        t.setLineSpacing(0, 1.35f);
+        return t;
+    }
+
+    /** 12sp 보조 한 줄 (로그 줄처럼 작은 글자). color 0 이면 DIM. raw setTextSize 대체용. */
+    public static TextView micro(Context c, String s, int color) {
+        TextView t = base(c, s, 12f, (color == 0) ? Theme.DIM : color, false);
+        return t;
+    }
+
     /** 작은 머리말 12sp SUB (구역 라벨) */
     public static TextView label(Context c, String s) {
         TextView t = base(c, s, 12f, Theme.SUB, true);
@@ -177,7 +206,8 @@ public final class Ui {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = Theme.dp(c, 18);
+        // 간격 스케일(4·8·12·16·20·24)에 맞춰 섹션 리듬을 16dp 로 통일한다.
+        lp.topMargin = Theme.dp(c, 16);
         lp.bottomMargin = Theme.dp(c, 8);
         l.setLayoutParams(lp);
 
@@ -233,7 +263,7 @@ public final class Ui {
         TextView t = base(c, s, 14f, primary ? Theme.ON_ACCENT : Theme.TEXT, primary);
         t.setBackground(primary
                 ? Theme.round(Theme.ACCENT, Theme.R_MD, 0, 0, c)
-                : Theme.round(0x00000000, Theme.R_MD, Theme.LINE2, 1, c));
+                : Theme.round(Theme.TRANSPARENT, Theme.R_MD, Theme.LINE2, 1, c));
         t.setGravity(Gravity.CENTER);
         t.setPadding(Theme.dp(c, 18), Theme.dp(c, 14), Theme.dp(c, 18), Theme.dp(c, 14));
         t.setMinimumHeight(Theme.dp(c, 48));
@@ -484,6 +514,12 @@ public final class Ui {
         }
     }
 
+    // 리딩 글리프 종류. 기능별로 색+형태를 같이 줘서 한눈에 구별되게 한다.
+    public static final int GLYPH_NONE     = -1;
+    public static final int GLYPH_MACRO    = 0;   // 발송 (삼각형)
+    public static final int GLYPH_ROOMBOT  = 1;   // 말풍선
+    public static final int GLYPH_MINIGAME = 2;   // 주사위
+
     /**
      * 목록 행: 좌 제목 · 우 현재값 · `›`.
      * 값이 비면 `›` 만 남는다. 값은 우측정렬 + 한 줄 + 말줄임이며 행 폭의 절반을 넘지 않는다.
@@ -493,6 +529,18 @@ public final class Ui {
      */
     public static LinearLayout navRow(Context c, String title, String value, int valueColor,
                                       final Runnable onTap) {
+        return navRow(c, GLYPH_NONE, 0, title, value, valueColor, onTap);
+    }
+
+    /**
+     * 리딩 배지(24dp 원형 + 기능 글리프)가 붙는 목록 행.
+     * 기능 행(매크로·방 관리봇·미니게임봇)에 색+형태로 즉시 구별되는 아이콘을 준다.
+     *
+     * @param glyphKind {@link #GLYPH_NONE} 이면 배지 없이 일반 행과 같다.
+     * @param accent    배지 액센트 색 (0 이면 Theme.ACCENT). Theme 토큰만 넘겨라.
+     */
+    public static LinearLayout navRow(Context c, int glyphKind, int accent, String title,
+                                      String value, int valueColor, final Runnable onTap) {
         NavRow r = new NavRow(c);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -502,9 +550,16 @@ public final class Ui {
         r.setPadding(ph, pv, ph, pv);
         r.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
 
-        TextView t = base(c, title, 15f, Theme.TEXT, true);
-        t.setSingleLine(true);
-        t.setEllipsize(TextUtils.TruncateAt.END);
+        if (glyphKind != GLYPH_NONE) {
+            Glyph badge = new Glyph(c, glyphKind, (accent == 0) ? Theme.ACCENT : accent);
+            LinearLayout.LayoutParams gp =
+                    new LinearLayout.LayoutParams(Theme.dp(c, 24), Theme.dp(c, 24));
+            gp.rightMargin = Theme.dp(c, 12);
+            badge.setLayoutParams(gp);
+            r.addView(badge);
+        }
+
+        TextView t = rowTitle(c, title);
         t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         r.addView(t);
 
@@ -556,6 +611,76 @@ public final class Ui {
                 }
             }
             super.onMeasure(wSpec, hSpec);
+        }
+    }
+
+    /**
+     * navRow 의 리딩 배지. 원형 배경(액센트 14%) 위에 기능별 글리프를 직접 그린다.
+     * 라이브러리 의존 없이 Canvas 로만 그려서 세 기능이 색·형태로 즉시 구별된다.
+     */
+    public static final class Glyph extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+        private final int kind;
+        private final int accent;
+
+        Glyph(Context c, int kind, int accent) {
+            super(c);
+            this.kind = kind;
+            this.accent = accent;
+        }
+
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float u = Math.min(w, h);
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Theme.fade(accent, 0.14f));
+            cv.drawCircle(cx, cy, u / 2f, paint);
+            paint.setColor(accent);
+
+            switch (kind) {
+                case GLYPH_MACRO: {   // 발송 — 오른쪽을 가리키는 삼각형
+                    path.rewind();
+                    path.moveTo(cx - u * 0.15f, cy - u * 0.17f);
+                    path.lineTo(cx + u * 0.20f, cy);
+                    path.lineTo(cx - u * 0.15f, cy + u * 0.17f);
+                    path.close();
+                    cv.drawPath(path, paint);
+                    break;
+                }
+                case GLYPH_ROOMBOT: { // 대화방 — 말풍선
+                    float bw = u * 0.42f;
+                    float bh = u * 0.30f;
+                    float left = cx - bw / 2f;
+                    float top = cy - bh / 2f - u * 0.04f;
+                    cv.drawRoundRect(left, top, left + bw, top + bh,
+                            u * 0.09f, u * 0.09f, paint);
+                    path.rewind();
+                    path.moveTo(cx - u * 0.07f, top + bh - u * 0.01f);
+                    path.lineTo(cx - u * 0.15f, top + bh + u * 0.11f);
+                    path.lineTo(cx + u * 0.02f, top + bh - u * 0.01f);
+                    path.close();
+                    cv.drawPath(path, paint);
+                    break;
+                }
+                case GLYPH_MINIGAME: { // 게임 — 주사위 4점
+                    float d = u * 0.075f;
+                    float off = u * 0.12f;
+                    cv.drawCircle(cx - off, cy - off, d, paint);
+                    cv.drawCircle(cx + off, cy - off, d, paint);
+                    cv.drawCircle(cx - off, cy + off, d, paint);
+                    cv.drawCircle(cx + off, cy + off, d, paint);
+                    break;
+                }
+                default: {            // 단색 점
+                    cv.drawCircle(cx, cy, u * 0.14f, paint);
+                }
+            }
         }
     }
 
@@ -692,7 +817,7 @@ public final class Ui {
         Check(Context c, boolean on) {
             super(c);
             this.on = on;
-            radius = Theme.dp(c, 6);
+            radius = Theme.dp(c, Theme.R_XS);
             border = Math.max(1f, Theme.dp(c, 1.5f));
             stroke = Math.max(2f, Theme.dp(c, 2));
         }

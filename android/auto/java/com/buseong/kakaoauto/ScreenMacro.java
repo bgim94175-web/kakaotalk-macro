@@ -1,6 +1,8 @@
 package com.buseong.kakaoauto;
 
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -393,38 +395,50 @@ public final class ScreenMacro {
 
     private static void doSendNow(final MainActivity a, final Settings s, final TextView btn,
                                  final List<RoomRef> rooms, final String msg) {
+        // 전송 루프를 메인 스레드에서 돌리면 '발송 중…' 라벨이 그려질 프레임이 없고,
+        // 대상 대화방이 많으면 전송 시간만큼 UI 가 멈춘다. 백그라운드로 보내고 결과만 메인에서 갱신한다.
         Nav.busy(btn, true, "발송 중…", "즉시 발송");
-        int ok = 0;
-        StringBuilder failed = new StringBuilder();
-        for (int i = 0; i < rooms.size(); i++) {
-            RoomRef room = rooms.get(i);
-            String label = room.label(a);
-            boolean sent = false;
-            try {
-                sent = KakaoListener.sendTo(a, room, msg);
-            } catch (Throwable t) {
-                Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
+        final Handler main = new Handler(Looper.getMainLooper());
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int okN = 0;
+                final StringBuilder failed = new StringBuilder();
+                for (int i = 0; i < rooms.size(); i++) {
+                    RoomRef room = rooms.get(i);
+                    String label = room.label(a);
+                    boolean sent = false;
+                    try {
+                        sent = KakaoListener.sendTo(a, room, msg);
+                    } catch (Throwable t) {
+                        Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
+                    }
+                    if (sent) {
+                        okN++;
+                    } else {
+                        if (failed.length() > 0) failed.append(", ");
+                        failed.append(label);
+                    }
+                }
+                final int ok = okN;
+                main.post(new Runnable() {
+                    @Override public void run() {
+                        if (a.isFinishing()) return;
+                        if (ok > 0) MainActivity.countSent(a, ok);
+                        Log.add(a, "즉시 발송 · 성공 " + ok + "건"
+                                + ((failed.length() > 0) ? (" / 실패: " + failed) : ""));
+                        Nav.busy(btn, false, "발송 중…", "즉시 발송");
+                        if (ok == 0) {
+                            Ui.toast(a, "발송에 실패했습니다. 활동 로그를 확인하십시오.");
+                        } else if (failed.length() > 0) {
+                            Ui.toast(a, ok + "건 발송했습니다. 일부 대화방은 실패했습니다.");
+                        } else {
+                            Ui.toast(a, ok + "건 발송했습니다.");
+                        }
+                        refresh();
+                    }
+                });
             }
-            if (sent) {
-                ok++;
-            } else {
-                if (failed.length() > 0) failed.append(", ");
-                failed.append(label);
-            }
-        }
-        if (ok > 0) MainActivity.countSent(a, ok);
-        Log.add(a, "즉시 발송 · 성공 " + ok + "건"
-                + ((failed.length() > 0) ? (" / 실패: " + failed) : ""));
-        Nav.busy(btn, false, "발송 중…", "즉시 발송");
-
-        if (ok == 0) {
-            Ui.toast(a, "발송에 실패했습니다. 활동 로그를 확인하십시오.");
-        } else if (failed.length() > 0) {
-            Ui.toast(a, ok + "건 발송했습니다. 일부 대화방은 실패했습니다.");
-        } else {
-            Ui.toast(a, ok + "건 발송했습니다.");
-        }
-        refresh();
+        }, "send-now").start();
     }
 
     // ── 이미지 선택 결과 (MainActivity.onActivityResult 에서 넘어온다) ──────

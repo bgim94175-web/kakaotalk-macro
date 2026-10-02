@@ -31,7 +31,8 @@ public final class ScreenAudit implements MainActivity.Screen {
 
     private int kindIdx = 0;
     private String key = "";
-    private boolean busy = false;
+    /** 요청 세대 토큰. load() 마다 증가하고, 콜백은 자신이 최신 세대일 때만 렌더한다. */
+    private int gen = 0;
 
     public ScreenAudit(MainActivity act) { this.a = act; }
 
@@ -106,16 +107,21 @@ public final class ScreenAudit implements MainActivity.Screen {
     }
 
     private void load() {
-        if (busy) return;
-        busy = true;
+        // 세대 토큰을 올린다. 진행 중이던 이전 요청의 콜백은 이보다 작은 세대라 렌더를 건너뛴다.
+        final int myGen = ++gen;
+        // 요청 당시의 필터 값을 고정해둔다 — 라벨·목록·세그먼트가 어긋나지 않게 콜백에서 이 값만 쓴다.
+        final int myKind = Math.max(0, Math.min(kindIdx, Api.AUDIT_KINDS.length - 1));
+        final int myKindLabel = Math.max(0, Math.min(kindIdx, Api.AUDIT_KIND_LABELS.length - 1));
+        final String myKey = key;
         if (listBox != null) {
             listBox.removeAllViews();
             listBox.addView(Ui.emptyBox(a, "불러오는 중…"));
         }
-        final String kind = Api.AUDIT_KINDS[Math.max(0, Math.min(kindIdx, Api.AUDIT_KINDS.length - 1))];
-        Api.audit(a, key, kind, LIMIT, new Api.Cb() {
+        final String kind = Api.AUDIT_KINDS[myKind];
+        Api.audit(a, myKey, kind, LIMIT, new Api.Cb() {
             @Override public void done(Api.Result r) {
-                busy = false;
+                // 내가 최신 요청이 아니면(사용자가 그새 다른 필터를 눌렀다면) 결과를 버린다.
+                if (myGen != gen) return;
                 if (a.kicked(r)) return;
                 if (listBox == null) return;
                 listBox.removeAllViews();
@@ -127,10 +133,9 @@ public final class ScreenAudit implements MainActivity.Screen {
                 JSONArray arr = r.arr("audit");
                 if (countLabel != null) {
                     StringBuilder t = new StringBuilder();
-                    t.append(Api.AUDIT_KIND_LABELS[Math.max(0, Math.min(kindIdx,
-                            Api.AUDIT_KIND_LABELS.length - 1))]);
+                    t.append(Api.AUDIT_KIND_LABELS[myKindLabel]);
                     t.append(" ").append(arr.length()).append("건");
-                    if (key.length() > 0) t.append(" · 키 ").append(key);
+                    if (myKey.length() > 0) t.append(" · 키 ").append(myKey);
                     if (arr.length() >= LIMIT) t.append(" (최근 ").append(LIMIT).append("건만)");
                     countLabel.setText(t.toString());
                 }

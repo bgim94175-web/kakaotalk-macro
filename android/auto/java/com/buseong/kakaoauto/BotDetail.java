@@ -536,7 +536,9 @@ public final class BotDetail {
                 // ── 안내 · 기록 ──
                 col.addView(Ui.sectionHeader(a, null, "명령어 · 기록"));
                 LinearLayout g3 = Ui.group(a);
-                g3.addView(Ui.navRow(a, "명령어 목록", "7개", Theme.SUB, new Runnable() {
+                // 실제로 처리되는 명령 수 = 사용 중 게임 + 공통 명령 2종(랭킹·도움).
+                // 게임 구성이 바뀌어도 값이 실제를 가리킨다.
+                g3.addView(Ui.navRow(a, "명령어 목록", (onGames(g) + 2) + "개", Theme.SUB, new Runnable() {
                     @Override public void run() { Nav.push(a, "명령어 목록", commands(a)); }
                 }));
                 g3.addView(Ui.navRow(a, "점수 · 진행 상태", scoreValue(a, g), Theme.SUB,

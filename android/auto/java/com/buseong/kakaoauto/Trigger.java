@@ -45,6 +45,12 @@ public final class Trigger {
     /** 같은 경고를 도배하지 않는 간격 */
     private static final long WARN_MS = 5 * 60 * 1000L;
 
+    /** 내가 방금 보낸 문구가 알림으로 되돌아왔을 때 메아리로 인정하는 창 (ms) */
+    private static final long ECHO_MS = 60000L;
+
+    /** 방 하나에 대해 기억해두는 최근 발송 문구 개수 */
+    private static final int MAX_SAID = 8;
+
     private static final Random RND = new Random();
 
     /** 트리거 id → 마지막 발동 시각 */
@@ -62,6 +68,19 @@ public final class Trigger {
     /** 경고 로그 도배 방지 */
     private static final ConcurrentHashMap<String, Long> WARNED =
             new ConcurrentHashMap<String, Long>();
+
+    /** 방 키 → 최근 내가 보낸 문구들 (메아리 차단용. RoomBot·MiniGame 과 동일한 구조) */
+    private static final ConcurrentHashMap<String, ArrayList<Said>> SAID =
+            new ConcurrentHashMap<String, ArrayList<Said>>();
+    /** SAID 접근 잠금 (load() 의 Trigger.class 잠금과 섞이지 않게 별도로 둔다) */
+    private static final Object SAID_LOCK = new Object();
+
+    /** 내가 보낸 문구 하나 (정규화된 본문 + 보낸 시각) */
+    private static final class Said {
+        final String norm;
+        final long at;
+        Said(String norm, long at) { this.norm = norm; this.at = at; }
+    }
 
     private static volatile boolean loaded = false;
 
@@ -147,6 +166,11 @@ public final class Trigger {
         final long now = System.currentTimeMillis();
 
         load(c);
+
+        // 메아리 차단: 내가 방금 이 방에 보낸 문구가 알림으로 되돌아온 것이면 트리거 판정을 하지 않는다.
+        // (fromMe 트리거가 자기 발송을 재감지해 무한 발송 루프를 도는 사고를 막는다. RoomBot·MiniGame 과 동일한 방어선)
+        if (saidRecently(room, text, now)) return;
+
         boolean dirty = false;
 
         for (int i = 0; i < list.size(); i++) {
@@ -207,19 +231,29 @@ public final class Trigger {
                 continue;
             }
 
-            // 상태를 먼저 찍는다 — 지연 중에 같은 트리거가 또 걸리는 걸 막는다
+            // 상태를 먼저 찍는다 — 지연 중에 같은 트리거가 또 걸리는 걸 막는다.
+            // 다만 발송이 실패하면 아래 Runnable 에서 선점한 쿨다운·1회발동을 되돌린다
+            // (AutoReply.refund 와 동일한 원칙 — 소모분을 실패 시 복구한다).
             CD.put(t.id, Long.valueOf(now));
             if (t.oncePerRoom) markFired(t.id, roomKey);
             dirty = true;
 
             final long wait = delayOf(t.delayMs);
             final String name = t.title();
+            final String tid = t.id;
+            final boolean once = t.oncePerRoom;
+            final long stamp = now;
             KakaoListener.post(new Runnable() {
                 @Override public void run() {
+                    // 메아리 차단: 보낼 문구를 발송 직전에 방별로 기억한다 (되돌아온 알림을 걸러낸다)
+                    remember(dest.key(), msg, System.currentTimeMillis());
                     boolean ok = KakaoListener.sendTo(c, dest, msg);
                     if (!ok) {
                         Log.add(c, "메시지 추적 「" + name + "」 발송에 실패했습니다. (대상 "
                                 + destLabel + ")");
+                        // 그 사이 같은 트리거가 다시 발동하지 않았다면 선점한 쿨다운·1회발동을 되돌린다.
+                        // 특히 oncePerRoom 트리거가 발송 실패로 영구히 '발동 완료'로 묶이는 것을 막는다.
+                        rollback(c, tid, roomKey, once, stamp);
                     }
                 }
             }, wait);
@@ -392,6 +426,104 @@ public final class Trigger {
             }
             set.add(room);
         }
+    }
+
+    /** 1회발동 기록에서 방 하나를 뺀다 (발송 실패 복구용) */
+    private static void unmarkFired(String id, String room) {
+        Set<String> set = ONCE.get(id);
+        if (set == null) return;
+        synchronized (set) { set.remove(room); }
+    }
+
+    /**
+     * 발송이 실패했을 때 선점했던 쿨다운·1회발동을 되돌린다.
+     * 그 사이 같은 트리거가 다시 발동했다면(CD 스탬프가 바뀌었다면) 손대지 않는다 —
+     * 뒤에 성공한 발송의 기록까지 지워버리면 안 되기 때문이다.
+     */
+    private static void rollback(Context c, String id, String roomKey, boolean once, long stamp) {
+        if (id == null) return;
+        Long cur = CD.get(id);
+        if (cur == null || cur.longValue() != stamp) return;   // 그 사이 재발동함 → 유지
+        CD.remove(id);
+        if (once) unmarkFired(id, roomKey);
+        save(c);
+    }
+
+    // ── 메아리 차단 (RoomBot·MiniGame 과 동일한 구조) ──────────────────────────
+
+    /** 보낸 문구를 방별로 기억한다 (정규화해서). 최근 {@link #MAX_SAID} 건만 들고 있는다. */
+    private static void remember(String key, String msg, long now) {
+        if (key == null || msg == null) return;
+        String norm = flat(msg);
+        if (norm.length() == 0) return;
+        synchronized (SAID_LOCK) {
+            ArrayList<Said> list = SAID.get(key);
+            if (list == null) { list = new ArrayList<Said>(); SAID.put(key, list); }
+            list.add(new Said(norm, now));
+            while (list.size() > MAX_SAID) list.remove(0);
+            if (SAID.size() > 120) {
+                Iterator<String> it = SAID.keySet().iterator();
+                while (it.hasNext() && SAID.size() > 120) {
+                    String k = it.next();
+                    if (k.equals(key)) continue;
+                    it.remove();
+                }
+            }
+        }
+    }
+
+    /**
+     * 내가 최근 {@link #ECHO_MS} 안에 이 방으로 보낸 문구의 메아리인가.
+     * 단체방 알림은 "내이름 : 보낸문장" 으로 되돌아오므로 접두 이름을 뗀 본문으로도 비교한다.
+     * 여러 줄 메시지는 알림에서 잘려 오니 앞부분 일치도 본다 (RoomBot 과 동일 규칙).
+     */
+    private static boolean saidRecently(RoomRef room, String text, long now) {
+        if (room == null || text == null) return false;
+        String key = room.key();
+        if (matchSaid(key, flat(text), now)) return true;
+        String body = stripName(text);
+        return body.length() > 0 && matchSaid(key, flat(body), now);
+    }
+
+    private static boolean matchSaid(String key, String b, long now) {
+        if (b.length() == 0) return false;
+        synchronized (SAID_LOCK) {
+            ArrayList<Said> list = SAID.get(key);
+            if (list == null) return false;
+            for (int i = list.size() - 1; i >= 0; i--) {
+                Said s = list.get(i);
+                if (now - s.at > ECHO_MS) continue;
+                if (s.norm.equals(b)) return true;
+                if (s.norm.length() > b.length() && b.length() >= 6 && s.norm.startsWith(b)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** "홍길동 : 안녕하세요" 처럼 앞에 짧은 이름 접두사가 있으면 본문만 떼어 돌려준다 (없으면 ""). */
+    private static String stripName(String text) {
+        if (text == null) return "";
+        int nl = text.indexOf('\n');
+        String head = (nl >= 0) ? text.substring(0, nl) : text;
+        int i = head.indexOf(" : ");
+        if (i <= 0 || i > 20) return "";
+        if (text.length() <= i + 3) return "";
+        return text.substring(i + 3);
+    }
+
+    /** 줄바꿈·연속 공백을 한 칸으로 (비교용) */
+    private static String flat(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        boolean sp = false;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (Character.isWhitespace(ch)) { sp = true; continue; }
+            if (sp && sb.length() > 0) sb.append(' ');
+            sp = false;
+            sb.append(ch);
+        }
+        return sb.toString().trim();
     }
 
     /** 지금 없는 트리거의 기록은 버린다 */

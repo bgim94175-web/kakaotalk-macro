@@ -380,7 +380,7 @@ public final class ImageSender {
             if (cand == null || cand.isEmpty()) {
                 missing++;
                 Log.add(c, "이미지의 촬영·저장 시각을 읽지 못했습니다 — " + ImagePicker.shortUri(ok.get(i))
-                        + ". 채팅방 첨부 경로로는 이 사진을 지목할 수 없습니다.");
+                        + ". 채팅방 첨부 경로로는 이 이미지를 지목할 수 없습니다.");
                 continue;
             }
             descs.add(cand);
@@ -932,7 +932,7 @@ public final class ImageSender {
 
         Log.add(j.app, "채팅방 첨부 경로로 이미지 " + j.descs.size() + "장을 전송합니다. 대화방: " + j.label
                 + " · 앱 상태: " + fgText(j.fg)
-                + " · 사진 지목: \"" + descsFor(j, variant)[0] + "\""
+                + " · 이미지 지목: \"" + descsFor(j, variant)[0] + "\""
                 + (variant == 0 ? "" : " (후보 " + (variant + 1) + "번)"));
 
         // 채팅방이 뜨는지 본다. 안 뜨면 백그라운드 액티비티 차단이다 → 공유창 폴백으로.
@@ -1000,7 +1000,7 @@ public final class ImageSender {
         if (retryable && sawRoom && j.attachVariant + 1 < variantCount(j)) {
             j.attachVariant++;
             String next = descsFor(j, j.attachVariant)[0];
-            Log.add(j.app, "채팅방 첨부 경로 실패: " + why + ". 사진 시각 후보를 \"" + next
+            Log.add(j.app, "채팅방 첨부 경로 실패: " + why + ". 이미지 시각 후보를 \"" + next
                     + "\" 로 바꿔 재시도합니다(표시 시각이 1분 차이날 수 있습니다).");
             if (attachAttempt(j)) return;
         }
@@ -1652,7 +1652,7 @@ public final class ImageSender {
         StringBuilder b = new StringBuilder(320);
         b.append("채팅방 첨부 경로: ").append(attachEnabled(j.app) ? "활성" : "비활성(설정)")
                 .append(" · 시도 ").append(yn(j.attachTried))
-                .append(j.attachTried ? (" · 사진 시각 후보 " + (j.attachVariant + 1) + "번까지 시도") : "")
+                .append(j.attachTried ? (" · 이미지 시각 후보 " + (j.attachVariant + 1) + "번까지 시도") : "")
                 .append('\n');
         b.append("대화방 열기 인텐트(알림 contentIntent): ");
         try {

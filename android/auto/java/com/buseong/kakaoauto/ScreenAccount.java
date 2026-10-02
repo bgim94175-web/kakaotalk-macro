@@ -453,7 +453,7 @@ public final class ScreenAccount {
         left.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
 
         LinearLayout head = Ui.row(a);
-        TextView nm = Ui.h2(a, Features.label(id));
+        TextView nm = Ui.rowTitle(a, Features.label(id));
         nm.setLayoutParams(new LinearLayout.LayoutParams(WRAP, WRAP));
         head.addView(nm);
         TextView chip = Ui.chip(a, stateKr(fs), stateColor(fs));
@@ -602,12 +602,7 @@ public final class ScreenAccount {
         box.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
 
         LinearLayout top = Ui.row(a);
-        TextView nt = new TextView(a);
-        nt.setText(p.name);
-        nt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-        nt.setTextColor(Theme.TEXT);
-        nt.setTypeface(Typeface.DEFAULT_BOLD);
-        nt.setIncludeFontPadding(false);
+        TextView nt = Ui.rowTitle(a, p.name);
         nt.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
         top.addView(nt);
         top.addView(Ui.chip(a, p.ok ? "허용" : "필요", p.ok ? Theme.ACCENT : Theme.AMBER));

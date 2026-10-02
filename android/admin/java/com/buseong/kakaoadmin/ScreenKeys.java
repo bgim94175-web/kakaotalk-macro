@@ -38,7 +38,8 @@ public final class ScreenKeys implements MainActivity.Screen {
     private String term = "";
     private int total = 0;
     private long serverNow = 0;
-    private boolean busy = false;
+    /** 요청 세대 토큰. fetch() 마다 증가하고, 콜백은 자신이 최신 세대일 때만 렌더한다. */
+    private int gen = 0;
 
     public ScreenKeys(MainActivity act) { this.a = act; }
 
@@ -123,8 +124,7 @@ public final class ScreenKeys implements MainActivity.Screen {
     // ── 서버에서 읽기 ─────────────────────────────────────────────────────────
 
     private void fetch(final boolean append) {
-        if (busy) return;
-        busy = true;
+        final int myGen = ++gen;
         if (!append) {
             rows.clear();
             if (listBox != null) {
@@ -139,7 +139,8 @@ public final class ScreenKeys implements MainActivity.Screen {
 
         Api.list(a, term, PAGE, offset, new Api.Cb() {
             @Override public void done(Api.Result r) {
-                busy = false;
+                // 내가 최신 요청이 아니면(검색어가 바뀌었거나 새로고침이 끼어들었다면) 결과를 버린다.
+                if (myGen != gen) return;
                 if (moreBtn != null) moreBtn.setText("더 보기");
                 if (a.kicked(r)) return;
                 if (!r.ok) {
@@ -207,14 +208,12 @@ public final class ScreenKeys implements MainActivity.Screen {
         r1.addView(st);
         card.addView(r1);
 
-        // 2줄: 소유자 · 메모
+        // 2줄: 소유자 · 연락처 (메모는 밀려서 소유자를 가리지 않게 상세 시트에서만 본다)
         String owner = str(lic, "owner_name");
         String contact = str(lic, "owner_contact");
-        String note = str(lic, "note");
         StringBuilder who = new StringBuilder();
         if (owner.length() > 0) who.append(owner);
         if (contact.length() > 0) who.append(who.length() > 0 ? " · " : "").append(contact);
-        if (note.length() > 0) who.append(who.length() > 0 ? " · " : "").append(note);
         if (who.length() == 0) who.append("소유자 미지정");
         TextView w = Ui.sub(a, who.toString());
         w.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12.5f);
@@ -223,14 +222,28 @@ public final class ScreenKeys implements MainActivity.Screen {
         mt(w, 5);
         card.addView(w);
 
-        // 3줄: 기능칩 3개
+        // 3줄: 보유 기능만 색 칩으로 표시한다. 미보유는 끝에 회색 요약 칩 하나로 묶어
+        //      '없음' 칩 반복으로 생기는 노이즈를 줄인다 (UI_V3: 켜진 것만 색).
         LinearLayout chips = Ui.row(a);
         mt(chips, 8);
         JSONArray feats = lic.optJSONArray("features");
+        int owned = 0;
+        StringBuilder missing = new StringBuilder();
         for (int i = 0; i < Api.FEATURES.length; i++) {
             String id = Api.FEATURES[i];
             JSONObject e = findFeat(feats, id);
-            chips.addView(Ui.chipSm(a, Api.featShort(id) + " " + featSuffix(e, now), featColor(e, now)));
+            if (e != null) {
+                chips.addView(Ui.chipSm(a, Api.featShort(id) + " " + featSuffix(e, now), featColor(e, now)));
+                owned++;
+            } else {
+                if (missing.length() > 0) missing.append(" · ");
+                missing.append(Api.featShort(id));
+            }
+        }
+        if (owned == 0) {
+            chips.addView(Ui.chipSm(a, "기능 미보유", Theme.DIM));
+        } else if (missing.length() > 0) {
+            chips.addView(Ui.chipSm(a, "미보유 " + missing, Theme.DIM));
         }
         card.addView(chips);
 

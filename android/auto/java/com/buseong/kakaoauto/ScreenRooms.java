@@ -47,6 +47,11 @@ public final class ScreenRooms {
     private static WeakReference<LinearLayout> BODY;
     private static WeakReference<View> SNACK;
 
+    /** 섹션 헤더 TextView 참조 (키 = 계정키, 단일 계정은 SINGLE_KEY). 토글 시 수치만 갱신한다. */
+    private static final String SINGLE_KEY = "\u0000single";
+    private static final LinkedHashMap<String, TextView> HEADERS =
+            new LinkedHashMap<String, TextView>();
+
     private static final Handler H = new Handler(Looper.getMainLooper());
 
     /** ✕ 를 눌렀지만 아직 실제로 지우지 않은 방 (키 = RoomRef.key()) */
@@ -100,6 +105,7 @@ public final class ScreenRooms {
     // ── 본문 ────────────────────────────────────────────────────────────────
 
     private static void fill(final MainActivity a, LinearLayout col) {
+        HEADERS.clear();
         if (!Settings.canSave(a)) {
             col.addView(Nav.note(a, "라이선스 인증 전에는 설정이 저장되지 않습니다. "
                     + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
@@ -134,13 +140,17 @@ public final class ScreenRooms {
             col.addView(Nav.note(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 "
                     + "자동으로 등록되며, 직접 입력하여 추가할 수도 있습니다.", Theme.ACCENT2, null, null));
         } else if (!multi) {
-            col.addView(Ui.sectionHeader(a, null, "선택 " + selected + "개 · 감지 " + detected + "개"));
+            LinearLayout sh = Ui.sectionHeader(a, null, "선택 " + selected + "개 · 감지 " + detected + "개");
+            rememberHeader(SINGLE_KEY, sh);
+            col.addView(sh);
             col.addView(section(a, rows));
         } else {
             for (int i = 0; i < accs.size(); i++) {
                 String acc = accs.get(i);
                 List<Row> mine = filter(rows, acc);
-                col.addView(Ui.sectionHeader(a, null, header(a, acc, mine)));
+                LinearLayout sh = Ui.sectionHeader(a, null, header(a, acc, mine));
+                rememberHeader(acc, sh);
+                col.addView(sh);
                 col.addView(section(a, mine));
             }
         }
@@ -190,6 +200,8 @@ public final class ScreenRooms {
                     badges, r.selected, new Ui.OnToggle() {
                         @Override public void on(boolean v) {
                             select(a, r.ref, v);
+                            // 전체 refresh 는 selected-first 정렬로 행이 튀므로 헤더 수치만 갱신한다.
+                            updateHeaders(a);
                             Nav.reload();
                         }
                     }, del));
@@ -203,6 +215,38 @@ public final class ScreenRooms {
         for (int i = 0; i < mine.size(); i++) if (mine.get(i).selected) sel++;
         String name = Accounts.nameOf(c, acc);
         return name + " · 선택 " + sel + "개";
+    }
+
+    /** 섹션 헤더의 제목 TextView 를 기억해 둔다 (sectionHeader 의 첫 자식) */
+    private static void rememberHeader(String key, LinearLayout sh) {
+        if (sh == null || sh.getChildCount() == 0) return;
+        View first = sh.getChildAt(0);
+        if (first instanceof TextView) HEADERS.put(key, (TextView) first);
+    }
+
+    /**
+     * 체크 토글 뒤 섹션 헤더의 '선택 N개' 수치만 다시 계산해 넣는다.
+     * 전체 refresh() 는 selected-first 정렬로 행이 튀므로 쓰지 않는다.
+     */
+    private static void updateHeaders(MainActivity a) {
+        if (HEADERS.isEmpty()) return;
+        List<Row> rows = rows(a);
+        int detected = 0;
+        int selected = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).detected) detected++;
+            if (rows.get(i).selected) selected++;
+        }
+        for (Map.Entry<String, TextView> e : HEADERS.entrySet()) {
+            TextView tv = e.getValue();
+            if (tv == null) continue;
+            String k = e.getKey();
+            if (SINGLE_KEY.equals(k)) {
+                tv.setText("선택 " + selected + "개 · 감지 " + detected + "개");
+            } else {
+                tv.setText(header(a, k, filter(rows, k)));
+            }
+        }
     }
 
     // ── 목록 만들기 ─────────────────────────────────────────────────────────

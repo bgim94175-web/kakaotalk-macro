@@ -13,6 +13,9 @@ import android.util.TypedValue;
 public final class Theme {
     private Theme() {}
 
+    // ── 투명 (채움 없음 / 보더만 그릴 때)
+    public static final int TRANSPARENT = 0x00000000;
+
     // ── 배경 계층 (어두운 데서 밝은 쪽으로)
     public static final int BG    = 0xFF0B0F14;
     public static final int BG2   = 0xFF111823;
@@ -41,6 +44,7 @@ public final class Theme {
     public static final int ON_PRIMARY = 0xFF170B2E;
 
     // ── 라운드 반경 (dp)
+    public static final int R_XS = 6;
     public static final int R_SM = 10;
     public static final int R_MD = 14;
     public static final int R_LG = 20;

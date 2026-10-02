@@ -54,7 +54,7 @@ app.use((req, res, next) => {
       console.log('[rate] 관리자 인증 실패로 차단중 ' + ip + ' ' + req.method + ' ' + req.path +
                   ' (' + mins + '분 남음)');
       return res.status(429).json({ ok: false, reason: 'rate_limited',
-        error: '비밀번호를 너무 많이 틀렸어. ' + mins + '분 뒤에 다시 해줘' });
+        error: '비밀번호 입력 실패 횟수를 초과했습니다. ' + mins + '분 후 다시 시도하십시오' });
     }
   }
 
@@ -62,7 +62,7 @@ app.use((req, res, next) => {
   if (!r.ok) {
     res.set('Retry-After', String(r.retryAfter));
     console.log('[rate] 과다요청 차단 ' + ip + ' ' + req.method + ' ' + req.path + ' (버킷=' + kind + ')');
-    return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 많아. 잠깐 뒤에 다시 해줘' });
+    return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오' });
   }
   next();
 });
@@ -106,10 +106,10 @@ app.use((err, req, res, next) => {
   console.error('[unhandled ' + req.method + ' ' + req.originalUrl + '] ' + (err && err.stack ? err.stack : err));
   if (res.headersSent) return;
   if (err && (err.type === 'entity.too.large' || err.status === 413)) {
-    return res.status(413).json({ ok: false, error: '본문이 너무 커' });
+    return res.status(413).json({ ok: false, error: '본문 크기가 허용 범위를 초과했습니다' });
   }
   if (err && err.type === 'entity.parse.failed') {
-    return res.status(400).json({ ok: false, error: 'JSON 이 깨졌어' });
+    return res.status(400).json({ ok: false, error: '요청 본문(JSON) 형식이 올바르지 않습니다' });
   }
   res.status(500).json({ ok: false, error: 'server_error' });
 });

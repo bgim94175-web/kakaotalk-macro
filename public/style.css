@@ -528,6 +528,27 @@ details.faq .body p:last-child{ margin-bottom:0 }
 }
 @keyframes sp{ to{ transform:rotate(360deg) } }
 
+/* ── 스켈레톤 — 가격 조회 중 상품 카드 자리표시 (다크 톤 토큰만 사용) */
+.sk{
+  display:block; background:var(--bg2); border-radius:var(--r-sm);
+  position:relative; overflow:hidden;
+}
+.sk::after{
+  content:""; position:absolute; inset:0;
+  background:linear-gradient(90deg, transparent 0%, var(--line) 50%, transparent 100%);
+  transform:translateX(-100%); animation:shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer{ to{ transform:translateX(100%) } }
+@media (prefers-reduced-motion:reduce){ .sk::after{ animation:none } }
+.card.prod.skel{ pointer-events:none }
+.card.prod.skel .sk-ico{ width:42px; height:42px; border-radius:var(--r-sm); flex:0 0 auto }
+.card.prod.skel .sk-ln{ height:13px }
+.card.prod.skel .sk-ln.w40{ width:40% }
+.card.prod.skel .sk-ln.w70{ width:70% }
+.card.prod.skel .sk-ln.w90{ width:90% }
+.card.prod.skel .prices .pr .sk-pl{ height:13px; width:46px }
+.card.prod.skel .prices .pr .sk-pv{ height:14px; width:74px; margin-left:auto }
+
 /* ── 토스트 */
 #toast{
   position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px));

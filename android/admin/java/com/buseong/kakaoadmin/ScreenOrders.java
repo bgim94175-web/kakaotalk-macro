@@ -30,12 +30,14 @@ public final class ScreenOrders implements MainActivity.Screen {
     private final MainActivity a;
 
     private ScrollView rootView;
+    private View segView;
     private LinearLayout listBox;
     private TextView countLabel;
     private TextView noteLabel;
 
     private int seg = 0;
-    private boolean busy = false;
+    /** 요청 세대 토큰. load() 마다 증가하고, 콜백은 자신이 최신 세대일 때만 렌더한다. */
+    private int gen = 0;
 
     public ScreenOrders(MainActivity act) { this.a = act; }
 
@@ -50,7 +52,7 @@ public final class ScreenOrders implements MainActivity.Screen {
         for (int i = 0; i < Api.ORDER_STATUS_LABELS.length; i++) labels[i] = Api.ORDER_STATUS_LABELS[i];
         labels[TAB_DEPOSIT] = "입금";
 
-        View segView = Ui.segment(a, labels, 0, new Ui.OnPick() {
+        segView = Ui.segment(a, labels, 0, new Ui.OnPick() {
             @Override public void pick(int i) { seg = i; load(); }
         });
         page.addView(segView);
@@ -80,6 +82,14 @@ public final class ScreenOrders implements MainActivity.Screen {
 
     @Override public void reload() { load(); }
 
+    /** 홈 요약바의 '확인 입금' 타일에서 바로 입금 세그먼트로 들어올 때 쓴다. */
+    public void focusDeposits() {
+        view();
+        seg = TAB_DEPOSIT;
+        if (segView != null) Ui.setSegment(segView, TAB_DEPOSIT);
+        load();
+    }
+
     private void load() {
         if (seg == TAB_DEPOSIT) loadDeposits();
         else loadOrders();
@@ -94,13 +104,13 @@ public final class ScreenOrders implements MainActivity.Screen {
     // ── 주문 ──────────────────────────────────────────────────────────────────
 
     private void loadOrders() {
-        if (busy) return;
-        busy = true;
+        final int myGen = ++gen;
         busyBox();
         final String status = Api.ORDER_STATUS[Math.max(0, Math.min(seg, Api.ORDER_STATUS.length - 1))];
         Api.orders(a, status, LIMIT, new Api.Cb() {
             @Override public void done(Api.Result r) {
-                busy = false;
+                // 내가 최신 요청이 아니면(사용자가 그새 다른 세그먼트를 눌렀다면) 결과를 버린다.
+                if (myGen != gen) return;
                 if (a.kicked(r)) return;
                 if (listBox == null) return;
                 listBox.removeAllViews();
@@ -379,12 +389,12 @@ public final class ScreenOrders implements MainActivity.Screen {
     // ── 입금 내역 ─────────────────────────────────────────────────────────────
 
     private void loadDeposits() {
-        if (busy) return;
-        busy = true;
+        final int myGen = ++gen;
         busyBox();
         Api.deposits(a, "", LIMIT, new Api.Cb() {
             @Override public void done(Api.Result r) {
-                busy = false;
+                // 내가 최신 요청이 아니면(사용자가 그새 다른 세그먼트를 눌렀다면) 결과를 버린다.
+                if (myGen != gen) return;
                 if (a.kicked(r)) return;
                 if (listBox == null) return;
                 listBox.removeAllViews();

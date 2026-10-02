@@ -9,6 +9,8 @@ import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 전역 초기화 + 크래시 핸들러 + 앱 로그(링버퍼).
@@ -125,8 +127,12 @@ public final class App extends Application {
      */
     public static synchronized void log(Context c, String msg) {
         if (msg == null) msg = "";
+        // 민감정보(라이선스 키·앱 서명)는 logcat 과 평문 Prefs 어디에도 전체값이 남지 않게 가린다.
+        msg = redact(msg);
         String line = stamp(System.currentTimeMillis()) + "  " + msg;
-        try { android.util.Log.i("KakaoAdmin", msg); } catch (Throwable ignore) { }
+        // 릴리스(서명) 빌드에서는 logcat 출력을 끈다 — 버그리포트·ADB·기기 백업 경로로
+        // 로그가 새 나가지 않게 한다. 운영 로그는 아래 앱 내 링버퍼로만 본다.
+        try { if (debuggable(c)) android.util.Log.i("KakaoAdmin", msg); } catch (Throwable ignore) { }
         SharedPreferences p = prefs(c);
         if (p == null) return;
         try {
@@ -147,6 +153,39 @@ public final class App extends Application {
         }
     }
 
+    /** 라이선스 키: KAKA-ABCD-EFGH-IJKL → KAKA-****-****-IJKL (서버 purchase.js 와 같은 규칙) */
+    private static final Pattern KEY_RE =
+            Pattern.compile("KAKA-[A-Z0-9]{4}-[A-Z0-9]{4}-([A-Z0-9]{4})");
+    /** 앱 서명 등 긴 16진수(해시) → 앞4·뒤4만 */
+    private static final Pattern HEX_RE =
+            Pattern.compile("\\b[0-9a-fA-F]{32,}\\b");
+
+    /**
+     * 로그에 남기기 전에 민감정보를 가린다.
+     * 라이선스 키는 뒤 4자만, 앱 서명(긴 16진수 해시)은 앞4·뒤4만 남긴다.
+     * 호출부가 전체값을 그대로 넘겨도 logcat·평문 Prefs 어디에도 전체값이 남지 않는다.
+     * 로그는 "어느 키였는지" 식별만 되면 되므로 뒤 4자만으로 운영에 지장이 없다.
+     */
+    static String redact(String msg) {
+        if (msg == null || msg.length() == 0) return msg;
+        String out = msg;
+        try {
+            out = KEY_RE.matcher(out).replaceAll("KAKA-****-****-$1");
+        } catch (Throwable ignore) { /* 가림에 실패해도 로그 자체는 남긴다 */ }
+        try {
+            Matcher mh = HEX_RE.matcher(out);
+            StringBuffer sb = new StringBuffer(out.length());
+            while (mh.find()) {
+                String h = mh.group();
+                String rep = h.substring(0, 4) + "…" + h.substring(h.length() - 4);
+                mh.appendReplacement(sb, Matcher.quoteReplacement(rep));
+            }
+            mh.appendTail(sb);
+            out = sb.toString();
+        } catch (Throwable ignore) { /* 가림에 실패해도 로그 자체는 남긴다 */ }
+        return out;
+    }
+
     /** 최근 로그 전체 (오래된 → 최신). 없으면 빈 문자열 */
     public static String logDump(Context c) {
         SharedPreferences p = prefs(c);
@@ -161,6 +200,22 @@ public final class App extends Application {
     }
 
     // ── 내부 ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 디버그 빌드인지 판단한다. BuildConfig 를 생성하지 않는 수동 빌드이므로
+     * 매니페스트의 debuggable 플래그로 본다. 릴리스(서명) 빌드는 이 플래그가 꺼져 있어
+     * logcat 출력이 비활성화된다.
+     */
+    private static boolean debuggable(Context c) {
+        Context use = (c != null) ? c.getApplicationContext() : appCtx;
+        if (use == null) return false;
+        try {
+            return (use.getApplicationInfo().flags
+                    & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     private static SharedPreferences prefs(Context c) {
         Context use = (c != null) ? c.getApplicationContext() : appCtx;

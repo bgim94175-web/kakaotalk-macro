@@ -177,6 +177,9 @@ public final class ScreenAccounts {
         s.setAccounts((next.size() == keys.size()) ? new ArrayList<String>() : next);
         s.save(a);
         Log.add(a, "발송 대상 계정을 변경했습니다: 사용 " + next.size() + "개 / " + keys.size() + "개");
+        // rename()·forget() 와 동일하게 이 화면도 다시 그려 상단 요약·카드 소계를 갱신한다.
+        // (Nav.reload() 는 ScreenAccount 만 갱신하고 이 복수형 화면은 건드리지 않는다)
+        refresh();
         Nav.reload();
     }
 

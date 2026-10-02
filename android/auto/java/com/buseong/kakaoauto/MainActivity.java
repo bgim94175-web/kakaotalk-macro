@@ -192,12 +192,8 @@ public final class MainActivity extends Activity {
             bxp.bottomMargin = Theme.dp(this, 14);
             box.setLayoutParams(bxp);
 
-            TextView big = new TextView(this);
-            big.setText(why);
-            big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+            TextView big = Ui.headline(this, why);
             big.setTextColor(Theme.RED);
-            big.setTypeface(Typeface.DEFAULT_BOLD);
-            big.setLineSpacing(0, 1.35f);
             box.addView(big, new LinearLayout.LayoutParams(MATCH, WRAP));
 
             TextView sm = Ui.sub(this, "동일한 키가 다른 기기에서 인증되면 먼저 사용한 기기가 잠금 처리됩니다.\n"
@@ -638,7 +634,9 @@ public final class MainActivity extends Activity {
             c = Theme.AMBER;
         }
         final String fv = v;
-        g.addView(Ui.navRow(a, name, fv, c, new Runnable() {
+        int glyph = Features.MINIGAME.equals(feat) ? Ui.GLYPH_MINIGAME : Ui.GLYPH_ROOMBOT;
+        int accent = Features.MINIGAME.equals(feat) ? Theme.FEAT_MINIGAME : Theme.FEAT_ROOMBOT;
+        g.addView(Ui.navRow(a, glyph, accent, name, fv, c, new Runnable() {
             @Override public void run() { Nav.go(Nav.BOT); }
         }));
     }
@@ -662,13 +660,9 @@ public final class MainActivity extends Activity {
             String[] all = dump.split("\n");
             int n = Math.min(4, all.length);
             for (int i = 0; i < n; i++) {
-                TextView lv = new TextView(a);
-                lv.setText(all[i]);
-                lv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
-                lv.setTextColor((i == 0) ? Theme.SUB : Theme.DIM);
+                TextView lv = Ui.micro(a, all[i], (i == 0) ? Theme.SUB : Theme.DIM);
                 lv.setSingleLine(true);
                 lv.setEllipsize(TextUtils.TruncateAt.END);
-                lv.setIncludeFontPadding(false);
                 LinearLayout.LayoutParams lvp = new LinearLayout.LayoutParams(MATCH, WRAP);
                 lvp.topMargin = Theme.dp(a, (i == 0) ? 0 : 8);
                 lv.setLayoutParams(lvp);
