@@ -453,24 +453,55 @@ public final class MainActivity extends Activity {
     private static String homeStatus(MainActivity a, Settings s) {
         if (!s.macro.enabled) return "미사용";
         if (s.macro.roomRefs().isEmpty()) return "대상 대화방 미설정 · 발송 보류";
-        if (s.macro.message == null || s.macro.message.trim().length() == 0) {
-            return "메시지 미설정 · 발송 보류";
-        }
-        long at;
-        try {
-            at = Scheduler.nextAt(a);
-        } catch (Throwable t) {
-            at = s.macro.nextAt;
-        }
-        String next = (at > 0) ? (ScreenMacro.hm(at) + " " + after(at)) : "예정 없음";
+        if (activeRoomCount(s) == 0) return "활성 대화방 없음 · 발송 보류";
+        if (!hasSendableRoom(s)) return "메시지 미설정 · 발송 보류";
+        // v4: 전역 단일 nextAt 이 아니라 대상 방들 중 가장 이른 방별 nextAt 을 보여준다.
+        long at = earliestRoomNextAt(s);
+        String next = (at > 0) ? (ScreenMacro.hm(at) + " " + after(at)) : "대기";
         return "다음 발송 " + next + " · 금일 " + sentToday(a) + "회 발송";
     }
 
     private static int homeStatusColor(MainActivity a, Settings s) {
         if (!s.macro.enabled) return Theme.DIM;
         if (s.macro.roomRefs().isEmpty()) return Theme.AMBER;
-        if (s.macro.message == null || s.macro.message.trim().length() == 0) return Theme.AMBER;
+        if (activeRoomCount(s) == 0) return Theme.AMBER;
+        if (!hasSendableRoom(s)) return Theme.AMBER;
         return Theme.SUB;
+    }
+
+    // ── 방별 상태 요약 (v4: 전역 → 계정 → 방 해상도 반영) ─────────────────────
+    //  홈은 상태만 읽는다 — 저장/스케줄을 건드리지 않으려고 Settings 의 read-only 공개
+    //  메서드(roomActive·roomNextAt·effMessage)만 쓴다.
+
+    /** 지금 매크로 대상(roomActive)인 대화방 수 */
+    private static int activeRoomCount(Settings s) {
+        int n = 0;
+        for (RoomRef r : s.macro.roomRefs()) {
+            if (r != null && s.roomActive(r)) n++;
+        }
+        return n;
+    }
+
+    /** 활성 대화방 중 유효 메시지(effMessage)가 비어 있지 않아 실제로 발송될 방이 하나라도 있나 */
+    private static boolean hasSendableRoom(Settings s) {
+        for (RoomRef r : s.macro.roomRefs()) {
+            if (r == null || !s.roomActive(r)) continue;
+            String m = s.effMessage(r);
+            if (m != null && m.trim().length() > 0) return true;
+        }
+        return false;
+    }
+
+    /** 활성 대화방들의 방별 nextAt 중 가장 이른 시각. 아직 잡힌 방이 없으면 0. */
+    private static long earliestRoomNextAt(Settings s) {
+        long earliest = 0L;
+        for (RoomRef r : s.macro.roomRefs()) {
+            if (r == null || !s.roomActive(r)) continue;
+            long at = s.roomNextAt(r);
+            if (at <= 0L) continue;
+            if (earliest == 0L || at < earliest) earliest = at;
+        }
+        return earliest;
     }
 
     /** "(12분 후)" */
@@ -496,9 +527,12 @@ public final class MainActivity extends Activity {
         final boolean notiOk = noti;
         final boolean battOk = ignoringBattery(a);
 
-        final boolean msgOk = !macroOn
-                || (s.macro.message != null && s.macro.message.trim().length() > 0);
-        final boolean roomOk = !macroOn || !s.macro.roomRefs().isEmpty();
+        // v4: 메시지는 전역 → 계정 → 방 순으로 해석된다. 전역이 비어 있어도 계정/방 덮어쓰기로
+        //     실제 발송될 방(hasSendableRoom)이 있으면 '발송 메시지'는 준비된 것으로 본다.
+        final boolean hasRooms = !s.macro.roomRefs().isEmpty();
+        final boolean globalMsg = s.macro.message != null && s.macro.message.trim().length() > 0;
+        final boolean msgOk = !macroOn || globalMsg || (hasRooms && hasSendableRoom(s));
+        final boolean roomOk = !macroOn || hasRooms;
 
         // 이미지 첨부를 쓸 때만 접근성·오버레이를 묻는다 (텍스트 발송에는 필요 없다)
         final boolean imgUse = macroOn && !Settings.IMG_NEVER.equals(s.macro.sendImages);

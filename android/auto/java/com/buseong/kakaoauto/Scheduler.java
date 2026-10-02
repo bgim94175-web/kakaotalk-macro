@@ -134,6 +134,9 @@ public final class Scheduler {
     /**
      * 발송 알람이 걸려 있게 보장한다. 여러 번 불러도 안전하다(같은 PendingIntent 를 덮어쓴다).
      * 매크로가 꺼져 있거나 기능이 안 열려 있으면 알람을 끈다.
+     *
+     * v4: 전역 nextAt 하나가 아니라 <b>방별 nextAt</b> 중 가장 이른 시각에 알람을 건다.
+     *     nextAt 이 0 인(아직 안 잡힌) 대상 방은 지금부터 그 방의 유효 쿨타임(effCd) 범위 랜덤으로 초기화한다.
      */
     public static void ensureScheduled(Context ctx) {
         Context c = app(ctx);
@@ -143,8 +146,18 @@ public final class Scheduler {
         // 설정을 못 읽는 상황(설정키 없음)에서도, 매크로가 꺼져 있어도 하트비트는 살아 있어야 한다.
         ensureHeartbeat(c);
 
-        Settings.Macro m = macro(c);
-        if (m == null) return;
+        rearm(c);
+    }
+
+    /**
+     * 대상 방들의 방별 nextAt 을 살펴 가장 이른 시각에 발송 알람을 다시 건다.
+     * 매크로가 꺼져 있거나 기능이 안 열렸거나 대상 방이 하나도 없으면 알람을 끈다.
+     * {@link #ensureScheduled} 와 {@link #scheduleNext} 가 공유한다.
+     */
+    private static void rearm(Context c) {
+        Settings s = settings(c);
+        if (s == null) return;
+        Settings.Macro m = s.macro;
 
         if (!m.enabled) {
             cancel(c);
@@ -157,16 +170,42 @@ public final class Scheduler {
         }
 
         long now = System.currentTimeMillis();
-        long next = storedNext(c);
+        boolean[] inited = { false };
+        long earliest = planActive(s, now, inited);
 
-        // 주기 최대치보다 더 멀리 잡혀 있으면(주기를 줄였거나 값이 깨졌으면) 다시 계산한다.
-        // 단, 지금이 방해금지 시간이면 예정 시각이 원래 멀 수밖에 없다 — 그건 건드리지 않는다.
-        long maxAhead = (long) Math.max(1, Math.max(m.intervalMinMin, m.intervalMaxMin)) * 60000L;
-        boolean tooFar = (next > now + maxAhead) && !m.inQuiet(now);
-        if (next <= now || tooFar) next = m.pickNextAt(now);
+        // 대상 방이 없거나 전부 비활성(미사용 계정·방 꺼짐)이면 예약을 거는 의미가 없다.
+        if (earliest <= 0L) {
+            cancel(c);
+            return;
+        }
 
-        setNext(c, m, next);
-        arm(c, next);
+        setNext(c, s, earliest, inited[0]);
+        arm(c, earliest);
+    }
+
+    /**
+     * 대상 방(roomActive)을 돌며 가장 이른 방별 nextAt 을 찾는다.
+     * nextAt 이 0 인 방은 지금부터 그 방 유효 쿨타임 범위 랜덤으로 초기화한다(메모리만 — 저장은 호출측).
+     *
+     * @param inited 새로 초기화한 방이 하나라도 있으면 inited[0]=true 로 알려준다(호출측이 save 판단).
+     * @return 대상 방들의 가장 이른 nextAt. 대상 방이 하나도 없으면 0.
+     */
+    private static long planActive(Settings s, long now, boolean[] inited) {
+        Settings.Macro m = s.macro;
+        long earliest = 0L;
+        List<RoomRef> all = m.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid() || !s.roomActive(r)) continue;
+            long at = s.roomNextAt(r);
+            if (at <= 0L) {
+                at = m.pickNextAt(now, s.effCdMinMin(r), s.effCdMaxMin(r));
+                s.setRoomNextAt(r, at);
+                if (inited != null) inited[0] = true;
+            }
+            if (earliest == 0L || at < earliest) earliest = at;
+        }
+        return earliest;
     }
 
     /**
@@ -214,24 +253,14 @@ public final class Scheduler {
     }
 
     /**
-     * 지금부터 주기(intervalMinMin~intervalMaxMin 분) 안에서 랜덤으로 다음 발송을 새로 잡는다.
-     * 방해금지 시간대에 걸리면 pickNextAt 이 끝나는 시각 뒤로 밀어준다.
+     * 다음 발송 알람을 다시 잡는다. v4 에서는 방별 nextAt 중 가장 이른 시각에 건다.
+     * (runDue 가 보낸 방은 이미 자기 nextAt 을 미래로 갱신해 뒀고, 아직 안 보낸 방은 그대로다.)
+     * 방해금지 시간대 처리는 각 방의 nextAt 을 잡을 때 pickNextAt 안에서 이미 끝난다.
      */
     public static void scheduleNext(Context ctx) {
         Context c = app(ctx);
         if (c == null) return;
-
-        Settings.Macro m = macro(c);
-        if (m == null) return;
-
-        if (!m.enabled || !License.allowed(c, Features.MACRO)) {
-            cancel(c);
-            return;
-        }
-
-        long at = m.pickNextAt(System.currentTimeMillis());
-        setNext(c, m, at);
-        arm(c, at);
+        rearm(c);
     }
 
     // ── 라이선스 하트비트 (매크로와 완전히 독립) ───────────────────────────────
@@ -439,46 +468,34 @@ public final class Scheduler {
             return;
         }
 
-        // 3) 방해금지 시간
+        // 3) 방해금지 시간 (전역 유지)
         if (m.inQuiet(now)) {
             Log.add(c, "방해금지 시간대(" + m.quietFrom + "~" + m.quietTo + ")이므로 발송하지 않았습니다.");
             return;
         }
 
-        // 4) 일일 한도
-        final int limit = m.dailyLimit;
-        if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-            Log.add(c, "일일 발송 한도(" + limit + "건)를 모두 사용했습니다. 자정에 초기화됩니다.");
-            return;
-        }
-
-        // 5) 보낼 내용 / 대상
-        final String msg = (m.message == null) ? "" : m.message;
-        if (msg.trim().length() == 0) {
-            Log.add(c, "발송 메시지가 비어 있어 발송하지 않았습니다. 매크로 탭에서 메시지를 입력하십시오.");
-            return;
-        }
-        // 대상 계정 필터 — Settings.accounts 가 비어 있으면 모든 계정이 대상이다
+        // 4) 대상 방 — roomActive(전역 on && 계정 on && 방 on && 발송 대상 계정) 인 방만 돈다.
+        //    (일일 한도 체크는 v4 에서 제거됨.)
         List<RoomRef> rooms = new ArrayList<RoomRef>();
-        int offAccount = 0;
+        int inactive = 0;
         List<RoomRef> all = m.roomRefs();
         for (int i = 0; i < all.size(); i++) {
             RoomRef r = all.get(i);
             if (r == null || !r.valid()) continue;
-            if (!s.accountOn(r.acc)) { offAccount++; continue; }
+            if (!s.roomActive(r)) { inactive++; continue; }
             rooms.add(r);
         }
         if (rooms.isEmpty()) {
-            if (offAccount > 0) {
-                Log.add(c, "대상 대화방 " + offAccount + "개가 모두 미사용 계정에 속해 발송하지 않았습니다."
-                        + " 내정보 탭의 카카오톡 계정에서 대상 계정을 확인하십시오.");
+            if (inactive > 0) {
+                Log.add(c, "대상 대화방 " + inactive + "개가 모두 비활성 상태(미사용 계정 또는 방 매크로 꺼짐)이므로 발송하지 않았습니다."
+                        + " 계정·대화방별 설정을 확인하십시오.");
             } else {
                 Log.add(c, "대상 대화방이 지정되지 않아 발송하지 않았습니다. 매크로 탭에서 대화방을 추가하십시오.");
             }
             return;
         }
 
-        // 6) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
+        // 5) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
         if (!KakaoListener.listenerBound()) {
             if (KakaoListener.connected(c)) {
                 Log.add(c, "알림 리스너가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
@@ -488,21 +505,18 @@ public final class Scheduler {
             return;
         }
 
-        // 7) 방별 발송
+        // 6) 방별 발송 — 방마다 자기 nextAt(쿨타임)·유효 메시지·최소 신규 메시지 수를 쓴다.
         final long deadline = now + RUN_BUDGET_MS;
-        final int minNeed = (m.minMessages < 0) ? 0 : m.minMessages;
         int ok = 0;
-        int waiting = 0;
+        int waiting = 0;    // 신규 메시지 미달로 대기
+        int notDue = 0;     // 아직 쿨타임이 안 됨
+        int emptyMsg = 0;   // 유효 메시지가 비어 건너뜀
         int left = 0;
+        boolean dirty = false;   // 방별 nextAt 을 갱신했으면 끝에 한 번 save
         StringBuilder failed = new StringBuilder();
 
         for (int i = 0; i < rooms.size(); i++) {
             if (System.currentTimeMillis() > deadline) {
-                left = rooms.size() - i;
-                break;
-            }
-            if (limit > 0 && MainActivity.sentToday(c) >= limit) {
-                Log.add(c, "일일 발송 한도(" + limit + "건)에 도달하여 남은 대화방은 중단했습니다.");
                 left = rooms.size() - i;
                 break;
             }
@@ -511,7 +525,30 @@ public final class Scheduler {
             // 계정이 2개 이상이면 label(c) 가 계정 이름까지 붙여준다 (하나면 방 이름만)
             String label = room.label(c);
 
-            // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 minNeed 개 이상 쌓인 방에만 보낸다
+            // 방별 쿨타임: 아직 때가 안 됐으면 건너뛴다 (0 이면 이번에 바로 발송 대상)
+            long roomAt = s.roomNextAt(room);
+            if (roomAt > 0L && now < roomAt) {
+                notDue++;
+                continue;
+            }
+
+            // ★ 쿨타임이 도래한 방은 '발송하든 못 하든' 다음 쿨타임으로 즉시 밀어둔다.
+            //   그러지 않으면 발송 조건 미충족(새 메시지 부족·메시지 공백·발송 실패) 방의 nextAt 이
+            //   과거에 고정돼, ensureScheduled 가 그 과거 시각으로 알람을 다시 걸어 즉시 재발화한다
+            //   (무한 반복·배터리 고갈). 발송 성공 여부와 무관하게 여기서 한 번만 전진시킨다.
+            s.setRoomNextAt(room, m.pickNextAt(now, s.effCdMinMin(room), s.effCdMaxMin(room)));
+            dirty = true;
+
+            // 유효 메시지(방 > 계정 > 전역)가 비면 그 방은 건너뛰고 로그로 알린다.
+            String msg = s.effMessage(room);
+            if (msg == null || msg.trim().length() == 0) {
+                emptyMsg++;
+                Log.add(c, "「" + label + "」 발송 메시지가 비어 있어 건너뛰었습니다. 매크로/계정/대화방 설정에서 메시지를 입력하십시오.");
+                continue;
+            }
+
+            // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 (방별 유효) minMessages 개 이상 쌓인 방에만 보낸다
+            final int minNeed = Math.max(0, s.effMinMessages(room));
             int others = 0;
             try {
                 others = KakaoListener.othersSinceMine(room);
@@ -578,14 +615,18 @@ public final class Scheduler {
             }
         }
 
+        // 방별 nextAt 갱신분을 한 번에 저장 (방마다 디스크 쓰지 않게 배치로)
+        if (dirty && Settings.canSave(c)) s.save(c);
+
         StringBuilder sb = new StringBuilder(96);
         sb.append("자동발송 · 성공 ").append(ok).append("건");
+        if (notDue > 0) sb.append(" / 쿨타임 대기 ").append(notDue).append("개 대화방");
         if (waiting > 0) {
-            sb.append(" / 대기 ").append(waiting).append("개 대화방(신규 메시지 ")
-              .append(minNeed).append("개 미달)");
+            sb.append(" / 신규 메시지 대기 ").append(waiting).append("개 대화방");
         }
+        if (emptyMsg > 0) sb.append(" / 메시지 없음 ").append(emptyMsg).append("개");
         if (failed.length() > 0) sb.append(" / 실패: ").append(failed);
-        if (offAccount > 0) sb.append(" / 미사용 계정 제외 ").append(offAccount).append("개");
+        if (inactive > 0) sb.append(" / 비활성 제외 ").append(inactive).append("개");
         if (left > 0) sb.append(" / 시간 부족으로 ").append(left).append("개 대화방은 다음 주기로 이월");
         Log.add(c, sb.toString());
     }
@@ -795,6 +836,10 @@ public final class Scheduler {
         PendingIntent pi = pending(c);
         if (pi == null) return false;
 
+        // 과거 시각이면 지금 직후로 올린다(방어). 도래한 방은 한 번 발화 후 runDue 가 nextAt 을 전진시킨다.
+        long nowMs = System.currentTimeMillis();
+        if (at < nowMs) at = nowMs + 500L;
+
         boolean exact = true;
         if (Build.VERSION.SDK_INT >= 31) {
             try {
@@ -902,23 +947,27 @@ public final class Scheduler {
         return (at < 0) ? 0L : at;
     }
 
-    /** 예정 시각을 평문 Prefs 에 쓰고, 설정 쪽 nextAt 에도 거울처럼 맞춰둔다. */
-    private static void setNext(Context c, Settings.Macro m, long at) {
-        Prefs.putLong(c, K_NEXT, at);
+    /**
+     * 다음 알람 예정 시각(= 가장 이른 방별 nextAt)을 평문 Prefs 에 쓰고, 전역 nextAt 거울도 맞춘다.
+     * planActive 가 방별 nextAt 을 새로 초기화했거나(inited) 전역 거울이 바뀌었으면 한 번 저장한다
+     * (방별 타이머와 전역 거울이 같은 Settings 인스턴스라 한 번의 save 로 함께 영속된다).
+     */
+    private static void setNext(Context c, Settings s, long earliest, boolean inited) {
+        Prefs.putLong(c, K_NEXT, earliest);
         try {
-            if (m != null && m.nextAt != at) {
-                m.nextAt = at;
-                if (Settings.canSave(c)) Settings.flush(c);
-            }
+            Settings.Macro m = s.macro;
+            boolean mirrorChanged = (m.nextAt != earliest);
+            if (mirrorChanged) m.nextAt = earliest;
+            if ((inited || mirrorChanged) && Settings.canSave(c)) s.save(c);
         } catch (Throwable t) {
             android.util.Log.w("KakaoAuto", "예정 시각 저장 실패", t);
         }
     }
 
     /** 설정을 읽는다. 못 읽으면 로그를 남기고 null. */
-    private static Settings.Macro macro(Context c) {
+    private static Settings settings(Context c) {
         try {
-            return Settings.macro(c);
+            return Settings.load(c);
         } catch (Throwable t) {
             Log.add(c, "설정을 읽지 못해 발송 예약에 실패했습니다. (" + t + ")");
             return null;

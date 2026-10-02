@@ -113,8 +113,8 @@ public final class ScreenMacro {
                     @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
                 }));
 
-        content.addView(Ui.navRow(a, "발송 주기", cycleSummary(s), Theme.TEXT, new Runnable() {
-            @Override public void run() { Nav.push(a, "발송 주기", MacroDetail.cycle(a)); }
+        content.addView(Ui.navRow(a, "쿨타임", cycleSummary(s), Theme.TEXT, new Runnable() {
+            @Override public void run() { Nav.push(a, "쿨타임", MacroDetail.cycle(a)); }
         }));
         col.addView(content);
 
@@ -150,7 +150,9 @@ public final class ScreenMacro {
         // ── 제한 ──
         col.addView(Ui.sectionHeader(a, null, "제한"));
         LinearLayout limit = Ui.group(a);
-        limit.addView(Ui.navRow(a, "발송 제한", limitSummary(s), Theme.TEXT, new Runnable() {
+        boolean quietOn = !"없음".equals(quietKr(s));
+        limit.addView(Ui.navRow(a, "발송 제한", limitSummary(s),
+                quietOn ? Theme.TEXT : Theme.DIM, new Runnable() {
             @Override public void run() { Nav.push(a, "발송 제한", MacroDetail.limits(a)); }
         }));
         col.addView(limit);
@@ -263,8 +265,9 @@ public final class ScreenMacro {
         return v;
     }
 
+    /** 전역 기본 쿨타임 요약 (방·계정 덮어쓰기와 무관하게 기본값 기준). `20~40분마다` */
     static String cycleSummary(Settings s) {
-        return s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분마다";
+        return s.macro.cooldownMinMin + "~" + s.macro.cooldownMaxMin + "분마다";
     }
 
     /**
@@ -304,8 +307,8 @@ public final class ScreenMacro {
 
     static String limitSummary(Settings s) {
         String q = quietKr(s);
-        if ("없음".equals(q)) return "1일 " + s.macro.dailyLimit + "회";
-        return q + " 중지 · 1일 " + s.macro.dailyLimit + "회";
+        if ("없음".equals(q)) return "미설정";
+        return q + " 중지";
     }
 
     static String quietKr(Settings s) {
@@ -352,7 +355,7 @@ public final class ScreenMacro {
         if (why != null) {
             final String w = why;
             Nav.confirm(a, "발송 제한 상태", w + "\n자동발송은 이 조건에서 발송하지 않습니다."
-                    + " 즉시 발송은 1일 한도에 함께 집계됩니다.", "발송", new Runnable() {
+                    + " 즉시 발송을 진행하시겠습니까?", "발송", new Runnable() {
                 @Override public void run() {
                     Log.add(a, "발송 제한 상태에서 즉시 발송을 실행했습니다. (" + w + ")");
                     doSendNow(a, s, btn, rooms, msg);
@@ -381,11 +384,6 @@ public final class ScreenMacro {
         try {
             if (s.macro.inQuiet(System.currentTimeMillis())) {
                 return "현재 방해금지 시간입니다. (" + quietKr(s) + ")";
-            }
-            int limit = s.macro.dailyLimit;
-            int sent = MainActivity.sentToday(a);
-            if (limit > 0 && sent >= limit) {
-                return "금일 발송 " + sent + "회로 1일 한도(" + limit + "회)에 도달했습니다.";
             }
         } catch (Throwable t) {
             return null;

@@ -98,7 +98,7 @@ public final class MacroDetail {
                 final Settings s = Settings.load(a);
                 final boolean empty = (s.macro.message == null || s.macro.message.trim().length() == 0);
 
-                col.addView(Ui.sectionHeader(a, null, "발송 메시지"));
+                col.addView(Ui.sectionHeader(a, null, "발송 메시지 (기본값)"));
                 LinearLayout g = Ui.group(a);
                 g.addView(Ui.navRow(a, "메시지 편집", empty ? "설정 필요" : "수정",
                         empty ? Theme.AMBER : Theme.SUB, new Runnable() {
@@ -118,6 +118,7 @@ public final class MacroDetail {
                 col.addView(prev);
 
                 col.addView(Nav.note(a, "입력한 내용이 그대로 발송되며 여러 줄 입력이 유지됩니다.\n"
+                        + "이 메시지는 전역 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 발송됩니다.\n"
                         + "치환 토큰은 메시지 추적·자동응답에서만 적용됩니다.", Theme.ACCENT2, null, null));
             }
         });
@@ -139,19 +140,20 @@ public final class MacroDetail {
                 });
     }
 
-    // ── 2. 발송 주기 ────────────────────────────────────────────────────────
+    // ── 2. 쿨타임 (전역 기본값) ──────────────────────────────────────────────
+    //  이 화면은 전역 기본값을 편집한다. 계정별 기본값·방별 덮어쓰기가 있으면 그 값이 우선한다.
 
     public static View cycle(MainActivity a) {
         return screen(a, new Filler() {
             @Override public void fill(final MainActivity a, LinearLayout col) {
                 final Settings s = Settings.load(a);
 
-                col.addView(Ui.sectionHeader(a, null, "발송 주기"));
+                col.addView(Ui.sectionHeader(a, null, "쿨타임 (기본값)"));
                 LinearLayout g = Ui.group(a);
-                g.addView(Ui.navRow(a, "발송 간격",
-                        s.macro.intervalMinMin + "~" + s.macro.intervalMaxMin + "분", Theme.TEXT,
+                g.addView(Ui.navRow(a, "쿨타임",
+                        s.macro.cooldownMinMin + "~" + s.macro.cooldownMaxMin + "분", Theme.TEXT,
                         new Runnable() {
-                            @Override public void run() { editInterval(a, s); }
+                            @Override public void run() { editCooldown(a, s); }
                         }));
                 g.addView(Ui.navRow(a, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT,
                         new Runnable() {
@@ -159,25 +161,28 @@ public final class MacroDetail {
                         }));
                 col.addView(g);
 
-                col.addView(Nav.note(a, "지정한 간격 내 임의 시각에 발송됩니다.", Theme.ACCENT2, null, null));
+                col.addView(Nav.note(a, "발송 후 다음 발송까지 대기하는 시간입니다."
+                        + " 최소~최대 사이의 임의 시각에 발송됩니다.\n"
+                        + "이 값은 전역 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 적용됩니다.",
+                        Theme.ACCENT2, null, null));
             }
         });
     }
 
-    private static void editInterval(final MainActivity a, final Settings s) {
-        final Nav.NumField lo = new Nav.NumField("최소 간격 (분)", "20", 1, 1440, s.macro.intervalMinMin);
-        final Nav.NumField hi = new Nav.NumField("최대 간격 (분)", "40", 1, 1440, s.macro.intervalMaxMin);
-        Nav.editNums(a, "발송 간격", "두 값 사이의 임의 시각에 발송됩니다.",
+    private static void editCooldown(final MainActivity a, final Settings s) {
+        final Nav.NumField lo = new Nav.NumField("최소 쿨타임 (분)", "20", 1, 1440, s.macro.cooldownMinMin);
+        final Nav.NumField hi = new Nav.NumField("최대 쿨타임 (분)", "40", 1, 1440, s.macro.cooldownMaxMin);
+        Nav.editNums(a, "쿨타임 (기본값)", "최소~최대 사이의 임의 시각에 발송됩니다.",
                 new Nav.NumField[] { lo, hi }, new Nav.OnNums() {
                     @Override public String ok() {
                         if (lo.value > hi.value) {
-                            Nav.errText(hi.err, "최대 간격은 최소 간격 이상으로 입력하십시오");
+                            Nav.errText(hi.err, "최대 쿨타임은 최소 쿨타임 이상으로 입력하십시오");
                             return "";
                         }
-                        s.macro.intervalMinMin = lo.value;
-                        s.macro.intervalMaxMin = hi.value;
+                        s.macro.cooldownMinMin = lo.value;
+                        s.macro.cooldownMaxMin = hi.value;
                         save(a, s);
-                        Log.add(a, "발송 간격을 " + lo.value + "~" + hi.value + "분으로 변경했습니다.");
+                        Log.add(a, "기본 쿨타임을 " + lo.value + "~" + hi.value + "분으로 변경했습니다.");
                         return null;
                     }
                 });
@@ -1126,11 +1131,6 @@ public final class MacroDetail {
                 g2.addView(Ui.navRow(a, "재응답 간격", Nav.dur(r.cooldownMs), Theme.TEXT, new Runnable() {
                     @Override public void run() { editReplyCooldown(a, s, r); }
                 }));
-                g2.addView(Ui.navRow(a, "1일 최대 응답",
-                        r.dailyLimit + "회 · 금일 " + AutoReply.today(a) + "회", Theme.TEXT,
-                        new Runnable() {
-                            @Override public void run() { editReplyLimit(a, s, r); }
-                        }));
                 g2.addView(Ui.navRow(a, "랜덤 지연",
                         (r.delayMaxMs <= 0) ? "없음" : ("0~" + (r.delayMaxMs / 1000) + "초"),
                         (r.delayMaxMs <= 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
@@ -1145,8 +1145,292 @@ public final class MacroDetail {
                             }
                         }));
                 col.addView(g2);
+
+                // ── 키워드 규칙 ──
+                // '모든 1:1 응답'(위 사용 토글)과 별개로, 특정 문자열이 감지되면 지정한 답장을 보낸다.
+                // 규칙에 매치되면 일반 응답보다 먼저 발송된다.
+                col.addView(Ui.sectionHeader(a, null, "키워드 규칙"));
+                col.addView(Ui.sub(a, "특정 문자열이 감지되면 지정한 답장을 발송합니다."
+                        + " 규칙에 매치되면 일반 응답보다 먼저 적용됩니다."));
+                col.addView(Nav.gap(a, 12));
+
+                if (r.rules.isEmpty()) {
+                    LinearLayout empty = Ui.card(a);
+                    empty.addView(Ui.sub(a, "등록된 규칙이 없습니다. 아래 [규칙 추가] 를 선택하십시오."));
+                    col.addView(empty);
+                }
+                for (int i = 0; i < r.rules.size(); i++) {
+                    col.addView(keywordCard(a, s, r, r.rules.get(i)));
+                }
+
+                col.addView(Nav.wideBtn(a, "규칙 추가", false, new Runnable() {
+                    @Override public void run() {
+                        if (r.rules.size() >= Settings.MAX_KEYWORD_RULES) {
+                            Ui.toast(a, "규칙은 최대 " + Settings.MAX_KEYWORD_RULES + "개까지 등록됩니다.");
+                            return;
+                        }
+                        newKeyword(a, s, r);
+                    }
+                }));
             }
         });
+    }
+
+    // ── 키워드 규칙 (오픈프로필 갠톡) ────────────────────────────────────────
+    //  메시지 추적(triggerDetail)과 같은 형태의 목록·편집 UI를 쓴다.
+
+    /** 규칙 한 건 = 사용 여부·삭제 행 + 세부 설정 행 */
+    private static LinearLayout keywordCard(final MainActivity a, final Settings s,
+                                            final Settings.AutoReplyCfg r,
+                                            final Settings.KeywordRule k) {
+        LinearLayout g = Ui.group(a);
+        String[] badges = { modeKr(k.mode) };
+        g.addView(Ui.checkRow(a, k.title(), kwMeta(k), badges, k.enabled,
+                new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        k.enabled = v;
+                        ScreenMacro.apply(a, s);
+                        ScreenMacro.refresh();
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 을(를) "
+                                + (v ? "사용으로" : "미사용으로") + " 변경했습니다.");
+                    }
+                },
+                new Runnable() {
+                    @Override public void run() { removeKeyword(a, s, r, k); }
+                }));
+        g.addView(Ui.navRow(a, "세부 설정", k.enabled ? "사용" : "미사용",
+                k.enabled ? Theme.TEXT : Theme.DIM, new Runnable() {
+                    @Override public void run() {
+                        Nav.push(a, "키워드 규칙", keywordDetail(a, k.id));
+                    }
+                }));
+        return g;
+    }
+
+    private static String kwMeta(Settings.KeywordRule k) {
+        return "「" + Nav.preview(k.pattern, 14) + "」 → " + Nav.preview(k.reply, 14);
+    }
+
+    /** 규칙 삭제 — 확인창 없이 지우고 5초간 되돌리기를 띄운다 (메시지 추적과 같은 규칙) */
+    private static void removeKeyword(final MainActivity a, final Settings s,
+                                      final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
+        int idx = r.rules.indexOf(k);
+        final int at = (idx < 0) ? r.rules.size() : idx;
+        final String name = k.title();
+        r.removeRule(k.id);
+        save(a, s);
+        Log.add(a, "키워드 규칙 「" + name + "」 을(를) 삭제했습니다.");
+        Nav.snack("규칙 「" + name + "」 삭제", "되돌리기", new Runnable() {
+            @Override public void run() {
+                Settings now = Settings.load(a);
+                Settings.AutoReplyCfg nr = now.autoreply;
+                if (nr.ruleById(k.id) != null) return;
+                if (nr.rules.size() >= Settings.MAX_KEYWORD_RULES) {
+                    Ui.toast(a, "규칙은 최대 " + Settings.MAX_KEYWORD_RULES + "개까지 등록됩니다.");
+                    return;
+                }
+                int pos = (at > nr.rules.size()) ? nr.rules.size() : at;
+                nr.rules.add(pos, k);
+                save(a, now);
+                Log.add(a, "키워드 규칙 「" + name + "」 삭제를 취소했습니다.");
+            }
+        });
+    }
+
+    /** 새 규칙 — 필수값(감지 문자열·답장)만 받고 만든 뒤, 나머지는 세부 설정에서 고친다 */
+    private static void newKeyword(final MainActivity a, final Settings s,
+                                   final Settings.AutoReplyCfg r) {
+        LinearLayout body = Nav.col(a);
+        body.addView(fieldLabel(a, "감지 문자열", 0));
+        final android.widget.EditText pat = line(a, "예) 문의", "");
+        body.addView(pat);
+        final TextView patErr = Nav.errLine(a);
+        body.addView(patErr);
+
+        body.addView(fieldLabel(a, "답장", 14));
+        final android.widget.EditText reply = multi(a, "{이름} {시간} {날짜} 사용 가능", "");
+        body.addView(reply);
+        final TextView replyErr = Nav.errLine(a);
+        body.addView(replyErr);
+
+        Nav.form(a, "규칙 추가", body, "저장", new Nav.OnSave() {
+            @Override public String save() {
+                Nav.errClear(patErr);
+                Nav.errClear(replyErr);
+                String p = pat.getText().toString();
+                if (p.trim().length() == 0) {
+                    Nav.errText(patErr, "감지 문자열을 입력하십시오");
+                    return "";
+                }
+                String rp = reply.getText().toString();
+                if (rp.trim().length() == 0) {
+                    Nav.errText(replyErr, "답장을 입력하십시오");
+                    return "";
+                }
+                Settings.KeywordRule k = new Settings.KeywordRule();
+                k.pattern = p;
+                k.reply = rp;
+                String why = r.addRule(k);
+                if (why != null) return why;
+                MacroDetail.save(a, s);
+                Log.add(a, "키워드 규칙 「" + k.title() + "」 을(를) 추가했습니다.");
+                return null;
+            }
+        });
+    }
+
+    /** 규칙 하나의 전용 서브화면. 값은 고치는 즉시 저장된다. */
+    private static View keywordDetail(MainActivity a, final String id) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final Settings s = Settings.load(a);
+                final Settings.AutoReplyCfg r = s.autoreply;
+                final Settings.KeywordRule k = r.ruleById(id);
+                if (k == null) {
+                    col.addView(Ui.sectionHeader(a, null, "규칙 없음"));
+                    col.addView(Ui.sub(a, "삭제된 규칙입니다. 뒤로 이동하십시오."));
+                    return;
+                }
+
+                // ── 감지 조건 ──
+                col.addView(Ui.sectionHeader(a, null, "감지 조건"));
+                LinearLayout g1 = Ui.group(a);
+                g1.addView(Ui.navRow(a, "감지 문자열", Nav.preview(k.pattern, 18), Theme.TEXT,
+                        new Runnable() {
+                            @Override public void run() { editKwPattern(a, s, r, k); }
+                        }));
+                g1.addView(Ui.navRow(a, "비교 방식", modeKr(k.mode), Theme.TEXT, new Runnable() {
+                    @Override public void run() { pickKwMode(a, s, r, k); }
+                }));
+                g1.addView(Ui.navRowSwitch(a, "대소문자 무시", null, k.ignoreCase, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        k.ignoreCase = v;
+                        ScreenMacro.apply(a, s);
+                    }
+                }));
+                col.addView(g1);
+
+                // ── 발송 ──
+                col.addView(Ui.sectionHeader(a, null, "발송"));
+                LinearLayout g2 = Ui.group(a);
+                g2.addView(Ui.navRow(a, "답장", Nav.preview(k.reply, 18), Theme.TEXT,
+                        new Runnable() {
+                            @Override public void run() { editKwReply(a, s, r, k); }
+                        }));
+                g2.addView(Ui.navRow(a, "쿨다운", Nav.dur(k.cooldownMs), Theme.TEXT, new Runnable() {
+                    @Override public void run() { editKwCooldown(a, s, r, k); }
+                }));
+                col.addView(g2);
+
+                // ── 동작 ──
+                col.addView(Ui.sectionHeader(a, null, "동작"));
+                LinearLayout g3 = Ui.group(a);
+                g3.addView(Ui.navRowSwitch(a, "사용", null, k.enabled, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        k.enabled = v;
+                        ScreenMacro.apply(a, s);
+                        ScreenMacro.refresh();
+                    }
+                }));
+                col.addView(g3);
+
+                col.addView(Nav.note(a, "쿨다운은 같은 상대에게 이 규칙을 다시 적용하기까지의 최소 간격입니다."
+                        + " 답장에는 {이름} {시간} {날짜} 이 치환됩니다.", Theme.ACCENT2, null, null));
+
+                TextView del = Ui.btn(a, "규칙 삭제", false);
+                del.setTextColor(Theme.RED);
+                LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(MATCH, WRAP);
+                dp.topMargin = Theme.dp(a, 10);
+                del.setLayoutParams(dp);
+                del.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        Nav.confirm(a, "규칙 삭제", "「" + k.title() + "」 을(를) 삭제합니다.",
+                                "삭제", new Runnable() {
+                                    @Override public void run() {
+                                        Nav.pop();
+                                        removeKeyword(a, s, r, k);
+                                    }
+                                });
+                    }
+                });
+                col.addView(del);
+            }
+        });
+    }
+
+    private static void editKwPattern(final MainActivity a, final Settings s,
+                                      final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
+        Nav.editText(a, "감지 문자열", "예) 문의", k.pattern, false,
+                "이 문자열이 감지되면 답장을 발송합니다.", new Nav.OnText() {
+                    @Override public String text(String value) {
+                        String old = k.pattern;
+                        k.pattern = (value == null) ? "" : value;
+                        String bad = k.validate();
+                        if (bad != null) { k.pattern = old; return bad; }
+                        save(a, s);
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 감지 문자열을 변경했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void editKwReply(final MainActivity a, final Settings s,
+                                    final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
+        Nav.editText(a, "답장", "발송할 내용을 입력하십시오", k.reply, true,
+                "{이름} {시간} {날짜} 이 치환됩니다. 최대 2000자.", new Nav.OnText() {
+                    @Override public String text(String value) {
+                        String old = k.reply;
+                        k.reply = (value == null) ? "" : value;
+                        String bad = k.validate();
+                        if (bad != null) { k.reply = old; return bad; }
+                        save(a, s);
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 답장을 변경했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void pickKwMode(final MainActivity a, final Settings s,
+                                   final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
+        int sel = 0;
+        for (int i = 0; i < Settings.MODES.length; i++) {
+            if (Settings.MODES[i].equals(k.mode)) sel = i;
+        }
+        Nav.choose(a, "비교 방식", new String[] { "포함", "정확히", "시작", "정규식" },
+                new String[] { "메시지에 포함되면 감지합니다",
+                        "메시지 전체가 일치할 때만 감지합니다",
+                        "메시지가 이 문자열로 시작할 때 감지합니다",
+                        "정규식으로 감지합니다. 형식 오류는 저장 시 안내됩니다" },
+                sel, new Nav.OnPick() {
+                    @Override public void pick(int index) {
+                        if (index < 0 || index >= Settings.MODES.length) return;
+                        String old = k.mode;
+                        k.mode = Settings.MODES[index];
+                        String bad = k.validate();
+                        if (bad != null) {
+                            k.mode = old;
+                            Ui.toast(a, bad);
+                            return;
+                        }
+                        save(a, s);
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 비교 방식을 "
+                                + modeKr(k.mode) + " 로 변경했습니다.");
+                    }
+                });
+    }
+
+    private static void editKwCooldown(final MainActivity a, final Settings s,
+                                       final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
+        final Nav.NumField n = new Nav.NumField("쿨다운 (분)", "360", 0, 10080,
+                (int) (k.cooldownMs / 60000L));
+        Nav.editNums(a, "쿨다운", "같은 상대에게 이 시간 내에는 이 규칙을 다시 적용하지 않습니다.",
+                new Nav.NumField[] { n }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        k.cooldownMs = n.value * 60000L;
+                        save(a, s);
+                        return null;
+                    }
+                });
     }
 
     private static void editReplyMsg(final MainActivity a, final Settings s,
@@ -1217,19 +1501,6 @@ public final class MacroDetail {
                 });
     }
 
-    private static void editReplyLimit(final MainActivity a, final Settings s,
-                                       final Settings.AutoReplyCfg r) {
-        final Nav.NumField n = new Nav.NumField("1일 최대 응답 수", "100", 1, 2000, r.dailyLimit);
-        Nav.editNums(a, "1일 최대 응답", "자정에 초기화됩니다.",
-                new Nav.NumField[] { n }, new Nav.OnNums() {
-                    @Override public String ok() {
-                        r.dailyLimit = n.value;
-                        save(a, s);
-                        return null;
-                    }
-                });
-    }
-
     private static void editReplyDelay(final MainActivity a, final Settings s,
                                        final Settings.AutoReplyCfg r) {
         final Nav.NumField n = new Nav.NumField("최대 지연 (초)", "30", 0, 120, r.delayMaxMs / 1000);
@@ -1274,14 +1545,9 @@ public final class MacroDetail {
                         new Runnable() {
                             @Override public void run() { editQuiet(a, s); }
                         }));
-                g.addView(Ui.navRow(a, "1일 최대 발송",
-                        s.macro.dailyLimit + "회 · 금일 " + MainActivity.sentToday(a) + "회",
-                        Theme.TEXT, new Runnable() {
-                            @Override public void run() { editDailyLimit(a, s); }
-                        }));
                 col.addView(g);
 
-                col.addView(Nav.note(a, "방해금지 시간에는 자동발송이 중지됩니다. 1일 한도는 자정에 초기화됩니다.",
+                col.addView(Nav.note(a, "방해금지 시간에는 자동발송이 중지됩니다.",
                         Theme.ACCENT2, null, null));
             }
         });
@@ -1338,19 +1604,6 @@ public final class MacroDetail {
                 return null;
             }
         });
-    }
-
-    private static void editDailyLimit(final MainActivity a, final Settings s) {
-        final Nav.NumField n = new Nav.NumField("1일 최대 발송 수", "200", 1, 5000, s.macro.dailyLimit);
-        Nav.editNums(a, "1일 최대 발송", "이 수량을 초과하면 당일 발송을 중지합니다.",
-                new Nav.NumField[] { n }, new Nav.OnNums() {
-                    @Override public String ok() {
-                        s.macro.dailyLimit = n.value;
-                        save(a, s);
-                        Log.add(a, "1일 최대 발송을 " + n.value + "회로 설정했습니다.");
-                        return null;
-                    }
-                });
     }
 
     // ── 대화방 다중 선택 서브화면 ───────────────────────────────────────────

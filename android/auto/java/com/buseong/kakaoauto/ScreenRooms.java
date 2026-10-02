@@ -143,7 +143,7 @@ public final class ScreenRooms {
             LinearLayout sh = Ui.sectionHeader(a, null, "선택 " + selected + "개 · 감지 " + detected + "개");
             rememberHeader(SINGLE_KEY, sh);
             col.addView(sh);
-            col.addView(section(a, rows));
+            addRooms(a, col, rows);
         } else {
             for (int i = 0; i < accs.size(); i++) {
                 String acc = accs.get(i);
@@ -151,7 +151,7 @@ public final class ScreenRooms {
                 LinearLayout sh = Ui.sectionHeader(a, null, header(a, acc, mine));
                 rememberHeader(acc, sh);
                 col.addView(sh);
-                col.addView(section(a, mine));
+                addRooms(a, col, mine);
             }
         }
 
@@ -174,39 +174,286 @@ public final class ScreenRooms {
         col.addView(help);
     }
 
-    /** 방 한 계정 분량을 카드 하나로 */
-    private static LinearLayout section(final MainActivity a, List<Row> list) {
-        LinearLayout g = Ui.group(a);
+    /**
+     * 방 목록을 카드로 쌓는다. 방 하나당 카드 하나다 (선택 체크행 + `대화방별 설정 ›` 행).
+     * 행을 통째로 한 카드에 섞지 않는 이유 — 체크행과 설정행을 한 묶음으로 보여 주려면
+     * 방마다 카드가 분리돼야 구분선이 엉키지 않는다 (MacroDetail 의 규칙 카드와 같은 형태).
+     */
+    private static void addRooms(final MainActivity a, LinearLayout col, List<Row> list) {
         if (list.isEmpty()) {
+            LinearLayout g = Ui.group(a);
             TextView t = Ui.sub(a, "감지된 대화방이 없습니다.");
             int ph = Theme.dp(a, 16);
             t.setPadding(ph, Theme.dp(a, 18), ph, Theme.dp(a, 18));
             t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
             g.addView(t);
-            return g;
+            col.addView(g);
+            return;
         }
         for (int i = 0; i < list.size(); i++) {
-            final Row r = list.get(i);
-            String[] badges = r.groupKnown
-                    ? new String[] { r.group ? "단체" : "1:1" }
-                    : null;
-            Runnable del = null;
-            if (r.detected) {
-                del = new Runnable() {
-                    @Override public void run() { delete(a, r.ref); }
-                };
-            }
-            g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "미감지",
-                    badges, r.selected, new Ui.OnToggle() {
-                        @Override public void on(boolean v) {
-                            select(a, r.ref, v);
-                            // 전체 refresh 는 selected-first 정렬로 행이 튀므로 헤더 수치만 갱신한다.
-                            updateHeaders(a);
-                            Nav.reload();
-                        }
-                    }, del));
+            col.addView(roomCard(a, list.get(i)));
         }
+    }
+
+    /** 방 한 칸 = 선택 체크행(삭제 포함) + 「대화방별 설정 ›」 행 */
+    private static LinearLayout roomCard(final MainActivity a, final Row r) {
+        LinearLayout g = Ui.group(a);
+        String[] badges = r.groupKnown
+                ? new String[] { r.group ? "단체" : "1:1" }
+                : null;
+        Runnable del = null;
+        if (r.detected) {
+            del = new Runnable() {
+                @Override public void run() { delete(a, r.ref); }
+            };
+        }
+        g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "미감지",
+                badges, r.selected, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        select(a, r.ref, v);
+                        // 전체 refresh 는 selected-first 정렬로 행이 튀므로 헤더 수치만 갱신한다.
+                        updateHeaders(a);
+                        Nav.reload();
+                    }
+                }, del));
+
+        // 방별 덮어쓰기 요약 — 맵을 직접 읽어 빈 cfg 가 생성되지 않게 한다 (저장 시 어차피 생략되지만 메모리도 깨끗이).
+        Settings.RoomCfg rc = storedCfg(Settings.load(a), r.ref);
+        String val;
+        int color;
+        if (rc != null && !rc.enabled) {
+            val = "매크로 꺼짐";
+            color = Theme.DIM;
+        } else if (hasOverride(rc)) {
+            val = "개별 설정";
+            color = Theme.TEXT;
+        } else {
+            val = "기본값";
+            color = Theme.DIM;
+        }
+        g.addView(Ui.navRow(a, "대화방별 설정", val, color, new Runnable() {
+            @Override public void run() {
+                Nav.push(a, "대화방 설정", roomEditor(a, r.ref));
+            }
+        }));
         return g;
+    }
+
+    /** 저장된 방 cfg 를 생성 없이 읽는다 (없으면 null = 상위 기본값 따름) */
+    private static Settings.RoomCfg storedCfg(Settings s, RoomRef ref) {
+        if (s == null || ref == null || s.macro.roomCfgs == null) return null;
+        return s.macro.roomCfgs.get(ref.key());
+    }
+
+    /** 이 방에 덮어쓰기(또는 끄기)가 하나라도 걸려 있나 */
+    private static boolean hasOverride(Settings.RoomCfg rc) {
+        return rc != null && (!rc.enabled || rc.hasMsg || rc.hasCd || rc.hasMin);
+    }
+
+    // ── 방별 덮어쓰기 편집 (서브화면) ─────────────────────────────────────────
+    //  대화방별 설정 › 에서 Nav.push 로 열린다. 값은 고치는 즉시 저장된다.
+
+    private static WeakReference<LinearLayout> EDIT_BODY;
+    private static RoomRef EDIT_REF;
+
+    /** 방 하나의 덮어쓰기 편집 화면을 만든다 */
+    private static View roomEditor(final MainActivity a, final RoomRef ref) {
+        LinearLayout col = Ui.screen(a);
+        EDIT_BODY = new WeakReference<LinearLayout>(col);
+        EDIT_REF = ref;
+        try {
+            fillEditor(a, col, ref);
+        } catch (Throwable t) {
+            Log.add(a, "대화방 설정 화면 구성에 실패했습니다: " + t);
+        }
+        return Ui.scroll(a, col);
+    }
+
+    /** 열려 있는 편집 화면을 제자리에서 다시 그린다 */
+    private static void refreshEditor() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (EDIT_BODY == null) ? null : EDIT_BODY.get();
+        RoomRef ref = EDIT_REF;
+        if (a == null || col == null || ref == null || a.isFinishing()
+                || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillEditor(a, col, ref);
+        } catch (Throwable t) {
+            Log.add(a, "대화방 설정 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillEditor(final MainActivity a, LinearLayout col, final RoomRef ref) {
+        final Settings s = Settings.load(a);
+        final Settings.RoomCfg rc = s.roomCfg(ref);   // 편집용 get-or-create
+
+        if (!Settings.canSave(a)) {
+            col.addView(Nav.note(a, "라이선스 인증 전에는 설정이 저장되지 않습니다. "
+                    + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
+        }
+
+        // ── 이 대화방 매크로 on/off ──
+        col.addView(Ui.sectionHeader(a, null, "대화방 매크로"));
+        LinearLayout g0 = Ui.group(a);
+        g0.addView(Ui.navRowSwitch(a, "이 대화방 발송", "끄면 이 대화방에는 자동발송하지 않습니다.",
+                rc.enabled, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        rc.enabled = v;
+                        persistRoom(a, s, "「" + ref.label(a) + "」 대화방 매크로를 "
+                                + (v ? "사용으로" : "미사용으로") + " 변경했습니다.");
+                    }
+                }));
+        col.addView(g0);
+
+        // ── 현재 유효값 안내 ──
+        String eff = s.effMessage(ref);
+        boolean willSend = (eff != null && eff.trim().length() > 0);
+        int cdMin = s.effCdMinMin(ref);
+        int cdMax = s.effCdMaxMin(ref);
+        int mm = s.effMinMessages(ref);
+        if (!rc.enabled) {
+            col.addView(Nav.note(a, "이 대화방 매크로가 꺼져 있어 자동발송 대상에서 제외됩니다.",
+                    Theme.AMBER, null, null));
+        } else if (!willSend) {
+            col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 대화방에는 발송되지 않습니다. "
+                    + "아래에서 메시지를 덮어쓰거나 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+        } else {
+            col.addView(Nav.note(a, "현재 이 대화방은 " + cdMin + "~" + cdMax
+                    + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
+                    + "발송 메시지: " + Nav.preview(eff, 40), Theme.ACCENT2, null, null));
+        }
+
+        // ── 덮어쓰기 ──
+        col.addView(Ui.sectionHeader(a, null, "덮어쓰기"));
+        LinearLayout g = Ui.group(a);
+
+        g.addView(Ui.navRowSwitch(a, "메시지 덮어쓰기", rc.hasMsg ? null : "끄면 상위 기본값을 따릅니다.",
+                rc.hasMsg, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        rc.hasMsg = v;
+                        persistRoom(a, s, null);
+                    }
+                }));
+        if (rc.hasMsg) {
+            boolean empty = (rc.message == null || rc.message.trim().length() == 0);
+            g.addView(Ui.navRow(a, "메시지 편집", empty ? "설정 필요" : Nav.preview(rc.message, 18),
+                    empty ? Theme.AMBER : Theme.TEXT, new Runnable() {
+                        @Override public void run() { editRoomMessage(a, s, ref, rc); }
+                    }));
+        }
+
+        g.addView(Ui.navRowSwitch(a, "쿨타임 덮어쓰기", rc.hasCd ? null : "끄면 상위 기본값을 따릅니다.",
+                rc.hasCd, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        rc.hasCd = v;
+                        persistRoom(a, s, null);
+                    }
+                }));
+        if (rc.hasCd) {
+            g.addView(Ui.navRow(a, "쿨타임", rc.cdMinMin + "~" + rc.cdMaxMin + "분", Theme.TEXT,
+                    new Runnable() {
+                        @Override public void run() { editRoomCd(a, s, ref, rc); }
+                    }));
+        }
+
+        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 덮어쓰기",
+                rc.hasMin ? null : "끄면 상위 기본값을 따릅니다.", rc.hasMin, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        rc.hasMin = v;
+                        persistRoom(a, s, null);
+                    }
+                }));
+        if (rc.hasMin) {
+            g.addView(Ui.navRow(a, "최소 신규 메시지", rc.minMessages + "개", Theme.TEXT, new Runnable() {
+                @Override public void run() { editRoomMin(a, s, ref, rc); }
+            }));
+        }
+        col.addView(g);
+
+        col.addView(Nav.note(a, "덮어쓰기를 끄면 계정 기본값 또는 전역 기본값을 따릅니다. "
+                + "우선순위는 대화방 › 계정 › 전역 순입니다.", Theme.ACCENT2, null, null));
+    }
+
+    /** 방 설정을 저장하고 편집 화면·목록·매크로 탭 요약을 갱신한다 */
+    private static void persistRoom(final MainActivity a, Settings s, String log) {
+        if (!s.save(a)) {
+            Nav.snack("저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.", null, null);
+            return;
+        }
+        if (log != null && log.length() > 0) Log.add(a, log);
+        refreshEditor();
+        refresh();
+        Nav.reload();
+    }
+
+    private static void editRoomMessage(final MainActivity a, final Settings s, final RoomRef ref,
+                                        final Settings.RoomCfg rc) {
+        Nav.editText(a, "대화방 메시지", "발송할 내용을 입력하십시오", rc.message, true,
+                "이 대화방에만 적용되는 메시지입니다. 최대 2000자.", new Nav.OnText() {
+                    @Override public String text(String value) {
+                        if (value == null || value.trim().length() == 0) {
+                            return "발송 메시지를 입력하십시오.";
+                        }
+                        if (value.length() > 2000) return "2000자 이하로 입력하십시오.";
+                        rc.message = value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + ref.label(a) + "」 대화방 메시지를 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
+                    }
+                });
+    }
+
+    private static void editRoomCd(final MainActivity a, final Settings s, final RoomRef ref,
+                                   final Settings.RoomCfg rc) {
+        final Nav.NumField lo = new Nav.NumField("최소 쿨타임 (분)", "20", 1, 1440, rc.cdMinMin);
+        final Nav.NumField hi = new Nav.NumField("최대 쿨타임 (분)", "40", 1, 1440, rc.cdMaxMin);
+        Nav.editNums(a, "쿨타임", "최소~최대 사이의 임의 시각에 발송됩니다.",
+                new Nav.NumField[] { lo, hi }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        if (lo.value > hi.value) {
+                            Nav.errText(hi.err, "최대 쿨타임은 최소 쿨타임 이상으로 입력하십시오");
+                            return "";
+                        }
+                        rc.cdMinMin = lo.value;
+                        rc.cdMaxMin = hi.value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + ref.label(a) + "」 대화방 쿨타임을 "
+                                + lo.value + "~" + hi.value + "분으로 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
+                    }
+                });
+    }
+
+    private static void editRoomMin(final MainActivity a, final Settings s, final RoomRef ref,
+                                    final Settings.RoomCfg rc) {
+        final Nav.NumField mm = new Nav.NumField("최소 신규 메시지 수", "1", 0, 999, rc.minMessages);
+        Nav.editNums(a, "최소 신규 메시지",
+                "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 경우에만 발송합니다. 0은 항상 발송입니다.",
+                new Nav.NumField[] { mm }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        rc.minMessages = mm.value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + ref.label(a) + "」 대화방 최소 신규 메시지를 "
+                                + mm.value + "개로 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
+                    }
+                });
     }
 
     /** `본계정 · 선택 2개` */
@@ -350,6 +597,9 @@ public final class ScreenRooms {
             for (int i = cur.size() - 1; i >= 0; i--) {
                 if (ref.equals(cur.get(i))) cur.remove(i);
             }
+            // 선택 해제한 방의 덮어쓰기·타이머(RoomCfg)도 정리한다. 안 지우면 Settings 가 계속 커지고,
+            // 나중에 다시 선택했을 때 과거 nextAt·옛 설정이 되살아난다. 재선택 시 기본값으로 시작한다.
+            if (s.macro.roomCfgs != null) s.macro.roomCfgs.remove(ref.key());
         }
         s.macro.setRoomRefs(cur);
         if (!s.save(c)) {

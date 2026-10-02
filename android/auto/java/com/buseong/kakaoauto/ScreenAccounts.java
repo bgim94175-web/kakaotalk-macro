@@ -153,6 +153,43 @@ public final class ScreenAccounts {
         g.addView(infoRow(a, "감지된 대화방", KakaoListener.roomCount(a, ac.key) + "개"));
         g.addView(infoRow(a, "마지막 감지", ScreenRooms.ago(ac.lastAt)));
         col.addView(g);
+
+        // 계정이 1개뿐이어도 매크로 기본값은 편집할 수 있다 (이 계정의 기본값이 곧 전체 기본).
+        col.addView(Ui.sectionHeader(a, null, "매크로"));
+        LinearLayout gm = Ui.group(a);
+        gm.addView(macroRow(a, ac.key));
+        col.addView(gm);
+        col.addView(Nav.note(a, "메시지·쿨타임·최소 신규 메시지를 이 계정 기준으로 덮어쓸 수 있습니다. "
+                + "설정하지 않으면 전역 기본값을 따릅니다.", Theme.ACCENT2, null, null));
+    }
+
+    /** 계정 카드·정보 화면에 공통으로 붙는 「매크로 기본값 ›」 행 */
+    private static LinearLayout macroRow(final MainActivity a, final String accKey) {
+        Settings s = Settings.load(a);
+        Settings.AccountCfg stored = (s.macro.accountCfgs == null)
+                ? null : s.macro.accountCfgs.get(accKey);
+        String val;
+        int color;
+        if (stored != null && !stored.on) {
+            val = "매크로 꺼짐";
+            color = Theme.DIM;
+        } else if (accHasOverride(stored)) {
+            val = "개별 설정";
+            color = Theme.TEXT;
+        } else {
+            val = "설정 안 함";
+            color = Theme.DIM;
+        }
+        return Ui.navRow(a, "매크로 기본값", val, color, new Runnable() {
+            @Override public void run() {
+                Nav.push(a, "계정 매크로 기본값", accountEditor(a, accKey));
+            }
+        });
+    }
+
+    /** 이 계정에 덮어쓰기(또는 끄기)가 하나라도 걸려 있나 */
+    private static boolean accHasOverride(Settings.AccountCfg ac) {
+        return ac != null && (!ac.on || ac.hasMsg || ac.hasCd || ac.hasMin);
     }
 
     /** 계정 1개 = 카드 1장. 체크·삭제·이름 수정이 각각 다른 행이라 헷갈릴 일이 없다. */
@@ -174,6 +211,7 @@ public final class ScreenAccounts {
         g.addView(Ui.navRow(a, "표시 이름", ac.name, 0, new Runnable() {
             @Override public void run() { rename(a, ac); }
         }));
+        g.addView(macroRow(a, ac.key));
         return g;
     }
 
@@ -260,6 +298,16 @@ public final class ScreenAccounts {
                             s.save(a);
                         }
                         try {
+                            // 이 계정의 매크로 기본값(AccountCfg)과 소속 방 덮어쓰기(RoomCfg)도 정리한다.
+                            Settings gs = Settings.load(a);
+                            if (gs.macro.accountCfgs != null) gs.macro.accountCfgs.remove(ac.key);
+                            if (gs.macro.roomCfgs != null) {
+                                java.util.Iterator<String> it = gs.macro.roomCfgs.keySet().iterator();
+                                while (it.hasNext()) {
+                                    if (RoomRef.parse(it.next()).acc.equals(ac.key)) it.remove();
+                                }
+                            }
+                            gs.save(a);
                             Accounts.forget(a, ac.key);
                         } catch (Throwable t) {
                             Log.add(a, "계정 기록 삭제 실패: " + t);
@@ -269,6 +317,212 @@ public final class ScreenAccounts {
                         refresh();
                         Nav.reload();
                         snack("계정 기록을 삭제했습니다.", null, null);
+                    }
+                });
+    }
+
+    // ── 계정 매크로 기본값 편집 (서브화면) ───────────────────────────────────
+    //  매크로 기본값 › 에서 Nav.push 로 열린다. 값은 고치는 즉시 저장된다.
+    //  계정값은 방별 덮어쓰기와 전역 기본값 사이에 있다 (우선순위: 대화방 › 계정 › 전역).
+
+    private static WeakReference<LinearLayout> EDIT_BODY;
+    private static String EDIT_KEY;
+
+    private static View accountEditor(final MainActivity a, final String accKey) {
+        LinearLayout col = Ui.screen(a);
+        EDIT_BODY = new WeakReference<LinearLayout>(col);
+        EDIT_KEY = accKey;
+        try {
+            fillEditor(a, col, accKey);
+        } catch (Throwable t) {
+            Log.add(a, "계정 매크로 화면 구성에 실패했습니다: " + t);
+        }
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshEditor() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (EDIT_BODY == null) ? null : EDIT_BODY.get();
+        String key = EDIT_KEY;
+        if (a == null || col == null || key == null || a.isFinishing()
+                || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillEditor(a, col, key);
+        } catch (Throwable t) {
+            Log.add(a, "계정 매크로 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillEditor(final MainActivity a, LinearLayout col, final String accKey) {
+        final Settings s = Settings.load(a);
+        final Settings.AccountCfg ac = s.accCfg(accKey);   // 편집용 get-or-create
+        final String accName = Accounts.nameOf(a, accKey);
+
+        if (!Settings.canSave(a)) {
+            col.addView(Nav.note(a, "라이선스 인증 전에는 설정이 저장되지 않습니다. "
+                    + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
+        }
+
+        // ── 이 계정 매크로 on/off ──
+        col.addView(Ui.sectionHeader(a, null, "계정 매크로"));
+        LinearLayout g0 = Ui.group(a);
+        g0.addView(Ui.navRowSwitch(a, "이 계정 발송", "끄면 이 계정의 모든 대화방에 자동발송하지 않습니다.",
+                ac.on, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        ac.on = v;
+                        persistAcc(a, s, "「" + accName + "」 계정 매크로를 "
+                                + (v ? "사용으로" : "미사용으로") + " 변경했습니다.");
+                    }
+                }));
+        col.addView(g0);
+
+        // ── 이 계정의 유효 기본값 안내 (전역값 대비) ──
+        String msg = ac.hasMsg ? ac.message : s.macro.message;
+        boolean willSend = (msg != null && msg.trim().length() > 0);
+        int cdMin = ac.hasCd ? ac.cdMinMin : s.macro.cooldownMinMin;
+        int cdMax = ac.hasCd ? ac.cdMaxMin : s.macro.cooldownMaxMin;
+        int mm = ac.hasMin ? ac.minMessages : s.macro.minMessages;
+        if (!ac.on) {
+            col.addView(Nav.note(a, "이 계정 매크로가 꺼져 있어 자동발송 대상에서 제외됩니다.",
+                    Theme.AMBER, null, null));
+        } else if (!willSend) {
+            col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 계정에는 발송되지 않습니다. "
+                    + "아래에서 메시지를 덮어쓰거나 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+        } else {
+            col.addView(Nav.note(a, "이 계정의 대화방은 기본적으로 " + cdMin + "~" + cdMax
+                    + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
+                    + "발송 메시지: " + Nav.preview(msg, 40), Theme.ACCENT2, null, null));
+        }
+
+        // ── 덮어쓰기 ──
+        col.addView(Ui.sectionHeader(a, null, "기본값 덮어쓰기"));
+        LinearLayout g = Ui.group(a);
+
+        g.addView(Ui.navRowSwitch(a, "메시지 덮어쓰기", ac.hasMsg ? null : "끄면 전역 기본값을 따릅니다.",
+                ac.hasMsg, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        ac.hasMsg = v;
+                        persistAcc(a, s, null);
+                    }
+                }));
+        if (ac.hasMsg) {
+            boolean empty = (ac.message == null || ac.message.trim().length() == 0);
+            g.addView(Ui.navRow(a, "메시지 편집", empty ? "설정 필요" : Nav.preview(ac.message, 18),
+                    empty ? Theme.AMBER : Theme.TEXT, new Runnable() {
+                        @Override public void run() { editAccMessage(a, s, accName, ac); }
+                    }));
+        }
+
+        g.addView(Ui.navRowSwitch(a, "쿨타임 덮어쓰기", ac.hasCd ? null : "끄면 전역 기본값을 따릅니다.",
+                ac.hasCd, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        ac.hasCd = v;
+                        persistAcc(a, s, null);
+                    }
+                }));
+        if (ac.hasCd) {
+            g.addView(Ui.navRow(a, "쿨타임", ac.cdMinMin + "~" + ac.cdMaxMin + "분", Theme.TEXT,
+                    new Runnable() {
+                        @Override public void run() { editAccCd(a, s, accName, ac); }
+                    }));
+        }
+
+        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 덮어쓰기",
+                ac.hasMin ? null : "끄면 전역 기본값을 따릅니다.", ac.hasMin, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        ac.hasMin = v;
+                        persistAcc(a, s, null);
+                    }
+                }));
+        if (ac.hasMin) {
+            g.addView(Ui.navRow(a, "최소 신규 메시지", ac.minMessages + "개", Theme.TEXT, new Runnable() {
+                @Override public void run() { editAccMin(a, s, accName, ac); }
+            }));
+        }
+        col.addView(g);
+
+        col.addView(Nav.note(a, "덮어쓰기를 끄면 전역 기본값을 따릅니다. "
+                + "대화방별 설정이 있으면 그 값이 계정 기본값보다 우선합니다.", Theme.ACCENT2, null, null));
+    }
+
+    /** 계정 설정을 저장하고 편집 화면·계정 목록·매크로 탭 요약을 갱신한다 */
+    private static void persistAcc(final MainActivity a, Settings s, String log) {
+        if (!s.save(a)) {
+            snack("저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.", null, null);
+            return;
+        }
+        if (log != null && log.length() > 0) Log.add(a, log);
+        refreshEditor();
+        refresh();
+        Nav.reload();
+    }
+
+    private static void editAccMessage(final MainActivity a, final Settings s, final String accName,
+                                       final Settings.AccountCfg ac) {
+        Nav.editText(a, "계정 메시지", "발송할 내용을 입력하십시오", ac.message, true,
+                "이 계정 기준으로 적용되는 메시지입니다. 최대 2000자.", new Nav.OnText() {
+                    @Override public String text(String value) {
+                        if (value == null || value.trim().length() == 0) {
+                            return "발송 메시지를 입력하십시오.";
+                        }
+                        if (value.length() > 2000) return "2000자 이하로 입력하십시오.";
+                        ac.message = value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + accName + "」 계정 메시지를 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
+                    }
+                });
+    }
+
+    private static void editAccCd(final MainActivity a, final Settings s, final String accName,
+                                  final Settings.AccountCfg ac) {
+        final Nav.NumField lo = new Nav.NumField("최소 쿨타임 (분)", "20", 1, 1440, ac.cdMinMin);
+        final Nav.NumField hi = new Nav.NumField("최대 쿨타임 (분)", "40", 1, 1440, ac.cdMaxMin);
+        Nav.editNums(a, "쿨타임", "최소~최대 사이의 임의 시각에 발송됩니다.",
+                new Nav.NumField[] { lo, hi }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        if (lo.value > hi.value) {
+                            Nav.errText(hi.err, "최대 쿨타임은 최소 쿨타임 이상으로 입력하십시오");
+                            return "";
+                        }
+                        ac.cdMinMin = lo.value;
+                        ac.cdMaxMin = hi.value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + accName + "」 계정 쿨타임을 "
+                                + lo.value + "~" + hi.value + "분으로 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
+                    }
+                });
+    }
+
+    private static void editAccMin(final MainActivity a, final Settings s, final String accName,
+                                   final Settings.AccountCfg ac) {
+        final Nav.NumField mm = new Nav.NumField("최소 신규 메시지 수", "1", 0, 999, ac.minMessages);
+        Nav.editNums(a, "최소 신규 메시지",
+                "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 경우에만 발송합니다. 0은 항상 발송입니다.",
+                new Nav.NumField[] { mm }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        ac.minMessages = mm.value;
+                        if (!s.save(a)) {
+                            return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
+                        }
+                        Log.add(a, "「" + accName + "」 계정 최소 신규 메시지를 "
+                                + mm.value + "개로 변경했습니다.");
+                        refreshEditor();
+                        refresh();
+                        Nav.reload();
+                        return null;
                     }
                 });
     }
