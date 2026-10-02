@@ -159,7 +159,7 @@ public final class ScreenAccounts {
         LinearLayout gm = Ui.group(a);
         gm.addView(macroRow(a, ac.key));
         col.addView(gm);
-        col.addView(Nav.note(a, "메시지·쿨타임·최소 신규 메시지를 이 계정 기준으로 덮어쓸 수 있습니다. "
+        col.addView(Nav.note(a, "메시지·쿨타임·최소 신규 메시지를 이 계정 기준으로 개별 지정할 수 있습니다. "
                 + "설정하지 않으면 전역 기본값을 따릅니다.", Theme.ACCENT2, null, null));
     }
 
@@ -388,7 +388,7 @@ public final class ScreenAccounts {
                     Theme.AMBER, null, null));
         } else if (!willSend) {
             col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 계정에는 발송되지 않습니다. "
-                    + "아래에서 메시지를 덮어쓰거나 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+                    + "아래에서 이 항목만 개별 지정하거나, 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
         } else {
             col.addView(Nav.note(a, "이 계정의 대화방은 기본적으로 " + cdMin + "~" + cdMax
                     + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
@@ -396,10 +396,10 @@ public final class ScreenAccounts {
         }
 
         // ── 덮어쓰기 ──
-        col.addView(Ui.sectionHeader(a, null, "기본값 덮어쓰기"));
+        col.addView(Ui.sectionHeader(a, null, "개별 설정"));
         LinearLayout g = Ui.group(a);
 
-        g.addView(Ui.navRowSwitch(a, "메시지 덮어쓰기", ac.hasMsg ? null : "끄면 전역 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "메시지 개별 설정", ac.hasMsg ? null : "끄면 전역 기본값을 따릅니다.",
                 ac.hasMsg, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasMsg = v;
@@ -414,7 +414,7 @@ public final class ScreenAccounts {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "쿨타임 덮어쓰기", ac.hasCd ? null : "끄면 전역 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "쿨타임 개별 설정", ac.hasCd ? null : "끄면 전역 기본값을 따릅니다.",
                 ac.hasCd, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasCd = v;
@@ -428,7 +428,7 @@ public final class ScreenAccounts {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 덮어쓰기",
+        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 개별 설정",
                 ac.hasMin ? null : "끄면 전역 기본값을 따릅니다.", ac.hasMin, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasMin = v;
@@ -442,7 +442,7 @@ public final class ScreenAccounts {
         }
         col.addView(g);
 
-        col.addView(Nav.note(a, "덮어쓰기를 끄면 전역 기본값을 따릅니다. "
+        col.addView(Nav.note(a, "개별 설정을 끄면 전역 기본값을 따릅니다. "
                 + "대화방별 설정이 있으면 그 값이 계정 기본값보다 우선합니다.", Theme.ACCENT2, null, null));
     }
 

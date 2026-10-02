@@ -317,7 +317,7 @@ public final class ScreenRooms {
                     Theme.AMBER, null, null));
         } else if (!willSend) {
             col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 대화방에는 발송되지 않습니다. "
-                    + "아래에서 메시지를 덮어쓰거나 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+                    + "아래에서 이 항목만 개별 지정하거나, 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
         } else {
             col.addView(Nav.note(a, "현재 이 대화방은 " + cdMin + "~" + cdMax
                     + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
@@ -325,10 +325,10 @@ public final class ScreenRooms {
         }
 
         // ── 덮어쓰기 ──
-        col.addView(Ui.sectionHeader(a, null, "덮어쓰기"));
+        col.addView(Ui.sectionHeader(a, null, "개별 설정"));
         LinearLayout g = Ui.group(a);
 
-        g.addView(Ui.navRowSwitch(a, "메시지 덮어쓰기", rc.hasMsg ? null : "끄면 상위 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "메시지 개별 설정", rc.hasMsg ? null : "끄면 상위 기본값을 따릅니다.",
                 rc.hasMsg, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         rc.hasMsg = v;
@@ -343,7 +343,7 @@ public final class ScreenRooms {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "쿨타임 덮어쓰기", rc.hasCd ? null : "끄면 상위 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "쿨타임 개별 설정", rc.hasCd ? null : "끄면 상위 기본값을 따릅니다.",
                 rc.hasCd, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         rc.hasCd = v;
@@ -357,7 +357,7 @@ public final class ScreenRooms {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 덮어쓰기",
+        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 개별 설정",
                 rc.hasMin ? null : "끄면 상위 기본값을 따릅니다.", rc.hasMin, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         rc.hasMin = v;
@@ -371,7 +371,7 @@ public final class ScreenRooms {
         }
         col.addView(g);
 
-        col.addView(Nav.note(a, "덮어쓰기를 끄면 계정 기본값 또는 전역 기본값을 따릅니다. "
+        col.addView(Nav.note(a, "개별 설정을 끄면 계정 기본값 또는 전역 기본값을 따릅니다. "
                 + "우선순위는 대화방 › 계정 › 전역 순입니다.", Theme.ACCENT2, null, null));
     }
 
