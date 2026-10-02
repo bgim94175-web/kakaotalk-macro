@@ -247,7 +247,7 @@ public final class Trigger {
                 @Override public void run() {
                     // 메아리 차단: 보낼 문구를 발송 직전에 방별로 기억한다 (되돌아온 알림을 걸러낸다)
                     remember(dest.key(), msg, System.currentTimeMillis());
-                    boolean ok = KakaoListener.sendTo(c, dest, msg);
+                    boolean ok = KakaoListener.sendTo(c, dest, msg, SendGuard.TRIGGER);
                     if (!ok) {
                         Log.add(c, "메시지 추적 「" + name + "」 발송에 실패했습니다. (대상 "
                                 + destLabel + ")");

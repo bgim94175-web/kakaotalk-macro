@@ -289,6 +289,14 @@ public final class Settings {
         /** 최소 신규 메시지 덮어쓰기 사용 */
         public boolean hasMin = false;
         public int minMessages = 1;
+        /**
+         * 이 방이 1:1 개인 대화인데도 발송 대상으로 쓰는 것에 손님이 동의했나.
+         *
+         * 기본값은 false — 동의가 없으면 {@link SendGuard} 가 1:1 발송을 막는다.
+         * 동의는 대상 대화방 목록에서 그 방을 켤 때 확인창으로 받는다. 광고 문구가
+         * 개인 대화방으로 나가는 사고를 막는 장치이므로, 기본값을 true 로 바꾸지 마라.
+         */
+        public boolean allowOneToOne = false;
         /** 이 방의 다음 발송 예정 시각 (epoch ms). 0 이면 아직 안 잡힘. */
         public long nextAt = 0L;
     }
@@ -1171,6 +1179,7 @@ public final class Settings {
             if (c.cdMaxMin != 40) j.put("cdMaxMin", c.cdMaxMin);
             if (c.hasMin) j.put("hasMin", true);
             if (c.minMessages != 1) j.put("minMessages", c.minMessages);
+            if (c.allowOneToOne) j.put("allow1to1", true);
             if (c.nextAt != 0L) j.put("nextAt", c.nextAt);
             if (j.length() > 0) out.put(key, j);
         }
@@ -1193,7 +1202,7 @@ public final class Settings {
             c.cdMaxMin = clamp(j.optInt("cdMaxMin", 40), 1, 1440);
             if (c.cdMaxMin < c.cdMinMin) c.cdMaxMin = c.cdMinMin;
             c.hasMin = j.optBoolean("hasMin", false);
-            c.minMessages = clamp(j.optInt("minMessages", 1), 0, 999);
+            c.minMessages = clamp(j.optInt("minMessages", 1), 0, 200);
             into.put(normAccKey(key), c);
         }
     }
@@ -1214,7 +1223,8 @@ public final class Settings {
             c.cdMaxMin = clamp(j.optInt("cdMaxMin", 40), 1, 1440);
             if (c.cdMaxMin < c.cdMinMin) c.cdMaxMin = c.cdMinMin;
             c.hasMin = j.optBoolean("hasMin", false);
-            c.minMessages = clamp(j.optInt("minMessages", 1), 0, 999);
+            c.minMessages = clamp(j.optInt("minMessages", 1), 0, 200);
+            c.allowOneToOne = j.optBoolean("allow1to1", false);
             c.nextAt = j.optLong("nextAt", 0L);
             // 방키는 RoomRef.key() 형식 그대로 보존 (구분자 포함). 정규화 없이 그대로 쓴다.
             into.put(RoomRef.parse(key).key(), c);

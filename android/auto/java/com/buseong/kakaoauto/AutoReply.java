@@ -203,7 +203,7 @@ public final class AutoReply {
         final String title = rule.title();
         KakaoListener.post(new Runnable() {
             @Override public void run() {
-                boolean ok = KakaoListener.sendTo(c, room, msg);
+                boolean ok = KakaoListener.sendTo(c, room, msg, SendGuard.AUTOREPLY);
                 if (ok) {
                     Log.add(c, "자동응답 발송 · 「" + label + "」 규칙 「" + title + "」 (금일 " + count() + "건)");
                 } else {
@@ -260,7 +260,7 @@ public final class AutoReply {
         final long wait = delayOf(cfg.delayMaxMs);
         KakaoListener.post(new Runnable() {
             @Override public void run() {
-                boolean ok = KakaoListener.sendTo(c, room, msg);
+                boolean ok = KakaoListener.sendTo(c, room, msg, SendGuard.AUTOREPLY);
                 if (ok) {
                     Log.add(c, "자동응답 발송 · 「" + label + "」 (금일 " + count() + "건)");
                 } else {

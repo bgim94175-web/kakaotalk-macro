@@ -113,6 +113,14 @@ public final class ScreenMacro {
                     @Override public void run() { Nav.push(a, "대상 대화방", ScreenRooms.build(a)); }
                 }));
 
+        int prot = SendGuard.protectedRooms(a).size();
+        content.addView(Ui.navRow(a, "보호 대화방", (prot == 0) ? "없음" : (prot + "개"),
+                (prot == 0) ? Theme.DIM : Theme.ACCENT2, new Runnable() {
+                    @Override public void run() {
+                        Nav.push(a, "보호 대화방", ScreenRooms.protectedScreen(a));
+                    }
+                }));
+
         content.addView(Ui.navRow(a, "쿨타임", cycleSummary(s), Theme.TEXT, new Runnable() {
             @Override public void run() { Nav.push(a, "쿨타임", MacroDetail.cycle(a)); }
         }));
@@ -406,7 +414,7 @@ public final class ScreenMacro {
                     String label = room.label(a);
                     boolean sent = false;
                     try {
-                        sent = KakaoListener.sendTo(a, room, msg);
+                        sent = KakaoListener.sendTo(a, room, msg, SendGuard.MACRO);
                     } catch (Throwable t) {
                         Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
                     }

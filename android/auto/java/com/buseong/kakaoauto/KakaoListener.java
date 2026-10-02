@@ -210,6 +210,51 @@ public final class KakaoListener extends NotificationListenerService {
     /** 같은 방 알림이 쏟아질 때 방 캐시를 다시 쓰는 최소 간격 (ms) */
     private static final long ROOM_SAVE_MS = 60000L;
 
+    // ── 단체/1:1 판정 공개 API (SendGuard 가 쓴다) ──────────────────────────
+
+    /** 단체방인지 1:1 인지 아직 모른다 */
+    public static final int GROUP_UNKNOWN = 0;
+    /** 1:1 개인 대화방 */
+    public static final int GROUP_NO = 1;
+    /** 단체방 */
+    public static final int GROUP_YES = 2;
+
+    /**
+     * 그 대화방이 단체방인가.
+     *
+     * <b>살아있는 답장 통로(Session)를 먼저 본다.</b> 발송은 그 통로가 있어야만 가능하고,
+     * 통로는 카카오톡 알림에서 생기면서 단체/1:1 판정을 같이 싣는다. 그래서 실제로 보낼 수
+     * 있는 상황이면 판정은 거의 항상 확정돼 있다.
+     *
+     * 방 캐시만 있는 경우에는 {@code lastAt > 0} 일 때만 믿는다. 구버전 저장값은 단체여부
+     * 칸이 없어서 전부 0(=1:1)로 읽히는데, 그걸 믿으면 업데이트 직후 단체방 발송이
+     * 통째로 막힌다. 그런 값은 모른다고 답한다.
+     */
+    public static int groupState(Context c, RoomRef ref) {
+        if (ref == null) return GROUP_UNKNOWN;
+        Session s = findSession(ref, RoomRef.DEFAULT_ACC.equals(ref.acc));
+        if (s != null) return s.group ? GROUP_YES : GROUP_NO;
+        loadRooms(c);
+        synchronized (ROOMS) {
+            Room r = ROOMS.get(ref.key());
+            if (r == null && RoomRef.DEFAULT_ACC.equals(ref.acc)) {
+                // 계정이 확정되지 않은 저장값 — 이름이 딱 하나 걸릴 때만 그 값을 쓴다
+                String want = normRoom(ref.name);
+                Room only = null;
+                int n = 0;
+                Iterator<Room> it = ROOMS.values().iterator();
+                while (it.hasNext()) {
+                    Room cur = it.next();
+                    if (cur == null || cur.ref == null) continue;
+                    if (normRoom(cur.ref.name).equals(want)) { only = cur; n++; }
+                }
+                if (n == 1) r = only;
+            }
+            if (r != null && r.lastAt > 0) return r.group ? GROUP_YES : GROUP_NO;
+        }
+        return GROUP_UNKNOWN;
+    }
+
     /** 최근 감지된 방 (키 = RoomRef.key(), 최신이 뒤). 접근은 전부 synchronized(ROOMS). */
     private static final LinkedHashMap<String, Room> ROOMS = new LinkedHashMap<String, Room>();
     private static volatile boolean roomsLoaded = false;
@@ -1098,8 +1143,19 @@ public final class KakaoListener extends NotificationListenerService {
      *      그때는 만료된 것이니 {@code session(ref).open = null} 로 비우고 다음 알림을 기다린다.
      */
     public static PendingIntent openIntentFor(RoomRef ref) {
+        // 보호 대화방·전체 정지 중에는 '대화방 열기' 자체를 내주지 않는다.
+        // 이 인텐트로 방을 열면 그 뒤는 접근성이 화면을 눌러 사진을 보내는데, 그 경로는
+        // 열린 방이 대상 방인지 검증하지 못한다(KakaoAccessibility 주석 참고).
+        // 그래서 여기서 막는 것이 사진이 보호 대화방으로 나가는 것을 막는 유일한 지점이다.
         Session s = findSession(ref, false);
-        return (s == null) ? null : s.open;
+        if (s == null) return null;
+        // 요청한 방과 실제로 열리는 방(s.ref) 둘 다 본다 — 세션 탐색이 다른 방을 골랐을 때
+        // 보호 판정은 '열리는 방' 기준이어야 한다.
+        Context app = App.app();
+        if (SendGuard.hardBlocked(app, ref)) return null;
+        if (s.ref != null && !s.ref.key().equals(ref.key())
+                && SendGuard.hardBlocked(app, s.ref)) return null;
+        return s.open;
     }
 
     /** 저장값(방 이름 또는 {@code RoomRef.key()})으로 조회하는 버전 */
@@ -1128,16 +1184,22 @@ public final class KakaoListener extends NotificationListenerService {
      * true 는 "카톡에 넘기는 것까지 성공" 이라는 뜻이다 — 카톡이 실제로 올렸는지는
      * 우리가 확인할 방법이 없다. 그래서 호출자가 어느 경로로 보냈는지 로그에 꼭 남겨야 한다.
      */
-    public static boolean sendImageTo(Context ctx, String room, Uri uri) {
-        return sendImageTo(ctx, RoomRef.parse(room), uri, lookup(room));
-    }
+    // sendImageTo(ctx, String room, uri) 는 없앴다 — 호출자가 없는데 공개돼 있었고,
+    // private 판을 바로 불러서 기능 구분 검사(1:1)를 건너뛰는 우회 경로였다.
 
     /** 계정까지 지정해서 보내는 버전 */
     public static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri) {
+        // 사진은 텍스트와 다른 경로로 나간다(RemoteInput 데이터 첨부). 여기서도 막는다 —
+        // ImageSender 쪽에서 이미 검사하지만, 이 메서드만 직접 부르는 코드가 생길 수 있다.
+        if (SendGuard.blocked(ctx, ref, SendGuard.MACRO)) return false;
         return sendImageTo(ctx, ref, uri, findSession(ref, false));
     }
 
     private static boolean sendImageTo(Context ctx, RoomRef ref, Uri uri, Session s) {
+        // 2차 방어선 — 요청한 방과 실제로 도달하는 방 둘 다 본다
+        if (SendGuard.hardBlocked(ctx, ref)) return false;
+        if (s != null && s.ref != null && !s.ref.key().equals(ref.key())
+                && SendGuard.hardBlocked(ctx, s.ref)) return false;
         if (ctx == null || ref == null || !ref.valid() || uri == null) return false;
         final String r = ref.label(ctx);
 
@@ -1305,13 +1367,18 @@ public final class KakaoListener extends NotificationListenerService {
         }
         if (hit != null) return hit;
 
-        // 2차: 같은 계정 + 한쪽이 다른 쪽을 포함 (방 이름 뒤에 인원수 "(12)" 가 붙는 경우 등)
+        // 2차: 같은 계정 + 뒤에 인원수·장식만 더 붙은 같은 방
+        //
+        // ★ 예전에는 여기가 `have.contains(want) || want.contains(have)` 였다. 길이 제한이
+        //   없어서 대상 「수학」 이 「수학 선생님」 세션에 걸렸다 — 광고 문구가 개인 대화방으로
+        //   나간 사고의 실제 원인이다. 이제는 <b>앞부분이 완전히 같고, 남는 꼬리가
+        //   인원수·장식뿐</b>일 때만 같은 방으로 본다 ("공지방" ↔ "공지방(12)").
         for (Map.Entry<String, Session> e : SESSIONS.entrySet()) {
             Session v = e.getValue();
             if (v == null || !v.ref.acc.equals(ref.acc)) continue;
             String have = normRoom(v.ref.name);
             if (have.length() == 0) continue;
-            if (have.contains(want) || want.contains(have)) {
+            if (sameRoomLoose(have, want)) {
                 if (hit != null) return null;      // 둘 이상 → 애매하니 포기
                 hit = v;
             }
@@ -1345,15 +1412,46 @@ public final class KakaoListener extends NotificationListenerService {
     }
 
     /** 방 이름 비교용 정규화: 공백 제거 + 소문자 */
+    /**
+     * 두 방 이름이 같은 방인가 — 뒤에 붙는 <b>인원수·장식만</b> 다른 경우까지 인정한다.
+     *
+     * 카카오톡은 단체방 이름 뒤에 인원수를 붙여 보여주는 경우가 있어서("공지방(12)"),
+     * 저장된 이름과 알림의 이름이 그만큼 다를 수 있다. 그 차이만 흡수한다.
+     *
+     * <b>단순 포함 매칭은 절대 쓰지 마라.</b> 예전 구현이 그랬고, 대상 「수학」 이
+     * 「수학 선생님」 개인 대화방에 걸려 광고 문구가 발송된 사고가 났다. 사람 이름은
+     * 다른 사람 이름의 일부이기 쉽다.
+     *
+     * @param have 알림에서 본 이름, @param want 설정에 저장된 이름 (둘 다 normRoom 결과)
+     */
+    private static boolean sameRoomLoose(String have, String want) {
+        if (have == null || want == null) return false;
+        if (have.equals(want)) return true;
+        String longer, shorter;
+        if (have.startsWith(want)) { longer = have; shorter = want; }
+        else if (want.startsWith(have)) { longer = want; shorter = have; }
+        else return false;                      // 앞부분이 다르면 다른 방이다
+        if (shorter.length() < 2) return false; // 한 글자가 접두사면 아무 방에나 걸린다
+        String tail = longer.substring(shorter.length());
+        if (tail.length() == 0 || tail.length() > 8) return false;
+        for (int i = 0; i < tail.length(); i++) {
+            char ch = tail.charAt(i);
+            boolean ok = (ch >= '0' && ch <= '9')
+                    || ch == '(' || ch == ')' || ch == '[' || ch == ']'
+                    || ch == '{' || ch == '}' || ch == '<' || ch == '>'
+                    || ch == '.' || ch == ',' || ch == '-' || ch == '~' || ch == '·';
+            if (!ok) return false;              // 글자가 섞여 있으면 다른 방이다
+        }
+        return true;
+    }
+
     private static String normRoom(String v) {
         if (v == null) return "";
         return v.replaceAll("\\s+", "").toLowerCase(java.util.Locale.KOREA);
     }
 
-    /** 저장값(방 이름 또는 RoomRef.key())으로 보내는 버전. 구버전 저장값 호환용이다. */
-    public static boolean sendTo(Context ctx, String room, String text) {
-        return sendTo(ctx, RoomRef.parse(room), text, lookup(room));
-    }
+    // sendTo(ctx, String room, text, kind) 도 없앴다 — 호출자가 없는데 공개돼 있었고,
+    // 계정 간 발송 간격까지 건너뛰는 우회 경로였다. 발송은 RoomRef 판 하나로만 들어온다.
 
     /**
      * 계정까지 지정해서 그 계정의 세션으로만 보내는 버전.
@@ -1398,7 +1496,18 @@ public final class KakaoListener extends NotificationListenerService {
         NAME_SENT.put(name, new NameStamp(ref.acc, System.currentTimeMillis()));
     }
 
-    public static boolean sendTo(Context ctx, RoomRef ref, String text) {
+    public static boolean sendTo(Context ctx, RoomRef ref, String text, int kind) {
+        // ★ 가장 먼저: 보내도 되는 방인가. 전체 정지 · 보호 대화방 · 1:1 검사가 여기서 끝난다.
+        //   이 아래 모든 경로(즉시 발송 · 계정 간 간격으로 미룬 발송)가 이 검사를 지난다.
+        if (SendGuard.blocked(ctx, ref, kind)) return false;
+        return sendStaggered(ctx, ref, text, kind);
+    }
+
+    /**
+     * 계정 간 간격(텀)을 적용해 보낸다. 차단 검사는 이미 위에서 끝났다.
+     * 이 메서드를 직접 부르지 마라 — {@link #sendTo(Context, RoomRef, String, int)} 만 쓴다.
+     */
+    private static boolean sendStaggered(Context ctx, RoomRef ref, String text, final int kind) {
         // 계정 간 간격: 다른 계정이 방금 같은 대화방에 보냈으면, 건너뛰지 않고
         // 남은 간격만큼 미뤄서 둘 다 보내되 동시 발사만 피한다(사용자 선택).
         long remaining = heldRemainingMs(ctx, ref);
@@ -1419,7 +1528,12 @@ public final class KakaoListener extends NotificationListenerService {
             String nm = normRoom(ref.name);
             if (nm.length() > 0) NAME_SENT.put(nm, new NameStamp(ref.acc, now0 + remaining));
             post(new Runnable() {
-                @Override public void run() { sendToDirect(c2, r2, t2); }
+                @Override public void run() {
+                    // 미뤄둔 사이에 전체 정지·보호 지정이 들어왔을 수 있다 → 쏘기 직전에 한 번 더 본다.
+                    // 기능 구분(kind)을 그대로 들고 와야 자동응답·봇이 1:1 규칙에 걸리지 않는다.
+                    if (SendGuard.blocked(c2, r2, kind)) return;
+                    sendToDirect(c2, r2, t2);
+                }
             }, remaining + 150L);
             return true;   // 수락: 잠시 뒤 실제로 발송된다
         }
@@ -1433,6 +1547,12 @@ public final class KakaoListener extends NotificationListenerService {
     }
 
     private static boolean sendTo(Context ctx, RoomRef ref, String text, Session s) {
+        // 2차 방어선 — 모든 텍스트 발송이 반드시 지나는 지점이다 (SendGuard.hardBlocked 설명 참고).
+        // ★ 요청한 방(ref)뿐 아니라 <b>실제로 도달하는 방</b>(s.ref)까지 본다. 세션 탐색이
+        //   조금이라도 다른 방을 골랐다면 보호 목록은 그 방 기준으로 판정되어야 한다.
+        if (SendGuard.hardBlocked(ctx, ref)) return false;
+        if (s != null && s.ref != null && !s.ref.key().equals(ref.key())
+                && SendGuard.hardBlocked(ctx, s.ref)) return false;
         if (ref == null || !ref.valid()) {
             Log.add(ctx, "발송 실패: 대상 대화방이 지정되지 않았습니다.");
             return false;
@@ -1451,7 +1571,8 @@ public final class KakaoListener extends NotificationListenerService {
         }
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
             Log.add(ctx, "발송 실패: 「" + r + "」 대화방 연결이 없습니다. "
-                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다.");
+                    + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다. "
+                    + "대화방 이름이 카카오톡에 표시되는 이름과 정확히 같은지 확인하십시오.");
             return false;
         }
         if (!bound) {

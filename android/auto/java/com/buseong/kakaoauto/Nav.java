@@ -1070,6 +1070,15 @@ public final class Nav {
     /** 예/아니오 확인창 */
     public static void confirm(Activity a, String titleTxt, String msg, String okLabel,
                                final Runnable onOk) {
+        confirm(a, titleTxt, msg, okLabel, onOk, null);
+    }
+
+    /**
+     * 취소했을 때도 할 일이 있는 판. 스위치처럼 <b>이미 화면이 바뀐</b> 조작을 확인받을 때
+     * 쓴다 — 취소하면 화면을 원래 상태로 되돌려야 한다. 창 밖을 눌러 닫아도 onCancel 이 온다.
+     */
+    public static void confirm(Activity a, String titleTxt, String msg, String okLabel,
+                               final Runnable onOk, final Runnable onCancel) {
         AlertDialog.Builder b = Ui.dialog(a, titleTxt);
         b.setMessage(msg);
         b.setPositiveButton((okLabel == null) ? "확인" : okLabel,
@@ -1078,7 +1087,16 @@ public final class Nav {
                         if (onOk != null) onOk.run();
                     }
                 });
-        b.setNegativeButton("취소", null);
+        b.setNegativeButton("취소", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+                if (onCancel != null) onCancel.run();
+            }
+        });
+        if (onCancel != null) {
+            b.setOnCancelListener(new android.content.DialogInterface.OnCancelListener() {
+                @Override public void onCancel(android.content.DialogInterface d) { onCancel.run(); }
+            });
+        }
         Ui.showDark(b);
     }
 

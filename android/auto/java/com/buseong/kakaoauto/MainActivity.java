@@ -367,6 +367,18 @@ public final class MainActivity extends Activity {
     private static void fillHome(final MainActivity a, LinearLayout col) {
         col.addView(Ui.title(a, "홈"));
 
+        // 전체 정지 중이면 그 사실이 가장 먼저 보여야 한다 — 아래 설정이 왜 동작하지 않는지가
+        // 여기서 설명된다. 해제도 이 자리에서 바로 한다.
+        if (SendGuard.stopped(a)) {
+            col.addView(Nav.note(a, "전체 정지 중입니다. 자동발송·메시지 추적·자동응답·봇의 "
+                    + "모든 발송이 멈춰 있습니다.", Theme.RED, "정지 해제", new Runnable() {
+                        @Override public void run() {
+                            SendGuard.setStopped(a, false);
+                            refreshHome();
+                        }
+                    }));
+        }
+
         TextView who = Ui.sub(a, Device.deviceName() + " · " + activeSummary(a));
         LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(MATCH, WRAP);
         wp.topMargin = Theme.dp(a, 4);
@@ -385,11 +397,70 @@ public final class MainActivity extends Activity {
         }
         if (warn != null) col.addView(warn);
 
+        col.addView(stopCard(a));
+
         fillReady(a, col);
         fillFeatures(a, col);
 
         col.addView(Ui.sectionHeader(a, null, "최근 활동"));
         col.addView(logCard(a));
+    }
+
+    /**
+     * 전체 정지 — 모든 자동 발송을 한 번에 멈춘다.
+     *
+     * 「자동발송」 토글과 다른 점: 그 토글은 매크로만 끈다. 메시지 추적·자동응답·관리봇·
+     * 미니게임봇은 계속 돈다. 잘못된 대화방으로 메시지가 나가고 있을 때 손님이 필요한 것은
+     * "전부 멈춤" 이다. 그래서 별도 버튼으로 두고, 끈 상태는 앱을 다시 켜도 유지된다.
+     *
+     * 저장이 평문 Prefs 인 이유는 {@link SendGuard} 설명 참고 — 라이선스 인증이 풀려
+     * 설정을 못 읽는 상태에서도 정지는 유지돼야 한다.
+     */
+    private static LinearLayout stopCard(final MainActivity a) {
+        LinearLayout card = Ui.card(a);
+        final boolean off = SendGuard.stopped(a);
+
+        LinearLayout head = Ui.row(a);
+        TextView t = Ui.h2(a, "전체 정지");
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, WRAP, 1f));
+        head.addView(t);
+        head.addView(Ui.chip(a, off ? "정지 중" : "동작 중", off ? Theme.RED : Theme.ACCENT));
+        card.addView(head);
+        card.addView(Ui.divider(a));
+
+        card.addView(Ui.sub(a, off
+                ? "모든 자동 발송이 멈춰 있습니다. 해제하면 기존 설정대로 다시 동작합니다."
+                : "자동발송·메시지 추적·자동응답·봇의 모든 발송을 한 번에 멈춥니다. "
+                        + "잘못된 대화방으로 메시지가 나가고 있을 때 사용하십시오."));
+
+        final TextView btn = Ui.btn(a, off ? "정지 해제" : "전체 정지", false);
+        if (!off) btn.setTextColor(Theme.RED);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        bp.topMargin = Theme.dp(a, 12);
+        btn.setLayoutParams(bp);
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (off) {
+                    SendGuard.setStopped(a, false);
+                    refreshHome();
+                    return;
+                }
+                Nav.confirm(a, "전체 정지",
+                        "모든 자동 발송을 즉시 멈춥니다.\n\n"
+                                + "자동발송·메시지 추적·자동응답·대화방 관리봇·미니게임봇이 모두 "
+                                + "멈추고, 예약된 발송과 대기 중인 사진 전송도 취소됩니다.\n"
+                                + "설정은 지워지지 않으며, 해제하면 그대로 다시 동작합니다.",
+                        "전체 정지", new Runnable() {
+                            @Override public void run() {
+                                SendGuard.setStopped(a, true);
+                                Ui.toast(a, "전체 정지했습니다.");
+                                refreshHome();
+                            }
+                        });
+            }
+        });
+        card.addView(btn);
+        return card;
     }
 
     // ── 1. 상태 카드 ────────────────────────────────────────────────────────

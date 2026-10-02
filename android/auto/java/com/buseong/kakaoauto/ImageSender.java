@@ -307,6 +307,14 @@ public final class ImageSender {
      */
     public static void sendWithResult(Context ctx, RoomRef room, List<String> uris, final Done onDone) {
         if (ctx == null) { fire(onDone, false, "앱 정보를 읽지 못했습니다."); return; }
+        // ★ 사진은 알림 답장·채팅방 첨부·공유창 세 경로로 나가고, 뒤 두 경로는 카카오톡 화면을
+        //   직접 조작하므로 텍스트 차단 지점을 지나지 않는다. 그래서 큐에 넣기 전에 여기서 막는다.
+        String bad = SendGuard.blockReason(ctx, room, SendGuard.MACRO);
+        if (bad != null) {
+            SendGuard.note(ctx, room, SendGuard.MACRO, bad);
+            fire(onDone, false, bad);
+            return;
+        }
         Context app = ctx.getApplicationContext();
         if (app == null) app = ctx;
         final Context c = app;
@@ -1785,6 +1793,29 @@ public final class ImageSender {
         String names = otherAccessibilityNames(c);
         Log.add(c, OTHER_ACC_HELP + ((names.length() > 0) ? (" 켜져 있는 앱: " + names) : ""));
         android.util.Log.w("KakaoAuto", "other a11y: " + other);
+    }
+
+    /**
+     * 대기 중인 사진 전송을 전부 버린다 (전체 정지가 부른다).
+     * 진행 중인 한 건은 접근성 쪽에서 끝나기를 기다리되, 큐에 남은 것은 보내지 않는다.
+     */
+    public static void dropAll(Context ctx) {
+        final Context c = (ctx == null) ? null : ctx.getApplicationContext();
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                int n = QUEUE.size();
+                QUEUE.clear();
+                if (n > 0 && c != null) {
+                    Log.add(c, "대기 중이던 사진 전송 " + n + "건을 취소했습니다.");
+                }
+            }
+        };
+        try {
+            if (H != null) H.post(r);
+            else r.run();
+        } catch (Throwable t) {
+            QUEUE.clear();
+        }
     }
 
     /** 한 건 마무리. 같은 건에 대해 두 번 불려도 두 번째는 무시된다. */

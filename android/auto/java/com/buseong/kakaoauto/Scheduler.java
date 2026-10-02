@@ -138,7 +138,12 @@ public final class Scheduler {
      * v4: 전역 nextAt 하나가 아니라 <b>방별 nextAt</b> 중 가장 이른 시각에 알람을 건다.
      *     nextAt 이 0 인(아직 안 잡힌) 대상 방은 지금부터 그 방의 유효 쿨타임(effCd) 범위 랜덤으로 초기화한다.
      */
+    /**
+     * 전체 정지 중이면 예약을 걸지 않는다. 차단은 발송 직전에도 한 번 더 걸리지만
+     * (SendGuard), 알람을 계속 깨우면 배터리만 쓰고 활동 로그에 보류 기록이 쌓인다.
+     */
     public static void ensureScheduled(Context ctx) {
+        if (SendGuard.stopped(ctx)) { cancel(ctx); return; }
         Context c = app(ctx);
         if (c == null) return;
 
@@ -412,6 +417,14 @@ public final class Scheduler {
         final Context c = app(ctx);
         if (c == null) return;
 
+        // 전체 정지 — 조건 판정도 하지 않고 알람까지 끊는다. 발송 직전에도 한 번 더 막히지만
+        // 여기서 끊어야 보류 기록이 방마다 쌓이지 않는다.
+        if (SendGuard.stopped(c)) {
+            Log.add(c, "전체 정지 중이므로 자동발송을 실행하지 않았습니다.");
+            cancel(c);
+            return;
+        }
+
         synchronized (LOCK) {
             if (running) {
                 Log.add(c, "이전 자동발송이 진행 중입니다. 이번 주기는 건너뜁니다.");
@@ -562,7 +575,7 @@ public final class Scheduler {
 
             boolean sent = false;
             try {
-                sent = KakaoListener.sendTo(c, room, msg);
+                sent = KakaoListener.sendTo(c, room, msg, SendGuard.MACRO);
             } catch (Throwable t) {
                 Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }

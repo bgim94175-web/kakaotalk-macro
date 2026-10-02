@@ -195,6 +195,151 @@ public final class ScreenRooms {
         }
     }
 
+    // ── 보호 대화방 ─────────────────────────────────────────────────────────
+
+    private static WeakReference<LinearLayout> PROT_BODY;
+
+    /**
+     * 보호 대화방 화면.
+     *
+     * 여기 올린 대화방은 자동발송·메시지 추적·자동응답·봇을 포함해 <b>어떤 기능으로도</b>
+     * 발송되지 않는다. 대화방이 다시 감지되어도 발송 대상이 될 수 없다.
+     *
+     * 이름으로 직접 추가할 수 있게 둔 이유: 사고가 난 대화방을 감지 목록에서 이미 지웠을 때
+     * 목록에서 고를 수가 없다. 그 경우가 가장 급한 경우다.
+     */
+    static View protectedScreen(final MainActivity a) {
+        LinearLayout col = Ui.screen(a);
+        PROT_BODY = new WeakReference<LinearLayout>(col);
+        fillProtected(a, col);
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshProtected() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (PROT_BODY == null) ? null : PROT_BODY.get();
+        if (a == null || col == null || a.isFinishing() || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillProtected(a, col);
+        } catch (Throwable t) {
+            Log.add(a, "보호 대화방 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillProtected(final MainActivity a, LinearLayout col) {
+        col.addView(Ui.sub(a, "여기 등록한 대화방에는 자동발송·메시지 추적·자동응답·봇을 포함해 "
+                + "어떤 기능으로도 메시지가 발송되지 않습니다. 대화방이 다시 감지되어도 "
+                + "발송 대상이 되지 않습니다."));
+
+        final List<String> list = SendGuard.protectedRooms(a);
+
+        col.addView(Ui.sectionHeader(a, null, "등록된 대화방"));
+        if (list.isEmpty()) {
+            col.addView(Nav.note(a, "등록된 보호 대화방이 없습니다.", Theme.DIM, null, null));
+        } else {
+            LinearLayout g = Ui.group(a);
+            for (int i = 0; i < list.size(); i++) {
+                final String name = list.get(i);
+                g.addView(Nav.actionRow(a, name, null, "해제", new Runnable() {
+                    @Override public void run() {
+                        Nav.confirm(a, "보호 해제",
+                                "「" + name + "」 의 보호를 해제합니다.\n"
+                                        + "발송 대상으로 선택하면 다시 자동 발송됩니다.",
+                                "해제", new Runnable() {
+                                    @Override public void run() {
+                                        SendGuard.unprotect(a, name);
+                                        refreshProtected();
+                                        refresh();
+                                    }
+                                });
+                    }
+                }));
+            }
+            col.addView(g);
+        }
+
+        col.addView(Ui.sectionHeader(a, null, "추가"));
+        LinearLayout g2 = Ui.group(a);
+        g2.addView(Ui.navRow(a, "감지된 대화방에서 선택", null, 0, new Runnable() {
+            @Override public void run() { pickToProtect(a); }
+        }));
+        g2.addView(Ui.navRow(a, "이름으로 직접 추가", null, 0, new Runnable() {
+            @Override public void run() { typeToProtect(a); }
+        }));
+        col.addView(g2);
+
+        col.addView(Nav.note(a, "대화방 이름은 카카오톡에 표시되는 이름과 같아야 합니다. "
+                + "계정이 여러 개인 경우 같은 이름의 대화방은 모든 계정에서 함께 차단됩니다.",
+                Theme.ACCENT2, null, null));
+    }
+
+    private static void pickToProtect(final MainActivity a) {
+        final List<KakaoListener.RoomInfo> known = KakaoListener.knownRooms(a);
+        final ArrayList<String> names = new ArrayList<String>();
+        final ArrayList<String> descs = new ArrayList<String>();
+        for (int i = 0; i < known.size(); i++) {
+            KakaoListener.RoomInfo info = known.get(i);
+            if (info == null || info.ref == null) continue;
+            String nm = info.ref.name;
+            if (SendGuard.isProtected(a, nm)) continue;
+            if (names.contains(nm)) continue;
+            names.add(nm);
+            descs.add((info.group ? "단체방" : "1:1 개인 대화")
+                    + ((info.lastAt > 0) ? (" · " + ago(info.lastAt)) : ""));
+        }
+        if (names.isEmpty()) {
+            Ui.toast(a, "추가할 대화방이 없습니다. 이름으로 직접 추가하십시오.");
+            return;
+        }
+        Nav.choose(a, "보호할 대화방",
+                names.toArray(new String[0]), descs.toArray(new String[0]), -1,
+                new Nav.OnPick() {
+                    @Override public void pick(int i) {
+                        if (i < 0 || i >= names.size()) return;
+                        doProtect(a, names.get(i));
+                    }
+                });
+    }
+
+    private static void typeToProtect(final MainActivity a) {
+        Nav.editText(a, "보호할 대화방", "카카오톡에 표시되는 이름", "", false,
+                "카카오톡 대화방 목록에 보이는 이름을 그대로 입력하십시오. "
+                        + "이름이 다르면 차단되지 않습니다.",
+                new Nav.OnText() {
+                    @Override public String text(String v) {
+                        String nm = (v == null) ? "" : v.trim();
+                        if (nm.length() == 0) return "대화방 이름을 입력하십시오.";
+                        doProtect(a, nm);
+                        return null;
+                    }
+                });
+    }
+
+    private static void doProtect(final MainActivity a, final String name) {
+        Nav.confirm(a, "대화방 보호",
+                "「" + name + "」 을(를) 보호합니다.\n\n"
+                        + "자동발송·메시지 추적·자동응답·봇을 포함해 모든 자동 발송이 차단됩니다.",
+                "보호", new Runnable() {
+                    @Override public void run() {
+                        if (!SendGuard.protect(a, name)) return;
+                        // 발송 대상에 들어 있었다면 같이 빼둔다
+                        try {
+                            Settings s = Settings.load(a);
+                            List<RoomRef> cur = s.macro.roomRefs();
+                            for (int i = 0; i < cur.size(); i++) {
+                                RoomRef rf = cur.get(i);
+                                if (rf != null && SendGuard.isProtected(a, rf.name)) select(a, rf, false);
+                            }
+                        } catch (Throwable t) {
+                            Log.add(a, "보호 대화방을 발송 대상에서 제외하지 못했습니다: " + t);
+                        }
+                        refreshProtected();
+                        refresh();
+                    }
+                });
+    }
+
     /** 방 한 칸 = 선택 체크행(삭제 포함) + 「대화방별 설정 ›」 행 */
     private static LinearLayout roomCard(final MainActivity a, final Row r) {
         LinearLayout g = Ui.group(a);
@@ -207,13 +352,17 @@ public final class ScreenRooms {
                 @Override public void run() { delete(a, r.ref); }
             };
         }
-        g.addView(Ui.checkRow(a, r.ref.name, r.detected ? ago(r.lastAt) : "미감지",
+        g.addView(Ui.checkRow(a, r.ref.name, rowSub(a, r),
                 badges, r.selected, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
-                        select(a, r.ref, v);
-                        // 전체 refresh 는 selected-first 정렬로 행이 튀므로 헤더 수치만 갱신한다.
-                        updateHeaders(a);
-                        Nav.reload();
+                        if (!v) {
+                            select(a, r.ref, false);
+                            // 전체 refresh 는 selected-first 정렬로 행이 튀므로 헤더 수치만 갱신한다.
+                            updateHeaders(a);
+                            Nav.reload();
+                            return;
+                        }
+                        confirmSelect(a, r);
                     }
                 }, del));
 
@@ -237,6 +386,78 @@ public final class ScreenRooms {
             }
         }));
         return g;
+    }
+
+    /** 행 아래 보조 문구. 보호 중인 방은 그 사실을 먼저 알린다. */
+    private static String rowSub(MainActivity a, Row r) {
+        if (SendGuard.isProtected(a, r.ref.name)) return "보호 중 · 발송되지 않습니다";
+        return r.detected ? ago(r.lastAt) : "미감지";
+    }
+
+    /**
+     * 대화방을 발송 대상으로 켤 때 확인을 받는다.
+     *
+     * 잘못 눌러서 켜지는 사고가 실제로 났다. 그래서 <b>이름과 단체/1:1 을 보여주고</b>
+     * 손님이 확인해야 켜진다. 1:1 개인 대화방이면 경고를 한 단계 더 올리고, 확인을
+     * 그 방의 1:1 발송 동의로 기록한다 ({@link Settings.RoomCfg#allowOneToOne}).
+     * 동의가 없으면 {@link SendGuard} 가 발송을 막는다.
+     */
+    private static void confirmSelect(final MainActivity a, final Row r) {
+        final Runnable revert = new Runnable() {
+            @Override public void run() { refresh(); }
+        };
+
+        if (SendGuard.isProtected(a, r.ref.name)) {
+            Nav.confirm(a, "보호 대화방입니다",
+                    "「" + r.ref.name + "」 은(는) 보호 대화방으로 지정되어 있어 발송 대상으로 사용할 수 없습니다.\n"
+                            + "발송하려면 보호를 먼저 해제하십시오.",
+                    "보호 해제", new Runnable() {
+                        @Override public void run() {
+                            SendGuard.unprotect(a, r.ref.name);
+                            refresh();
+                        }
+                    }, revert);
+            return;
+        }
+
+        final boolean oneToOne = !r.groupKnown || !r.group;
+        String msg;
+        String ok;
+        if (!r.groupKnown) {
+            msg = "「" + r.ref.name + "」 을(를) 발송 대상으로 사용합니다.\n\n"
+                    + "이 대화방이 단체방인지 개인 대화인지 아직 확인되지 않았습니다. "
+                    + "카카오톡 알림이 1회 수신되면 확인됩니다. 확인 전까지는 발송되지 않습니다.";
+            ok = "사용";
+        } else if (r.group) {
+            msg = "「" + r.ref.name + "」(단체방)을 발송 대상으로 사용합니다.\n\n"
+                    + "설정한 주기에 따라 이 대화방으로 메시지가 자동 발송됩니다.";
+            ok = "사용";
+        } else {
+            msg = "「" + r.ref.name + "」 은(는) 1:1 개인 대화방입니다.\n\n"
+                    + "이 대화방을 발송 대상으로 사용하면 상대 1명에게 설정한 메시지가 "
+                    + "주기적으로 자동 발송됩니다. 광고 문구가 개인에게 반복 발송되면 "
+                    + "신고 또는 차단 대상이 될 수 있습니다.\n\n"
+                    + "그래도 사용하시겠습니까?";
+            ok = "1:1 발송 사용";
+        }
+
+        Nav.confirm(a, "발송 대상 추가", msg, ok, new Runnable() {
+            @Override public void run() {
+                select(a, r.ref, true);
+                if (oneToOne) allowOneToOne(a, r.ref);
+                updateHeaders(a);
+                refresh();
+            }
+        }, revert);
+    }
+
+    /** 그 방의 1:1 발송 동의를 기록한다 */
+    private static void allowOneToOne(MainActivity a, RoomRef ref) {
+        Settings s = Settings.load(a);
+        Settings.RoomCfg rc = s.roomCfg(ref);
+        if (rc == null) return;
+        rc.allowOneToOne = true;
+        if (!s.save(a)) Log.add(a, "1:1 발송 허용을 저장하지 못했습니다.");
     }
 
     /** 저장된 방 cfg 를 생성 없이 읽는다 (없으면 null = 상위 기본값 따름) */
@@ -293,6 +514,12 @@ public final class ScreenRooms {
                     + "내정보 탭에서 인증을 완료하십시오.", Theme.AMBER, null, null));
         }
 
+        final boolean prot = SendGuard.isProtected(a, ref.name);
+        if (prot) {
+            col.addView(Nav.note(a, "보호 대화방입니다. 아래 설정과 무관하게 이 대화방에는 "
+                    + "어떤 기능으로도 자동 발송되지 않습니다.", Theme.ACCENT2, null, null));
+        }
+
         // ── 이 대화방 매크로 on/off ──
         col.addView(Ui.sectionHeader(a, null, "대화방 매크로"));
         LinearLayout g0 = Ui.group(a);
@@ -304,6 +531,72 @@ public final class ScreenRooms {
                                 + (v ? "사용으로" : "미사용으로") + " 변경했습니다.");
                     }
                 }));
+        // 보호 — 매크로뿐 아니라 추적·자동응답·봇까지 전부 막는다. 그래서 '이 대화방 발송'
+        // 스위치와 따로 둔다. 실수로 켜질 수 있는 값이 아니어야 하므로 확인창을 거친다.
+        g0.addView(Ui.navRowSwitch(a, "이 대화방 보호",
+                prot ? "모든 기능의 자동 발송이 차단됩니다."
+                     : "켜면 어떤 설정으로도 이 대화방에 발송되지 않습니다.",
+                prot, new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        if (v) {
+                            Nav.confirm(a, "대화방 보호",
+                                    "「" + ref.name + "」 을(를) 보호합니다.\n\n"
+                                            + "자동발송·메시지 추적·자동응답·봇을 포함해 모든 자동 발송이 "
+                                            + "차단됩니다. 대화방이 다시 감지되어도 발송 대상이 되지 않습니다.",
+                                    "보호", new Runnable() {
+                                        @Override public void run() {
+                                            SendGuard.protect(a, ref.name);
+                                            select(a, ref, false);   // 발송 대상에서도 빼둔다
+                                            refreshEditor();
+                                            refresh();
+                                        }
+                                    }, new Runnable() {
+                                        @Override public void run() { refreshEditor(); }
+                                    });
+                        } else {
+                            Nav.confirm(a, "보호 해제",
+                                    "「" + ref.name + "」 의 보호를 해제합니다.\n"
+                                            + "발송 대상으로 선택하면 다시 자동 발송됩니다.",
+                                    "해제", new Runnable() {
+                                        @Override public void run() {
+                                            SendGuard.unprotect(a, ref.name);
+                                            refreshEditor();
+                                            refresh();
+                                        }
+                                    }, new Runnable() {
+                                        @Override public void run() { refreshEditor(); }
+                                    });
+                        }
+                    }
+                }));
+        if (KakaoListener.groupState(a, ref) == KakaoListener.GROUP_NO) {
+            g0.addView(Ui.navRowSwitch(a, "1:1 발송 허용",
+                    rc.allowOneToOne ? "이 개인 대화방으로 발송됩니다."
+                                     : "개인 대화방이므로 발송하지 않습니다.",
+                    rc.allowOneToOne, new Ui.OnToggle() {
+                        @Override public void on(boolean v) {
+                            if (!v) {
+                                rc.allowOneToOne = false;
+                                persistRoom(a, s, "「" + ref.label(a) + "」 1:1 발송을 차단했습니다.");
+                                refreshEditor();
+                                return;
+                            }
+                            Nav.confirm(a, "1:1 발송 허용",
+                                    "「" + ref.name + "」 은(는) 1:1 개인 대화방입니다.\n\n"
+                                            + "허용하면 상대 1명에게 설정한 메시지가 주기적으로 자동 "
+                                            + "발송됩니다. 신고 또는 차단 대상이 될 수 있습니다.",
+                                    "허용", new Runnable() {
+                                        @Override public void run() {
+                                            rc.allowOneToOne = true;
+                                            persistRoom(a, s, "「" + ref.label(a) + "」 1:1 발송을 허용했습니다.");
+                                            refreshEditor();
+                                        }
+                                    }, new Runnable() {
+                                        @Override public void run() { refreshEditor(); }
+                                    });
+                        }
+                    }));
+        }
         col.addView(g0);
 
         // ── 현재 유효값 안내 ──

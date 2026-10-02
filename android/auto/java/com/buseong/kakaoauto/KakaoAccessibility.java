@@ -3404,16 +3404,33 @@ public final class KakaoAccessibility extends AccessibilityService {
             return hitOf(cand, L_PREFIX);
         }
 
-        // 부분 일치 — 남의 대화 미리보기 줄을 잡지 않게 길이를 제한한다
-        if (roomS.length() >= 2 && cs.contains(roomS)
-                && cs.length() <= roomS.length() + 14) {
-            return hitOf(cand, L_PART);
-        }
-        if (roomC.length() >= 4 && cc.contains(roomC)
-                && cc.length() <= roomC.length() + 14) {
+        // 장식만 다른 같은 이름 — "⭐공지방⭐" ↔ "공지방"
+        //
+        // ★ 예전에는 여기가 길이만 제한한 포함 매칭이었다(cs.contains(roomS) 이고 14자 이내).
+        //   그래서 대상 「수학」 이 화면의 「수학 선생님」 행에 걸렸다 — 사진이 엉뚱한 개인
+        //   대화방으로 나갈 수 있는 경로였고, 같은 원인으로 실제 오발송 사고가 났다.
+        //   이제는 <b>장식 문자를 떼어낸 뒤 이름이 완전히 같을 때만</b> 인정한다.
+        //   이름이 서로 포함관계인 것만으로는 같은 방이라고 보지 않는다 — 사람 이름은
+        //   다른 사람 이름의 일부이기 쉽다.
+        if (roomS.length() >= 2 && letters(cs).equals(letters(roomS))
+                && letters(roomS).length() >= 2) {
             return hitOf(cand, L_PART);
         }
         return null;
+    }
+
+    /**
+     * 글자·숫자만 남긴다 (장식·기호·공백 제거). 「⭐공지방⭐」 → 「공지방」.
+     * 이름이 장식만 다른지 보는 데 쓴다 — 포함 매칭 대신 쓰는 안전한 비교다.
+     */
+    private static String letters(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (Character.isLetterOrDigit(ch)) sb.append(ch);
+        }
+        return sb.toString();
     }
 
     private static Hit hitOf(String name, int level) {
