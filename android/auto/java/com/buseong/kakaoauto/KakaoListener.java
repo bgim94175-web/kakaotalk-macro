@@ -118,7 +118,7 @@ public final class KakaoListener extends NotificationListenerService {
         /** 방 이름 (= ref.name). 예전 코드가 그대로 읽을 수 있게 남겨둔다 */
         public final String room;
         /** 답장 액션의 PendingIntent (카톡이 준 것) */
-        public volatile PendingIntent pending;
+        volatile PendingIntent pending;
         /**
          * 알림 본문을 탭했을 때 실행되는 인텐트 = <b>그 대화방 열기</b> (카톡이 만든 것).
          *
@@ -132,7 +132,7 @@ public final class KakaoListener extends NotificationListenerService {
          * (FLAG_AUTO_CANCEL 은 사용자가 알림을 탭했을 때만 적용된다).
          * 없으면 null (카톡이 안 넣어준 알림).
          */
-        public volatile PendingIntent open;
+        volatile PendingIntent open;
         /** 그 액션에 달린 RemoteInput 들 (결과 키가 여기 있다) */
         public volatile RemoteInput[] inputs;
         /**

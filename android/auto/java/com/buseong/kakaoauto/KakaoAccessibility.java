@@ -407,6 +407,18 @@ public final class KakaoAccessibility extends AccessibilityService {
     private static volatile int verifyTries = 0;
     /** btn_send 의 enabled 가 Y 가 되기를 기다린 횟수 */
     private static volatile int sendWaits = 0;
+    /**
+     * 채팅방 첨부 흐름에서 <b>열려 있는 방이 대상 방임을 화면에서 한 번이라도 확인했나.</b>
+     *
+     * 이 흐름은 방을 직접 열지 않고 "이미 열려 있는 채팅방" 의 첨부 시트를 조작한다. 그래서
+     * 방 열기 인텐트가 조용히 실패했거나 손님이 그 사이 다른 방을 열어두면, 엉뚱한 방으로
+     * 사진이 그대로 나간다 — 예전에는 이 확인값을 진단에만 쓰고 전송은 그냥 눌렀다.
+     */
+    private static volatile boolean roomSeenEver = false;
+    /** 대상 방 확인을 기다린 횟수 (끝내 확인되지 않으면 전송하지 않는다) */
+    private static volatile int roomSeenWaits = 0;
+    /** 대상 방 확인을 이만큼 기다려도 안 보이면 전송을 중단한다 */
+    private static final int MAX_ROOM_SEEN_WAIT = 10;
     /** 마지막으로 본 btn_send 상태 ("미확인" / "enabled=Y" / "enabled=N") */
     private static volatile String sendState = "미확인";
     /** 첨부 시트에서 본 사진 desc 목록 (중복 제거, 화면 밖으로 밀려난 것도 기억한다) */
@@ -653,6 +665,8 @@ public final class KakaoAccessibility extends AccessibilityService {
         verifyTries = 0;
         dupWant = 0;
         sendWaits = 0;
+        roomSeenEver = false;
+        roomSeenWaits = 0;
         sendState = "미확인";
         menuSeen = "";
         sheetShape = "";
@@ -1118,6 +1132,26 @@ public final class KakaoAccessibility extends AccessibilityService {
 
         if (hits.size() == 1) {
             Hit hit = hits.get(0);
+
+            // ★ 공유창은 행을 누르는 즉시 그 방으로 사진이 간다. 그래서 <b>이름이 확실할 때만</b>
+            //   누른다 — 정확히 일치 · 공백/이모지만 다른 일치 · 목록에서 잘려 표시된 경우(말줄임
+            //   표시가 실제로 있을 때)까지다. 앞부분만 같은 행은 다른 방일 수 있으므로
+            //   (「공지방」 ↔ 「공지방 2기」) 추측하지 않고 중단한다.
+            boolean sure = (hit.level <= L_CORE)
+                    || (hit.level == L_PREFIX && hit.fromEllipsis);
+            if (!sure) {
+                dumpAndFail("대상 대화방을 확실하게 찾지 못해 전송을 중단했습니다"
+                        + " (화면에서 찾은 이름: 「" + cut(hit.name, 24) + "」 · " + hit.how() + ")."
+                        + " 오발송을 방지하기 위해 선택하지 않았습니다."
+                        + " 설정의 대화방 이름을 카카오톡에 표시되는 이름 그대로 입력하십시오."
+                        + nextStep());
+                return;
+            }
+            if (SendGuard.isProtected(this, targetRoom)) {
+                finish(false, "「" + targetRoom + "」 은 보호 대화방이므로 전송하지 않았습니다.");
+                return;
+            }
+
             int r = clickRoom(hit);
             if (r == 2) return;                     // 이미 끝냈다
             if (r == 1) {
@@ -1617,12 +1651,13 @@ public final class KakaoAccessibility extends AccessibilityService {
                         }
                     }
 
-                    // 대상 대화방 이름이 화면에 보이나 — 이 흐름은 방을 검증하지 않으므로
-                    // 진단에 "확인됨/확인되지 않음" 만 남긴다 (대화방 제목 id 는 미확보 — 문서 8장).
+                    // 대상 대화방 이름이 화면에 보이나. ★ 이제는 진단용이 아니라 <b>전송 조건</b>이다 —
+                    // 확인되지 않으면 doSendAttach 가 전송 버튼을 누르지 않는다.
                     if (vis && !a.roomNameSeen && roomS.length() >= 2 && tx.length() > 0) {
                         String txS = squash(tx);
                         if (txS.equals(roomS) || (txS.length() >= 4 && roomS.startsWith(txS))) {
                             a.roomNameSeen = true;
+                            roomSeenEver = true;
                         }
                     }
 
@@ -2060,6 +2095,26 @@ public final class KakaoAccessibility extends AccessibilityService {
     // ── A단계 3: 전송 ────────────────────────────────────────────────────────
 
     private void doSendAttach(AScan a) {
+        // ★ 보내기 전에: 지금 열려 있는 방이 정말 대상 방인가.
+        //   이 흐름은 방을 직접 열지 않으므로, 확인되지 않은 채 누르면 화면에 있는 아무 방으로
+        //   사진이 나간다. 확인될 때까지 기다리고, 끝내 확인되지 않으면 보내지 않는다.
+        if (!roomSeenEver && targetRoom != null && squash(targetRoom).length() >= 2) {
+            roomSeenWaits++;
+            if (roomSeenWaits < MAX_ROOM_SEEN_WAIT) {
+                kick(RETRY_MS);
+                return;
+            }
+            dumpAndFail("열려 있는 대화방이 「" + targetRoom + "」 인지 확인하지 못해 전송을 중단했습니다."
+                    + " 오발송을 방지하기 위해 보내지 않았습니다."
+                    + " 카카오톡에서 해당 대화방을 직접 열어둔 상태로 다시 시도하거나,"
+                    + " 설정의 대화방 이름을 화면에 표시되는 이름 그대로 입력하십시오." + a11yTail());
+            return;
+        }
+        if (SendGuard.isProtected(this, targetRoom)) {
+            finish(false, "「" + targetRoom + "」 은 보호 대화방이므로 전송하지 않았습니다.");
+            return;
+        }
+
         if (a.btnSend == null) {
             if (sendTry > 0) {
                 finish(true, targetRoom + " · 사진 " + pickedCount + "장을 전송했습니다."
@@ -2995,6 +3050,13 @@ public final class KakaoAccessibility extends AccessibilityService {
         /** {@code L_EXACT} ~ {@code L_PART} */
         int level = L_PART;
         String rowKey = "";
+        /**
+         * {@code L_PREFIX} 일 때, 화면의 행에 <b>말줄임 표시가 실제로 있었나</b>.
+         * 표시가 없는데 앞부분만 같은 행은 '잘린 같은 방' 이 아니라 그냥 다른 방일 수 있다
+         * (「공지방」 과 「공지방 2기」). 공유창은 누르는 즉시 사진이 그 방으로 가므로
+         * 이 구분이 필요하다.
+         */
+        boolean fromEllipsis = false;
 
         String how() {
             switch (level) {
@@ -3396,12 +3458,12 @@ public final class KakaoAccessibility extends AccessibilityService {
         boolean marked = !base.equals(cs);
         if (base.length() >= (marked ? 3 : MIN_PREFIX)
                 && roomS.length() > base.length() && roomS.startsWith(base)) {
-            return hitOf(cand, L_PREFIX);
+            return hitOf(cand, L_PREFIX, marked);
         }
         String baseC = core(base);
         if (baseC.length() >= (marked ? 2 : MIN_PREFIX_CORE)
                 && roomC.length() > baseC.length() && roomC.startsWith(baseC)) {
-            return hitOf(cand, L_PREFIX);
+            return hitOf(cand, L_PREFIX, marked);
         }
 
         // 장식만 다른 같은 이름 — "⭐공지방⭐" ↔ "공지방"
@@ -3434,9 +3496,14 @@ public final class KakaoAccessibility extends AccessibilityService {
     }
 
     private static Hit hitOf(String name, int level) {
+        return hitOf(name, level, false);
+    }
+
+    private static Hit hitOf(String name, int level, boolean fromEllipsis) {
         Hit h = new Hit();
         h.name = name;
         h.level = level;
+        h.fromEllipsis = fromEllipsis;
         return h;
     }
 
