@@ -84,7 +84,7 @@ public final class BootReceiver extends BroadcastReceiver {
             th.setPriority(Thread.NORM_PRIORITY);
             th.start();
         } catch (Throwable t) {
-            Log.add(c, "부팅 처리 스레드를 생성하지 못했습니다: " + t);
+            Log.add(c, "부팅 처리 작업을 생성하지 못했습니다: " + t);
             try { finish.run(); } catch (Throwable ignore) { /* 무시 */ }
         }
     }

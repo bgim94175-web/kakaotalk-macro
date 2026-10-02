@@ -162,7 +162,7 @@ public final class WordDict {
     }
 
     /**
-     * 게임 시작 단어. 끝 글자로 이어갈 단어가 남아있는 걸 골라준다(바로 막히면 재미없다).
+     * 게임 시작 단어. 끝 단어로 이어갈 단어가 남아있는 걸 골라준다(바로 막히면 재미없다).
      * 못 찾으면 아무 단어나 돌려준다.
      */
     public static String startWord(Set<String> used) {
@@ -194,7 +194,7 @@ public final class WordDict {
         return cand.get(0);
     }
 
-    /** 그 글자로 시작하는 미사용 단어가 하나라도 있나 */
+    /** 그 단어로 시작하는 미사용 단어가 하나라도 있나 */
     public static boolean anyStarting(char first, Set<String> used) {
         char[] vs = variants(first);
         for (int i = 0; i < LIST.size(); i++) {
@@ -208,7 +208,7 @@ public final class WordDict {
         return false;
     }
 
-    /** 그 글자로 시작하는 미사용 단어 전부 */
+    /** 그 단어로 시작하는 미사용 단어 전부 */
     public static List<String> candidates(char first, Set<String> used) {
         ArrayList<String> out = new ArrayList<String>();
         char[] vs = variants(first);

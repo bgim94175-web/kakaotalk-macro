@@ -445,7 +445,7 @@ public final class License {
         try {
             Settings.invalidate();
         } catch (Throwable t) {
-            android.util.Log.w("KakaoAuto", "설정 캐시 비우기 실패", t);
+            android.util.Log.w("KakaoAuto", "설정 임시 저장 비우기 실패", t);
         }
         Log.add(app, "현재 기기의 라이선스를 해제했습니다. 저장된 설정도 함께 삭제되었습니다.");
     }
@@ -847,7 +847,7 @@ public final class License {
         // ── nonce: 응답 재생(replay) 방어
         String back = str(o, "nonce", "");
         if (nonce != null && !nonce.equals(back)) {
-            Log.add(c, "응답 nonce 가 일치하지 않습니다. 이전 응답이 재사용된 것으로 판단됩니다.");
+            Log.add(c, "응답 확인값이 일치하지 않습니다. 이전 응답이 재사용된 것으로 판단됩니다.");
             p.fail = "bad_signature";
             return p;
         }

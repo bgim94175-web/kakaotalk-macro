@@ -93,7 +93,7 @@ public final class App extends Application {
         long now = System.currentTimeMillis();
         String head = headline(e);
         String body = "시각 " + stamp(now) + "\n"
-                + "스레드 " + ((th == null) ? "?" : th.getName()) + "\n"
+                + "작업 " + ((th == null) ? "?" : th.getName()) + "\n"
                 + "앱 v" + Device.appVersionName(c) + " (" + Device.appVersion(c) + ")\n"
                 + "기기 " + Device.deviceName() + " · SDK " + android.os.Build.VERSION.SDK_INT + "\n\n"
                 + clip(stack(e));
@@ -160,7 +160,7 @@ public final class App extends Application {
             th.start();
         } catch (Throwable t) {
             // 스레드를 못 만들면 그 자리에서라도 설정은 읽어둔다
-            Log.add(c, "초기화 스레드를 생성하지 못했습니다: " + t);
+            Log.add(c, "초기화 작업을 생성하지 못했습니다: " + t);
             try { Settings.load(c); } catch (Throwable ignore) { /* 위 로그로 충분 */ }
         }
     }
@@ -175,7 +175,7 @@ public final class App extends Application {
     }
 
     private static String stack(Throwable e) {
-        if (e == null) return "(스택트레이스 없음)";
+        if (e == null) return "(오류 상세 없음)";
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
         try {
@@ -183,7 +183,7 @@ public final class App extends Application {
             pw.flush();
             return sw.toString();
         } catch (Throwable t) {
-            return "(스택트레이스를 읽지 못했습니다: " + t + ")";
+            return "(오류 상세를 읽지 못했습니다: " + t + ")";
         } finally {
             try { pw.close(); } catch (Throwable ignore) { /* 무시 */ }
         }

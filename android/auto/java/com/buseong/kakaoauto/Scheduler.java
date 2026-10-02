@@ -498,7 +498,7 @@ public final class Scheduler {
         // 5) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
         if (!KakaoListener.listenerBound()) {
             if (KakaoListener.connected(c)) {
-                Log.add(c, "알림 리스너가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
+                Log.add(c, "알림 읽기 권한가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
             } else {
                 Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
             }

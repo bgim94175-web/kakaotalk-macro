@@ -193,7 +193,7 @@ public final class BotDetail {
                             @Override public void run() {
                                 Nav.editText(a, "입장 메시지", "예) {이름}님 환영합니다",
                                         r.welcomeMsg, true,
-                                        "{이름} 은 입장한 사람의 이름으로 치환됩니다.", new Nav.OnText() {
+                                        "{이름} 은 입장한 사람의 이름으로 바뀝니다.", new Nav.OnText() {
                                             @Override public String text(String value) {
                                                 if (value == null || value.trim().length() == 0) {
                                                     return "입장 메시지를 입력하십시오.";
@@ -222,7 +222,7 @@ public final class BotDetail {
                             @Override public void run() {
                                 Nav.editText(a, "퇴장 메시지", "예) {이름}님 안녕히 가십시오",
                                         r.leaveMsg, true,
-                                        "{이름} 은 퇴장한 사람의 이름으로 치환됩니다.", new Nav.OnText() {
+                                        "{이름} 은 퇴장한 사람의 이름으로 바뀝니다.", new Nav.OnText() {
                                             @Override public String text(String value) {
                                                 if (value == null || value.trim().length() == 0) {
                                                     return "퇴장 메시지를 입력하십시오.";
@@ -283,7 +283,7 @@ public final class BotDetail {
                         r.floodSecs + "초 / " + r.floodCount + "개", Theme.TEXT, new Runnable() {
                             @Override public void run() {
                                 final Nav.NumField secs =
-                                        new Nav.NumField("기준 시간 (초)", "10", 1, 600, r.floodSecs);
+                                        new Nav.NumField("감지 시간 (초)", "10", 1, 600, r.floodSecs);
                                 final Nav.NumField cnt =
                                         new Nav.NumField("허용 개수", "5", 2, 100, r.floodCount);
                                 Nav.editNums(a, "도배 기준",
@@ -355,7 +355,7 @@ public final class BotDetail {
 
                 col.addView(Ui.sectionHeader(a, null, "명령"));
                 LinearLayout g1 = Ui.group(a);
-                g1.addView(Ui.navRow(a, "명령 접두사", r.cmdPrefix, Theme.TEXT, new Runnable() {
+                g1.addView(Ui.navRow(a, "명령어 앞글자", r.cmdPrefix, Theme.TEXT, new Runnable() {
                     @Override public void run() { editPrefix(a, s, true); }
                 }));
                 g1.addView(Ui.navRow(a, "공지문", msgValue(r.notice),
@@ -384,18 +384,18 @@ public final class BotDetail {
                                 Nav.push(a, "관리자 명단", words(a, WORDS_ADMIN));
                             }
                         }));
-                g2.addView(Ui.navRow(a, "1일 최대 발송", r.dailyLimit + "회", Theme.TEXT,
+                g2.addView(Ui.navRow(a, "하루 최대 발송", r.dailyLimit + "회", Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("1일 최대 발송 수", "300",
+                                final Nav.NumField n = new Nav.NumField("하루 최대 발송 수", "300",
                                         1, 5000, r.dailyLimit);
-                                Nav.editNums(a, "1일 최대 발송",
+                                Nav.editNums(a, "하루 최대 발송",
                                         "봇이 1일에 발송할 수 있는 메시지 수입니다. 자정에 초기화됩니다.",
                                         new Nav.NumField[] { n }, new Nav.OnNums() {
                                             @Override public String ok() {
                                                 r.dailyLimit = n.value;
                                                 save(a, s);
-                                                Log.add(a, "대화방 관리봇 1일 최대 발송을 "
+                                                Log.add(a, "대화방 관리봇 하루 최대 발송을 "
                                                         + n.value + "회로 설정했습니다.");
                                                 return null;
                                             }
@@ -492,39 +492,39 @@ public final class BotDetail {
                         (onGames(g) > 0) ? Theme.TEXT : Theme.AMBER, new Runnable() {
                             @Override public void run() { Nav.push(a, "게임 선택", games(a)); }
                         }));
-                g2.addView(Ui.navRow(a, "명령 접두사", g.cmdPrefix, Theme.TEXT, new Runnable() {
+                g2.addView(Ui.navRow(a, "명령어 앞글자", g.cmdPrefix, Theme.TEXT, new Runnable() {
                     @Override public void run() { editPrefix(a, s, false); }
                 }));
-                g2.addView(Ui.navRow(a, "응답 쿨다운", Nav.dur(g.cooldownMs), Theme.TEXT,
+                g2.addView(Ui.navRow(a, "응답 쿨타임", Nav.dur(g.cooldownMs), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("쿨다운 (초)", "3", 0, 600,
+                                final Nav.NumField n = new Nav.NumField("쿨타임 (초)", "3", 0, 600,
                                         (int) (g.cooldownMs / 1000L));
-                                Nav.editNums(a, "응답 쿨다운",
+                                Nav.editNums(a, "응답 쿨타임",
                                         "동일 대화방에서 이 시간 안에는 재응답하지 않습니다.",
                                         new Nav.NumField[] { n }, new Nav.OnNums() {
                                             @Override public String ok() {
                                                 g.cooldownMs = n.value * 1000L;
                                                 save(a, s);
-                                                Log.add(a, "미니게임봇 응답 쿨다운을 "
+                                                Log.add(a, "미니게임봇 응답 쿨타임을 "
                                                         + n.value + "초로 설정했습니다.");
                                                 return null;
                                             }
                                         });
                             }
                         }));
-                g2.addView(Ui.navRow(a, "1일 최대 발송", g.dailyLimit + "회", Theme.TEXT,
+                g2.addView(Ui.navRow(a, "하루 최대 발송", g.dailyLimit + "회", Theme.TEXT,
                         new Runnable() {
                             @Override public void run() {
-                                final Nav.NumField n = new Nav.NumField("1일 최대 발송 수", "300",
+                                final Nav.NumField n = new Nav.NumField("하루 최대 발송 수", "300",
                                         1, 5000, g.dailyLimit);
-                                Nav.editNums(a, "1일 최대 발송",
+                                Nav.editNums(a, "하루 최대 발송",
                                         "봇이 1일에 발송할 수 있는 메시지 수입니다. 자정에 초기화됩니다.",
                                         new Nav.NumField[] { n }, new Nav.OnNums() {
                                             @Override public String ok() {
                                                 g.dailyLimit = n.value;
                                                 save(a, s);
-                                                Log.add(a, "미니게임봇 1일 최대 발송을 "
+                                                Log.add(a, "미니게임봇 하루 최대 발송을 "
                                                         + n.value + "회로 설정했습니다.");
                                                 return null;
                                             }
@@ -1200,7 +1200,7 @@ public final class BotDetail {
     /** 명령 접두사 (3글자 이하, 공백 불가) */
     private static void editPrefix(final MainActivity a, final Settings s, final boolean forRoomBot) {
         String cur = forRoomBot ? s.roombot.cmdPrefix : s.minigame.cmdPrefix;
-        Nav.editText(a, "명령 접두사", "!", cur, false,
+        Nav.editText(a, "명령어 앞글자", "!", cur, false,
                 "이 문자로 시작하는 메시지만 명령으로 처리합니다. 1글자를 권장합니다. (예: ! / . / ~)",
                 new Nav.OnText() {
                     @Override public String text(String value) {
@@ -1211,7 +1211,7 @@ public final class BotDetail {
                         if (forRoomBot) s.roombot.cmdPrefix = v;
                         else s.minigame.cmdPrefix = v;
                         save(a, s);
-                        Log.add(a, "명령 접두사를 「" + v + "」 로 설정했습니다.");
+                        Log.add(a, "명령어 앞글자를 「" + v + "」 로 설정했습니다.");
                         return null;
                     }
                 });

@@ -382,7 +382,7 @@ public final class KakaoListener extends NotificationListenerService {
             s.groupRank = m.groupRank;
         } else if (s.group) {
             m.group = true;
-            m.why = m.why + "→세션기억(단체방)";
+            m.why = m.why + "→대화방기억(단체방)";
         }
         // (세션이 확실한 1:1 인데 이번 근거가 약하게 '그룹' 이라고 하면 m.group 은 그대로 둔다.
         //  이 한 건만 조심하고, 세션 판정을 오염시키지는 않는다.)
@@ -1142,7 +1142,7 @@ public final class KakaoListener extends NotificationListenerService {
         final String r = ref.label(ctx);
 
         if (s == null) {
-            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 대화방 세션이 없습니다. "
+            Log.add(ctx, "이미지 전송 실패: 「" + r + "」 대화방 연결이 없습니다. "
                     + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 전송이 가능합니다.");
             return false;
         }
@@ -1450,7 +1450,7 @@ public final class KakaoListener extends NotificationListenerService {
             return false;
         }
         if (s == null || s.pending == null || s.inputs == null || s.inputs.length == 0) {
-            Log.add(ctx, "발송 실패: 「" + r + "」 대화방 세션이 없습니다. "
+            Log.add(ctx, "발송 실패: 「" + r + "」 대화방 연결이 없습니다. "
                     + "해당 대화방의 카카오톡 알림이 1회 이상 수신되어야 발송이 가능합니다.");
             return false;
         }

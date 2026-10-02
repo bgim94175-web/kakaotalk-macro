@@ -155,9 +155,9 @@ public final class ScreenAccount {
                 new Runnable() {
                     @Override public void run() { pushLicense(a); }
                 }));
-        lic.addView(Ui.navRow(a, "이용 기능", featValue(a, st), featColor(a),
+        lic.addView(Ui.navRow(a, "사용 가능 기능", featValue(a, st), featColor(a),
                 new Runnable() {
-                    @Override public void run() { Nav.push(a, "이용 기능", sub(a, FEATURES)); }
+                    @Override public void run() { Nav.push(a, "사용 가능 기능", sub(a, FEATURES)); }
                 }));
         col.addView(lic);
 

@@ -48,7 +48,7 @@ public final class Keystore {
                 return;
             }
             blob = "f1:" + f;
-            Log.add(c, "이 기기는 보안 키저장소를 사용할 수 없어 기기지문 방식으로 설정키를 보관했습니다.");
+            Log.add(c, "이 기기는 보안 키저장소를 사용할 수 없어 기기 고유정보 방식으로 설정키를 보관했습니다.");
         }
         Prefs.putStr(c, BLOB_KEY, blob);
         Prefs.clearCache();

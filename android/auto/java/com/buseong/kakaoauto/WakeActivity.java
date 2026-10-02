@@ -207,7 +207,7 @@ public final class WakeActivity extends Activity {
         String pkg = run.getPackage();
         if (pkg == null && run.getComponent() != null) pkg = run.getComponent().getPackageName();
         if (!"com.kakao.talk".equals(pkg)) {
-            Log.add(this, "화면 절전 해제 실패: 실행할 카카오톡 인텐트가 전달되지 않았습니다.");
+            Log.add(this, "화면 절전 해제 실패: 실행할 카카오톡 실행 정보가 전달되지 않았습니다.");
             return null;
         }
         return run;
@@ -228,7 +228,7 @@ public final class WakeActivity extends Activity {
         try { h.removeCallbacksAndMessages(null); } catch (Throwable ignore) { }
 
         if (run == null) {
-            report(id, false, "실행할 카카오톡 인텐트가 전달되지 않았습니다");
+            report(id, false, "실행할 카카오톡 실행 정보가 전달되지 않았습니다");
             finish();
             return;
         }

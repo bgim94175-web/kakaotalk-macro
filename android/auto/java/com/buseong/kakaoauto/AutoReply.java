@@ -140,7 +140,7 @@ public final class AutoReply {
                 // 정규식이 깨진 규칙은 건너뛰되 사용자에게 알린다 (조용히 삼키지 않는다)
                 if (Settings.MODE_REGEX.equals(rule.mode) && compiled(rule.pattern, rule.ignoreCase) == null) {
                     warn(c, "ruleregex:" + rule.id, "자동응답 키워드 규칙 「" + rule.title()
-                            + "」 정규식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
+                            + "」 패턴 형식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
                     continue;
                 }
                 if (!ruleMatches(rule, text)) continue;
@@ -195,7 +195,7 @@ public final class AutoReply {
         if (msg == null || msg.trim().length() == 0) {
             refundRule(c, rkey, stamp);
             warn(c, "rulerender:" + rule.id,
-                    "자동응답 키워드 규칙 「" + rule.title() + "」 메시지가 치환 후 비어 있습니다. 규칙 내용을 확인하십시오.");
+                    "자동응답 키워드 규칙 「" + rule.title() + "」 메시지에 들어갈 내용이 없습니다. 규칙 내용을 확인하십시오.");
             return;
         }
 
@@ -253,7 +253,7 @@ public final class AutoReply {
         final String msg = cfg.render(who.length() > 0 ? who : room.name, now);
         if (msg == null || msg.trim().length() == 0) {
             refund(c, key, stamp);
-            warn(c, "render", "자동응답 메시지가 치환 후 비어 있습니다. 메시지 내용을 확인하십시오.");
+            warn(c, "render", "자동응답 메시지에 들어갈 내용이 없습니다. 메시지 내용을 확인하십시오.");
             return;
         }
 

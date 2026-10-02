@@ -105,7 +105,7 @@ public final class AlarmReceiver extends BroadcastReceiver {
             th.start();
         } catch (Throwable t) {
             // 스레드조차 못 만드는 상황. 조용히 버리지 말고 로그는 남긴다.
-            Log.add(c, "알람 처리 스레드를 생성하지 못했습니다: " + t);
+            Log.add(c, "알람 처리 작업을 생성하지 못했습니다: " + t);
             if (finish != null) {
                 try { finish.run(); } catch (Throwable ignore) { /* 무시 */ }
             }

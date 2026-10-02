@@ -54,7 +54,7 @@ public final class App extends Application {
                 try {
                     StringWriter sw = new StringWriter();
                     PrintWriter pw = new PrintWriter(sw);
-                    pw.println("스레드: " + (t == null ? "?" : t.getName()));
+                    pw.println("작업: " + (t == null ? "?" : t.getName()));
                     pw.println("시각: " + stamp(System.currentTimeMillis()));
                     pw.println("앱: KakaoAdmin v2.0");
                     pw.println("기기: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL

@@ -176,7 +176,7 @@ public final class ImageSender {
         boolean multiExported = true;
         boolean singleExported = true;
         /**
-         * 조회 자체가 실패했나 (예외). <b>"받을 액티비티가 없다" 와 절대 같게 취급하지 않는다</b> —
+         * 조회 자체가 실패했나 (예외). <b>"받을 앱이 없다" 와 절대 같게 취급하지 않는다</b> —
          * 조회 실패를 없음으로 읽으면 실제로는 보낼 수 있는 상황에서 전송을 스스로 포기한다.
          */
         boolean queryFailed = false;
@@ -206,7 +206,7 @@ public final class ImageSender {
         final Done onDone;
 
         /**
-         * 경로별 결과 한 줄씩 ("채팅방 첨부 → 대화방 열기 인텐트 없음"). 로그·진단에 그대로 찍는다.
+         * 경로별 결과 한 줄씩 ("채팅방 첨부 → 대화방 열기 정보 없음"). 로그·진단에 그대로 찍는다.
          * 이게 없으면 "실패했다" 만 남아서 어느 경로가 왜 막혔는지 아무도 모른다.
          */
         final ArrayList<String> routes = new ArrayList<String>(4);
@@ -306,7 +306,7 @@ public final class ImageSender {
      * (이름을 따로 둔 이유: send(.., null) 호출부가 있어서 오버로드로 만들면 컴파일이 모호해진다)
      */
     public static void sendWithResult(Context ctx, RoomRef room, List<String> uris, final Done onDone) {
-        if (ctx == null) { fire(onDone, false, "앱 컨텍스트가 없습니다."); return; }
+        if (ctx == null) { fire(onDone, false, "앱 정보를 읽지 못했습니다."); return; }
         Context app = ctx.getApplicationContext();
         if (app == null) app = ctx;
         final Context c = app;
@@ -391,9 +391,9 @@ public final class ImageSender {
         main().post(new Runnable() {
             @Override public void run() {
                 if (QUEUE.size() >= MAX_QUEUE) {
-                    Log.add(c, "이미지 전송 대기열이 한도(" + MAX_QUEUE + "건)에 도달했습니다. 대화방 "
+                    Log.add(c, "이미지 전송 대기 목록이 한도(" + MAX_QUEUE + "건)에 도달했습니다. 대화방 "
                             + label + " 건은 취소되었습니다.");
-                    fire(onDone, false, "전송 대기열이 한도에 도달했습니다.");
+                    fire(onDone, false, "전송 대기 목록이 한도에 도달했습니다.");
                     return;
                 }
                 seq++;
@@ -657,12 +657,12 @@ public final class ImageSender {
             if (!replyImageEnabled(c)) return "건너뜀(설정에서 비활성)";
             if (!KakaoListener.listenerBound()) {
                 return KakaoListener.connected(c)
-                        ? "사용 불가(알림 리스너 미연결 — 카카오톡 알림 1회 수신 필요)"
+                        ? "사용 불가(알림 읽기 권한 미연결 — 카카오톡 알림 1회 수신 필요)"
                         : "사용 불가(알림 읽기 권한 비활성)";
             }
             java.util.Set<String> t = KakaoListener.imageTypesFor(ref);
             if (t == null || t.isEmpty()) {
-                return "사용 불가(카카오톡이 답장창에 이미지 타입을 제공하지 않거나 대화방 세션 없음)";
+                return "사용 불가(카카오톡이 답장창에 이미지 타입을 제공하지 않거나 대화방 연결 없음)";
             }
             return "사용 불가(원인 미확정)";
         } catch (Throwable t) {
@@ -874,7 +874,7 @@ public final class ImageSender {
 
         // 2) 채팅방을 여는 수단이 있나. 알림 contentIntent 가 유일한 직행 수단이다.
         if (openIntent(j) == null) {
-            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 없음 — 해당 대화방의 카카오톡 알림이 "
+            route(j, R_ATTACH, "사용 불가(대화방 열기 정보 없음 — 해당 대화방의 카카오톡 알림이 "
                     + "1회 이상 수신되어야 생성됨)");
             return false;
         }
@@ -896,7 +896,7 @@ public final class ImageSender {
     private static boolean attachAttempt(final Job j) {
         android.app.PendingIntent open = openIntent(j);
         if (open == null) {
-            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 만료 — 카카오톡이 해당 알림을 정리함)");
+            route(j, R_ATTACH, "사용 불가(대화방 열기 정보 만료 — 카카오톡이 해당 알림을 정리함)");
             return false;
         }
 
@@ -920,7 +920,7 @@ public final class ImageSender {
         } catch (android.app.PendingIntent.CanceledException e) {
             KakaoAccessibility.disarm();
             j.attachTried = false;
-            route(j, R_ATTACH, "사용 불가(대화방 열기 인텐트 만료 — 카카오톡이 해당 알림을 정리함)");
+            route(j, R_ATTACH, "사용 불가(대화방 열기 정보 만료 — 카카오톡이 해당 알림을 정리함)");
             return false;
         } catch (Throwable t) {
             KakaoAccessibility.disarm();
@@ -1111,7 +1111,7 @@ public final class ImageSender {
 
         // ── 원인 (a) 판별: 카톡에 받을 액티비티가 아예 없나 ──
         //  매니페스트에 <queries><package com.kakao.talk> 가 있어서 QUERY_ALL_PACKAGES 없이 조회된다.
-        //  "받을 액티비티 없음" 과 "던졌는데 응답 없음" 은 완전히 다른 원인인데,
+        //  "받을 앱 없음" 과 "던졌는데 응답 없음" 은 완전히 다른 원인인데,
         //  이 조회 없이는 둘을 절대 구별할 수 없다.
         Share sh = resolveShare(j.app);
         j.share = sh;
@@ -1185,7 +1185,7 @@ public final class ImageSender {
             }
         }, j.app);
 
-        Log.add(j.app, "이미지 " + j.batch.size() + "장의 공유창을 실행합니다(폴백 경로). 대화방: " + j.label
+        Log.add(j.app, "이미지 " + j.batch.size() + "장의 공유창을 실행합니다(예비 방식). 대화방: " + j.label
                 + " · 앱 상태: " + fgText(fg)
                 + " · 화면: " + (ready ? "사용 가능" : screenState(j.app))
                 + " · 수신 대상: " + sh(j).text());
@@ -1236,7 +1236,7 @@ public final class ImageSender {
         Intent i = shareIntent(j, P_COMPONENT.equals(path));
         if (i == null) {
             // 공유창을 띄우기도 전에 죽는다 → 접근성 덤프가 없다. 최소 진단이라도 남긴다.
-            diag(j, "이미지 주소(URI) 파싱 실패 — 공유 인텐트를 생성하지 못했습니다.", 0L,
+            diag(j, "이미지 주소를 읽지 못해 공유 요청을 만들지 못했습니다.", 0L,
                     "첨부 " + j.batch.size() + "개 전부 Uri.parse 단계에서 실패했습니다.");
             KakaoAccessibility.disarm();
             Log.add(j.app, "이미지 전송 실패: 이미지 주소가 손상되었습니다. 진단 기록을 저장했습니다"
@@ -1573,7 +1573,7 @@ public final class ImageSender {
         String now = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date());
         b.append("=== 이미지 전송 진단 ").append(now).append(" ===\n");
         b.append("※ 카카오톡 화면에 도달하기 전에 실패했거나 접근성 서비스가 응답하지 않은 상태입니다.\n");
-        b.append("   화면 뷰 트리 기록이 없으므로 아래 항목(특히 「전송 경로」)으로 원인을 판단합니다.\n");
+        b.append("   화면 구성 기록이 없으므로 아래 항목(특히 「전송 경로」)으로 원인을 판단합니다.\n");
         b.append("단계: ").append(step).append('\n');
         if (extra != null && extra.length() > 0) b.append("힌트: ").append(extra).append('\n');
         // 이름과 계정을 절대 한 문자열로 합치지 않는다 (합쳐 쓰다 화면 매칭이 깨진 적이 있다)
@@ -1587,7 +1587,7 @@ public final class ImageSender {
         b.append("전송 경로: ").append(routeText(j)).append('\n');
         b.append(attachBlock(j));
         b.append("앱 상태: ").append(fgText(j.fg))
-                .append(" ← ActivityManager 프로세스 중요도 판정").append('\n');
+                .append(" ← 안드로이드가 판정한 앱 상태").append('\n');
         b.append("화면: ").append(screenState(j.app))
                 .append(" · 절전 해제: ").append(j.woke ? "시도함(WakeActivity)" : "불필요(화면 켜짐 상태)")
                 .append('\n');
@@ -1599,7 +1599,7 @@ public final class ImageSender {
         }
         b.append("카카오톡 공유 수신 대상: ").append(sh(j).text()).append('\n');
         b.append("시도한 실행 경로: ").append(j.trail.isEmpty() ? "없음" : trailText(j)).append('\n');
-        b.append("공유 인텐트 전달 시각: ")
+        b.append("공유 요청 전달 시각: ")
                 .append(j.launchedAt == 0L ? "전달되지 않음"
                         : (new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(j.launchedAt))
                            + " (" + ((System.currentTimeMillis() - j.launchedAt) / 1000) + "초 전)"))
@@ -1622,7 +1622,7 @@ public final class ImageSender {
         b.append("알림 답장 이미지 첨부: ");
         try {
             java.util.Set<String> t = KakaoListener.imageTypesFor(j.ref);
-            b.append((t == null || t.isEmpty()) ? "불가(카카오톡이 이미지 타입을 제공하지 않거나 대화방 세션 없음)"
+            b.append((t == null || t.isEmpty()) ? "불가(카카오톡이 이미지 타입을 제공하지 않거나 대화방 연결 없음)"
                     : ("가능 " + t));
         } catch (Throwable t) {
             b.append("확인 실패 (").append(t.getClass().getSimpleName()).append(")");
@@ -1654,7 +1654,7 @@ public final class ImageSender {
                 .append(" · 시도 ").append(yn(j.attachTried))
                 .append(j.attachTried ? (" · 이미지 시각 후보 " + (j.attachVariant + 1) + "번까지 시도") : "")
                 .append('\n');
-        b.append("대화방 열기 인텐트(알림 contentIntent): ");
+        b.append("대화방 열기 정보(카카오톡 알림): ");
         try {
             b.append(KakaoListener.openIntentFor(j.ref) != null ? "보유"
                     : "없음(해당 대화방 알림 미수신 — 채팅방을 열 수단이 없습니다)");
@@ -1709,7 +1709,7 @@ public final class ImageSender {
      * 현장에서 자주 나오는데 로그만 보면 절대 모르는 항목이다.
      */
     public static String otherAccessibility(Context c) {
-        if (c == null) return "조회 실패 — 컨텍스트 없음";
+        if (c == null) return "조회 실패 — 앱 정보 없음";
         try {
             String flat = android.provider.Settings.Secure.getString(c.getContentResolver(),
                     android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);

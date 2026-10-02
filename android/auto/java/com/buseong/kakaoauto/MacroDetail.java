@@ -118,8 +118,8 @@ public final class MacroDetail {
                 col.addView(prev);
 
                 col.addView(Nav.note(a, "입력한 내용이 그대로 발송되며 여러 줄 입력이 유지됩니다.\n"
-                        + "이 메시지는 전역 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 발송됩니다.\n"
-                        + "치환 토큰은 메시지 추적·자동응답에서만 적용됩니다.", Theme.ACCENT2, null, null));
+                        + "이 메시지는 전체 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 발송됩니다.\n"
+                        + "{방} {이름} 같은 표시는 메시지 추적·자동응답에서만 쓸 수 있습니다.", Theme.ACCENT2, null, null));
             }
         });
     }
@@ -155,7 +155,7 @@ public final class MacroDetail {
                         new Runnable() {
                             @Override public void run() { editCooldown(a, s); }
                         }));
-                g.addView(Ui.navRow(a, "최소 신규 메시지", s.macro.minMessages + "개", Theme.TEXT,
+                g.addView(Ui.navRow(a, "새 메시지 최소 개수", s.macro.minMessages + "개", Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { editMinMessages(a, s); }
                         }));
@@ -163,7 +163,7 @@ public final class MacroDetail {
 
                 col.addView(Nav.note(a, "발송 후 다음 발송까지 대기하는 시간입니다."
                         + " 최소~최대 사이의 임의 시각에 발송됩니다.\n"
-                        + "이 값은 전역 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 적용됩니다.",
+                        + "이 값은 전체 기본값입니다. 계정별 기본값·대화방별 설정이 있으면 그 값이 우선 적용됩니다.",
                         Theme.ACCENT2, null, null));
             }
         });
@@ -189,14 +189,14 @@ public final class MacroDetail {
     }
 
     private static void editMinMessages(final MainActivity a, final Settings s) {
-        final Nav.NumField mm = new Nav.NumField("최소 신규 메시지 수", "1", 0, 200, s.macro.minMessages);
-        Nav.editNums(a, "최소 신규 메시지",
+        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수 수", "1", 0, 200, s.macro.minMessages);
+        Nav.editNums(a, "새 메시지 최소 개수",
                 "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 대화방에만 발송합니다. 0은 항상 발송입니다.",
                 new Nav.NumField[] { mm }, new Nav.OnNums() {
                     @Override public String ok() {
                         s.macro.minMessages = mm.value;
                         save(a, s);
-                        Log.add(a, "최소 신규 메시지를 " + mm.value + "개로 변경했습니다.");
+                        Log.add(a, "새 메시지 최소 개수를 " + mm.value + "개로 변경했습니다.");
                         return null;
                     }
                 });
@@ -244,13 +244,13 @@ public final class MacroDetail {
                 // ── 전송 방식 ──
                 col.addView(Ui.sectionHeader(a, null, "전송 방식"));
                 LinearLayout g = Ui.group(a);
-                g.addView(Ui.navRow(a, "전송 모드", ScreenMacro.imgModeKr(s.macro.sendImages),
+                g.addView(Ui.navRow(a, "첨부 방식", ScreenMacro.imgModeKr(s.macro.sendImages),
                         Settings.IMG_NEVER.equals(s.macro.sendImages) ? Theme.DIM : Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { pickImgMode(a, s); }
                         }));
                 if (Settings.IMG_EVERY_N.equals(s.macro.sendImages)) {
-                    g.addView(Ui.navRow(a, "전송 주기", s.macro.imageEveryN + "회마다", Theme.TEXT,
+                    g.addView(Ui.navRow(a, "첨부 간격", s.macro.imageEveryN + "회마다", Theme.TEXT,
                             new Runnable() {
                                 @Override public void run() { editEveryN(a, s); }
                             }));
@@ -454,7 +454,7 @@ public final class MacroDetail {
     }
 
     private static void pickImgMode(final MainActivity a, final Settings s) {
-        String[] labels = { "안 보냄", "매번", "N회마다", "수동 전송만" };
+        String[] labels = { "안 보냄", "매번", "정해진 횟수마다", "수동 전송만" };
         String[] descs = {
                 "이미지를 첨부하지 않습니다",
                 "발송 시마다 이미지를 함께 전송합니다",
@@ -465,12 +465,12 @@ public final class MacroDetail {
         for (int i = 0; i < Settings.IMG_MODES.length; i++) {
             if (Settings.IMG_MODES[i].equals(s.macro.sendImages)) sel = i;
         }
-        Nav.choose(a, "전송 모드", labels, descs, sel, new Nav.OnPick() {
+        Nav.choose(a, "첨부 방식", labels, descs, sel, new Nav.OnPick() {
             @Override public void pick(int index) {
                 if (index < 0 || index >= Settings.IMG_MODES.length) return;
                 s.macro.sendImages = Settings.IMG_MODES[index];
                 save(a, s);
-                Log.add(a, "이미지 전송 모드를 「" + ScreenMacro.imgModeKr(s.macro.sendImages)
+                Log.add(a, "이미지 첨부 방식을 「" + ScreenMacro.imgModeKr(s.macro.sendImages)
                         + "」 로 변경했습니다.");
             }
         });
@@ -478,12 +478,12 @@ public final class MacroDetail {
 
     private static void editEveryN(final MainActivity a, final Settings s) {
         final Nav.NumField n = new Nav.NumField("발송 횟수 (N)", "3", 1, 100, s.macro.imageEveryN);
-        Nav.editNums(a, "전송 주기", "3으로 설정하면 3·6·9번째 발송에 이미지가 첨부됩니다.",
+        Nav.editNums(a, "첨부 간격", "3으로 설정하면 3·6·9번째 발송에 이미지가 첨부됩니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         s.macro.imageEveryN = n.value;
                         save(a, s);
-                        Log.add(a, "이미지 전송 주기를 " + n.value + "회마다로 변경했습니다.");
+                        Log.add(a, "이미지 첨부 간격을 " + n.value + "회마다로 변경했습니다.");
                         return null;
                     }
                 });
@@ -607,7 +607,7 @@ public final class MacroDetail {
                 final Settings s = Settings.load(a);
 
                 col.addView(Ui.sectionHeader(a, null, "추적 규칙"));
-                col.addView(Ui.sub(a, "지정한 문자열이 감지되면 즉시 발송합니다. 발송 주기와 독립적으로 동작합니다."));
+                col.addView(Ui.sub(a, "지정한 단어가 감지되면 즉시 발송합니다. 발송 주기와 독립적으로 동작합니다."));
                 col.addView(Nav.gap(a, 12));
 
                 if (s.triggers.isEmpty()) {
@@ -704,7 +704,7 @@ public final class MacroDetail {
         final android.widget.EditText name = line(a, "예) 출석 확인", "");
         body.addView(name);
 
-        body.addView(fieldLabel(a, "감지 문자열", 14));
+        body.addView(fieldLabel(a, "감지할 단어", 14));
         final android.widget.EditText pat = line(a, "예) 출석", "");
         body.addView(pat);
         final TextView patErr = Nav.errLine(a);
@@ -722,7 +722,7 @@ public final class MacroDetail {
                 Nav.errClear(replyErr);
                 String p = pat.getText().toString();
                 if (p.trim().length() == 0) {
-                    Nav.errText(patErr, "감지 문자열을 입력하십시오");
+                    Nav.errText(patErr, "감지할 단어을 입력하십시오");
                     return "";
                 }
                 String rp = reply.getText().toString();
@@ -771,11 +771,11 @@ public final class MacroDetail {
                         new Runnable() {
                             @Override public void run() { editTrigName(a, s, t); }
                         }));
-                g1.addView(Ui.navRow(a, "감지 문자열", Nav.preview(t.pattern, 18), Theme.TEXT,
+                g1.addView(Ui.navRow(a, "감지할 단어", Nav.preview(t.pattern, 18), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { editTrigPattern(a, s, t); }
                         }));
-                g1.addView(Ui.navRow(a, "비교 방식", modeKr(t.mode), Theme.TEXT, new Runnable() {
+                g1.addView(Ui.navRow(a, "찾는 방식", modeKr(t.mode), Theme.TEXT, new Runnable() {
                     @Override public void run() { pickTrigMode(a, s, t); }
                 }));
                 col.addView(g1);
@@ -820,7 +820,7 @@ public final class MacroDetail {
                         autoTarget ? Theme.SUB : Theme.TEXT, new Runnable() {
                             @Override public void run() { pickTrigTarget(a, s, t); }
                         }));
-                g2.addView(Ui.navRow(a, "랜덤 지연",
+                g2.addView(Ui.navRow(a, "랜덤 대기",
                         (t.delayMs <= 0) ? "없음" : ("0~" + (t.delayMs / 1000) + "초"),
                         (t.delayMs <= 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
                             @Override public void run() { editTrigDelay(a, s, t); }
@@ -837,7 +837,7 @@ public final class MacroDetail {
                         ScreenMacro.refresh();
                     }
                 }));
-                g3.addView(Ui.navRow(a, "재발동 간격", Nav.dur(t.cooldownMs), Theme.TEXT, new Runnable() {
+                g3.addView(Ui.navRow(a, "다시 감지까지 대기", Nav.dur(t.cooldownMs), Theme.TEXT, new Runnable() {
                     @Override public void run() { editTrigCooldown(a, s, t); }
                 }));
                 g3.addView(Ui.navRowSwitch(a, "대화방별 1회", "한 대화방에서 1회 발동하면 이후 발송하지 않습니다.",
@@ -856,21 +856,21 @@ public final class MacroDetail {
                         fired = new ArrayList<RoomRef>();
                     }
                     final int n = fired.size();
-                    g3.addView(Ui.navRow(a, "발동 기록", (n == 0) ? "없음" : (n + "개 대화방"),
+                    g3.addView(Ui.navRow(a, "감지 기록", (n == 0) ? "없음" : (n + "개 대화방"),
                             (n == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
                                 @Override public void run() {
                                     if (n == 0) {
-                                        Ui.toast(a, "발동 기록이 없습니다.");
+                                        Ui.toast(a, "감지 기록이 없습니다.");
                                         return;
                                     }
-                                    Nav.confirm(a, "발동 기록 초기화",
-                                            "대화방 " + n + "개의 발동 기록을 삭제합니다. 해당 대화방에서 다시 발동합니다.",
+                                    Nav.confirm(a, "감지 기록 초기화",
+                                            "대화방 " + n + "개의 감지 기록을 삭제합니다. 해당 대화방에서 다시 발동합니다.",
                                             "초기화", new Runnable() {
                                                 @Override public void run() {
                                                     try { Trigger.resetState(a, t.id); }
                                                     catch (Throwable e) { /* 무해 */ }
                                                     Log.add(a, "규칙 「" + t.title()
-                                                            + "」 의 발동 기록을 초기화했습니다.");
+                                                            + "」 의 감지 기록을 초기화했습니다.");
                                                     refresh();
                                                 }
                                             });
@@ -903,7 +903,7 @@ public final class MacroDetail {
     private static void editTrigName(final MainActivity a, final Settings s,
                                      final Settings.TriggerCfg t) {
         Nav.editText(a, "규칙 이름", "예) 출석 확인", t.name, false,
-                "목록에 표시되는 이름입니다. 비워두면 감지 문자열이 표시됩니다.", new Nav.OnText() {
+                "목록에 표시되는 이름입니다. 비워두면 감지할 단어이 표시됩니다.", new Nav.OnText() {
                     @Override public String text(String value) {
                         t.name = (value == null) ? "" : value.trim();
                         save(a, s);
@@ -914,15 +914,15 @@ public final class MacroDetail {
 
     private static void editTrigPattern(final MainActivity a, final Settings s,
                                         final Settings.TriggerCfg t) {
-        Nav.editText(a, "감지 문자열", "예) 출석", t.pattern, false,
-                "이 문자열이 감지되면 발송합니다.", new Nav.OnText() {
+        Nav.editText(a, "감지할 단어", "예) 출석", t.pattern, false,
+                "이 단어가 감지되면 발송합니다.", new Nav.OnText() {
                     @Override public String text(String value) {
                         String old = t.pattern;
                         t.pattern = (value == null) ? "" : value;
                         String bad = trigCheck(t);
                         if (bad != null) { t.pattern = old; return bad; }
                         save(a, s);
-                        Log.add(a, "규칙 「" + t.title() + "」 의 감지 문자열을 변경했습니다.");
+                        Log.add(a, "규칙 「" + t.title() + "」 의 감지할 단어을 변경했습니다.");
                         return null;
                     }
                 });
@@ -931,7 +931,7 @@ public final class MacroDetail {
     private static void editTrigReply(final MainActivity a, final Settings s,
                                       final Settings.TriggerCfg t) {
         Nav.editText(a, "발송 메시지", "발송할 내용을 입력하십시오", t.reply, true,
-                "{방} {이름} {메시지} {시간} 이 치환됩니다. 최대 2000자.", new Nav.OnText() {
+                "{방} {이름} {메시지} {시간} 은 실제 값으로 바뀝니다. 최대 2000자.", new Nav.OnText() {
                     @Override public String text(String value) {
                         String old = t.reply;
                         t.reply = (value == null) ? "" : value;
@@ -950,11 +950,11 @@ public final class MacroDetail {
         for (int i = 0; i < Settings.MODES.length; i++) {
             if (Settings.MODES[i].equals(t.mode)) sel = i;
         }
-        Nav.choose(a, "비교 방식", new String[] { "포함", "정확히", "시작", "정규식" },
+        Nav.choose(a, "찾는 방식", new String[] { "포함", "정확히", "시작", "정규식(고급)" },
                 new String[] { "메시지에 포함되면 감지합니다",
                         "메시지 전체가 일치할 때만 감지합니다",
-                        "메시지가 이 문자열로 시작할 때 감지합니다",
-                        "정규식으로 감지합니다. 형식 오류는 저장 시 안내됩니다" },
+                        "메시지가 이 단어로 시작할 때 감지합니다",
+                        "고급 패턴 문법으로 감지합니다. 잘 모르면 「포함」을 쓰십시오" },
                 sel, new Nav.OnPick() {
                     @Override public void pick(int index) {
                         if (index < 0 || index >= Settings.MODES.length) return;
@@ -967,7 +967,7 @@ public final class MacroDetail {
                             return;
                         }
                         save(a, s);
-                        Log.add(a, "규칙 「" + t.title() + "」 의 비교 방식을 "
+                        Log.add(a, "규칙 「" + t.title() + "」 의 찾는 방식을 "
                                 + modeKr(t.mode) + " 로 변경했습니다.");
                     }
                 });
@@ -976,7 +976,7 @@ public final class MacroDetail {
     private static void editTrigDelay(final MainActivity a, final Settings s,
                                       final Settings.TriggerCfg t) {
         final Nav.NumField n = new Nav.NumField("최대 지연 (초)", "0", 0, 60, t.delayMs / 1000);
-        Nav.editNums(a, "랜덤 지연", "0부터 이 값 사이에서 임의로 지연한 후 발송합니다. 0은 즉시 발송입니다.",
+        Nav.editNums(a, "랜덤 대기", "0부터 이 값 사이에서 임의로 지연한 후 발송합니다. 0은 즉시 발송입니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         int old = t.delayMs;
@@ -991,9 +991,9 @@ public final class MacroDetail {
 
     private static void editTrigCooldown(final MainActivity a, final Settings s,
                                          final Settings.TriggerCfg t) {
-        final Nav.NumField n = new Nav.NumField("재발동 간격 (초)", "60", 0, 86400,
+        final Nav.NumField n = new Nav.NumField("다시 감지까지 대기 (초)", "60", 0, 86400,
                 (int) (t.cooldownMs / 1000L));
-        Nav.editNums(a, "재발동 간격", "이 시간 내에는 같은 규칙이 다시 발동하지 않습니다.",
+        Nav.editNums(a, "다시 감지까지 대기", "이 시간 내에는 같은 규칙이 다시 발동하지 않습니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         long old = t.cooldownMs;
@@ -1066,7 +1066,7 @@ public final class MacroDetail {
     private static String modeKr(String mode) {
         if (Settings.MODE_EXACT.equals(mode)) return "정확히";
         if (Settings.MODE_STARTS.equals(mode)) return "시작";
-        if (Settings.MODE_REGEX.equals(mode)) return "정규식";
+        if (Settings.MODE_REGEX.equals(mode)) return "정규식(고급)";
         return "포함";
     }
 
@@ -1131,7 +1131,7 @@ public final class MacroDetail {
                 g2.addView(Ui.navRow(a, "재응답 간격", Nav.dur(r.cooldownMs), Theme.TEXT, new Runnable() {
                     @Override public void run() { editReplyCooldown(a, s, r); }
                 }));
-                g2.addView(Ui.navRow(a, "랜덤 지연",
+                g2.addView(Ui.navRow(a, "랜덤 대기",
                         (r.delayMaxMs <= 0) ? "없음" : ("0~" + (r.delayMaxMs / 1000) + "초"),
                         (r.delayMaxMs <= 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
                             @Override public void run() { editReplyDelay(a, s, r); }
@@ -1150,7 +1150,7 @@ public final class MacroDetail {
                 // '모든 1:1 응답'(위 사용 토글)과 별개로, 특정 문자열이 감지되면 지정한 답장을 보낸다.
                 // 규칙에 매치되면 일반 응답보다 먼저 발송된다.
                 col.addView(Ui.sectionHeader(a, null, "키워드 규칙"));
-                col.addView(Ui.sub(a, "특정 문자열이 감지되면 지정한 답장을 발송합니다."
+                col.addView(Ui.sub(a, "특정 단어가 감지되면 지정한 답장을 발송합니다."
                         + " 규칙에 매치되면 일반 응답보다 먼저 적용됩니다."));
                 col.addView(Nav.gap(a, 12));
 
@@ -1241,7 +1241,7 @@ public final class MacroDetail {
     private static void newKeyword(final MainActivity a, final Settings s,
                                    final Settings.AutoReplyCfg r) {
         LinearLayout body = Nav.col(a);
-        body.addView(fieldLabel(a, "감지 문자열", 0));
+        body.addView(fieldLabel(a, "감지할 단어", 0));
         final android.widget.EditText pat = line(a, "예) 문의", "");
         body.addView(pat);
         final TextView patErr = Nav.errLine(a);
@@ -1259,7 +1259,7 @@ public final class MacroDetail {
                 Nav.errClear(replyErr);
                 String p = pat.getText().toString();
                 if (p.trim().length() == 0) {
-                    Nav.errText(patErr, "감지 문자열을 입력하십시오");
+                    Nav.errText(patErr, "감지할 단어을 입력하십시오");
                     return "";
                 }
                 String rp = reply.getText().toString();
@@ -1295,11 +1295,11 @@ public final class MacroDetail {
                 // ── 감지 조건 ──
                 col.addView(Ui.sectionHeader(a, null, "감지 조건"));
                 LinearLayout g1 = Ui.group(a);
-                g1.addView(Ui.navRow(a, "감지 문자열", Nav.preview(k.pattern, 18), Theme.TEXT,
+                g1.addView(Ui.navRow(a, "감지할 단어", Nav.preview(k.pattern, 18), Theme.TEXT,
                         new Runnable() {
                             @Override public void run() { editKwPattern(a, s, r, k); }
                         }));
-                g1.addView(Ui.navRow(a, "비교 방식", modeKr(k.mode), Theme.TEXT, new Runnable() {
+                g1.addView(Ui.navRow(a, "찾는 방식", modeKr(k.mode), Theme.TEXT, new Runnable() {
                     @Override public void run() { pickKwMode(a, s, r, k); }
                 }));
                 g1.addView(Ui.navRowSwitch(a, "대소문자 무시", null, k.ignoreCase, new Ui.OnToggle() {
@@ -1317,7 +1317,7 @@ public final class MacroDetail {
                         new Runnable() {
                             @Override public void run() { editKwReply(a, s, r, k); }
                         }));
-                g2.addView(Ui.navRow(a, "쿨다운", Nav.dur(k.cooldownMs), Theme.TEXT, new Runnable() {
+                g2.addView(Ui.navRow(a, "쿨타임", Nav.dur(k.cooldownMs), Theme.TEXT, new Runnable() {
                     @Override public void run() { editKwCooldown(a, s, r, k); }
                 }));
                 col.addView(g2);
@@ -1334,8 +1334,8 @@ public final class MacroDetail {
                 }));
                 col.addView(g3);
 
-                col.addView(Nav.note(a, "쿨다운은 같은 상대에게 이 규칙을 다시 적용하기까지의 최소 간격입니다."
-                        + " 답장에는 {이름} {시간} {날짜} 이 치환됩니다.", Theme.ACCENT2, null, null));
+                col.addView(Nav.note(a, "쿨타임은 같은 상대에게 이 규칙을 다시 적용하기까지의 최소 간격입니다."
+                        + " 답장의 {이름} {시간} {날짜} 은 실제 값으로 바뀝니다.", Theme.ACCENT2, null, null));
 
                 TextView del = Ui.btn(a, "규칙 삭제", false);
                 del.setTextColor(Theme.RED);
@@ -1360,15 +1360,15 @@ public final class MacroDetail {
 
     private static void editKwPattern(final MainActivity a, final Settings s,
                                       final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
-        Nav.editText(a, "감지 문자열", "예) 문의", k.pattern, false,
-                "이 문자열이 감지되면 답장을 발송합니다.", new Nav.OnText() {
+        Nav.editText(a, "감지할 단어", "예) 문의", k.pattern, false,
+                "이 단어가 감지되면 답장을 발송합니다.", new Nav.OnText() {
                     @Override public String text(String value) {
                         String old = k.pattern;
                         k.pattern = (value == null) ? "" : value;
                         String bad = k.validate();
                         if (bad != null) { k.pattern = old; return bad; }
                         save(a, s);
-                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 감지 문자열을 변경했습니다.");
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 감지할 단어을 변경했습니다.");
                         return null;
                     }
                 });
@@ -1377,7 +1377,7 @@ public final class MacroDetail {
     private static void editKwReply(final MainActivity a, final Settings s,
                                     final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
         Nav.editText(a, "답장", "발송할 내용을 입력하십시오", k.reply, true,
-                "{이름} {시간} {날짜} 이 치환됩니다. 최대 2000자.", new Nav.OnText() {
+                "{이름} {시간} {날짜} 은 실제 값으로 바뀝니다. 최대 2000자.", new Nav.OnText() {
                     @Override public String text(String value) {
                         String old = k.reply;
                         k.reply = (value == null) ? "" : value;
@@ -1396,11 +1396,11 @@ public final class MacroDetail {
         for (int i = 0; i < Settings.MODES.length; i++) {
             if (Settings.MODES[i].equals(k.mode)) sel = i;
         }
-        Nav.choose(a, "비교 방식", new String[] { "포함", "정확히", "시작", "정규식" },
+        Nav.choose(a, "찾는 방식", new String[] { "포함", "정확히", "시작", "정규식(고급)" },
                 new String[] { "메시지에 포함되면 감지합니다",
                         "메시지 전체가 일치할 때만 감지합니다",
-                        "메시지가 이 문자열로 시작할 때 감지합니다",
-                        "정규식으로 감지합니다. 형식 오류는 저장 시 안내됩니다" },
+                        "메시지가 이 단어로 시작할 때 감지합니다",
+                        "고급 패턴 문법으로 감지합니다. 잘 모르면 「포함」을 쓰십시오" },
                 sel, new Nav.OnPick() {
                     @Override public void pick(int index) {
                         if (index < 0 || index >= Settings.MODES.length) return;
@@ -1413,7 +1413,7 @@ public final class MacroDetail {
                             return;
                         }
                         save(a, s);
-                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 비교 방식을 "
+                        Log.add(a, "키워드 규칙 「" + k.title() + "」 의 찾는 방식을 "
                                 + modeKr(k.mode) + " 로 변경했습니다.");
                     }
                 });
@@ -1421,9 +1421,9 @@ public final class MacroDetail {
 
     private static void editKwCooldown(final MainActivity a, final Settings s,
                                        final Settings.AutoReplyCfg r, final Settings.KeywordRule k) {
-        final Nav.NumField n = new Nav.NumField("쿨다운 (분)", "360", 0, 10080,
+        final Nav.NumField n = new Nav.NumField("쿨타임 (분)", "360", 0, 10080,
                 (int) (k.cooldownMs / 60000L));
-        Nav.editNums(a, "쿨다운", "같은 상대에게 이 시간 내에는 이 규칙을 다시 적용하지 않습니다.",
+        Nav.editNums(a, "쿨타임", "같은 상대에게 이 시간 내에는 이 규칙을 다시 적용하지 않습니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         k.cooldownMs = n.value * 60000L;
@@ -1436,7 +1436,7 @@ public final class MacroDetail {
     private static void editReplyMsg(final MainActivity a, final Settings s,
                                      final Settings.AutoReplyCfg r) {
         Nav.editText(a, "응답 메시지", "예) 안녕하세요 {이름}님, 확인 후 회신드립니다", r.message, true,
-                "{이름} {시간} {날짜} 이 치환됩니다. 최대 2000자.", new Nav.OnText() {
+                "{이름} {시간} {날짜} 은 실제 값으로 바뀝니다. 최대 2000자.", new Nav.OnText() {
                     @Override public String text(String value) {
                         if (value == null || value.trim().length() == 0) {
                             return "응답 메시지를 입력하십시오.";
@@ -1457,8 +1457,8 @@ public final class MacroDetail {
             if (Settings.SCOPES[i].equals(r.scope)) sel = i;
         }
         Nav.choose(a, "적용 대상",
-                new String[] { "모든 1:1", "미등록 상대만", "특정 대화방 제외" },
-                new String[] { "모든 1:1 대화에 응답합니다",
+                new String[] { "모든 1:1 대화", "저장 안 된 상대만", "특정 대화방 제외" },
+                new String[] { "모든 1:1 대화 대화에 응답합니다",
                         "이전 응답 이력이 없는 상대에게만 응답합니다",
                         "지정한 대화방을 제외하고 응답합니다" },
                 sel, new Nav.OnPick() {
@@ -1504,7 +1504,7 @@ public final class MacroDetail {
     private static void editReplyDelay(final MainActivity a, final Settings s,
                                        final Settings.AutoReplyCfg r) {
         final Nav.NumField n = new Nav.NumField("최대 지연 (초)", "30", 0, 120, r.delayMaxMs / 1000);
-        Nav.editNums(a, "랜덤 지연", "0부터 이 값 사이에서 임의로 지연한 후 응답합니다.",
+        Nav.editNums(a, "랜덤 대기", "0부터 이 값 사이에서 임의로 지연한 후 응답합니다.",
                 new Nav.NumField[] { n }, new Nav.OnNums() {
                     @Override public String ok() {
                         r.delayMaxMs = n.value * 1000;

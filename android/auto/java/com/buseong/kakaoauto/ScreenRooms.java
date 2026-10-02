@@ -317,10 +317,10 @@ public final class ScreenRooms {
                     Theme.AMBER, null, null));
         } else if (!willSend) {
             col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 대화방에는 발송되지 않습니다. "
-                    + "아래에서 이 항목만 개별 지정하거나, 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+                    + "아래에서 이 항목만 개별 지정하거나, 전체 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
         } else {
             col.addView(Nav.note(a, "현재 이 대화방은 " + cdMin + "~" + cdMax
-                    + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
+                    + "분 주기로 발송되며, 새 메시지 최소 개수는 " + mm + "개입니다.\n"
                     + "발송 메시지: " + Nav.preview(eff, 40), Theme.ACCENT2, null, null));
         }
 
@@ -357,7 +357,7 @@ public final class ScreenRooms {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 개별 설정",
+        g.addView(Ui.navRowSwitch(a, "새 메시지 최소 개수 개별 설정",
                 rc.hasMin ? null : "끄면 상위 기본값을 따릅니다.", rc.hasMin, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         rc.hasMin = v;
@@ -365,14 +365,14 @@ public final class ScreenRooms {
                     }
                 }));
         if (rc.hasMin) {
-            g.addView(Ui.navRow(a, "최소 신규 메시지", rc.minMessages + "개", Theme.TEXT, new Runnable() {
+            g.addView(Ui.navRow(a, "새 메시지 최소 개수", rc.minMessages + "개", Theme.TEXT, new Runnable() {
                 @Override public void run() { editRoomMin(a, s, ref, rc); }
             }));
         }
         col.addView(g);
 
-        col.addView(Nav.note(a, "개별 설정을 끄면 계정 기본값 또는 전역 기본값을 따릅니다. "
-                + "우선순위는 대화방 › 계정 › 전역 순입니다.", Theme.ACCENT2, null, null));
+        col.addView(Nav.note(a, "개별 설정을 끄면 계정 기본값 또는 전체 기본값을 따릅니다. "
+                + "대화방 설정이 가장 먼저 쓰이고, 없으면 계정 설정, 그다음 전체 기본값이 쓰입니다.", Theme.ACCENT2, null, null));
     }
 
     /** 방 설정을 저장하고 편집 화면·목록·매크로 탭 요약을 갱신한다 */
@@ -437,8 +437,8 @@ public final class ScreenRooms {
 
     private static void editRoomMin(final MainActivity a, final Settings s, final RoomRef ref,
                                     final Settings.RoomCfg rc) {
-        final Nav.NumField mm = new Nav.NumField("최소 신규 메시지 수", "1", 0, 999, rc.minMessages);
-        Nav.editNums(a, "최소 신규 메시지",
+        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수 수", "1", 0, 999, rc.minMessages);
+        Nav.editNums(a, "새 메시지 최소 개수",
                 "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 경우에만 발송합니다. 0은 항상 발송입니다.",
                 new Nav.NumField[] { mm }, new Nav.OnNums() {
                     @Override public String ok() {
@@ -446,7 +446,7 @@ public final class ScreenRooms {
                         if (!s.save(a)) {
                             return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
                         }
-                        Log.add(a, "「" + ref.label(a) + "」 대화방 최소 신규 메시지를 "
+                        Log.add(a, "「" + ref.label(a) + "」 대화방 새 메시지 최소 개수를 "
                                 + mm.value + "개로 변경했습니다.");
                         refreshEditor();
                         refresh();

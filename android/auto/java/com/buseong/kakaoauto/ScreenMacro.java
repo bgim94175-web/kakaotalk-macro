@@ -317,14 +317,14 @@ public final class ScreenMacro {
     }
 
     static String scopeKr(String scope) {
-        if (Settings.SCOPE_UNKNOWN.equals(scope)) return "미등록 상대만";
+        if (Settings.SCOPE_UNKNOWN.equals(scope)) return "저장 안 된 상대만";
         if (Settings.SCOPE_EXCEPT.equals(scope)) return "특정 대화방 제외";
-        return "모든 1:1";
+        return "모든 1:1 대화";
     }
 
     static String imgModeKr(String mode) {
         if (Settings.IMG_EVERY.equals(mode)) return "매번";
-        if (Settings.IMG_EVERY_N.equals(mode)) return "N회마다";
+        if (Settings.IMG_EVERY_N.equals(mode)) return "정해진 횟수마다";
         if (Settings.IMG_MANUAL.equals(mode)) return "수동 전송만";
         return "안 보냄";
     }

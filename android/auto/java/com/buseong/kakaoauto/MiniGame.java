@@ -848,8 +848,8 @@ public final class MiniGame {
         if (cfg.enabled && (cfg.rooms == null || cfg.rooms.isEmpty())) {
             return "봇이 동작할 대화방을 1개 이상 선택하십시오.";
         }
-        if (cfg.cmdPrefix == null || cfg.cmdPrefix.trim().length() == 0) return "명령 접두사를 입력하십시오.";
-        if (cfg.cooldownMs < 0) return "쿨다운은 0 이상으로 입력하십시오.";
+        if (cfg.cmdPrefix == null || cfg.cmdPrefix.trim().length() == 0) return "명령어 앞글자를 입력하십시오.";
+        if (cfg.cooldownMs < 0) return "쿨타임은 0 이상으로 입력하십시오.";
         if (cfg.dailyLimit < 0) return "일일 한도는 0 이상으로 입력하십시오.";
         boolean any = false;
         for (int i = 0; i < Settings.GAMES.length; i++) if (cfg.gameOn(Settings.GAMES[i])) any = true;
@@ -895,7 +895,7 @@ public final class MiniGame {
             }
             Long last = LAST_BOT.get(rk);
             if (last != null && now - last.longValue() < cool) {
-                note(c, "cool:" + rk, "미니게임봇 「" + label + "」 쿨다운(" + (cool / 1000)
+                note(c, "cool:" + rk, "미니게임봇 「" + label + "」 쿨타임(" + (cool / 1000)
                         + "초) 중이므로 1건을 건너뛰었습니다.");
                 return false;
             }

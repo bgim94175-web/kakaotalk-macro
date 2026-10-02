@@ -687,7 +687,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                 sb.append("실패: 접근성 서비스가 연결되지 않아 화면을 읽지 못했습니다.\n");
                 sb.append("찾으려던 이름: \"").append(r).append("\"\n");
                 if (!r.equals(raw)) sb.append("설정 저장값: \"").append(vis(raw)).append("\"\n");
-                sb.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
+                sb.append("대화방 열기 정보(카카오톡 알림): ").append(openIntentState()).append('\n');
                 sb.append(env(ctx));
                 sb.append("조치: 설정 › 접근성 › 설치된 앱 › 카톡 오토 를 재설정한 후 다시 시도하십시오.\n");
                 sb.append("=== 끝 ===\n");
@@ -2590,7 +2590,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                     .append(" · 목록 확인 ").append(sawShareList ? "있음" : "없음").append('\n');
         }
         sb.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
-        sb.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
+        sb.append("대화방 열기 정보(카카오톡 알림): ").append(openIntentState()).append('\n');
         sb.append(env(this));
         sb.append("마지막으로 본 화면: ")
                 .append(seenAt == 0 ? "없음(화면 수집 기록 없음)" : seenShape).append('\n');
@@ -3588,7 +3588,7 @@ public final class KakaoAccessibility extends AccessibilityService {
                     .append("\"  (계정키·구분자는 화면 매칭에서 제외했습니다)\n");
         }
         out.append("카카오톡 화면 이벤트: ").append(eventState()).append('\n');
-        out.append("대화방 열기 인텐트(알림 contentIntent): ").append(openIntentState()).append('\n');
+        out.append("대화방 열기 정보(카카오톡 알림): ").append(openIntentState()).append('\n');
         out.append("단계: ").append(whereNow())
                 .append(" · 대화방 선택 ").append(clickedRow ? "시도" : "없음")
                 .append(" · 전송 입력 ").append(sendTry).append("회")
@@ -3596,7 +3596,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append(env(this));
         out.append("카카오톡 버전: ").append(kakaoVersion()).append('\n');
         out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
-        out.append("마지막 액티비티/다이얼로그: ")
+        out.append("마지막 화면: ")
                 .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
 
         ArrayList<AccessibilityNodeInfo> rs = roots();
@@ -3781,7 +3781,7 @@ public final class KakaoAccessibility extends AccessibilityService {
         out.append(env(this));
         out.append("카카오톡 버전: ").append(kakaoVersion()).append('\n');
         out.append("좌표 탭 가능(canPerformGestures): ").append(canGesture() ? "Y" : "N").append('\n');
-        out.append("마지막 액티비티/다이얼로그: ")
+        out.append("마지막 화면: ")
                 .append(lastActivityCls.length() == 0 ? "확인 불가" : lastActivityCls).append('\n');
 
         ArrayList<AccessibilityNodeInfo> rs = roots();

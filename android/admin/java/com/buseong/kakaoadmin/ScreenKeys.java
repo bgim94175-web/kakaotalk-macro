@@ -421,8 +421,8 @@ public final class ScreenKeys implements MainActivity.Screen {
         box.addView(Ui.kvTight(a, "마지막 접속", Ui.fmtFull(lic.optLong("last_seen", 0))));
         box.addView(Ui.kvTight(a, "기기명", dash(str(lic, "device_name"))));
         if (str(lic, "device_id").length() > 0) box.addView(Ui.kvStack(a, "기기 ID", str(lic, "device_id")));
-        if (str(lic, "device_fp").length() > 0) box.addView(Ui.kvStack(a, "기기 지문", str(lic, "device_fp")));
-        box.addView(Ui.kvTight(a, "세션", lic.optBoolean("has_session", false)
+        if (str(lic, "device_fp").length() > 0) box.addView(Ui.kvStack(a, "기기 고유정보", str(lic, "device_fp")));
+        box.addView(Ui.kvTight(a, "대화방 연결", lic.optBoolean("has_session", false)
                 ? ("접속 중 · " + Ui.fmtMin(lic.optLong("session_at", 0))) : "없음"));
         int resets = lic.optInt("reset_count", 0);
         box.addView(Ui.kvColor(a, "기기 초기화", resets + "회"

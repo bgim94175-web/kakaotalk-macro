@@ -493,7 +493,7 @@ public final class Ui {
                     paintSegment(inner, idx);
                     if (cb != null) {
                         try { cb.pick(idx); }
-                        catch (Throwable e) { App.log(v.getContext(), "세그먼트 처리 실패: " + e); }
+                        catch (Throwable e) { App.log(v.getContext(), "탭 처리 실패: " + e); }
                     }
                 }
             });

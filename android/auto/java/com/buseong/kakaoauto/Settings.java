@@ -443,14 +443,14 @@ public final class Settings {
 
         /** 저장 전 검사. 문제가 없으면 null, 있으면 사용자에게 보여줄 한국어 문장. */
         public String validate() {
-            if (pattern == null || pattern.trim().length() == 0) return "감지할 문자열을 입력하십시오.";
+            if (pattern == null || pattern.trim().length() == 0) return "감지할 글자을 입력하십시오.";
             if (reply == null || reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
             if (MODE_REGEX.equals(mode)) {
                 try {
                     Pattern.compile(pattern);
                 } catch (Throwable t) {
                     String why = t.getMessage();
-                    return "정규식 형식이 올바르지 않습니다."
+                    return "정규식(고급) 형식이 올바르지 않습니다."
                             + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
                 }
             }
@@ -534,14 +534,14 @@ public final class Settings {
 
         /** 저장 전 검사. 문제가 없으면 null, 있으면 사용자에게 보여줄 한국어 문장. */
         public String validate() {
-            if (pattern == null || pattern.trim().length() == 0) return "감지할 문자열을 입력하십시오.";
+            if (pattern == null || pattern.trim().length() == 0) return "감지할 글자을 입력하십시오.";
             if (reply == null || reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
             if (MODE_REGEX.equals(mode)) {
                 try {
                     Pattern.compile(pattern);
                 } catch (Throwable t) {
                     String why = t.getMessage();
-                    return "정규식 형식이 올바르지 않습니다."
+                    return "정규식(고급) 형식이 올바르지 않습니다."
                             + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
                 }
             }

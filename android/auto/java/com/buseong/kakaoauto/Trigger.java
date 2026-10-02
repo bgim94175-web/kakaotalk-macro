@@ -183,7 +183,7 @@ public final class Trigger {
             // 정규식이 깨진 트리거는 건너뛰되 사용자에게 알린다
             if (Settings.MODE_REGEX.equals(t.mode) && compiled(t.pattern, t.ignoreCase) == null) {
                 warn(c, "regex:" + t.id,
-                        "메시지 추적 「" + t.title() + "」 정규식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
+                        "메시지 추적 「" + t.title() + "」 패턴 형식이 올바르지 않아 건너뛰었습니다. 설정에서 수정하십시오.");
                 continue;
             }
 
@@ -219,7 +219,7 @@ public final class Trigger {
             // 쿨다운을 소모하지 않고 넘겨서, 그 방 알림이 오면 다음에 정상 발동하게 한다.
             if (tgt.length() > 0 && !KakaoListener.hasSession(dest)) {
                 warn(c, "sess:" + t.id + ":" + dest.key(),
-                        "메시지 추적 「" + t.title() + "」 대상 대화방의 세션이 없습니다. 「" + destLabel
+                        "메시지 추적 「" + t.title() + "」 대상 대화방의 연결이 없습니다. 「" + destLabel
                                 + "」의 카카오톡 알림이 1회 수신되어야 발송이 가능합니다.");
                 continue;
             }
@@ -281,24 +281,24 @@ public final class Trigger {
     /** 문제가 없으면 null, 있으면 사용자에게 그대로 보여줄 한국어 설명. */
     public static String validate(Settings.TriggerCfg t) {
         if (t == null) return "규칙 내용이 비어 있습니다.";
-        if (t.pattern == null || t.pattern.trim().length() == 0) return "감지할 문자열을 입력하십시오.";
+        if (t.pattern == null || t.pattern.trim().length() == 0) return "감지할 글자을 입력하십시오.";
         if (t.reply == null || t.reply.trim().length() == 0) return "발송할 메시지를 입력하십시오.";
-        if (!validMode(t.mode)) return "비교 방식을 선택하십시오. (포함 · 정확히 · 시작 · 정규식)";
+        if (!validMode(t.mode)) return "찾는 방식을 선택하십시오. (포함 · 정확히 · 시작 · 정규식(고급))";
 
         if (Settings.MODE_REGEX.equals(t.mode)) {
             try {
                 Pattern.compile(t.pattern);
             } catch (Throwable e) {
                 String why = e.getMessage();
-                return "정규식 형식이 올바르지 않습니다."
+                return "정규식(고급) 형식이 올바르지 않습니다."
                         + ((why == null) ? "" : (" (" + why.replace('\n', ' ') + ")"));
             }
-            // 고쳐서 저장하는 경우가 많으니 "깨진 정규식" 표시를 풀어준다
+            // 고쳐서 저장하는 경우가 많으니 "깨진 정규식(고급)" 표시를 풀어준다
             forget(t.pattern);
         }
 
         if (t.delayMs < 0 || t.delayMs > MAX_DELAY_MS) return "지연 시간은 0~60초 범위로 입력하십시오.";
-        if (t.cooldownMs < 0) return "재발동 간격은 0 이상으로 입력하십시오.";
+        if (t.cooldownMs < 0) return "다시 감지까지 대기은 0 이상으로 입력하십시오.";
         if (t.rooms != null && t.rooms.size() > 50) return "대화방은 최대 50개까지 지정됩니다.";
         if (t.reply.length() > 2000) return "발송 메시지가 너무 깁니다. 2000자 이하로 입력하십시오.";
         return null;
@@ -590,7 +590,7 @@ public final class Trigger {
                     }
                 }
             } catch (Throwable t) {
-                Log.add(c, "메시지 추적 발동 기록이 손상되어 초기화했습니다. (" + t + ")");
+                Log.add(c, "메시지 추적 감지 기록이 손상되어 초기화했습니다. (" + t + ")");
                 CD.clear();
                 ONCE.clear();
             }
@@ -626,7 +626,7 @@ public final class Trigger {
 
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
-            Log.add(c, "메시지 추적 발동 기록을 저장하지 못했습니다. (" + t + ")");
+            Log.add(c, "메시지 추적 감지 기록을 저장하지 못했습니다. (" + t + ")");
         }
     }
 }

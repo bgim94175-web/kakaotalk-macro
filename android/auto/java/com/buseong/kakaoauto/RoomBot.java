@@ -290,7 +290,7 @@ public final class RoomBot {
         String msg = render(tpl, room.name, person, now, 0, "");
         if (msg.trim().length() == 0) {
             note(c, "jl-empty:" + (join ? "w" : "l"),
-                    "대화방 관리봇 " + kindName + " 안내가 치환 후 비어 있습니다. 메시지 내용을 확인하십시오.");
+                    "대화방 관리봇 " + kindName + " 안내에 들어갈 내용이 없습니다. 메시지 내용을 확인하십시오.");
             return;
         }
         if (send(c, cfg, room, msg, now)) {
@@ -466,7 +466,7 @@ public final class RoomBot {
         if (cfg.floodSecs < 1 || cfg.floodSecs > 600) return "도배 판정 시간은 1~600초 범위로 입력하십시오.";
         if (cfg.floodCount < 2 || cfg.floodCount > 100) return "도배 판정 개수는 2~100개 범위로 입력하십시오.";
         if (cfg.dailyLimit < 0) return "일일 한도는 0 이상으로 입력하십시오.";
-        if (cfg.cmdPrefix == null || cfg.cmdPrefix.trim().length() == 0) return "명령 접두사를 입력하십시오.";
+        if (cfg.cmdPrefix == null || cfg.cmdPrefix.trim().length() == 0) return "명령어 앞글자를 입력하십시오.";
         if (cfg.notice != null && cfg.notice.length() > 2000) return "공지가 너무 깁니다. 2000자 이하로 입력하십시오.";
         return null;
     }
@@ -747,7 +747,7 @@ public final class RoomBot {
             }
             Long last = LAST_BOT.get(rk);
             if (last != null && now - last.longValue() < ROOM_COOLDOWN_MS) {
-                note(c, "cool:" + rk, "대화방 관리봇 「" + label + "」 쿨다운("
+                note(c, "cool:" + rk, "대화방 관리봇 「" + label + "」 쿨타임("
                         + (ROOM_COOLDOWN_MS / 1000) + "초) 중이므로 1건을 건너뛰었습니다.");
                 return false;
             }

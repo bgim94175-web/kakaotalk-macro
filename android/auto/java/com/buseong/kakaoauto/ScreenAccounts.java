@@ -159,8 +159,8 @@ public final class ScreenAccounts {
         LinearLayout gm = Ui.group(a);
         gm.addView(macroRow(a, ac.key));
         col.addView(gm);
-        col.addView(Nav.note(a, "메시지·쿨타임·최소 신규 메시지를 이 계정 기준으로 개별 지정할 수 있습니다. "
-                + "설정하지 않으면 전역 기본값을 따릅니다.", Theme.ACCENT2, null, null));
+        col.addView(Nav.note(a, "메시지·쿨타임·새 메시지 최소 개수를 이 계정 기준으로 개별 지정할 수 있습니다. "
+                + "설정하지 않으면 전체 기본값을 따릅니다.", Theme.ACCENT2, null, null));
     }
 
     /** 계정 카드·정보 화면에 공통으로 붙는 「매크로 기본값 ›」 행 */
@@ -388,10 +388,10 @@ public final class ScreenAccounts {
                     Theme.AMBER, null, null));
         } else if (!willSend) {
             col.addView(Nav.note(a, "유효 발송 메시지가 비어 있어 이 계정에는 발송되지 않습니다. "
-                    + "아래에서 이 항목만 개별 지정하거나, 전역 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
+                    + "아래에서 이 항목만 개별 지정하거나, 전체 기본 메시지를 설정하십시오.", Theme.AMBER, null, null));
         } else {
             col.addView(Nav.note(a, "이 계정의 대화방은 기본적으로 " + cdMin + "~" + cdMax
-                    + "분 주기로 발송되며, 최소 신규 메시지는 " + mm + "개입니다.\n"
+                    + "분 주기로 발송되며, 새 메시지 최소 개수는 " + mm + "개입니다.\n"
                     + "발송 메시지: " + Nav.preview(msg, 40), Theme.ACCENT2, null, null));
         }
 
@@ -399,7 +399,7 @@ public final class ScreenAccounts {
         col.addView(Ui.sectionHeader(a, null, "개별 설정"));
         LinearLayout g = Ui.group(a);
 
-        g.addView(Ui.navRowSwitch(a, "메시지 개별 설정", ac.hasMsg ? null : "끄면 전역 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "메시지 개별 설정", ac.hasMsg ? null : "끄면 전체 기본값을 따릅니다.",
                 ac.hasMsg, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasMsg = v;
@@ -414,7 +414,7 @@ public final class ScreenAccounts {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "쿨타임 개별 설정", ac.hasCd ? null : "끄면 전역 기본값을 따릅니다.",
+        g.addView(Ui.navRowSwitch(a, "쿨타임 개별 설정", ac.hasCd ? null : "끄면 전체 기본값을 따릅니다.",
                 ac.hasCd, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasCd = v;
@@ -428,21 +428,21 @@ public final class ScreenAccounts {
                     }));
         }
 
-        g.addView(Ui.navRowSwitch(a, "최소 신규 메시지 개별 설정",
-                ac.hasMin ? null : "끄면 전역 기본값을 따릅니다.", ac.hasMin, new Ui.OnToggle() {
+        g.addView(Ui.navRowSwitch(a, "새 메시지 최소 개수 개별 설정",
+                ac.hasMin ? null : "끄면 전체 기본값을 따릅니다.", ac.hasMin, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         ac.hasMin = v;
                         persistAcc(a, s, null);
                     }
                 }));
         if (ac.hasMin) {
-            g.addView(Ui.navRow(a, "최소 신규 메시지", ac.minMessages + "개", Theme.TEXT, new Runnable() {
+            g.addView(Ui.navRow(a, "새 메시지 최소 개수", ac.minMessages + "개", Theme.TEXT, new Runnable() {
                 @Override public void run() { editAccMin(a, s, accName, ac); }
             }));
         }
         col.addView(g);
 
-        col.addView(Nav.note(a, "개별 설정을 끄면 전역 기본값을 따릅니다. "
+        col.addView(Nav.note(a, "개별 설정을 끄면 전체 기본값을 따릅니다. "
                 + "대화방별 설정이 있으면 그 값이 계정 기본값보다 우선합니다.", Theme.ACCENT2, null, null));
     }
 
@@ -508,8 +508,8 @@ public final class ScreenAccounts {
 
     private static void editAccMin(final MainActivity a, final Settings s, final String accName,
                                    final Settings.AccountCfg ac) {
-        final Nav.NumField mm = new Nav.NumField("최소 신규 메시지 수", "1", 0, 999, ac.minMessages);
-        Nav.editNums(a, "최소 신규 메시지",
+        final Nav.NumField mm = new Nav.NumField("새 메시지 최소 개수 수", "1", 0, 999, ac.minMessages);
+        Nav.editNums(a, "새 메시지 최소 개수",
                 "마지막 발송 이후 상대 메시지가 이 수량 이상 누적된 경우에만 발송합니다. 0은 항상 발송입니다.",
                 new Nav.NumField[] { mm }, new Nav.OnNums() {
                     @Override public String ok() {
@@ -517,7 +517,7 @@ public final class ScreenAccounts {
                         if (!s.save(a)) {
                             return "저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.";
                         }
-                        Log.add(a, "「" + accName + "」 계정 최소 신규 메시지를 "
+                        Log.add(a, "「" + accName + "」 계정 새 메시지 최소 개수를 "
                                 + mm.value + "개로 변경했습니다.");
                         refreshEditor();
                         refresh();

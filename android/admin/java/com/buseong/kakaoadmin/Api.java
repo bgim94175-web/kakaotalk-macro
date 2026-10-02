@@ -96,8 +96,8 @@ public final class Api {
         "reset", "order", "expired", "revoked", "bad_deposit_token", "bad_admin_pw"
     };
     public static volatile String[] AUDIT_KIND_LABELS = {
-        "전체", "활성화", "기기불일치", "지문변경", "서명위조", "변조탐지",
-        "기기초기화", "주문", "기간만료", "회수·차단", "입금토큰", "관리자 비번 실패"
+        "전체", "활성화", "기기불일치", "기기정보 변경", "앱 위조", "앱 변조",
+        "기기초기화", "주문", "기간만료", "회수·차단", "입금코드", "관리자 비번 실패"
     };
 
     /** 눈에 띄는 색(RED)으로 보여줄 종류 — 폴백. 서버 `alert_kinds` 가 오면 그게 우선이다. */
@@ -471,14 +471,14 @@ public final class Api {
         if (kind == null) return "-";
         if (kind.equals("activate")) return "활성화";
         if (kind.equals("mismatch")) return "기기불일치";
-        if (kind.equals("takeover")) return "지문변경";
-        if (kind.equals("bad_sig")) return "서명위조";
-        if (kind.equals("tamper")) return "변조탐지";
+        if (kind.equals("takeover")) return "기기정보 변경";
+        if (kind.equals("bad_sig")) return "앱 위조";
+        if (kind.equals("tamper")) return "앱 변조";
         if (kind.equals("expired")) return "기간만료";
         if (kind.equals("revoked")) return "회수·차단";
         if (kind.equals("reset")) return "기기초기화";
         if (kind.equals("order")) return "주문";
-        if (kind.equals("bad_deposit_token")) return "입금토큰";
+        if (kind.equals("bad_deposit_token")) return "입금코드";
         if (kind.equals("bad_admin_pw")) return "관리자 비번 실패";
         return kind;
     }
@@ -547,7 +547,7 @@ public final class Api {
                              final JSONObject body, final Cb cb) {
         final Context c = (ctx == null) ? null : ctx.getApplicationContext();
         if (c == null) {
-            if (cb != null) cb.done(err(0, "앱 상태가 비정상입니다. 앱을 다시 실행하십시오. (컨텍스트 없음)"));
+            if (cb != null) cb.done(err(0, "앱 상태가 비정상입니다. 앱을 다시 실행하십시오. (앱 정보 없음)"));
             return;
         }
         final String base = base(c);
