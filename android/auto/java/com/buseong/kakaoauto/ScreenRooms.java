@@ -29,7 +29,8 @@ import java.util.Map;
  *   - 체크하면 즉시 저장. 확인 버튼 없음.
  *   - ✕ 는 감지 목록에서 1건 삭제 (멤버 이름이 방으로 잘못 들어간 항목 정리) + 5초 실행 취소
  *   - [직접 입력 추가] 는 아직 감지 안 된 방을 손으로 넣는다
- *   - [감지 목록 초기화] 는 감지 캐시만 비우고 선택된 방은 남긴다
+ *   - [초기화] 서브화면에 세 가지가 있다 — 감지 목록만 / 개별 설정 전체 / 방 목록 전체.
+ *     보호 대화방과 전체 정지는 어떤 초기화로도 해제되지 않는다.
  *
  * 삭제를 5초 미루는 이유 — KakaoListener 에는 감지 캐시에 방을 다시 넣는 공개 API 가 없다.
  * 그래서 ✕ 를 누르면 화면에서만 먼저 감추고(PENDING), 스낵바가 사라질 때 실제로 지운다.
@@ -164,11 +165,11 @@ public final class ScreenRooms {
         });
         col.addView(add);
 
-        TextView clear = Nav.wideBtn(a, "감지 목록 초기화", false, new Runnable() {
-            @Override public void run() { clearDialog(a); }
-        });
-        clear.setTextColor(Theme.RED);
-        col.addView(clear);
+        // 초기화는 종류가 셋이다. 빨간 버튼을 셋 쌓으면 실수로 누르기 쉬우므로
+        // 전용 화면으로 모으고, 각 항목이 무엇을 지우는지 그 자리에서 보여준다.
+        col.addView(Nav.wideBtn(a, "초기화", false, new Runnable() {
+            @Override public void run() { Nav.push(a, "초기화", resetScreen(a)); }
+        }));
 
         TextView help = Ui.sub(a, "감지 목록 초기화는 감지된 대화방 기록만 비웁니다. "
                 + "선택된 대상 대화방은 유지됩니다.");
@@ -1160,9 +1161,188 @@ public final class ScreenRooms {
                         // 실제로 지워진 캐시를 다시 살릴 수 없으니 예약된 삭제도 같이 끝낸다
                         cancelPending();
                         Log.add(a, "감지된 대화방 목록을 초기화했습니다.");
+                        refreshReset();
                         refresh();
                         Nav.reload();
                         snack("감지 목록을 초기화했습니다.", null, null);
+                    }
+                });
+    }
+
+    // ── 초기화 ──────────────────────────────────────────────────────────────
+    //
+    // 세 가지를 구분한다. 지우는 범위가 다르고, 되돌릴 수 없으므로 각 확인창에
+    // '무엇이 몇 개 지워지는지' 와 '무엇이 남는지' 를 같이 적는다.
+    //
+    // ★ 보호 대화방과 전체 정지는 어떤 초기화로도 지우지 않는다. 초기화 한 번으로
+    //   안전장치가 조용히 풀리면, 발송하면 안 되는 방으로 다시 나가는 사고가 난다.
+
+    private static WeakReference<LinearLayout> RESET_BODY;
+
+    static View resetScreen(final MainActivity a) {
+        LinearLayout col = Ui.screen(a);
+        RESET_BODY = new WeakReference<LinearLayout>(col);
+        fillReset(a, col);
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshReset() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (RESET_BODY == null) ? null : RESET_BODY.get();
+        if (a == null || col == null || a.isFinishing() || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillReset(a, col);
+        } catch (Throwable t) {
+            Log.add(a, "초기화 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    /** 방별 개별 설정이 걸린 방 수 (끄기·메시지·쿨타임·새 메시지 개수·1:1 허용) */
+    private static int cfgCount(Settings s) {
+        if (s == null || s.macro.roomCfgs == null) return 0;
+        int n = 0;
+        Iterator<Settings.RoomCfg> it = s.macro.roomCfgs.values().iterator();
+        while (it.hasNext()) {
+            Settings.RoomCfg c = it.next();
+            if (c == null) continue;
+            if (!c.enabled || c.hasMsg || c.hasCd || c.hasMin || c.allowOneToOne) n++;
+        }
+        return n;
+    }
+
+    private static int accCfgCount(Settings s) {
+        if (s == null || s.macro.accountCfgs == null) return 0;
+        return s.macro.accountCfgs.size();
+    }
+
+    private static void fillReset(final MainActivity a, LinearLayout col) {
+        final Settings s = Settings.load(a);
+        int detected = KakaoListener.knownRooms(a).size();
+        int selected = s.macro.roomRefs().size();
+        final int cfgs = cfgCount(s);
+        final int accs = accCfgCount(s);
+
+        col.addView(Ui.sub(a, "되돌릴 수 없습니다. 지우는 범위를 확인하고 실행하십시오.\n"
+                + "보호 대화방과 전체 정지는 어떤 초기화로도 해제되지 않습니다."));
+
+        col.addView(Ui.sectionHeader(a, null, "현재 상태"));
+        LinearLayout now = Ui.card(a);
+        now.addView(Ui.kv(a, "감지된 대화방", detected + "개"));
+        now.addView(Ui.kv(a, "발송 대상", selected + "개"));
+        now.addView(Ui.kv(a, "대화방 개별 설정", cfgs + "개"));
+        now.addView(Ui.kv(a, "계정 개별 설정", accs + "개"));
+        now.addView(Ui.kv(a, "보호 대화방", SendGuard.protectedRooms(a).size() + "개 (유지)"));
+        col.addView(now);
+
+        col.addView(Ui.sectionHeader(a, null, "초기화"));
+        LinearLayout g = Ui.group(a);
+
+        g.addView(Ui.navRow(a, "감지 목록만 초기화", detected + "개", Theme.TEXT, new Runnable() {
+            @Override public void run() { clearDialog(a); }
+        }));
+
+        g.addView(Ui.navRow(a, "개별 설정 전체 초기화", (cfgs + accs) + "개", Theme.TEXT,
+                new Runnable() {
+                    @Override public void run() { resetCfgsDialog(a, cfgs, accs); }
+                }));
+
+        g.addView(Ui.navRow(a, "방 목록 전체 초기화", "전부 삭제", Theme.RED, new Runnable() {
+            @Override public void run() { resetAllDialog(a, detected, selected, cfgs); }
+        }));
+        col.addView(g);
+
+        col.addView(Ui.sub(a, "「감지 목록만 초기화」 는 감지 기록만 지우고 발송 대상 선택은 "
+                + "남깁니다. 메시지를 다시 받으면 목록에 다시 올라옵니다.\n"
+                + "「개별 설정 전체 초기화」 는 대화방별·계정별로 따로 지정한 값을 모두 지워 "
+                + "전체 기본값을 쓰게 합니다. 발송 대상 선택은 그대로입니다.\n"
+                + "「방 목록 전체 초기화」 는 감지 기록·발송 대상 선택·대화방 개별 설정을 "
+                + "모두 지웁니다. 대화방을 처음부터 다시 고르게 됩니다.\n"
+                + "봇의 대상 대화방은 봇 탭에서 따로 관리하며 여기서 지워지지 않습니다."));
+    }
+
+    /** 개별 설정만 전부 삭제 — 대상 선택과 감지 목록은 그대로 */
+    private static void resetCfgsDialog(final MainActivity a, final int cfgs, final int accs) {
+        if (cfgs + accs == 0) { Ui.toast(a, "지정된 개별 설정이 없습니다."); return; }
+        Nav.confirm(a, "개별 설정 전체 초기화",
+                "대화방 개별 설정 " + cfgs + "개와 계정 개별 설정 " + accs + "개를 삭제합니다.\n\n"
+                        + "모든 대화방이 전체 기본값(메시지·쿨타임·새 메시지 최소 개수)을 "
+                        + "쓰게 됩니다. 발송 대상 선택과 감지 목록은 그대로 유지됩니다.\n"
+                        + "1:1 발송을 허용해 둔 대화방은 허용이 해제되어 발송되지 않습니다.",
+                "초기화", new Runnable() {
+                    @Override public void run() {
+                        Settings s = Settings.load(a);
+                        try {
+                            List<RoomRef> keep = s.macro.roomRefs();
+                            if (s.macro.roomCfgs != null) s.macro.roomCfgs.clear();
+                            if (s.macro.accountCfgs != null) s.macro.accountCfgs.clear();
+                            // ★ 방별 '다음 발송 시각' 도 개별 설정에 들어 있다. 그냥 지우면
+                            //   모든 대상 방이 '발송할 때가 됐다' 가 되어 다음 알람에 한꺼번에
+                            //   나간다 — 방이 20개면 20건이 동시에 올라가는 도배가 된다.
+                            //   그래서 각 방에 쿨타임 범위 안의 시각을 다시 흩어서 넣는다.
+                            long base = System.currentTimeMillis();
+                            for (int i = 0; i < keep.size(); i++) {
+                                RoomRef rf = keep.get(i);
+                                if (rf == null || !rf.valid()) continue;
+                                s.setRoomNextAt(rf, s.macro.pickNextAt(base,
+                                        s.effCdMinMin(rf), s.effCdMaxMin(rf)));
+                            }
+                            if (!s.save(a)) { Ui.toast(a, "저장하지 못했습니다."); return; }
+                        } catch (Throwable t) {
+                            Log.add(a, "개별 설정 초기화에 실패했습니다: " + t);
+                            Ui.toast(a, "초기화하지 못했습니다.");
+                            return;
+                        }
+                        Log.add(a, "개별 설정을 전체 초기화했습니다. (대화방 " + cfgs
+                                + "개 · 계정 " + accs + "개) 모든 대화방이 전체 기본값을 사용하며, "
+                                + "발송 시각은 쿨타임 범위로 다시 배분했습니다.");
+                        try { Scheduler.ensureScheduled(a); } catch (Throwable ignore) { }
+                        Ui.toast(a, "개별 설정을 초기화했습니다.");
+                        refreshReset();
+                        refresh();
+                        ScreenMacro.refresh();
+                    }
+                });
+    }
+
+    /** 방 관련 전부 삭제 — 감지 목록 + 대상 선택 + 방별 개별 설정 */
+    private static void resetAllDialog(final MainActivity a, final int detected,
+                                       final int selected, final int cfgs) {
+        Nav.confirm(a, "방 목록 전체 초기화",
+                "감지된 대화방 " + detected + "개, 발송 대상 " + selected + "개, "
+                        + "대화방 개별 설정 " + cfgs + "개를 모두 삭제합니다.\n\n"
+                        + "발송 대상이 비면 자동발송이 중단됩니다. 대화방을 다시 선택해야 "
+                        + "발송이 재개됩니다.\n"
+                        + "보호 대화방과 전체 정지는 유지됩니다. 봇의 대상 대화방은 "
+                        + "봇 탭에서 따로 관리하며 지워지지 않습니다.",
+                "전체 초기화", new Runnable() {
+                    @Override public void run() {
+                        Settings s = Settings.load(a);
+                        try {
+                            s.macro.rooms.clear();
+                            if (s.macro.roomCfgs != null) s.macro.roomCfgs.clear();
+                            if (!s.save(a)) { Ui.toast(a, "저장하지 못했습니다."); return; }
+                        } catch (Throwable t) {
+                            Log.add(a, "방 목록 전체 초기화에 실패했습니다: " + t);
+                            Ui.toast(a, "초기화하지 못했습니다.");
+                            return;
+                        }
+                        try {
+                            KakaoListener.clearRooms(a);
+                        } catch (Throwable t) {
+                            Log.add(a, "감지 목록을 비우지 못했습니다: " + t);
+                        }
+                        cancelPending();
+                        Log.add(a, "방 목록을 전체 초기화했습니다. (감지 " + detected
+                                + "개 · 발송 대상 " + selected + "개 · 개별 설정 " + cfgs + "개) "
+                                + "발송 대상이 없어 자동발송이 중단됩니다.");
+                        // 대상이 비었으니 예약을 다시 계산한다 (과거 시각 알람이 남지 않게)
+                        try { Scheduler.ensureScheduled(a); } catch (Throwable ignore) { }
+                        Ui.toast(a, "방 목록을 전체 초기화했습니다.");
+                        refreshReset();
+                        refresh();
+                        Nav.reload();
+                        ScreenMacro.refresh();
                     }
                 });
     }
