@@ -102,6 +102,14 @@ public final class ScreenAccounts {
 
         TextView help = Ui.sub(a, "계정 이름은 카카오톡 프로필 이름을 따릅니다. "
                 + "읽지 못한 경우 순번으로 표시되며 직접 수정할 수 있습니다.");
+        // 복제 앱으로 로그인한 카톡은 구조적으로 감지할 수 없다. 여기가 사장이
+        // "왜 두 번째 계정이 안 보이지" 를 확인하러 오는 자리이므로 그 사실을 적는다.
+        col.addView(Nav.note(a, "계정이 추가되지 않는 경우: 휴대폰 설정의 「듀얼 메신저」"
+                + "(삼성) 또는 「듀얼 앱」(샤오미 등) 으로 추가한 카카오톡만 인식됩니다.\n"
+                + "「다중계정」 같은 복제 앱으로 로그인한 카카오톡은 인식되지 않으며 발송도 "
+                + "되지 않습니다. 그 앱들은 카카오톡을 자기 앱 안에서 돌려서, 알림이 "
+                + "카카오톡이 아닌 그 앱 이름으로 올라오기 때문입니다.",
+                Theme.ACCENT2, null, null));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
