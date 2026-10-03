@@ -1313,7 +1313,7 @@ public final class KakaoListener extends NotificationListenerService {
             s.othersSinceMine = 0;
             // 사진만 보내는 경우(수동 발송·첨부 방식 '수동 전송만')도 그 방에 발송한 것이다.
             // 기록하지 않으면 다른 계정이 바로 뒤이어 보내 동시 발송이 된다.
-            stampAccountSend(ref);
+            stampAccountSend(ref, s.ref);
             return true;
         } catch (PendingIntent.CanceledException e) {
             // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
@@ -1698,10 +1698,36 @@ public final class KakaoListener extends NotificationListenerService {
      *   스탬프 주인이 되어 간격 검사를 건너뛰었다.
      */
     private static void stampAccountSend(RoomRef ref) {
+        stampAccountSend(ref, null);
+    }
+
+    /**
+     * @param actual 실제로 발송한 세션의 방 참조. 요청한 참조와 계정이 다를 수 있다 —
+     *               계정 정보가 없는 구버전 저장값(acc="0")은 계정을 가로질러 통로를 찾기
+     *               때문이다. 그때 요청 계정("0")으로 기록하면 실제로 보낸 계정은
+     *               자기 기록을 못 보고 바로 뒤이어 또 보낸다(동시 발송).
+     */
+    private static void stampAccountSend(RoomRef ref, RoomRef actual) {
+        RoomRef use = (actual != null && actual.valid()) ? actual : ref;
+        stampAccountSendInner(use);
+    }
+
+    private static void stampAccountSendInner(RoomRef ref) {
         if (ref == null) return;
         String key = gapKey(ref.name);
         if (key.length() == 0) return;
-        NAME_SENT.put(key, new NameStamp(ref.acc, System.currentTimeMillis()));
+        long now = System.currentTimeMillis();
+        NAME_SENT.put(key, new NameStamp(ref.acc, now));
+        // 방 이름이 바뀌면 옛 키가 계속 남는다. 간격보다 훨씬 오래된 기록은 쓸모가 없다.
+        if (NAME_SENT.size() > MAX_ROOMS * 2) {
+            long keep = 2 * 3600 * 1000L;
+            Iterator<Map.Entry<String, NameStamp>> it = NAME_SENT.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, NameStamp> e = it.next();
+                NameStamp v = e.getValue();
+                if (v == null || now - v.at > keep) it.remove();
+            }
+        }
     }
 
     /**
@@ -1732,8 +1758,35 @@ public final class KakaoListener extends NotificationListenerService {
      */
     public static int send(Context ctx, RoomRef ref, String text, int kind) {
         if (SendGuard.blocked(ctx, ref, kind)) return SEND_FAIL;
-        if (gapApplies(kind) && heldMs(ctx, ref) > 0L) return SEND_HELD;
-        return sendToDirect(ctx, ref, text) ? SEND_OK : SEND_FAIL;
+        if (!gapApplies(kind)) {
+            return sendToDirect(ctx, ref, text) ? SEND_OK : SEND_FAIL;
+        }
+        // ★ '간격이 비었나' 확인과 '보내고 기록' 사이에 다른 스레드가 끼어들면 둘 다
+        //   보내버린다 — 예약 발송은 자기 스레드에서, 봇·추적·자동응답은 알림 스레드에서
+        //   돌기 때문에 실제로 겹칠 수 있다. 그 방 이름 단위로 묶어 한 번에 하나만 지나게 한다.
+        //   (방마다 따로 묶으므로 서로 다른 방의 발송은 병렬로 진행된다.)
+        synchronized (gapLock(ref)) {
+            if (heldMs(ctx, ref) > 0L) return SEND_HELD;
+            return sendToDirect(ctx, ref, text) ? SEND_OK : SEND_FAIL;
+        }
+    }
+
+    /** 방 이름별 잠금 객체 (간격 판정 + 발송을 원자적으로 묶는 데 쓴다) */
+    private static final Map<String, Object> GAP_LOCKS = new ConcurrentHashMap<String, Object>();
+
+    /** 잠금 객체가 너무 늘어나면 쓰는 공용 잠금 (살짝 과하게 묶이지만 안전하다) */
+    private static final Object GAP_LOCK_FALLBACK = new Object();
+
+    private static Object gapLock(RoomRef ref) {
+        String k = (ref == null) ? "" : gapKey(ref.name);
+        Object o = GAP_LOCKS.get(k);
+        if (o != null) return o;
+        // ★ 맵을 비우면 안 된다 — 비우는 순간 같은 방에 대해 서로 다른 잠금 객체가 나가서
+        //   상호 배제가 깨진다(둘 다 발송). 한도를 넘으면 공용 잠금을 쓴다.
+        if (GAP_LOCKS.size() >= 200) return GAP_LOCK_FALLBACK;
+        Object fresh = new Object();
+        Object prev = GAP_LOCKS.putIfAbsent(k, fresh);
+        return (prev != null) ? prev : fresh;
     }
 
     /**
@@ -1838,7 +1891,7 @@ public final class KakaoListener extends NotificationListenerService {
             s.lastMine = now;
             s.othersSinceMine = 0;
             s.lastSentText = text;
-            stampAccountSend(ref);
+            stampAccountSend(ref, s.ref);
             rememberOurs(text);
             Log.add(ctx, "「" + r + "」 발송 완료: " + preview(text));
             return true;
