@@ -170,6 +170,18 @@ public final class KakaoListener extends NotificationListenerService {
         /** 중복 알림 판정용 지문 */
         volatile String lastKey = "";
         volatile long lastKeyAt;
+        /**
+         * 이름이 아닌 <b>고정 방 식별자</b> 후보. 지금은 진단 기록에만 쓴다.
+         *
+         * 대화방 이름이 바뀌면 저장된 이름으로는 답장 통로를 찾지 못해 발송이 끊긴다.
+         * 근본 해결은 이름 대신 고정된 식별자로 통로를 찾는 것인데, 카카오톡이 어떤 값을
+         * 내려주는지 · 이름을 바꿔도 그 값이 유지되는지를 실제 기기에서 확인해야 한다.
+         * 확인되지 않은 값으로 통로를 찾으면 엉뚱한 방으로 발송된다. 그래서 먼저 기록만 한다.
+         */
+        volatile String idShortcut = "";
+        volatile String idTag = "";
+        volatile int idNum = 0;
+
         /** 판정 근거 로그를 이 방에서 이미 남겼나 (방마다 처음 1회만 — 도배 금지) */
         volatile boolean whyLogged = false;
         /** 자동응답 보류 로그를 이 방에서 이미 남겼나 */
@@ -361,6 +373,26 @@ public final class KakaoListener extends NotificationListenerService {
         }
     }
 
+    /**
+     * 대화 바로가기 id — 이름이 바뀌어도 유지될 가능성이 있는 유일한 후보다.
+     * API 30 미만이거나 카카오톡이 내려주지 않으면 빈 문자열.
+     */
+    private String shortcutId(StatusBarNotification sbn) {
+        if (sbn == null || Build.VERSION.SDK_INT < 30) return "";
+        try {
+            NotificationListenerService.RankingMap rm = getCurrentRanking();
+            if (rm == null) return "";
+            NotificationListenerService.Ranking r = new NotificationListenerService.Ranking();
+            if (!rm.getRanking(sbn.getKey(), r)) return "";
+            android.content.pm.ShortcutInfo si = r.getConversationShortcutInfo();
+            if (si == null) return "";
+            String id = si.getId();
+            return (id == null) ? "" : id.trim();
+        } catch (Throwable ignore) {
+            return "";
+        }
+    }
+
     /** 앱 컨텍스트. getApplicationContext() 가 아직 null 이어도 죽지 않게 감싼다. */
     private Context ctxOrApp() {
         try {
@@ -393,6 +425,11 @@ public final class KakaoListener extends NotificationListenerService {
         if (m == null) return;
         if (m.room.length() == 0 || m.text.length() == 0) return;
 
+        // 이름이 아닌 식별자 후보를 기록해 둔다 (진단 전용 — 위 Session 필드 설명 참고)
+        final String scId = shortcutId(sbn);
+        final String sbTag = (sbn.getTag() == null) ? "" : sbn.getTag();
+        final int sbId = sbn.getId();
+
         // 세션 갱신 (여기까지는 아주 싸다 — 메인 스레드에서 해도 된다)
         final String skey = m.ref.key();
         Session s = SESSIONS.get(skey);
@@ -402,6 +439,9 @@ public final class KakaoListener extends NotificationListenerService {
             s = (prev != null) ? prev : fresh;
             if (SESSIONS.size() > MAX_SESSIONS) trimSessions(skey);
         }
+        if (scId.length() > 0) s.idShortcut = scId;
+        if (sbTag.length() > 0) s.idTag = sbTag;
+        if (sbId != 0) s.idNum = sbId;
 
         Reply r = findReply(n);
         if (r != null) {
@@ -445,6 +485,13 @@ public final class KakaoListener extends NotificationListenerService {
                 && Math.abs(m.at - s.lastMine) < ECHO_MS
                 && (s.lastSentText.equals(m.text) || s.lastSentText.equals(m.body))) {
             m.fromMe = true;
+        }
+        // ★ 다른 계정이 보낸 우리 메시지도 우리 것으로 본다. 세션은 계정별로 따로이므로
+        //   위 검사(그 계정의 lastSentText)로는 잡히지 않는다. 이걸 빼면 계정 A 의 홍보가
+        //   계정 B 에게 '남의 새 메시지' 로 집계돼 「새 메시지 최소 개수」 가 무력화된다.
+        if (!m.fromMe && (isOurs(m.text) || isOurs(m.body))) {
+            m.fromMe = true;
+            if (m.why == null || m.why.length() == 0) m.why = "다른 계정이 보낸 우리 메시지";
         }
 
         // 같은 알림 갱신(읽음 처리·요약 재게시 등)은 한 번만 처리한다
@@ -1264,6 +1311,9 @@ public final class KakaoListener extends NotificationListenerService {
 
             s.lastMine = System.currentTimeMillis();
             s.othersSinceMine = 0;
+            // 사진만 보내는 경우(수동 발송·첨부 방식 '수동 전송만')도 그 방에 발송한 것이다.
+            // 기록하지 않으면 다른 계정이 바로 뒤이어 보내 동시 발송이 된다.
+            stampAccountSend(ref);
             return true;
         } catch (PendingIntent.CanceledException e) {
             // 카톡이 그 알림을 치웠다 → 세션은 죽은 거다. 다음 알림에서 되살아난다.
@@ -1463,81 +1513,263 @@ public final class KakaoListener extends NotificationListenerService {
      * (여러 계정에 같은 이름이 있으면 findSession 이 null 을 돌려주므로 오발송은 없다).
      */
     // ── 계정 간 발송 간격(텀) ──────────────────────────────────────────────
-    // 듀얼 메신저로 두 계정이 같은 물리적 대화방에 들어가 있으면, 같은 방 이름으로
-    // 양쪽이 동시에 발송해 메시지가 중복된다. 한 계정이 보낸 뒤 설정한 간격 동안
-    // 다른 계정의 같은 이름 발송을 보류해 동시 중복을 막는다.
-    // (같은 계정의 재발송은 각 기능의 쿨다운이 담당하므로 여기서는 막지 않는다.)
-    private static final class NameStamp { final String acc; final long at; NameStamp(String a, long t) { acc = a; at = t; } }
+    //
+    // 듀얼 메신저로 두 계정이 같은 대화방에 들어가 있으면, 같은 방 이름으로 양쪽이 동시에
+    // 발송해 메시지가 중복된다. 사장 선택은 "건너뛰지 말고 둘 다 보내되 간격(텀)을 두기" 다.
+    //
+    // ★ 예전 구현은 여기서 Handler.postDelayed 로 직접 미루고 호출자에게 true 를 돌려줬다.
+    //   그게 결함의 근원이었다.
+    //     - Handler 는 SystemClock.uptimeMillis 기준이라 기기가 깊은 잠에 들면 시간이 멈춘다.
+    //       WakeLock 은 발송 루틴이 끝나면 풀리므로, 화면 꺼둔 전용 폰에서 60초가 몇 시간이
+    //       되거나 프로세스가 죽으면 그냥 사라졌다 → 홍보 누락.
+    //     - 아직 안 보냈는데 true 를 돌려주니 발송 통계가 올라가고 쿨타임이 밀리고
+    //       사진이 글보다 먼저 나갔다.
+    //     - 미룰 때 '미래 시각' 을 스탬프로 박아 경과 시간이 음수가 되고, 대기가 간격보다
+    //       길어지거나 '방금 보낸 계정' 이 자기 미래 스탬프를 만나 검사를 건너뛰었다.
+    //
+    //   이제 여기서는 <b>미루지 않는다.</b> "지금은 보내면 안 된다, N ms 뒤에 다시 와라"
+    //   ({@link #SEND_HELD}) 만 알려주고, 다시 오는 일은 호출자가 각자의 방식으로 한다.
+    //   예약 발송은 그 방의 다음 발송 시각을 그때로 당겨 알람에 맡긴다 — 알람은
+    //   RTC_WAKEUP 이라 기기를 깨우고 프로세스가 죽어도 살아난다.
+    //
+    // (같은 계정의 재발송은 각 기능의 쿨타임이 담당하므로 여기서는 막지 않는다.)
+
+    /** 발송했다 */
+    public static final int SEND_OK = 1;
+    /** 못 보냈다 (통로 없음·권한 없음·차단 등) */
+    public static final int SEND_FAIL = 0;
+    /** 계정 간 간격 때문에 <b>아직</b> 안 보냈다. {@link #heldMs} 로 남은 시간을 받는다. */
+    public static final int SEND_HELD = 2;
+
+    private static final class NameStamp {
+        final String acc; final long at;
+        NameStamp(String a, long t) { acc = a; at = t; }
+    }
+
+    /** 키 = {@link #gapKey} (방 이름의 표준형). 값 = 마지막으로 실제 발송한 계정·시각. */
     private static final Map<String, NameStamp> NAME_SENT = new ConcurrentHashMap<String, NameStamp>();
-    private static final Map<String, Long> GAP_LOGGED = new ConcurrentHashMap<String, Long>();
 
     private static long crossAccountGapMs(Context ctx) {
         try { return Settings.load(ctx).crossAccountGapMs; } catch (Throwable t) { return 60000L; }
     }
 
-    /** 다른 계정이 간격 안에 같은 방 이름으로 보냈으면 남은 대기 ms, 아니면 0. */
-    private static long heldRemainingMs(Context ctx, RoomRef ref) {
-        long gap = crossAccountGapMs(ctx);
-        if (gap <= 0 || ref == null) return 0L;
-        String name = normRoom(ref.name);
-        if (name.length() == 0) return 0L;
-        NameStamp st = NAME_SENT.get(name);
-        if (st == null) return 0L;
-        if (st.acc.equals(ref.acc)) return 0L;                  // 같은 계정의 재발송은 쿨다운 담당
-        long elapsed = System.currentTimeMillis() - st.at;
-        return (elapsed < gap) ? (gap - elapsed) : 0L;          // 다른 계정이 간격 안에 보냄 → 남은 시간
-    }
+    /**
+     * 간격 판정용 방 이름 표준형.
+     *
+     * {@link #normRoom} 만 쓰면 같은 방인데 한쪽 계정에 인원수가 붙어
+     * 「공지방」 / 「공지방(12)」 로 들어올 때 서로 다른 키가 되어, <b>막으려던 중복이
+     * 그대로 나갔다.</b> 세션 탐색({@link #sameRoomLoose})은 이 둘을 같은 방으로 보는데
+     * 간격 기록만 완전일치를 쓴 불일치였다. 그래서 꼬리의 인원수·장식을 떼어낸다.
+     */
+    private static String gapKey(String name) {
+        String s = normRoom(name);
+        if (s.length() < 2) return s;
 
-    /** 발송 성공 시 그 방 이름의 마지막 발송 계정·시각을 기록한다. */
-    private static void stampAccountSend(RoomRef ref) {
-        if (ref == null) return;
-        String name = normRoom(ref.name);
-        if (name.length() == 0) return;
-        NAME_SENT.put(name, new NameStamp(ref.acc, System.currentTimeMillis()));
-    }
+        // 괄호로 묶인 꼬리만 떼어낸다 — "공지방(12)" → "공지방".
+        // ★ 숫자를 그냥 떼면 「공지1」과 「공지2」가 같은 키가 되어 서로 다른 방이
+        //   괜히 미뤄진다. 그래서 여는 괄호가 있을 때만 떼어낸다.
+        int i = s.length() - 1;
+        while (i >= 0) {
+            char ch = s.charAt(i);
+            if (ch == ')' || ch == ']' || ch == '}' || ch == '>'
+                    || (ch >= '0' && ch <= '9') || ch == ',' || ch == '.') { i--; continue; }
+            break;
+        }
+        if (i >= 1 && (s.charAt(i) == '(' || s.charAt(i) == '[' || s.charAt(i) == '{'
+                || s.charAt(i) == '<')) {
+            String head = s.substring(0, i);
+            if (head.length() >= 2) return head;
+        }
 
-    public static boolean sendTo(Context ctx, RoomRef ref, String text, int kind) {
-        // ★ 가장 먼저: 보내도 되는 방인가. 전체 정지 · 보호 대화방 · 1:1 검사가 여기서 끝난다.
-        //   이 아래 모든 경로(즉시 발송 · 계정 간 간격으로 미룬 발송)가 이 검사를 지난다.
-        if (SendGuard.blocked(ctx, ref, kind)) return false;
-        return sendStaggered(ctx, ref, text, kind);
+        // 꼬리가 기호뿐이면(장식) 그것도 떼어낸다 — "공지방·" → "공지방"
+        int end = s.length();
+        while (end > 0) {
+            char ch = s.charAt(end - 1);
+            if (ch == '·' || ch == '-' || ch == '~' || ch == '.' || ch == ',') { end--; continue; }
+            break;
+        }
+        return (end >= 2) ? s.substring(0, end) : s;
     }
 
     /**
-     * 계정 간 간격(텀)을 적용해 보낸다. 차단 검사는 이미 위에서 끝났다.
-     * 이 메서드를 직접 부르지 마라 — {@link #sendTo(Context, RoomRef, String, int)} 만 쓴다.
+     * 다른 계정이 간격 안에 같은 방으로 보냈으면 남은 대기 ms, 아니면 0.
+     *
+     * 경과 시간은 음수가 될 수 없게 조인다 — 기기 시간을 되돌리거나 시계가 어긋나도
+     * 남은 대기가 설정한 간격보다 커지지 않는다.
      */
-    private static boolean sendStaggered(Context ctx, RoomRef ref, String text, final int kind) {
-        // 계정 간 간격: 다른 계정이 방금 같은 대화방에 보냈으면, 건너뛰지 않고
-        // 남은 간격만큼 미뤄서 둘 다 보내되 동시 발사만 피한다(사용자 선택).
-        long remaining = heldRemainingMs(ctx, ref);
-        if (remaining > 0) {
-            final Context c2 = (ctx.getApplicationContext() != null) ? ctx.getApplicationContext() : ctx;
-            final RoomRef r2 = ref;
-            final String t2 = text;
-            String nk = normRoom(ref.name);
-            Long lastLog = GAP_LOGGED.get(nk);
-            long now0 = System.currentTimeMillis();
-            if (lastLog == null || now0 - lastLog.longValue() > 60000L) {
-                GAP_LOGGED.put(nk, Long.valueOf(now0));
-                Log.add(ctx, "「" + ref.label(ctx) + "」 다른 계정이 방금 같은 대화방에 보내 "
-                        + ((remaining + 999) / 1000) + "초 뒤로 미룹니다(계정 간 간격).");
+    public static long heldMs(Context ctx, RoomRef ref) {
+        long gap = crossAccountGapMs(ctx);
+        if (gap <= 0 || ref == null) return 0L;
+        String key = gapKey(ref.name);
+        if (key.length() == 0) return 0L;
+        NameStamp st = NAME_SENT.get(key);
+        if (st == null) return 0L;
+        if (st.acc.equals(ref.acc)) return 0L;          // 같은 계정의 재발송은 쿨타임 담당
+        long elapsed = System.currentTimeMillis() - st.at;
+        if (elapsed < 0) elapsed = 0;                   // 시계 되돌림 방어
+        return (elapsed < gap) ? (gap - elapsed) : 0L;
+    }
+
+    // ── 우리가 보낸 문장 (계정을 가로질러) ──────────────────────────────────
+    //
+    // 세션은 계정별로 따로다. 그래서 계정 A 가 올린 홍보가 계정 B 의 알림으로 들어오면
+    // B 의 세션에서는 '남이 보낸 새 메시지' 로 집계됐다. 그 결과:
+    //   - 「새 메시지 최소 개수」 가 우리 홍보로 충족돼, 아무도 말하지 않는 방에서도
+    //     두 계정이 서로를 보고 계속 발송했다 — 도배 방지 장치가 통째로 풀렸다.
+    //   - 메시지 추적·자동응답이 우리 홍보에 반응할 수 있었다.
+    // 그래서 '우리 앱이 최근에 보낸 문장' 을 계정 구분 없이 한곳에 모아두고, 들어온
+    // 메시지가 거기 있으면 우리 것으로 본다.
+
+    /** 보낸 문장을 이만큼 기억한다 (알림이 늦게 도착하는 기기를 감안해 넉넉히) */
+    private static final long OURS_MS = 3 * 60 * 1000L;
+    /** 기억할 문장 수 상한 */
+    private static final int OURS_MAX = 40;
+    private static final Map<String, Long> OURS = new ConcurrentHashMap<String, Long>();
+
+    private static String oursKey(String text) {
+        if (text == null) return "";
+        String s = text.trim();
+        if (s.length() == 0) return "";
+        // 단체방 알림은 "내이름 : 보낸문장" 으로 되돌아오므로 접두사를 뗀 본문도 함께 본다.
+        return normRoom(s);
+    }
+
+    private static void rememberOurs(String text) {
+        String k = oursKey(text);
+        if (k.length() < 2) return;
+        long now = System.currentTimeMillis();
+        OURS.put(k, Long.valueOf(now));
+        if (OURS.size() > OURS_MAX) {
+            Iterator<Map.Entry<String, Long>> it = OURS.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Long> e = it.next();
+                Long v = e.getValue();
+                if (v == null || now - v.longValue() > OURS_MS) it.remove();
             }
-            // 예정 발송 시각으로 스탬프를 찍어, 계정이 3개 이상이어도 서로 다른 시점으로 어긋나게 한다.
-            // (다음 계정은 이 미래 시각 기준으로 남은 간격을 재므로 delay 가 누적된다)
-            String nm = normRoom(ref.name);
-            if (nm.length() > 0) NAME_SENT.put(nm, new NameStamp(ref.acc, now0 + remaining));
-            post(new Runnable() {
-                @Override public void run() {
-                    // 미뤄둔 사이에 전체 정지·보호 지정이 들어왔을 수 있다 → 쏘기 직전에 한 번 더 본다.
-                    // 기능 구분(kind)을 그대로 들고 와야 자동응답·봇이 1:1 규칙에 걸리지 않는다.
-                    if (SendGuard.blocked(c2, r2, kind)) return;
-                    sendToDirect(c2, r2, t2);
-                }
-            }, remaining + 150L);
-            return true;   // 수락: 잠시 뒤 실제로 발송된다
+            if (OURS.size() > OURS_MAX) OURS.clear();   // 그래도 넘치면 통째로 비운다
         }
+    }
+
+    /** 이 문장을 우리 앱이 최근에 보냈나 (어느 계정이든) */
+    private static boolean isOurs(String text) {
+        String k = oursKey(text);
+        if (k.length() < 2) return false;
+        Long at = OURS.get(k);
+        if (at == null) return false;
+        if (System.currentTimeMillis() - at.longValue() > OURS_MS) {
+            OURS.remove(k);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 그 방의 '이름이 아닌 식별자' 후보 한 줄. 진단 기록에만 쓴다.
+     * 사장이 대화방 이름을 바꿔본 뒤 이 값이 그대로인지 확인하면,
+     * 이름 대신 이 값으로 답장 통로를 찾도록 바꿀 수 있다.
+     */
+    public static String roomIdInfo(RoomRef ref) {
+        Session s = (ref == null) ? null : SESSIONS.get(ref.key());
+        if (s == null) return "세션 없음";
+        StringBuilder sb = new StringBuilder();
+        sb.append("바로가기id=").append(s.idShortcut.length() == 0 ? "없음" : s.idShortcut);
+        sb.append(" · 알림tag=").append(s.idTag.length() == 0 ? "없음" : s.idTag);
+        sb.append(" · 알림id=").append(s.idNum);
+        return sb.toString();
+    }
+
+    /** 설정된 간격 (로그 문구 계산용) */
+    public static long gapOf(Context ctx) {
+        return crossAccountGapMs(ctx);
+    }
+
+    /** 마지막으로 그 방에 실제 발송한 계정 (없으면 "") — 로그 문구에 쓴다. */
+    private static String lastSenderAcc(RoomRef ref) {
+        if (ref == null) return "";
+        NameStamp st = NAME_SENT.get(gapKey(ref.name));
+        return (st == null) ? "" : st.acc;
+    }
+
+    /**
+     * 실제로 발송한 뒤에만 기록한다.
+     *
+     * ★ 미리 찍지 마라. 예전에는 미루기로 결정한 순간 '예정 시각' 을 찍었는데, 그 발송이
+     *   실패하면 그 기록이 남아 다른 계정이 괜히 더 기다렸고, 발송한 적 없는 계정이
+     *   스탬프 주인이 되어 간격 검사를 건너뛰었다.
+     */
+    private static void stampAccountSend(RoomRef ref) {
+        if (ref == null) return;
+        String key = gapKey(ref.name);
+        if (key.length() == 0) return;
+        NAME_SENT.put(key, new NameStamp(ref.acc, System.currentTimeMillis()));
+    }
+
+    /**
+     * 기능 구분에 따라 계정 간 간격을 적용하나.
+     *
+     * <ul>
+     *   <li>{@link SendGuard#MACRO} — 적용. 앱이 먼저 거는 홍보 발송이고, 같은 방에 두 계정이
+     *       동시에 올리는 것이 바로 이 기능이 막으려는 것이다. 보류되면 예약 알람이 다시 온다.</li>
+     *   <li>{@link SendGuard#TRIGGER}, {@link SendGuard#ROOMBOT}, {@link SendGuard#MINIGAME} —
+     *       적용하되 <b>미루지 않고 건너뛴다</b>(호출자가 그렇게 처리한다). 상대의 말·명령에
+     *       답하는 기능이라 1분 뒤의 답은 쓸모가 없고, 두 계정이 같은 명령에 두 번 답하는 것이
+     *       문제다. 한 계정이 답했으면 다른 계정은 조용히 있는 게 맞다.</li>
+     *   <li>{@link SendGuard#AUTOREPLY} — 적용하지 않는다. 1:1 개인 대화는 계정마다 따로이고,
+     *       같은 사람이 두 계정에 각각 말을 걸었으면 양쪽 다 답해야 한다. 여기서 막으면
+     *       한쪽 손님의 문의가 영구히 무응답이 된다.</li>
+     * </ul>
+     */
+    private static boolean gapApplies(int kind) {
+        return kind != SendGuard.AUTOREPLY;
+    }
+
+    /**
+     * 발송. 결과는 {@link #SEND_OK} / {@link #SEND_FAIL} / {@link #SEND_HELD} 중 하나다.
+     *
+     * {@code SEND_HELD} 를 받으면 <b>아직 아무것도 보내지 않았다.</b> 호출자는
+     * {@link #heldMs} 로 남은 시간을 받아 다시 시도할 시점을 정하거나(예약 발송),
+     * 이번 건을 포기해야 한다(명령 응답). 성공으로 처리해서는 안 된다.
+     */
+    public static int send(Context ctx, RoomRef ref, String text, int kind) {
+        if (SendGuard.blocked(ctx, ref, kind)) return SEND_FAIL;
+        if (gapApplies(kind) && heldMs(ctx, ref) > 0L) return SEND_HELD;
+        return sendToDirect(ctx, ref, text) ? SEND_OK : SEND_FAIL;
+    }
+
+    /**
+     * 간격을 무시하고 보낸다 — 손님이 「그래도 보내기」 를 직접 누른 경우에만 쓴다.
+     * 차단 검사(전체 정지·보호 대화방·1:1)는 그대로 지난다.
+     */
+    public static boolean sendIgnoringGap(Context ctx, RoomRef ref, String text, int kind) {
+        if (SendGuard.blocked(ctx, ref, kind)) return false;
         return sendToDirect(ctx, ref, text);
+    }
+
+    /**
+     * 기존 호출부 호환용 — 보냈나. <b>보류({@code SEND_HELD})는 false 다</b>
+     * (아직 안 보냈으므로). 보류를 구분해야 하는 호출부는 {@link #send} 를 쓴다.
+     */
+    public static boolean sendTo(Context ctx, RoomRef ref, String text, int kind) {
+        return send(ctx, ref, text, kind) == SEND_OK;
+    }
+
+    /** 보류 사유를 활동 로그에 남긴다 (방 단위로 10분에 1회 — 주기마다 쌓이면 로그가 오염된다) */
+    private static final Map<String, Long> HELD_LOGGED = new ConcurrentHashMap<String, Long>();
+
+    public static void noteHeld(Context ctx, RoomRef ref, int kind, long remaining, boolean skipped) {
+        if (ctx == null || ref == null) return;
+        String k = ref.key();
+        long now = System.currentTimeMillis();
+        Long last = HELD_LOGGED.get(k);
+        if (last != null && now - last.longValue() < 10 * 60 * 1000L) return;
+        HELD_LOGGED.put(k, Long.valueOf(now));
+        if (HELD_LOGGED.size() > 300) HELD_LOGGED.clear();
+        String other = lastSenderAcc(ref);
+        String who = (other.length() == 0) ? "다른 계정이" : ("「" + Accounts.nameOf(ctx, other) + "」 계정이");
+        Log.add(ctx, "「" + ref.label(ctx) + "」 " + who + " 방금 같은 이름의 대화방에 발송하여 "
+                + (skipped
+                    ? "이번 응답을 보내지 않았습니다(계정 간 간격)."
+                    : ((remaining + 999) / 1000) + "초 뒤로 미룹니다(계정 간 간격)."));
     }
 
     /** 간격 가드를 거치지 않고 바로 발송한다(이미 미뤄진 재호출용). */
@@ -1607,6 +1839,7 @@ public final class KakaoListener extends NotificationListenerService {
             s.othersSinceMine = 0;
             s.lastSentText = text;
             stampAccountSend(ref);
+            rememberOurs(text);
             Log.add(ctx, "「" + r + "」 발송 완료: " + preview(text));
             return true;
         } catch (PendingIntent.CanceledException e) {

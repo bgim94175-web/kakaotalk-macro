@@ -523,6 +523,7 @@ public final class Scheduler {
         int ok = 0;
         int waiting = 0;    // 신규 메시지 미달로 대기
         int notDue = 0;     // 아직 쿨타임이 안 됨
+        int held = 0;       // 계정 간 간격으로 보류 (다음 알람에서 다시 보낸다)
         int emptyMsg = 0;   // 유효 메시지가 비어 건너뜀
         int left = 0;
         boolean dirty = false;   // 방별 nextAt 을 갱신했으면 끝에 한 번 save
@@ -573,14 +574,32 @@ public final class Scheduler {
                 continue;
             }
 
-            boolean sent = false;
+            int res = KakaoListener.SEND_FAIL;
             try {
-                sent = KakaoListener.sendTo(c, room, msg, SendGuard.MACRO);
+                res = KakaoListener.send(c, room, msg, SendGuard.MACRO);
             } catch (Throwable t) {
                 Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
             }
 
-            if (sent) {
+            // ★ 계정 간 간격에 걸렸다 — 아직 아무것도 보내지 않았다.
+            //   메모리 타이머로 미루면 기기가 잠들 때 사라지므로(홍보 누락), 이 방의 다음
+            //   발송 시각을 간격이 끝나는 시점으로 **당겨** 알람에 맡긴다. 알람은 기기를
+            //   깨우고 프로세스가 죽어도 살아나므로 둘 다 보내는 것이 보장된다.
+            //   성공으로 집계하지 않고 사진도 보내지 않는다 — 글보다 사진이 먼저 나가면 안 된다.
+            if (res == KakaoListener.SEND_HELD) {
+                long wait = 0L;
+                try { wait = KakaoListener.heldMs(c, room); } catch (Throwable t) { wait = 0L; }
+                if (wait <= 0L) wait = 5000L;                  // 그 사이 간격이 끝났으면 곧 다시
+                long retryAt = now + wait + 1500L;             // 간격 경계를 확실히 넘긴 뒤
+                long planned = s.roomNextAt(room);
+                // 이미 더 이른 시각이 잡혀 있으면 그대로 둔다 (쿨타임을 앞당기지는 않는다)
+                if (planned <= 0L || retryAt < planned) s.setRoomNextAt(room, retryAt);
+                KakaoListener.noteHeld(c, room, SendGuard.MACRO, wait, false);
+                held++;
+                continue;
+            }
+
+            if (res == KakaoListener.SEND_OK) {
                 ok++;
                 MainActivity.countSent(c, 1);
 
@@ -633,6 +652,9 @@ public final class Scheduler {
 
         StringBuilder sb = new StringBuilder(96);
         sb.append("자동발송 · 성공 ").append(ok).append("건");
+        if (held > 0) {
+            sb.append(" / 계정 간 간격으로 ").append(held).append("개 대화방은 잠시 뒤 발송");
+        }
         if (notDue > 0) sb.append(" / 쿨타임 대기 ").append(notDue).append("개 대화방");
         if (waiting > 0) {
             sb.append(" / 신규 메시지 대기 ").append(waiting).append("개 대화방");

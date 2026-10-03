@@ -1662,6 +1662,15 @@ public final class ImageSender {
                 .append(" · 시도 ").append(yn(j.attachTried))
                 .append(j.attachTried ? (" · 이미지 시각 후보 " + (j.attachVariant + 1) + "번까지 시도") : "")
                 .append('\n');
+        // 이름이 바뀌어도 유지되는 식별자를 찾기 위한 기록. 대화방 이름을 바꿔본 뒤
+        // 이 값이 그대로인지 확인하면, 이름 대신 이 값으로 통로를 찾도록 바꿀 수 있다.
+        b.append("대화방 식별자 후보: ");
+        try {
+            b.append(KakaoListener.roomIdInfo(j.ref));
+        } catch (Throwable t2) {
+            b.append("확인 실패");
+        }
+        b.append('\n');
         b.append("대화방 열기 정보(카카오톡 알림): ");
         try {
             b.append(KakaoListener.openIntentFor(j.ref) != null ? "보유"

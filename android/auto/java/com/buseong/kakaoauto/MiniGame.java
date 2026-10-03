@@ -912,7 +912,13 @@ public final class MiniGame {
             remember(rk, msg, now);
             save(c);
         }
-        boolean ok = KakaoListener.sendTo(c, r, msg, SendGuard.MINIGAME);
+        int rr = KakaoListener.send(c, r, msg, SendGuard.MINIGAME);
+        if (rr == KakaoListener.SEND_HELD) {
+            // 다른 계정의 봇이 방금 답했다. 같은 명령에 두 번 답하지 않는다.
+            KakaoListener.noteHeld(c, r, SendGuard.MINIGAME, 0L, true);
+            return false;
+        }
+        boolean ok = (rr == KakaoListener.SEND_OK);
         if (!ok) {
             synchronized (MiniGame.class) {
                 if (sentToday > 0) sentToday = sentToday - 1;

@@ -397,6 +397,20 @@ public final class MainActivity extends Activity {
         }
         if (warn != null) col.addView(warn);
 
+        // 대화방 이름이 바뀌면 발송이 조용히 끊긴다 → 홈에서 바로 알린다
+        int stale = 0;
+        try { stale = ScreenRooms.staleCount(a); } catch (Throwable t) { stale = 0; }
+        if (stale > 0) {
+            final int n = stale;
+            col.addView(Nav.note(a, "발송 대상 " + n + "개 대화방에서 최근 카카오톡 메시지가 "
+                    + "확인되지 않았습니다. 대화방 이름이 변경되면 발송이 중단됩니다.",
+                    Theme.AMBER, "확인", new Runnable() {
+                        @Override public void run() {
+                            Nav.push(a, "이름 변경 확인", ScreenRooms.renameScreen(a));
+                        }
+                    }));
+        }
+
         col.addView(stopCard(a));
 
         fillReady(a, col);

@@ -136,6 +136,10 @@ public final class ScreenRooms {
             col.addView(top);
         }
 
+        // 이름이 바뀐 대화방 안내 — 선택돼 있는데 감지가 끊긴 방이 있으면 맨 위에서 알린다.
+        View rn = renameNote(a, rows);
+        if (rn != null) col.addView(rn);
+
         if (rows.isEmpty()) {
             col.addView(Nav.note(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 "
                     + "자동으로 등록되며, 직접 입력하여 추가할 수도 있습니다.", Theme.ACCENT2, null, null));
@@ -386,6 +390,195 @@ public final class ScreenRooms {
             }
         }));
         return g;
+    }
+
+    // ── 이름이 바뀐 대화방 ──────────────────────────────────────────────────
+    //
+    // 대상 대화방은 '계정 + 그때의 이름' 으로 저장된다(RoomRef). 대화방 이름이 바뀌면
+    // 새 알림은 새 이름으로 들어와 답장 통로가 새 키로 생기고, 저장된 옛 이름으로는
+    // 아무것도 찾지 못한다 → 매 주기 "대화방 연결이 없습니다" 로 실패한다.
+    // 그런데 그 실패가 활동 로그에만 묻혀서 사장은 발송이 끊긴 것을 모른다.
+    //
+    // 이름으로 자동 추적할 방법은 없다(알림에 고정된 방 번호가 없다). 추측으로 자동
+    // 교체하면 엉뚱한 방으로 발송되는 사고가 난다. 그래서 <b>후보를 제시하고 사장이
+    // 확인</b>하게 한다.
+
+    /** 이 시간 동안 감지가 없으면 '끊겼다' 고 본다 */
+    private static final long STALE_MS = 3L * 24 * 3600 * 1000L;
+    /** 새로 감지된 방을 '최근' 으로 보는 기간 */
+    private static final long FRESH_MS = 14L * 24 * 3600 * 1000L;
+
+    /**
+     * 발송 대상인데 최근 감지가 없는 방의 개수 (홈 경고에 쓴다).
+     * 대화방 이름이 바뀌면 발송이 조용히 끊기므로, 목록을 열지 않아도 알 수 있어야 한다.
+     */
+    public static int staleCount(Context c) {
+        try {
+            return staleRows(rows(c)).size();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 선택돼 있는데 감지가 끊긴 방 */
+    private static List<Row> staleRows(List<Row> rows) {
+        ArrayList<Row> out = new ArrayList<Row>();
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            if (r == null || !r.selected) continue;
+            if (!r.detected) { out.add(r); continue; }              // 아예 감지된 적 없음
+            if (r.lastAt > 0 && now - r.lastAt > STALE_MS) out.add(r);
+            }
+        return out;
+    }
+
+    private static View renameNote(final MainActivity a, final List<Row> rows) {
+        final List<Row> stale = staleRows(rows);
+        if (stale.isEmpty()) return null;
+        String names = "";
+        for (int i = 0; i < stale.size() && i < 3; i++) {
+            if (names.length() > 0) names += ", ";
+            names += "「" + Nav.preview(stale.get(i).ref.name, 14) + "」";
+        }
+        if (stale.size() > 3) names += " 외 " + (stale.size() - 3) + "개";
+        return Nav.note(a, "발송 대상 " + stale.size() + "개 대화방에서 최근 카카오톡 메시지가 "
+                + "확인되지 않았습니다 (" + names + ").\n"
+                + "대화방 이름이 변경되면 발송이 중단됩니다. 이름이 바뀐 경우 아래에서 "
+                + "바꿔 주십시오.", Theme.AMBER, "이름 변경 확인", new Runnable() {
+                    @Override public void run() { Nav.push(a, "이름 변경 확인", renameScreen(a)); }
+                });
+    }
+
+    private static WeakReference<LinearLayout> RENAME_BODY;
+
+    static View renameScreen(final MainActivity a) {
+        LinearLayout col = Ui.screen(a);
+        RENAME_BODY = new WeakReference<LinearLayout>(col);
+        fillRename(a, col);
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshRename() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (RENAME_BODY == null) ? null : RENAME_BODY.get();
+        if (a == null || col == null || a.isFinishing() || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillRename(a, col);
+        } catch (Throwable t) {
+            Log.add(a, "이름 변경 확인 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillRename(final MainActivity a, LinearLayout col) {
+        col.addView(Ui.sub(a, "발송 대상인데 최근 메시지가 확인되지 않은 대화방입니다. "
+                + "대화방 이름이 바뀌었으면 새 이름으로 바꿔 주십시오. 바꾸면 그 대화방의 "
+                + "개별 설정과 발송 주기가 함께 옮겨집니다."));
+
+        List<Row> rows = rows(a);
+        final List<Row> stale = staleRows(rows);
+        if (stale.isEmpty()) {
+            col.addView(Nav.note(a, "확인이 필요한 대화방이 없습니다.", Theme.DIM, null, null));
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < stale.size(); i++) {
+            final Row old = stale.get(i);
+
+            // 같은 계정에서 최근 감지된 '선택 안 된' 방들이 새 이름 후보다
+            final ArrayList<String> cand = new ArrayList<String>();
+            final ArrayList<String> desc = new ArrayList<String>();
+            for (int j = 0; j < rows.size(); j++) {
+                Row r = rows.get(j);
+                if (r == null || r.selected || !r.detected) continue;
+                if (!r.ref.acc.equals(old.ref.acc)) continue;
+                if (r.lastAt <= 0 || now - r.lastAt > FRESH_MS) continue;
+                cand.add(r.ref.name);
+                desc.add((r.groupKnown ? (r.group ? "단체방" : "1:1 개인 대화") : "확인 중")
+                        + " · " + ago(r.lastAt));
+            }
+
+            col.addView(Ui.sectionHeader(a, null, Nav.preview(old.ref.name, 20)));
+            LinearLayout g = Ui.group(a);
+            g.addView(Ui.kv(a, "마지막 감지",
+                    (old.lastAt > 0) ? ago(old.lastAt) : "감지된 적 없음"));
+            if (cand.isEmpty()) {
+                g.addView(Ui.kv(a, "새 이름 후보", "없음"));
+                col.addView(g);
+                col.addView(Ui.sub(a, "같은 계정에서 새로 감지된 대화방이 없습니다. "
+                        + "그 대화방에서 카카오톡 메시지를 1회 받으면 후보가 나타납니다."));
+                continue;
+            }
+            col.addView(g);
+            LinearLayout g2 = Ui.group(a);
+            g2.addView(Ui.navRow(a, "새 이름으로 바꾸기", cand.size() + "개 후보", Theme.ACCENT2,
+                    new Runnable() {
+                        @Override public void run() {
+                            Nav.choose(a, "바뀐 이름 선택",
+                                    cand.toArray(new String[0]), desc.toArray(new String[0]), -1,
+                                    new Nav.OnPick() {
+                                        @Override public void pick(int k) {
+                                            if (k < 0 || k >= cand.size()) return;
+                                            confirmRename(a, old.ref, cand.get(k));
+                                        }
+                                    });
+                        }
+                    }));
+            col.addView(g2);
+        }
+    }
+
+    private static void confirmRename(final MainActivity a, final RoomRef from, final String to) {
+        Nav.confirm(a, "대화방 이름 변경",
+                "「" + from.name + "」 을(를) 「" + to + "」 로 바꿉니다.\n\n"
+                        + "같은 대화방인지 카카오톡에서 먼저 확인하십시오. 다른 대화방을 고르면 "
+                        + "그 대화방으로 발송됩니다.",
+                "바꾸기", new Runnable() {
+                    @Override public void run() { applyRename(a, from, to); }
+                });
+    }
+
+    /** 대상 목록·방별 설정·보호 지정을 새 이름으로 옮긴다 */
+    private static void applyRename(MainActivity a, RoomRef from, String to) {
+        RoomRef dst = RoomRef.of(from.acc, to);
+        if (!dst.valid()) { Ui.toast(a, "새 이름이 올바르지 않습니다."); return; }
+        Settings s = Settings.load(a);
+        try {
+            // 1) 방별 설정을 그대로 옮긴다 (쿨타임·메시지·1:1 허용·다음 발송 시각)
+            if (s.macro.roomCfgs != null) {
+                Settings.RoomCfg cfg = s.macro.roomCfgs.remove(from.key());
+                if (cfg != null) s.macro.roomCfgs.put(dst.key(), cfg);
+            }
+            // 2) 대상 목록에서 옛 이름을 빼고 새 이름을 넣는다
+            List<RoomRef> cur = s.macro.roomRefs();
+            ArrayList<String> keys = new ArrayList<String>();
+            for (int i = 0; i < cur.size(); i++) {
+                RoomRef r = cur.get(i);
+                if (r == null) continue;
+                keys.add(r.key().equals(from.key()) ? dst.key() : r.key());
+            }
+            if (!keys.contains(dst.key())) keys.add(dst.key());
+            s.macro.rooms.clear();
+            s.macro.rooms.addAll(keys);
+            if (!s.save(a)) { Ui.toast(a, "저장하지 못했습니다."); return; }
+        } catch (Throwable t) {
+            Log.add(a, "대화방 이름 변경에 실패했습니다: " + t);
+            Ui.toast(a, "이름을 바꾸지 못했습니다.");
+            return;
+        }
+        // 3) 보호 지정도 같이 옮긴다 (이름 기준이므로 옛 이름만 남으면 보호가 풀린다)
+        if (SendGuard.isProtected(a, from.name)) {
+            SendGuard.protect(a, to);
+            SendGuard.unprotect(a, from.name);
+        }
+        Log.add(a, "대상 대화방 「" + from.name + "」 을(를) 「" + to + "」 로 변경했습니다. "
+                + "개별 설정과 발송 주기를 함께 옮겼습니다.");
+        Ui.toast(a, "이름을 바꿨습니다.");
+        refreshRename();
+        refresh();
+        ScreenMacro.refresh();
     }
 
     /** 행 아래 보조 문구. 보호 중인 방은 그 사실을 먼저 알린다. */

@@ -117,16 +117,33 @@ public final class ScreenAccounts {
             @Override public void run() { editGap(a); }
         }));
         col.addView(gg);
-        col.addView(Nav.note(a, "두 계정이 같은 대화방에 들어가 있으면, 한 계정이 보낸 뒤 이 시간 "
-                + "동안 다른 계정의 같은 대화방 발송을 건너뜁니다. 동시 중복 발송을 막습니다. "
-                + "0으로 두면 끕니다.", Theme.ACCENT2, null, null));
+        // 문구가 실제 동작과 달랐다("건너뜁니다"). 지금 동작을 그대로 적는다.
+        col.addView(Nav.note(a, "두 계정이 같은 대화방에 들어가 있을 때, 한 계정이 보낸 뒤 "
+                + "이 시간이 지나야 다른 계정이 보냅니다. 건너뛰지 않고 둘 다 보내되 "
+                + "동시에 올라가지 않게 합니다.\n"
+                + "자동발송은 이 시간 뒤에 다시 보내고, 봇과 메시지 추적은 한 계정만 답합니다"
+                + "(같은 명령에 두 번 답하면 도배가 됩니다).\n"
+                + "대화방 이름으로 판단하므로, 이름만 같고 실제로는 다른 대화방이면 "
+                + "그 방도 이 시간만큼 늦게 발송됩니다. 0으로 두면 끕니다.",
+                Theme.ACCENT2, null, null));
+
+        // 간격이 쿨타임보다 길면 발송이 계속 뒤로 밀린다 — 눈에 보이게 알린다.
+        int cdMin = gs.macro.cooldownMinMin;
+        if (gs.crossAccountGapMs > 0L && gs.crossAccountGapMs >= cdMin * 60000L) {
+            col.addView(Nav.note(a, "간격(" + (gs.crossAccountGapMs / 1000L) + "초)이 최소 쿨타임("
+                    + cdMin + "분)보다 길거나 같습니다. 이 상태에서는 두 번째 계정의 발송이 "
+                    + "계속 뒤로 밀릴 수 있습니다. 간격을 쿨타임보다 짧게 설정하십시오.",
+                    Theme.AMBER, null, null));
+        }
     }
 
     private static void editGap(final MainActivity a) {
         final Settings s = Settings.load(a);
         final Nav.NumField f = new Nav.NumField("간격 (초)", "60", 0, 3600,
                 (int) (s.crossAccountGapMs / 1000L));
-        Nav.editNums(a, "계정 간 발송 간격", "0으로 두면 끕니다. 같은 대화방 이름에만 적용됩니다.",
+        Nav.editNums(a, "계정 간 발송 간격",
+                "0으로 두면 끕니다. 대화방 이름이 같을 때만 적용되며, 최소 쿨타임보다 짧게 "
+                        + "설정하십시오.",
                 new Nav.NumField[] { f }, new Nav.OnNums() {
                     @Override public String ok() {
                         s.crossAccountGapMs = (long) f.value * 1000L;

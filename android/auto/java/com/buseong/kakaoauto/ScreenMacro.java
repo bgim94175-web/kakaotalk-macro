@@ -414,7 +414,20 @@ public final class ScreenMacro {
                     String label = room.label(a);
                     boolean sent = false;
                     try {
-                        sent = KakaoListener.sendTo(a, room, msg, SendGuard.MACRO);
+                        // 손님이 직접 누른 발송이다. 계정 간 간격 때문에 조용히 안 보내면
+                        // "눌렀는데 안 갔다" 가 되므로, 간격은 안내만 하고 그대로 보낸다
+                        // (중복 위험은 아래 로그로 알린다).
+                        int r = KakaoListener.send(a, room, msg, SendGuard.MACRO);
+                        if (r == KakaoListener.SEND_HELD) {
+                            long wait = KakaoListener.heldMs(a, room);
+                            Log.add(a, "「" + label + "」 다른 계정이 "
+                                    + Math.max(1L, (KakaoListener.gapOf(a) - wait + 999) / 1000)
+                                    + "초 전에 같은 이름의 대화방에 발송했습니다."
+                                    + " 즉시 발송은 요청하신 대로 그대로 보냈습니다. 중복될 수 있습니다.");
+                            sent = KakaoListener.sendIgnoringGap(a, room, msg, SendGuard.MACRO);
+                        } else {
+                            sent = (r == KakaoListener.SEND_OK);
+                        }
                     } catch (Throwable t) {
                         Log.add(a, "즉시 발송 중 오류가 발생했습니다. (" + label + ") " + t);
                     }

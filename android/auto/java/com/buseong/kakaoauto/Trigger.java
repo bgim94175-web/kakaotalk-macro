@@ -247,7 +247,15 @@ public final class Trigger {
                 @Override public void run() {
                     // 메아리 차단: 보낼 문구를 발송 직전에 방별로 기억한다 (되돌아온 알림을 걸러낸다)
                     remember(dest.key(), msg, System.currentTimeMillis());
-                    boolean ok = KakaoListener.sendTo(c, dest, msg, SendGuard.TRIGGER);
+                    int r = KakaoListener.send(c, dest, msg, SendGuard.TRIGGER);
+                    if (r == KakaoListener.SEND_HELD) {
+                        // 다른 계정이 방금 같은 대화방에 보냈다. 메시지 추적은 '즉시 발송' 이
+                        // 약속이라 미루면 의미가 없고, 두 계정이 같은 키워드에 두 번 반응하는
+                        // 것이 문제다 → 이번 건은 그 계정에 맡기고 보내지 않는다.
+                        KakaoListener.noteHeld(c, dest, SendGuard.TRIGGER, 0L, true);
+                        return;
+                    }
+                    boolean ok = (r == KakaoListener.SEND_OK);
                     if (!ok) {
                         Log.add(c, "메시지 추적 「" + name + "」 발송에 실패했습니다. (대상 "
                                 + destLabel + ")");

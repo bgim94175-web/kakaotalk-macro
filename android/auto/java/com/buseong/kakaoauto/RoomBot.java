@@ -756,7 +756,13 @@ public final class RoomBot {
             remember(rk, msg, now);
             save(c);
         }
-        boolean ok = KakaoListener.sendTo(c, room, msg, SendGuard.ROOMBOT);
+        int r = KakaoListener.send(c, room, msg, SendGuard.ROOMBOT);
+        if (r == KakaoListener.SEND_HELD) {
+            // 다른 계정의 봇이 방금 그 대화방에 답했다. 같은 명령에 두 번 답하면 도배다.
+            KakaoListener.noteHeld(c, room, SendGuard.ROOMBOT, 0L, true);
+            return false;
+        }
+        boolean ok = (r == KakaoListener.SEND_OK);
         if (!ok) {
             synchronized (RoomBot.class) {
                 if (sentToday > 0) sentToday = sentToday - 1;
