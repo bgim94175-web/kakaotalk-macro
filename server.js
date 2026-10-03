@@ -11,9 +11,11 @@ const path = require('path');
 
 const db = require('./lib/db');
 const rl = require('./lib/ratelimit');
+const senderChild = require('./lib/sender-child');
 const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
 const purchaseRoutes = require('./routes/purchase');
+const panelRoutes = require('./routes/panel');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -26,8 +28,18 @@ const app = express();
 app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
 app.disable('x-powered-by');
 
-// 본문 크기 제한 (설정 백업 blob 256KB + 여유)
-app.use(express.json({ limit: '512kb' }));
+// 발송 API 는 자식으로 그대로 넘긴다. 이미지 base64 가 512kb 를 넘으므로
+// express.json 보다 먼저 둔다. 자식이 죽어 있으면 503 만 반환하고 부모는 계속 산다.
+senderChild.install(app);
+
+// 본문 크기 제한 (설정 백업 blob 256KB + 여유). /v1 은 위에서 이미 프록시한다.
+// 관리 화면의 이미지 저장만 더 받는다. 그 외 경로는 512kb 그대로다.
+const jsonSmall = express.json({ limit: '512kb' });
+const jsonSettings = express.json({ limit: '16mb' });
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path === '/panel/api/settings') return jsonSettings(req, res, next);
+  return jsonSmall(req, res, next);
+});
 
 // ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
 // 버킷은 종류별로 나뉘어 있다(verify 30 / order-read 180 / order-write 20 / deposit 60 / admin 120,
@@ -68,12 +80,20 @@ app.use((req, res, next) => {
 });
 
 // ── 정적 파일 (구매 웹사이트). index 는 아래에서 직접 다룬다.
-app.use(express.static(PUBLIC_DIR, { index: false, extensions: ['html'], maxAge: '1h' }));
+app.use(express.static(PUBLIC_DIR, {
+  index: false,
+  extensions: ['html'],
+  maxAge: '1h',
+  setHeaders: (res, filePath) => {
+    if (/panel\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
 
 function page(name) {
   return (req, res, next) => {
     const f = path.join(PUBLIC_DIR, name);
     if (!fs.existsSync(f)) return next();
+    if (name === 'panel.html') res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(f);
   };
 }
@@ -82,11 +102,13 @@ function page(name) {
 app.get('/buy', page('buy.html'));
 app.get('/my', page('my.html'));
 app.get('/order/:id', page('order.html'));
+app.get('/panel', page('panel.html'));
 
 // ── API 라우터
 app.use(licenseRoutes);
 app.use(adminRoutes);
 app.use(purchaseRoutes);
+app.use(panelRoutes);
 
 // 루트: 브라우저면 랜딩 페이지, 그 외(앱/curl 연결확인)는 기존 JSON 그대로
 app.get('/', (req, res) => {
@@ -115,6 +137,8 @@ app.use((err, req, res, next) => {
 });
 
 // ── 셀프핑: Render 무료는 15분 동안 외부 요청이 없으면 잠듦 → 10분마다 자기 공개 주소를 호출해서 막음
+// 이 호출이 무료 인스턴스를 하루 종일 켜 두지는 못한다. 프로세스가 죽거나, 호출이 실패하거나,
+// 무료 한도로 인스턴스가 멈추면 그 사이 발송은 멈춘다.
 // Render가 RENDER_EXTERNAL_URL을 자동으로 넣어줌 (로컬에선 SELF_URL로 테스트)
 function startSelfPing() {
   const base = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
@@ -176,5 +200,6 @@ db.migrate()
   .then(() => app.listen(PORT, () => {
     console.log('license server on :' + PORT);
     startSelfPing();
+    senderChild.start();
   }))
   .catch((e) => { console.error('DB init 실패:', e && e.stack ? e.stack : e); process.exit(1); });

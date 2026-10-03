@@ -3,7 +3,7 @@ services:
     name: kakao-license
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npm install --prefix sender
     startCommand: npm start
     healthCheckPath: /health
     envVars:
@@ -69,3 +69,13 @@ services:
       #   프록시
       #     TRUST_PROXY_HOPS          1     x-forwarded-for 뒤에서 N번째를 클라이언트 IP 로 쓴다.
       #                                     Render 기본 구성이면 1 이 맞다. 모르면 넣지 마라.
+
+      # 발송 자식. 값은 대시보드에만 넣는다. 여기 적지 않는다.
+      # SENDER_PUBLIC_URL 을 비우면 이 서비스 주소(RENDER_EXTERNAL_URL)를 앱에 알려 준다.
+      # 세션은 Neon kakao_sessions. 발송 루프는 부모가 띄우는 자식이고, 죽으면 다시 띄운다.
+      - key: SENDER_PUBLIC_URL
+        sync: false
+      - key: SENDER_TOKEN
+        sync: false
+      - key: SENDER_KEY
+        sync: false
