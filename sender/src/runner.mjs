@@ -74,12 +74,13 @@ export class Hub {
 
   status(id) {
     const slot = this.accounts.get(id)
-    if (!slot) return { linked: false, needs_register: false, reason: 'absent' }
+    if (!slot) return { linked: false, needs_register: false, reason: 'absent', connected: false }
     return {
       linked: !slot.record.needs_register,
       needs_register: !!slot.record.needs_register,
       reason: slot.record.reason || (slot.record.needs_register ? 'reauth' : 'ok'),
       notices: guardNotices(slot.record),
+      connected: socketUp(slot),
     }
   }
 
@@ -561,6 +562,14 @@ class Slot {
       filename: `photo-${i + 1}.jpg`,
     })))
     if (!realLogId(res && res.log_id)) log(this.id, 'multi image send missing log id')
+  }
+}
+
+function socketUp(slot) {
+  try {
+    return !!(slot && slot.client && typeof slot.client.isConnected === 'function' && slot.client.isConnected())
+  } catch {
+    return false
   }
 }
 

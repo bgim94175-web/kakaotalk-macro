@@ -1,8 +1,9 @@
 import express from 'express'
 
 import { guardNotices } from './features.mjs'
+import { beginLogin, cancelLogin, confirmLogin } from './register.mjs'
 import { Hub } from './runner.mjs'
-import { assertKey } from './store.mjs'
+import { assertKey, loadRecord } from './store.mjs'
 
 const token = process.env.SENDER_TOKEN || ''
 if (!token) {
@@ -95,6 +96,71 @@ app.post('/v1/config', async (req, res) => {
   } catch (e) {
     res.status(e.status || 500).json({ ok: false, error: e.message || 'failed', needs_register: !!e.needs_register })
   }
+})
+
+function publicStatus(live, rec) {
+  if (live && live.reason !== 'absent') return live
+  if (!rec) return { linked: false, needs_register: false, reason: 'absent', connected: false, notices: [] }
+  return {
+    linked: !rec.needs_register && !!(rec.credentials && rec.credentials.access_token),
+    needs_register: !!rec.needs_register,
+    reason: rec.reason || 'ok',
+    connected: false,
+    notices: guardNotices(rec),
+  }
+}
+
+app.get('/v1/snapshot', async (req, res) => {
+  const id = deviceId(req.query.device_id)
+  if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  const rec = await loadRecord(id)
+  const live = hub.status(id)
+  const st = publicStatus(live, rec)
+  res.json({
+    ok: true,
+    ...st,
+    config: rec && rec.config ? rec.config : {},
+    rooms: rec && Array.isArray(rec.rooms) ? rec.rooms : [],
+    features: rec && rec.features ? rec.features : {},
+    images: rec && Array.isArray(rec.images) ? rec.images : [],
+  })
+})
+
+app.post('/v1/register/begin', async (req, res) => {
+  const id = deviceId(req.body && req.body.device_id)
+  if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  const email = req.body && typeof req.body.email === 'string' ? req.body.email : ''
+  const password = req.body && typeof req.body.password === 'string' ? req.body.password : ''
+  if (!email || !password) return res.status(400).json({ ok: false, error: 'bad_request' })
+  try {
+    const out = await beginLogin(hub, {
+      device_id: id,
+      email,
+      password,
+      forced: !!(req.body && req.body.forced),
+    })
+    res.json({ ok: true, ...out })
+  } catch (e) {
+    process.stderr.write(`[sender] register begin failed ${e && e.code ? e.code : ''}\n`)
+    res.status(502).json({ ok: false, error: 'kakao_unreachable' })
+  }
+})
+
+app.post('/v1/register/confirm', async (req, res) => {
+  const pendingId = req.body && typeof req.body.pending_id === 'string' ? req.body.pending_id : ''
+  if (!pendingId) return res.status(400).json({ ok: false, error: 'bad_request' })
+  try {
+    const out = await confirmLogin(hub, { pending_id: pendingId })
+    res.json({ ok: true, ...out })
+  } catch (e) {
+    process.stderr.write(`[sender] register confirm failed ${e && e.code ? e.code : ''}\n`)
+    res.status(502).json({ ok: false, error: 'kakao_unreachable' })
+  }
+})
+
+app.post('/v1/register/cancel', async (req, res) => {
+  cancelLogin(req.body && req.body.pending_id)
+  res.json({ ok: true })
 })
 
 app.post('/v1/unlink', async (req, res) => {
