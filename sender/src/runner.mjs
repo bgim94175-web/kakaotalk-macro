@@ -342,8 +342,8 @@ export class Hub {
     return out
   }
 
-  // 채팅 목록. 이 계정이 든 방을 최근 대화순으로 돌려준다. 오픈프로필 갠톡(open_dm)과
-  // 오픈채팅방(open_room), 그리고 말이 오간 방을 올린다. 조용한 일반 채팅은 빼서 목록을 깨끗이 둔다.
+  // 채팅 목록. 오픈프로필로 온 1:1 채팅(open_dm)만 최근 대화순으로 돌려준다.
+  // 오픈 단체방과 일반 채팅은 올리지 않는다 — 손님 갠톡이 묻히지 않게.
   async inbox(id) {
     const slot = this.requireLive(id)
     let catalog = []
@@ -371,14 +371,16 @@ export class Hub {
     const out = []
     for (const ch of byId.values()) {
       const kind = ch.list_kind || 'normal'
+      // 오픈프로필로 온 1:1 채팅만 올린다.
+      // 오픈 단체방(매크로를 돌리는 방)과 일반 채팅은 이 화면이 다룰 일이 아니다.
+      if (kind !== 'open_dm') continue
       // 받아 둔 기록이 있으면 그걸 믿는다(방을 열면 0 이 된다).
       // 기록이 없으면 — 프로세스가 막 떴을 때 — 카카오가 세어 둔 값을 쓴다.
       const unread = ch.has_buffer ? (ch.unread || 0) : (ch.unread_count || 0)
-      if (kind === 'normal' && !ch.has_buffer && unread === 0) continue
       out.push({
         chat_id: ch.chat_id,
         list_kind: kind,
-        name: ch.title || ch.display_name || ch.peer || (kind === 'open_room' ? '오픈채팅방' : ''),
+        name: ch.title || ch.display_name || ch.peer || '',
         preview: ch.last_text || '',
         unread,
         last_at: ch.last_at || 0,
@@ -543,6 +545,25 @@ class Slot {
     return stampOpenLinkTitles(list, this.linkNames.map)
   }
 
+  // 이 방이 오픈프로필 1:1 인지 목록 캐시에서 본다. 캐시에 없으면 '' — 아직 모른다는 뜻이다.
+  kindOf(id) {
+    for (const row of this.catalogCache.list || []) {
+      if (row.chat_id === id) return row.list_kind || 'normal'
+    }
+    return ''
+  }
+
+  // 갠톡이 아닌 것으로 밝혀진 방의 기록은 버린다. 단체방까지 들고 있으면 메모리만 먹는다.
+  pruneInbox(list) {
+    if (!this.inbox.size) return
+    const kinds = new Map()
+    for (const row of list) kinds.set(row.chat_id, row.list_kind || 'normal')
+    for (const cid of Array.from(this.inbox.keys())) {
+      const k = kinds.get(cid)
+      if (k && k !== 'open_dm') this.inbox.delete(cid)
+    }
+  }
+
   // 그 방의 기록을 꺼낸다. 없으면 만든다.
   // 프로세스가 다시 떠서 처음 만드는 방이면, 카카오가 세어 둔 안 읽음 수에서 이어 센다
   // (그래야 새 글 하나가 왔을 때 23 → 1 로 줄어들지 않는다).
@@ -573,6 +594,11 @@ class Slot {
     if (!id) return
     const text = typeof m.text === 'string' ? m.text : ''
     if (!recordable(text, m.type)) return
+    // 채팅 화면은 오픈프로필 1:1 만 다룬다.
+    // 처음 보는 방은 일단 담되, 목록을 다시 읽어 종류를 알아낸다 (새로 생긴 갠톡일 수 있다).
+    const kind = this.kindOf(id)
+    if (kind && kind !== 'open_dm') return
+    if (!kind) this.catalogCache.at = 0
     const logId = m.logId ? String(m.logId) : ''
     const conv = this.convFor(id)
     if (logId && conv.list.some((x) => x.log_id === logId)) return
@@ -629,6 +655,7 @@ class Slot {
           }
         })
         this.catalogCache = { at: Date.now(), list: mapped }
+        this.pruneInbox(mapped)
         return mapped
       })()
         .catch((e) => {

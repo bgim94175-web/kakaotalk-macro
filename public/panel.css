@@ -356,22 +356,15 @@ legend { padding: 0 4px; font-weight: 650; }
   background: linear-gradient(180deg, #ffffff, #f6f8fa);
   border-bottom: 1px solid var(--line);
 }
-.kkt-filter {
+.kkt-toolname {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
   min-height: 34px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #fff;
   font-size: 13px;
-  font-weight: 650;
-  color: var(--muted);
-  cursor: pointer;
+  font-weight: 700;
+  color: var(--band-chat);
+  letter-spacing: -0.01em;
 }
-.kkt-filter input { width: 16px; height: 16px; margin: 0; accent-color: var(--band-chat); }
-.kkt-filter:has(input:checked) { color: var(--band-chat); border-color: #9cc4b7; background: #eef6f2; }
 .kkt-tools .btn { margin-left: auto; width: auto; min-height: 34px; padding: 4px 13px; border-radius: 999px; }
 #chat-error { margin: 8px 12px 0; }
 .kkt-rooms { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; }
@@ -425,18 +418,6 @@ legend { padding: 0 4px; font-weight: 650; }
 .kkt-meta { min-width: 0; }
 .kkt-name { font-weight: 650; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .kkt-name b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
-.kkt-tag {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: #7a6a00;
-  background: #fff3b0;
-  border-radius: 5px;
-  padding: 1px 6px;
-}
-.kkt-tag.tagroom { color: #2f5d50; background: #d9efe6; }
 .kkt-prev { color: var(--muted); font-size: 13px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kkt-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .kkt-time { color: #9aa6b2; font-size: 11px; white-space: nowrap; }

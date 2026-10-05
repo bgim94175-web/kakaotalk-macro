@@ -536,7 +536,7 @@ if (client.isConnected()) throw new Error('login() must not open a LOCO socket')
 const got = client.getCredentials()
 if (got.oauthToken !== 'tok' || got.userId !== '42') throw new Error('credentials not restored')
 
-// ── 채팅 버퍼: 갠톡/오픈방 목록 · 대화 불러오기 · 보낸 메시지 기록 ──────────────
+// ── 채팅 버퍼: 오픈프로필 갠톡만 · 대화 불러오기 · 보낸 메시지 기록 ──────────────
 // 카카오는 sent_at 을 초로 준다. 버퍼는 밀리초로 들고 있어야 화면 시각이 맞는다.
 const SEC = 1700000000
 const chatSlot = new Slot('chat-dev', { credentials: { user_id: '111' }, needs_register: false, reason: 'ok' })
@@ -546,7 +546,8 @@ chatSlot.client = {
   async getChats() {
     return [
       { chat_id: '5', type: 'OD', title: '', display_name: '구매자', active_members: 2, last_message: { sent_at: SEC - 600, message: '이전글' } },
-      { chat_id: '9', type: 'OM', link_id: '77', active_members: 50, title: '오픈방', display_name: 'a,b', unread_count: 4, last_message: { sent_at: SEC - 900, message: '방글' } },
+      { chat_id: '6', type: 'OD', title: '', display_name: '새손님', active_members: 2, unread_count: 4, last_message: { sent_at: SEC - 300, message: '문의드려요' } },
+      { chat_id: '9', type: 'OM', link_id: '77', active_members: 50, title: '오픈방', display_name: 'a,b', unread_count: 9, last_message: { sent_at: SEC - 900, message: '방글' } },
       { chat_id: '42', type: '2', active_members: 2, title: '친구', display_name: '친구', last_message: { sent_at: SEC - 1200, message: '없음' } },
     ]
   },
@@ -576,11 +577,16 @@ const inbox = await chatHub.inbox('chat-dev')
 const row5 = inbox.find((c) => c.chat_id === '5')
 if (!row5 || row5.list_kind !== 'open_dm' || row5.name !== '구매자') throw new Error('chat: 갠톡 row wrong')
 if (row5.unread !== 2 || row5.last_at !== (SEC + 60) * 1000) throw new Error('chat: inbox merge wrong')
-const row9 = inbox.find((c) => c.chat_id === '9')
-if (!row9) throw new Error('chat: open_room not listed')
-// 받아 둔 기록이 없는 방은 카카오가 세어 둔 안읽음 수를 그대로 보여야 한다
-if (row9.unread !== 4) throw new Error('chat: 버퍼가 없을 때 카카오의 안읽음 수를 쓰지 않았다')
-if (inbox.find((c) => c.chat_id === '42')) throw new Error('chat: quiet normal chat should be hidden')
+// 받아 둔 기록이 없는 갠톡은 카카오가 세어 둔 안읽음 수를 그대로 보여야 한다
+const row6 = inbox.find((c) => c.chat_id === '6')
+if (!row6 || row6.unread !== 4) throw new Error('chat: 버퍼가 없을 때 카카오의 안읽음 수를 쓰지 않았다')
+// 오픈 단체방과 일반 채팅은 이 목록에 올라오면 안 된다 (손님 갠톡이 묻힌다)
+if (inbox.find((c) => c.chat_id === '9')) throw new Error('chat: 오픈 단체방이 목록에 올라왔다')
+if (inbox.find((c) => c.chat_id === '42')) throw new Error('chat: 일반 채팅이 목록에 올라왔다')
+if (inbox.length !== 2) throw new Error('chat: 갠톡만 올라와야 한다 (' + inbox.length + '개)')
+// 갠톡이 아닌 방의 기록은 목록을 읽을 때 버려야 한다
+chatSlot.noteChat('9', { logId: '501', text: '단체방 글', mine: false, at: SEC, author: 'x', type: 1 })
+if (chatSlot.inbox.has('9')) throw new Error('chat: 단체방 메시지를 버퍼에 담았다')
 if (inbox[0].chat_id !== '5') throw new Error('chat: not sorted recent-first')
 
 await chatHub.sendText('chat-dev', '5', '네 가능합니다')

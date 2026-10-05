@@ -797,7 +797,7 @@
   // 목록은 9초, 열린 방은 3초마다 새로 읽는다. 방을 열면 그 방의 안 읽음은 서버에서 0 이 된다.
   var chat = {
     deviceId: '', openId: '', openName: '', openKind: '',
-    dmOnly: false, listBusy: false, listAgain: false, roomBusy: false, roomAgain: false, sending: false,
+    listBusy: false, listAgain: false, roomBusy: false, roomAgain: false, sending: false,
     listTimer: null, roomTimer: null, roomSig: '', listSig: '', renderedIds: {},
   };
   var kkt = document.getElementById('kkt');
@@ -860,11 +860,6 @@
     var d = new Date(Number(ms) || 0);
     if (!ms || isNaN(d.getTime())) return '';
     return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
-  }
-  function kindTag(k) {
-    if (k === 'open_dm') return '갠톡';
-    if (k === 'open_room') return '오픈방';
-    return '';
   }
   function setComposeEnabled(on) {
     if (chatText) chatText.disabled = !on;
@@ -949,7 +944,8 @@
   }
 
   function renderChatList(chats) {
-    var rows = chat.dmOnly ? chats.filter(function (c) { return c.list_kind === 'open_dm'; }) : chats;
+    // 서버가 이미 갠톡만 주지만, 한 번 더 걸러 오픈방이 섞여 들어올 여지를 없앤다.
+    var rows = chats.filter(function (c) { return c && c.list_kind === 'open_dm'; });
     // 바뀐 게 없으면 그대로 둔다. 9초마다 새로 그리면 마우스·포커스가 끊긴다.
     var sig = rows.map(function (c) {
       return c.chat_id + '\u0001' + c.unread + '\u0001' + c.last_at + '\u0001' + c.name + '\u0001' + c.preview;
@@ -958,9 +954,8 @@
     chat.listSig = sig;
     chatRooms.textContent = '';
     if (!rows.length) {
-      chatRooms.appendChild(emptyState('🗨️', chat.dmOnly
-        ? '갠톡이 아직 없습니다.'
-        : '대화가 아직 없습니다.\n상대가 메시지를 보내면 여기에 나타납니다.'));
+      chatRooms.appendChild(emptyState('🗨️',
+        '아직 온 갠톡이 없습니다.\n오픈프로필로 1:1 채팅이 오면 여기에 나타납니다.'));
       return;
     }
     rows.forEach(function (c) {
@@ -969,14 +964,10 @@
       row.type = 'button';
       row.dataset.id = c.chat_id;
       if (c.chat_id === chat.openId) row.setAttribute('aria-current', 'true');
-      var isDm = c.list_kind === 'open_dm';
-      var ava = el('div', 'kkt-ava' + (isDm ? ' dm' : ''), initialOf(name));
-      if (!isDm) ava.style.setProperty('--ava', avaColor(name));
+      var ava = el('div', 'kkt-ava dm', initialOf(name));
       var meta = el('div', 'kkt-meta');
       var nameRow = el('div', 'kkt-name');
       nameRow.appendChild(el('b', '', name));
-      var tag = kindTag(c.list_kind);
-      if (tag) nameRow.appendChild(el('span', 'kkt-tag' + (c.list_kind === 'open_room' ? ' tagroom' : ''), tag));
       meta.appendChild(nameRow);
       meta.appendChild(el('div', 'kkt-prev', c.preview || ''));
       var right = el('div', 'kkt-right');
@@ -1162,10 +1153,6 @@
     }
   }
 
-  document.getElementById('chat-dm-only').addEventListener('change', function () {
-    chat.dmOnly = this.checked;
-    loadChatList();
-  });
   document.getElementById('chat-reload').addEventListener('click', function () { loadChatList(true); });
   document.getElementById('chat-back').addEventListener('click', function () {
     if (kkt) kkt.setAttribute('data-view', 'list');

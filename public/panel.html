@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=6">
+<link rel="stylesheet" href="/panel.css?v=7">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -84,12 +84,12 @@
 
       <section class="card" data-band="chat" aria-labelledby="chat-title">
         <h2 id="chat-title">채팅</h2>
-        <p class="lead">오픈프로필 갠톡과 오픈채팅방의 대화를 여기서 보고 답합니다. 카카오톡을 열지 않아도 등록된 계정으로 이 서버가 보냅니다.</p>
+        <p class="lead">오픈프로필 1:1 채팅(갠톡)만 모아 보여 줍니다. 카카오톡을 열지 않아도 등록된 계정으로 이 서버가 답장을 보냅니다. 오픈채팅 단체방은 여기 올라오지 않습니다.</p>
         <p id="chat-note" class="hint"></p>
         <div id="kkt" class="kkt" data-view="list" hidden>
           <div class="kkt-list">
             <div class="kkt-tools">
-              <label class="kkt-filter"><input type="checkbox" id="chat-dm-only"> 갠톡만</label>
+              <span class="kkt-toolname">오픈프로필 갠톡</span>
               <button type="button" id="chat-reload" class="btn ghost">새로고침</button>
             </div>
             <p id="chat-error" class="error" role="alert"></p>
@@ -229,6 +229,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=11"></script>
+<script src="/panel.js?v=12"></script>
 </body>
 </html>
