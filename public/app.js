@@ -640,7 +640,7 @@
           el('div', { cls: 'head' }, [
             el('div', {
               cls: 'ico', 'aria-hidden': 'true',
-              style: 'background:rgba(255,255,255,.05);border:1px solid var(--line);color:' + f.color
+              style: 'background:#f4f6f8;border:1px solid var(--line);color:' + f.color
             }, f.icon),
             el('div', { cls: 't' }, [
               el('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [

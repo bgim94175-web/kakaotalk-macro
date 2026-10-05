@@ -7,16 +7,21 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=2">
+<link rel="stylesheet" href="/panel.css?v=3">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
 <header class="top">
   <div class="bar">
-    <div>
-      <p class="kicker">카카오톡 매크로</p>
-      <h1>매크로 관리</h1>
-    </div>
+    <a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">카카오톡 매크로</a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a href="/buy">구매</a>
+      <a href="/my">내 키</a>
+      <a href="/panel" aria-current="page">관리</a>
+    </nav>
+  </div>
+  <div class="pagehead">
+    <h1>매크로 관리</h1>
     <div class="top-side">
       <p id="who" class="who"></p>
       <button type="button" id="logout" class="btn ghost" hidden>나가기</button>
@@ -38,7 +43,7 @@
   <div id="app" hidden>
     <section class="strip" id="runstate" aria-live="polite"></section>
 
-    <section class="card">
+    <section class="card" id="account-block" data-band="account">
       <h2>카카오 계정</h2>
       <p class="lead">한 키에 계정을 여러 개 둘 수 있습니다. 등록이 끝나면 그 계정의 발송은 이 서버가 합니다.</p>
       <div id="account-list" class="account-list"></div>
@@ -67,9 +72,15 @@
     </section>
 
     <div id="detail" hidden>
+      <nav class="jumps" aria-label="이 계정의 설정">
+        <a href="#macro-title">매크로</a>
+        <a href="#visit-title">들낙 방지</a>
+        <a href="#reply-title">자동응답</a>
+        <a href="#snipe-title">저격</a>
+      </nav>
       <p id="detail-where" class="where"></p>
 
-      <section class="card" aria-labelledby="macro-title">
+      <section class="card" data-band="macro" aria-labelledby="macro-title">
         <h2 id="macro-title">매크로</h2>
         <p class="lead">이 계정이 고른 방에 글을 보냅니다. 발송은 서버에서 합니다.</p>
         <form id="macro-form" class="stack">
@@ -96,7 +107,10 @@
           </div>
           <div>
             <label for="images">이미지 1~5장</label>
-            <input id="images" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+            <div class="file-line">
+              <input id="images" class="file-native" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+              <label for="images" class="btn ghost">사진 고르기</label>
+            </div>
             <p class="hint">없으면 글만 보냅니다. 있으면 매번 함께 보냅니다.</p>
             <div id="thumbs" class="thumbs"></div>
           </div>
@@ -114,7 +128,7 @@
         </form>
       </section>
 
-      <section class="card" aria-labelledby="visit-title">
+      <section class="card" data-band="visit" aria-labelledby="visit-title">
         <h2 id="visit-title">들낙 방지</h2>
         <p class="lead">고른 방에 누군가 들어오면 입장 안내를, 나가면 퇴장 안내를 보냅니다. 그 사람을 한 번 멘션하고, 오픈프로필 링크와 그 시각을 적습니다. 매크로와 갠톡 자동응답과는 따로입니다.</p>
         <form id="visit-form" class="stack">
@@ -129,7 +143,7 @@
         </form>
       </section>
 
-      <section class="card" aria-labelledby="reply-title">
+      <section class="card" data-band="reply" aria-labelledby="reply-title">
         <h2 id="reply-title">갠톡 자동응답</h2>
         <p class="lead">개인 채팅에 온 말에 답합니다. 매크로의 보낼 방과는 따로입니다.</p>
         <form id="reply-form" class="stack">
@@ -147,7 +161,7 @@
         </form>
       </section>
 
-      <section class="card" aria-labelledby="snipe-title">
+      <section class="card" data-band="snipe" aria-labelledby="snipe-title">
         <h2 id="snipe-title">경쟁사 저격</h2>
         <p class="lead">고른 말이 올라오면 답합니다. 매크로 발송, 갠톡 자동응답과 따로입니다.</p>
         <div id="triggers"></div>
