@@ -30,7 +30,7 @@
       ]
     },
     {
-      id: 'roombot', name: '대화방 관리봇', icon: '🛡', color: 'var(--accent2)', tag: '',
+      id: 'roombot', name: '대화방 관리봇', icon: '🛡', color: 'var(--mark)', tag: '',
       desc: '입/퇴장 인사, 금지어·도배 감지, 공지 자동안내',
       bullets: [
         '입장 / 퇴장 인사 자동 발송',
@@ -41,7 +41,7 @@
       ]
     },
     {
-      id: 'minigame', name: '미니게임봇', icon: '🎲', color: 'var(--violet)', tag: '',
+      id: 'minigame', name: '미니게임봇', icon: '🎲', color: 'var(--stone)', tag: '',
       desc: '끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹',
       bullets: [
         '끝말잇기 (사전 내장, 두음법칙 처리)',
@@ -640,7 +640,7 @@
           el('div', { cls: 'head' }, [
             el('div', {
               cls: 'ico', 'aria-hidden': 'true',
-              style: 'background:rgba(255,255,255,.05);border:1px solid var(--line);color:' + f.color
+              style: 'background:var(--bg2);border:1px solid var(--line);color:' + f.color
             }, f.icon),
             el('div', { cls: 't' }, [
               el('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
