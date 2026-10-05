@@ -99,6 +99,30 @@ public final class RoomBot {
 
     /** "방키\u0001이름" → 누적 경고 횟수 (방키 = RoomRef.key()) */
     private static final HashMap<String, Integer> WARNS = new HashMap<String, Integer>();
+
+    // ── 들낙(반복 입·퇴장) ─────────────────────────────────────────────────────
+    //
+    // 같은 사람이 짧은 시간에 들어왔다 나가기를 반복하면 봇 인사가 그 횟수만큼 올라가
+    // 방이 인사로 도배된다. 들낙 자체보다 그 도배가 실제 피해다.
+    //
+    // 강제퇴장은 할 수 없다(이 클래스 머리말 참고). 그래서 이 기능이 하는 일은 셋이다 —
+    // (1) 들낙으로 판정된 사람의 인사를 생략한다  (2) 명단에 기록해 방장이 보고 직접
+    // 처리하게 한다  (3) 방장이 원하면 방에 안내를 1회 올린다(기본은 올리지 않는다).
+
+    /** "방키\u0001사람" → 최근 입·퇴장 시각 목록 (창 안의 것만 남긴다) */
+    private static final HashMap<String, ArrayList<Long>> CHURN =
+            new HashMap<String, ArrayList<Long>>();
+    /** "방키\u0001사람" → 들낙으로 판정된 누적 횟수 (명단에 쓴다) */
+    private static final HashMap<String, Integer> CHURN_N = new HashMap<String, Integer>();
+    /** "방키\u0001사람" → 마지막 들낙 판정 시각 */
+    private static final HashMap<String, Long> CHURN_AT = new HashMap<String, Long>();
+    /** 같은 사람에게 안내·로그를 되풀이하지 않기 위한 창 */
+    private static final long CHURN_NOTE_MS = 30 * 60 * 1000L;
+    private static final HashMap<String, Long> CHURN_NOTED = new HashMap<String, Long>();
+    /** 들낙 기록 보관 기간 — 넘으면 명단에서 뺀다 */
+    private static final long CHURN_TTL_MS = 7L * 24 * 3600 * 1000L;
+    /** 한 사람의 입·퇴장 시각을 이만큼만 들고 있는다 */
+    private static final int CHURN_MAX_EVENTS = 24;
     /** "방키\u0001이름" → 마지막 경고 시각 (TTL·정리용) */
     private static final HashMap<String, Long> WARN_AT = new HashMap<String, Long>();
     /** "방키\u0001이름" → 최근 메시지 시각들 (도배 판정) */
@@ -274,11 +298,155 @@ public final class RoomBot {
         return head;
     }
 
+    /**
+     * 입·퇴장을 한 건 기록하고, 창 안의 횟수가 기준을 넘으면 들낙으로 판정한다.
+     *
+     * @return <b>이번 호출에서 새로 들낙으로 판정됐으면</b> 창 안의 입·퇴장 횟수, 아니면 0.
+     *         이미 들낙 상태로 계속 들어오는 건에는 0 을 돌려준다 — 안내·로그를 되풀이하지
+     *         않기 위해서다. 인사를 생략할지는 {@link #churning} 이 따로 판단한다.
+     */
+    private static int bumpChurn(Context c, Settings.RoomBotCfg cfg, RoomRef room,
+                                 String who, long now) {
+        if (cfg == null || !cfg.churnOn) return 0;
+        if (who == null || who.trim().length() == 0) return 0;   // 이름을 못 뽑으면 셀 수 없다
+        int need = (cfg.churnCount < 2) ? 2 : cfg.churnCount;
+        long win = (long) ((cfg.churnMin < 1) ? 1 : cfg.churnMin) * 60000L;
+        String k = key(room, who);
+        synchronized (RoomBot.class) {
+            load(c);
+            ArrayList<Long> list = CHURN.get(k);
+            if (list == null) { list = new ArrayList<Long>(); CHURN.put(k, list); }
+            // 창을 벗어난 기록은 버린다
+            for (int i = list.size() - 1; i >= 0; i--) {
+                Long v = list.get(i);
+                if (v == null || now - v.longValue() > win) list.remove(i);
+            }
+            list.add(Long.valueOf(now));
+            while (list.size() > CHURN_MAX_EVENTS) list.remove(0);
+            if (list.size() < need) { trimChurn(k); return 0; }
+
+            // 명단 누적과 안내는 창마다 한 번만 (한 번의 들낙에 1회)
+            Long noted = CHURN_NOTED.get(k);
+            if (noted != null && now - noted.longValue() <= CHURN_NOTE_MS) return 0;
+            Integer prev = CHURN_N.get(k);
+            CHURN_N.put(k, Integer.valueOf((prev == null ? 0 : prev.intValue()) + 1));
+            CHURN_AT.put(k, Long.valueOf(now));
+            CHURN_NOTED.put(k, Long.valueOf(now));
+            trimChurn(k);
+            save(c);
+            return list.size();
+        }
+    }
+
+    /** 그 사람이 지금 들낙 창 안에 있나 (인사 생략 판단용) */
+    private static boolean churning(Context c, Settings.RoomBotCfg cfg, RoomRef room, String who) {
+        if (cfg == null || !cfg.churnOn || who == null || who.trim().length() == 0) return false;
+        long now = System.currentTimeMillis();
+        long win = (long) ((cfg.churnMin < 1) ? 1 : cfg.churnMin) * 60000L;
+        int need = (cfg.churnCount < 2) ? 2 : cfg.churnCount;
+        synchronized (RoomBot.class) {
+            ArrayList<Long> list = CHURN.get(key(room, who));
+            if (list == null) return false;
+            int n = 0;
+            for (int i = 0; i < list.size(); i++) {
+                Long v = list.get(i);
+                if (v != null && now - v.longValue() <= win) n++;
+            }
+            return n >= need;
+        }
+    }
+
+    private static void trimChurn(String keep) {
+        if (CHURN.size() > MAX_WARN_KEYS) {
+            Iterator<Map.Entry<String, ArrayList<Long>>> it = CHURN.entrySet().iterator();
+            while (it.hasNext() && CHURN.size() > MAX_WARN_KEYS) {
+                Map.Entry<String, ArrayList<Long>> e = it.next();
+                if (e.getKey().equals(keep)) continue;
+                it.remove();
+            }
+        }
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<String, Long>> it2 = CHURN_AT.entrySet().iterator();
+        while (it2.hasNext()) {
+            Map.Entry<String, Long> e = it2.next();
+            Long v = e.getValue();
+            if (v == null || now - v.longValue() > CHURN_TTL_MS) {
+                CHURN_N.remove(e.getKey());
+                CHURN_NOTED.remove(e.getKey());
+                it2.remove();
+            }
+        }
+    }
+
+    /** 들낙 명단 — "사람\u0001횟수\u0001마지막시각" 목록, 횟수 많은 순 */
+    public static List<String> churnList(Context c) {
+        ArrayList<String> out = new ArrayList<String>();
+        synchronized (RoomBot.class) {
+            load(c);
+            trimChurn("");
+            ArrayList<Map.Entry<String, Integer>> rows =
+                    new ArrayList<Map.Entry<String, Integer>>(CHURN_N.entrySet());
+            for (int i = 0; i < rows.size(); i++) {
+                for (int j = i + 1; j < rows.size(); j++) {
+                    if (rows.get(j).getValue().intValue() > rows.get(i).getValue().intValue()) {
+                        Map.Entry<String, Integer> tmp = rows.get(i);
+                        rows.set(i, rows.get(j));
+                        rows.set(j, tmp);
+                    }
+                }
+            }
+            for (int i = 0; i < rows.size() && i < 50; i++) {
+                String k = rows.get(i).getKey();
+                int sep = k.indexOf('\u0001');
+                String who = (sep >= 0) ? k.substring(sep + 1) : k;
+                Long at = CHURN_AT.get(k);
+                out.add(who + '\u0001' + rows.get(i).getValue() + '\u0001'
+                        + (at == null ? 0L : at.longValue()));
+            }
+        }
+        return out;
+    }
+
+    /** 들낙 기록 전부 삭제. 지운 건수를 돌려준다. */
+    public static int clearChurn(Context c) {
+        synchronized (RoomBot.class) {
+            load(c);
+            int n = CHURN_N.size();
+            CHURN.clear();
+            CHURN_N.clear();
+            CHURN_AT.clear();
+            CHURN_NOTED.clear();
+            save(c);
+            return n;
+        }
+    }
+
     private static void handleJoinLeave(Context c, Settings.RoomBotCfg cfg, RoomRef room,
                                         String body, int kind, long now) {
         boolean join = (kind == 1);
+        final String churnWho = personOf(body);
+
+        // ★ 인사를 보낼지 판단하기 <b>전에</b> 센다. 인사가 꺼져 있어도 들낙은 기록해야
+        //   명단이 쌓이고, 나중에 인사를 켰을 때 바로 억제가 걸린다.
+        int churnN = bumpChurn(c, cfg, room, churnWho, now);
+        if (churnN > 0) {
+            Log.add(c, "대화방 관리봇 · 「" + room.label(c) + "」 " + nameOf(churnWho)
+                    + " 반복 입·퇴장이 확인되었습니다 (" + cfg.churnMin + "분 안에 "
+                    + churnN + "회)."
+                    + (cfg.churnMute ? " 입·퇴장 인사를 생략합니다." : ""));
+            // 방장이 안내 문구를 넣어둔 경우에만 방에 1회 올린다
+            String cm = (cfg.churnMsg == null) ? "" : cfg.churnMsg.trim();
+            if (cm.length() > 0) {
+                String msg = render(cm, room.name, churnWho, now, churnN, "");
+                if (msg.trim().length() > 0) send(c, cfg, room, msg, now);
+            }
+        }
+
         boolean on = join ? cfg.welcomeOn : cfg.leaveOn;
         if (!on) return;
+
+        // 들낙 중인 사람의 인사는 생략한다 — 이게 인사 도배를 막는 핵심이다
+        if (cfg.churnMute && churning(c, cfg, room, churnWho)) return;
         String tpl = join ? cfg.welcomeMsg : cfg.leaveMsg;
         String kindName = join ? "입장" : "퇴장";
         if (tpl == null || tpl.trim().length() == 0) {
@@ -286,7 +454,7 @@ public final class RoomBot {
                     "대화방 관리봇 " + kindName + " 안내가 활성 상태이나 메시지가 비어 있습니다. 봇 탭에서 입력하십시오.");
             return;
         }
-        String person = personOf(body);
+        String person = churnWho;
         String msg = render(tpl, room.name, person, now, 0, "");
         if (msg.trim().length() == 0) {
             note(c, "jl-empty:" + (join ? "w" : "l"),
@@ -975,6 +1143,24 @@ public final class RoomBot {
                     if (v > 0) WARN_AT.put(normKey(k), Long.valueOf(v));
                 }
             }
+            JSONObject cn = o.optJSONObject("churn");
+            if (cn != null) {
+                Iterator<String> it = cn.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    int v = cn.optInt(k, 0);
+                    if (v > 0) CHURN_N.put(normKey(k), Integer.valueOf(v));
+                }
+            }
+            JSONObject ca = o.optJSONObject("churnAt");
+            if (ca != null) {
+                Iterator<String> it = ca.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    long v = ca.optLong(k, 0L);
+                    if (v > 0) CHURN_AT.put(normKey(k), Long.valueOf(v));
+                }
+            }
             trimWarns();
         } catch (Throwable t) {
             Log.add(c, "대화방 관리봇 기록이 손상되어 초기화했습니다. (" + t + ")");
@@ -1004,6 +1190,20 @@ public final class RoomBot {
                 a.put(e.getKey(), e.getValue().longValue());
             }
             o.put("warnAt", a);
+            JSONObject cn = new JSONObject();
+            Iterator<Map.Entry<String, Integer>> it3 = CHURN_N.entrySet().iterator();
+            while (it3.hasNext()) {
+                Map.Entry<String, Integer> e = it3.next();
+                cn.put(e.getKey(), e.getValue().intValue());
+            }
+            o.put("churn", cn);
+            JSONObject ca = new JSONObject();
+            Iterator<Map.Entry<String, Long>> it4 = CHURN_AT.entrySet().iterator();
+            while (it4.hasNext()) {
+                Map.Entry<String, Long> e = it4.next();
+                ca.put(e.getKey(), e.getValue().longValue());
+            }
+            o.put("churnAt", ca);
             Prefs.putStr(c, K_STATE, o.toString());
         } catch (Throwable t) {
             Log.add(c, "대화방 관리봇 기록을 저장하지 못했습니다. (" + t + ")");

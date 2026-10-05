@@ -607,6 +607,29 @@ public final class Settings {
         /** 하루 최대 봇 발송 수 */
         public int dailyLimit = 300;
 
+        // ── 들낙 방지 (반복 입·퇴장) ────────────────────────────────────────
+        //
+        // 같은 사람이 짧은 시간에 들어왔다 나가기를 반복하면, 봇의 입·퇴장 인사가
+        // 그 횟수만큼 올라가 방이 인사로 도배된다. 들낙 자체보다 그 인사 도배가
+        // 실제 피해다. 그래서 기본값은 "조용히 인사만 생략하고 명단에 기록" 이다.
+        //
+        // 강제퇴장은 할 수 없다 — 카카오톡이 외부 앱의 강퇴를 허용하지 않는다.
+        // 명단을 만들어 방장이 카카오톡에서 직접 처리하게 돕는 것이 이 기능의 한계다.
+
+        /** 들낙 감지 사용 (기본 켜짐 — 끄면 인사 도배가 그대로 올라간다) */
+        public boolean churnOn = true;
+        /** churnMin 분 안에 입·퇴장 합계가 churnCount 회 이상이면 들낙으로 본다 */
+        public int churnCount = 4;
+        public int churnMin = 10;
+        /** 들낙으로 판정된 사람의 입·퇴장 인사를 생략한다 (기본 켜짐) */
+        public boolean churnMute = true;
+        /**
+         * 방에 올릴 들낙 안내. <b>비워두면 방에 아무것도 올리지 않고 명단에만 기록한다.</b>
+         * 기본값이 빈 문자열인 이유 — 공개 경고는 당사자를 지목하는 것이어서
+         * 인사 도배보다 분위기를 더 해칠 수 있다. 쓸지는 방장이 정한다.
+         */
+        public String churnMsg = "";
+
         /** 봇이 도는 방 (RoomRef 목록) */
         public List<RoomRef> roomRefs() {
             return refsOf(rooms);
@@ -1117,6 +1140,11 @@ public final class Settings {
             r.put("cmdPrefix", roombot.cmdPrefix);
             r.put("adminNames", arr(roombot.adminNames));
             r.put("dailyLimit", roombot.dailyLimit);
+            r.put("churnOn", roombot.churnOn);
+            r.put("churnCount", roombot.churnCount);
+            r.put("churnMin", roombot.churnMin);
+            r.put("churnMute", roombot.churnMute);
+            r.put("churnMsg", roombot.churnMsg);
             o.put("roombot", r);
 
             JSONObject g = new JSONObject();
@@ -1346,6 +1374,11 @@ public final class Settings {
             s.roombot.cmdPrefix = prefix(str(r, "cmdPrefix", s.roombot.cmdPrefix));
             s.roombot.adminNames = list(r, "adminNames");
             s.roombot.dailyLimit = clamp(r.optInt("dailyLimit", s.roombot.dailyLimit), 0, 9999);
+            s.roombot.churnOn = r.optBoolean("churnOn", s.roombot.churnOn);
+            s.roombot.churnCount = clamp(r.optInt("churnCount", s.roombot.churnCount), 2, 20);
+            s.roombot.churnMin = clamp(r.optInt("churnMin", s.roombot.churnMin), 1, 180);
+            s.roombot.churnMute = r.optBoolean("churnMute", s.roombot.churnMute);
+            s.roombot.churnMsg = str(r, "churnMsg", s.roombot.churnMsg);
         }
 
         JSONObject g = o.optJSONObject("minigame");

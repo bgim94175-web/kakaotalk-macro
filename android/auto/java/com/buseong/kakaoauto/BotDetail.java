@@ -151,6 +151,10 @@ public final class BotDetail {
                 g2.addView(Ui.navRow(a, "감지 규칙", detectValue(r), Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "감지 규칙", detect(a)); }
                 }));
+                g2.addView(Ui.navRow(a, "들낙 방지", churnValue(r),
+                        r.churnOn ? Theme.TEXT : Theme.DIM, new Runnable() {
+                            @Override public void run() { Nav.push(a, "들낙 방지", churn(a)); }
+                        }));
                 g2.addView(Ui.navRow(a, "명령 · 관리", cmdValue(r), Theme.TEXT, new Runnable() {
                     @Override public void run() { Nav.push(a, "명령 · 관리", command(a)); }
                 }));
@@ -165,9 +169,172 @@ public final class BotDetail {
                         warned.isEmpty() ? Theme.DIM : Theme.TEXT, new Runnable() {
                             @Override public void run() { Nav.push(a, "경고 누적", warns(a)); }
                         }));
+                final List<String> churned = RoomBot.churnList(a);
+                g3.addView(Ui.navRow(a, "들낙 명단",
+                        churned.isEmpty() ? "없음" : (churned.size() + "명"),
+                        churned.isEmpty() ? Theme.DIM : Theme.TEXT, new Runnable() {
+                            @Override public void run() { Nav.push(a, "들낙 명단", churnList(a)); }
+                        }));
                 col.addView(g3);
 
                 col.addView(Nav.note(a, RoomBot.LIMIT_NOTE, Theme.AMBER, null, null));
+            }
+        });
+    }
+
+    private static String churnValue(Settings.RoomBotCfg r) {
+        if (!r.churnOn) return "미사용";
+        String base = r.churnMin + "분 " + r.churnCount + "회";
+        if (r.churnMute) base = base + " · 인사 생략";
+        if (r.churnMsg != null && r.churnMsg.trim().length() > 0) base = base + " · 안내";
+        return base;
+    }
+
+    /**
+     * 들낙 방지 — 반복 입·퇴장 처리.
+     *
+     * 강제퇴장은 할 수 없다(카카오톡이 외부 앱의 강퇴를 허용하지 않는다). 이 화면이 하는 일은
+     * 인사 도배를 막고 명단을 남겨 방장이 직접 처리하게 돕는 것이다. 그 한계를 화면에 적는다.
+     */
+    private static View churn(MainActivity a) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final Settings s = Settings.load(a);
+                final Settings.RoomBotCfg r = s.roombot;
+
+                col.addView(Ui.sub(a, "같은 사람이 짧은 시간에 들어왔다 나가기를 반복하면, "
+                        + "입·퇴장 인사가 그 횟수만큼 올라가 대화방이 인사로 가득 찹니다. "
+                        + "그 인사를 생략하고 명단에 기록합니다."));
+
+                LinearLayout g = Ui.group(a);
+                g.addView(Ui.navRowSwitch(a, "들낙 방지", "끄면 반복 입·퇴장에도 인사가 매번 올라갑니다.",
+                        r.churnOn, new Ui.OnToggle() {
+                            @Override public void on(boolean v) {
+                                r.churnOn = v;
+                                save(a, s);
+                                Log.add(a, v ? "들낙 방지를 사용으로 변경했습니다."
+                                        : "들낙 방지를 미사용으로 변경했습니다.");
+                                refresh();
+                            }
+                        }));
+                if (r.churnOn) {
+                    g.addView(Ui.navRow(a, "기준", r.churnMin + "분 안에 " + r.churnCount + "회",
+                            Theme.TEXT, new Runnable() {
+                                @Override public void run() { editChurn(a, s, r); }
+                            }));
+                    g.addView(Ui.navRowSwitch(a, "인사 생략",
+                            r.churnMute ? "반복 입·퇴장인 사람에게는 인사를 보내지 않습니다."
+                                        : "인사를 그대로 보냅니다. 도배가 될 수 있습니다.",
+                            r.churnMute, new Ui.OnToggle() {
+                                @Override public void on(boolean v) {
+                                    r.churnMute = v;
+                                    save(a, s);
+                                    refresh();
+                                }
+                            }));
+                    g.addView(Ui.navRow(a, "대화방 안내",
+                            (r.churnMsg == null || r.churnMsg.trim().length() == 0)
+                                    ? "올리지 않음" : Nav.preview(r.churnMsg, 16),
+                            (r.churnMsg == null || r.churnMsg.trim().length() == 0)
+                                    ? Theme.DIM : Theme.TEXT,
+                            new Runnable() {
+                                @Override public void run() { editChurnMsg(a, s, r); }
+                            }));
+                }
+                col.addView(g);
+
+                col.addView(Nav.note(a, "강제퇴장은 할 수 없습니다. 카카오톡이 외부 앱의 "
+                        + "강제퇴장을 허용하지 않습니다. 반복 입·퇴장이 확인된 사람은 "
+                        + "「들낙 명단」 에 쌓이며, 내보내는 것은 방장이 카카오톡에서 직접 "
+                        + "처리해야 합니다.", Theme.AMBER, null, null));
+            }
+        });
+    }
+
+    private static void editChurn(final MainActivity a, final Settings s,
+                                  final Settings.RoomBotCfg r) {
+        final Nav.NumField min = new Nav.NumField("기준 시간 (분)", "10", 1, 180, r.churnMin);
+        final Nav.NumField cnt = new Nav.NumField("입·퇴장 횟수", "4", 2, 20, r.churnCount);
+        Nav.editNums(a, "들낙 기준",
+                "이 시간 안에 입장과 퇴장을 합쳐 이 횟수 이상이면 반복 입·퇴장으로 봅니다. "
+                        + "들어왔다 나가면 2회입니다.",
+                new Nav.NumField[] { min, cnt }, new Nav.OnNums() {
+                    @Override public String ok() {
+                        r.churnMin = min.value;
+                        r.churnCount = cnt.value;
+                        save(a, s);
+                        Log.add(a, "들낙 기준을 " + min.value + "분 안에 " + cnt.value
+                                + "회로 설정했습니다.");
+                        return null;
+                    }
+                });
+    }
+
+    private static void editChurnMsg(final MainActivity a, final Settings s,
+                                     final Settings.RoomBotCfg r) {
+        Nav.editText(a, "대화방 안내", "비워두면 올리지 않습니다", r.churnMsg, true,
+                "반복 입·퇴장이 확인되면 대화방에 1회 올립니다. {이름} 은 그 사람 이름으로 "
+                        + "바뀝니다.\n비워두면 대화방에는 아무것도 올리지 않고 명단에만 "
+                        + "기록합니다. 공개 안내는 당사자를 지목하는 것이어서 분위기를 "
+                        + "해칠 수 있으니, 필요할 때만 쓰십시오.",
+                new Nav.OnText() {
+                    @Override public String text(String v) {
+                        r.churnMsg = (v == null) ? "" : v.trim();
+                        save(a, s);
+                        Log.add(a, (r.churnMsg.length() == 0)
+                                ? "들낙 대화방 안내를 사용하지 않도록 변경했습니다."
+                                : "들낙 대화방 안내를 설정했습니다.");
+                        refresh();
+                        return null;
+                    }
+                });
+    }
+
+    /** 들낙 명단 — 방장이 보고 직접 내보낼 사람을 판단하는 자리 */
+    private static View churnList(MainActivity a) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final List<String> rows = RoomBot.churnList(a);
+
+                col.addView(Ui.sub(a, "반복 입·퇴장이 확인된 사람입니다. 횟수가 많은 순입니다. "
+                        + "내보내는 것은 카카오톡에서 방장이 직접 처리해야 합니다."));
+
+                col.addView(Ui.sectionHeader(a, null, "들낙 명단"));
+                if (rows.isEmpty()) {
+                    LinearLayout box = Ui.card(a);
+                    box.addView(Ui.sub(a, "기록된 사람이 없습니다."));
+                    col.addView(box);
+                    return;
+                }
+                LinearLayout g = Ui.group(a);
+                for (int i = 0; i < rows.size(); i++) {
+                    String[] f = rows.get(i).split("\u0001", -1);
+                    String who = (f.length > 0) ? f[0] : "";
+                    String n = (f.length > 1) ? f[1] : "0";
+                    long at = 0L;
+                    try { at = (f.length > 2) ? Long.parseLong(f[2]) : 0L; } catch (Throwable ignore) { }
+                    g.addView(Ui.kv(a, (who.length() == 0) ? "이름 미확인" : who,
+                            n + "회" + ((at > 0) ? (" · " + ScreenMacro.agoShort(at)) : "")));
+                }
+                col.addView(g);
+
+                TextView clear = Nav.wideBtn(a, "들낙 명단 초기화", false, new Runnable() {
+                    @Override public void run() {
+                        Nav.confirm(a, "들낙 명단 초기화",
+                                "기록된 반복 입·퇴장 명단을 전부 삭제합니다. "
+                                        + "설정은 그대로 유지됩니다.",
+                                "초기화", new Runnable() {
+                                    @Override public void run() {
+                                        int n = RoomBot.clearChurn(a);
+                                        Log.add(a, "들낙 명단을 초기화했습니다. (" + n + "명)");
+                                        Ui.toast(a, "들낙 명단을 초기화했습니다.");
+                                        refresh();
+                                    }
+                                });
+                    }
+                });
+                clear.setTextColor(Theme.RED);
+                col.addView(clear);
             }
         });
     }
