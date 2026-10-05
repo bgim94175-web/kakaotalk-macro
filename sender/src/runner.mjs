@@ -110,6 +110,28 @@ async function openLinkNames(client, list) {
   return names
 }
 
+function idText(v) {
+  if (v == null || v === '') return ''
+  if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v.trim())) return v.trim()
+  if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return String(v)
+  if (typeof v === 'bigint' && v > 0n) return v.toString()
+  if (typeof v === 'object' && typeof v.toString === 'function') {
+    const s = v.toString()
+    if (/^[1-9][0-9]*$/.test(s)) return s
+  }
+  return ''
+}
+
+function logAfter(id, cursor) {
+  if (!id) return false
+  if (!cursor) return true
+  try {
+    return BigInt(id) > BigInt(cursor)
+  } catch {
+    return id > cursor
+  }
+}
+
 function realLogId(v) {
   if (typeof v === 'bigint') v = v.toString()
   else if (typeof v === 'number' && Number.isFinite(v) && v === Math.trunc(v)) v = String(v)
@@ -327,6 +349,7 @@ class Slot {
     this.linkIds = new Map()
     this.lastLog = new Map()
     this.profileLinks = new Map()
+    this.visitCursor = new Map()
   }
 
   async start() {
@@ -336,6 +359,7 @@ class Slot {
         await this.ensure()
         await this.macroTick()
         await this.guardTick()
+        await this.visitScan()
       }).catch((e) => log(this.id, e && e.message ? e.message : e))
     }, 20000)
     if (this.timer.unref) this.timer.unref()
@@ -375,6 +399,7 @@ class Slot {
       }
     })
     await this.listener.start()
+    this.enqueue(() => this.visitScan()).catch(() => {})
   }
 
   async stop() {
@@ -523,7 +548,7 @@ class Slot {
     const mine = author.length > 0 && author === creds.user_id
     let authorName = typeof ev.author_name === 'string' ? ev.author_name.trim() : ''
     let profileLink = ''
-    if (!mine && this.client && visitNeedsProfile(this.record, chatId)) {
+    if (!mine && author && this.client && visitNeedsProfile(this.record, chatId)) {
       try {
         const card = await this.memberCard(chatId, author)
         if (card.name) authorName = card.name
@@ -598,6 +623,70 @@ class Slot {
     const li = ev.linkId != null ? ev.linkId : ev.li
     if (chatId == null || li == null || li === '') return
     this.linkIds.set(String(chatId), String(li))
+  }
+
+  async visitScan() {
+    if (this.record.needs_register || !this.client) return
+    const rooms = this.record.rooms || []
+    for (const room of rooms) {
+      const chatId = String(room && room.chat_id || '')
+      if (!visitNeedsProfile(this.record, chatId)) continue
+      try {
+        await this.scanRoom(chatId)
+      } catch (e) {
+        await this.onError(e)
+      }
+    }
+  }
+
+  async scanRoom(chatId) {
+    const session = await this.client.acquireSession()
+    const infoRes = await session.getChannelInfo(Long.fromString(chatId))
+    const info = infoRes && infoRes.body && infoRes.body.chatInfo
+    if (!info || info.left === true) return
+    const max = idText(info.lastLogId) || idText(info.lastChatLog && info.lastChatLog.logId)
+    if (!max) return
+    const li = idText(info.li)
+    if (li) this.linkIds.set(chatId, li)
+    const cursor = this.visitCursor.get(chatId) || ''
+    if (!cursor) {
+      this.visitCursor.set(chatId, max)
+      return
+    }
+    if (!logAfter(max, cursor)) return
+    const response = await session.syncMessages(
+      Long.fromString(chatId),
+      40,
+      Long.fromString(cursor),
+      Long.fromString(max),
+    )
+    const logs = (response && response.body && response.body.chatLogs) || []
+    logs.sort((a, b) => {
+      const aa = idText(a && a.logId)
+      const bb = idText(b && b.logId)
+      if (!aa || aa === bb) return 0
+      return logAfter(aa, bb) ? 1 : -1
+    })
+    let tip = cursor
+    for (const entry of logs) {
+      const id = idText(entry && entry.logId)
+      if (!logAfter(id, cursor)) continue
+      if (logAfter(id, tip)) tip = id
+      const visits = visitEventsFromMessage({
+        message: entry && entry.message,
+        message_type: entry && entry.type,
+        author_id: entry && entry.authorId,
+        attachment: entry && entry.attachment,
+      })
+      for (const v of visits) {
+        await this.onMember(v.kind, {
+          chat_id: chatId,
+          member: { user_id: v.authorId },
+          author_name: v.authorName,
+        })
+      }
+    }
+    if (tip !== cursor) this.visitCursor.set(chatId, tip)
   }
 
   async guardTick() {

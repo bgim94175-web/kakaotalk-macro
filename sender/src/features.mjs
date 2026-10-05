@@ -89,12 +89,23 @@ function realId(id) {
   return typeof id === 'string' && /^[1-9][0-9]*$/.test(id)
 }
 
+function bareRoomName(name) {
+  return String(name || '').trim().replace(/\s+\d{2,7}$/, '').trim()
+}
+
+function sameRoomName(a, b) {
+  if (a === b) return true
+  const left = bareRoomName(a)
+  const right = bareRoomName(b)
+  return left.length > 0 && left === right
+}
+
 function coversList(list, roomKey) {
   if (!Array.isArray(list) || list.length === 0) return false
   const p = parseRoomKey(roomKey)
   return list.some((k) => {
     const q = parseRoomKey(k)
-    return q.key === p.key || (q.acc === p.acc && q.name === p.name)
+    return q.key === p.key || (q.acc === p.acc && sameRoomName(q.name, p.name))
   })
 }
 
@@ -317,26 +328,28 @@ function eventsFromKoreanFeed(text, author) {
   if (!body || body.length > 80 || body.charAt(0) === '{') return []
   const kindN = joinLeaveKind(body)
   if (!kindN) return []
-  const id = decimalId(author)
-  if (!id) return []
+  const at = tailWord(body, kindN === 1 ? JOIN_WORDS : LEAVE_WORDS)
+  if (at < 0) return []
+  const head = body.slice(0, at).trim()
+  if (!/님이?$/.test(head)) return []
+  const name = personOf(body).slice(0, 40)
+  if (!name) return []
   return [{
     kind: kindN === 1 ? 'join' : 'leave',
-    authorId: id,
-    authorName: personOf(body).slice(0, 40),
+    authorId: decimalId(author),
+    authorName: name,
   }]
 }
 
 /**
- * Open-chat join and leave arrive as a MSG feed (chat type 0), not NEWMEM/DELMEM.
- * Kakao shows "님이 들어왔습니다" / "님이 나갔습니다". The packet is often
- * JSON: feedType 4 members, or feedType 2 member.
+ * Open-chat join and leave are the sentence Kakao shows:
+ * "홍보ㄱㄱ님이 들어왔습니다." / "님이 나갔습니다."
+ * That sentence is the packet text. It is not only a feedType JSON object,
+ * and it often has no numeric author id.
  * Returns one event per person. Kick feeds are left for the room guard.
  */
 export function visitEventsFromMessage(ev) {
   if (!ev || typeof ev !== 'object') return []
-  const type = ev.message_type != null ? ev.message_type : ev.messageType
-  const typeNum = type == null || type === '' ? null : Number(type)
-  if (typeNum != null && typeNum !== 0) return []
   const message = ev.message != null ? ev.message : ev.text
   const text = message == null ? '' : String(message).trim()
   if (text.charAt(0) === '{') {
@@ -359,7 +372,6 @@ export function visitEventsFromMessage(ev) {
     const fromObj = eventsFromFeed('', attachment)
     if (fromObj.length) return fromObj
   }
-  if (typeNum !== 0) return []
   const author = ev.author_id != null ? ev.author_id : ev.authorId
   return eventsFromKoreanFeed(text, author)
 }
@@ -1289,14 +1301,26 @@ function visitState(record) {
   return v
 }
 
-function visitSeen(v, chatId, author, kind, now) {
-  const key = `${chatId}${SEP}${author}${SEP}${kind}`
-  const prev = Number(v.seen[key] || 0)
-  if (prev && now - prev < 60000) return true
-  v.seen[key] = now
-  const keys = Object.keys(v.seen)
-  if (keys.length > 400) {
-    for (const k of keys) {
+function visitIdentity(authorId, authorName) {
+  const id = /^[1-9][0-9]*$/.test(String(authorId || '').trim()) ? String(authorId).trim() : ''
+  const name = String(authorName || '').trim().slice(0, 40)
+  if (!id && !name) return null
+  return { id, name, key: id || ('n:' + name) }
+}
+
+function visitSeen(v, chatId, who, kind, now) {
+  const keys = []
+  if (who.id) keys.push(`${chatId}${SEP}${who.id}${SEP}${kind}`)
+  if (who.name) keys.push(`${chatId}${SEP}n:${who.name}${SEP}${kind}`)
+  if (!keys.length) keys.push(`${chatId}${SEP}${who.key}${SEP}${kind}`)
+  for (const key of keys) {
+    const prev = Number(v.seen[key] || 0)
+    if (prev && now - prev < 60000) return true
+  }
+  for (const key of keys) v.seen[key] = now
+  const all = Object.keys(v.seen)
+  if (all.length > 400) {
+    for (const k of all) {
       if (now - Number(v.seen[k] || 0) > 60000) delete v.seen[k]
     }
   }
@@ -1332,20 +1356,42 @@ function pruneVisit(v) {
   for (let i = 0; i < drop; i++) delete v.people[keys[i]]
 }
 
-function rememberPerson(v, chatId, author, now, kind, name, link) {
-  const key = `${chatId}${SEP}${author}`
-  const prev = v.people[key] && typeof v.people[key] === 'object' ? v.people[key] : {}
+function uniqTimes(list, now) {
+  const seen = new Set()
+  const out = []
+  for (const t of trimTimes(list, now)) {
+    if (seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+  }
+  return out
+}
+
+function rememberPerson(v, chatId, who, now, kind, link) {
+  const keys = []
+  if (who.id) keys.push(`${chatId}${SEP}${who.id}`)
+  if (who.name) keys.push(`${chatId}${SEP}n:${who.name}`)
+  if (!keys.length) keys.push(`${chatId}${SEP}${who.key}`)
+  const prev = { joins: [], leaves: [] }
+  for (const key of keys) {
+    const row = v.people[key]
+    if (!row || typeof row !== 'object') continue
+    if (!prev.name && row.name) prev.name = row.name
+    if (!prev.link && row.link) prev.link = row.link
+    if (Array.isArray(row.joins)) prev.joins = prev.joins.concat(row.joins)
+    if (Array.isArray(row.leaves)) prev.leaves = prev.leaves.concat(row.leaves)
+  }
   const row = {
-    name: name ? String(name).trim().slice(0, 40) : (prev.name ? String(prev.name) : ''),
+    name: who.name || (prev.name ? String(prev.name) : ''),
     link: openProfileLink(link) || openProfileLink(prev.link),
-    joins: trimTimes(prev.joins, now),
-    leaves: trimTimes(prev.leaves, now),
+    joins: uniqTimes(prev.joins, now),
+    leaves: uniqTimes(prev.leaves, now),
   }
   if (kind === 'join') row.joins.push(now)
   else row.leaves.push(now)
-  row.joins = trimTimes(row.joins, now)
-  row.leaves = trimTimes(row.leaves, now)
-  v.people[key] = row
+  row.joins = uniqTimes(row.joins, now)
+  row.leaves = uniqTimes(row.leaves, now)
+  for (const key of keys) v.people[key] = row
   pruneVisit(v)
   return row
 }
@@ -1390,12 +1436,12 @@ function applyVisit(record, ev, sends) {
   const room = visitRoom(record, ev.chatId)
   if (!room) return false
   if (ev.mine) return false
-  const author = ev.authorId == null ? '' : String(ev.authorId).trim()
-  if (!/^[1-9][0-9]*$/.test(author)) return false
+  const who = visitIdentity(ev.authorId, ev.authorName)
+  if (!who) return false
   const now = Number(ev.now) || Date.now()
   const v = visitState(record)
-  if (visitSeen(v, String(room.chat_id), author, ev.kind, now)) return true
-  const row = rememberPerson(v, String(room.chat_id), author, now, ev.kind, ev.authorName, ev.profileLink)
+  if (visitSeen(v, String(room.chat_id), who, ev.kind, now)) return true
+  const row = rememberPerson(v, String(room.chat_id), who, now, ev.kind, ev.profileLink)
   if (ev.kind !== 'join') return true
   sends.push({
     chatId: String(room.chat_id),

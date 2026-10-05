@@ -1,6 +1,6 @@
 import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
-import { roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
+import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from './room-kind.mjs'
 import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -286,9 +286,39 @@ const typedLeave = visitEventsFromMessage({
 if (typedLeave.length !== 1 || typedLeave[0].kind !== 'leave' || typedLeave[0].authorName !== 'ㅇㅇㅇ') {
   throw new Error('visible leave line')
 }
-if (visitEventsFromMessage({ message_type: 1, message: '김ㅇㅇ님이 들어왔습니다.', author_id: '42' }).length !== 0) {
-  throw new Error('a typed sentence is not a join')
+const plainJoin = visitEventsFromMessage({
+  message_type: 1,
+  message: '홍보ㄱㄱ님이 들어왔습니다.',
+})
+if (plainJoin.length !== 1 || plainJoin[0].kind !== 'join' || plainJoin[0].authorName !== '홍보ㄱㄱ') {
+  throw new Error('plain join sentence')
 }
+if (plainJoin[0].authorId) throw new Error('a sentence does not need a user id')
+const plainLeave = visitEventsFromMessage({ message: '*^*^*님이 나갔습니다.' })
+if (plainLeave.length !== 1 || plainLeave[0].kind !== 'leave' || plainLeave[0].authorName !== '*^*^*') {
+  throw new Error('plain leave sentence')
+}
+if (visitEventsFromMessage({ message_type: 1, message: '오늘 들어왔습니다' }).length !== 0) {
+  throw new Error('a normal sentence is not a join')
+}
+const plainPosted = guardOnChat(visitRecord(), {
+  kind: plainJoin[0].kind,
+  chatId: '555',
+  authorId: plainJoin[0].authorId,
+  authorName: plainJoin[0].authorName,
+  now: t0,
+})
+if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보ㄱㄱ') < 0) {
+  throw new Error('plain sentence posts one notice')
+}
+if (plainPosted.sends[0].text.indexOf('[들낙 안내]') < 0) throw new Error('plain sentence uses the summary')
+const countedRoom = visitRecord()
+countedRoom.config.visit.rooms = [parseRoomKey('0\u0001검 Fam 1424').key]
+countedRoom.rooms = [{ key: parseRoomKey('0\u0001검 Fam').key, chat_id: '555', name: '검 Fam', kind: 'open' }]
+const countedJoin = guardOnChat(countedRoom, {
+  kind: 'join', chatId: '555', authorId: '', authorName: '홍보ㄱㄱ', now: t0 + 120000,
+})
+if (countedJoin.sends.length !== 1) throw new Error('member count is not part of the saved room')
 const invited = visitEventsFromMessage({
   message_type: 0,
   message: '{"feedType":1,"inviter":{"userId":1,"nickName":"호스트"},"members":[{"userId":2,"nickName":"손님"}]}',
@@ -331,6 +361,13 @@ const unnamed = stampOpenLinkTitles(
   new Map(),
 )
 if (unnamed[0].title != null) throw new Error('missing link name is not invented')
+const countedTitle = stampOpenLinkTitles([
+  { type: 13, link_id: '9', title: null, display_name: '김', active_members: 1428 },
+], new Map([['9', '검 Fam 1428']]))
+if (countedTitle[0].title !== '검 Fam' || roomTitle(countedTitle[0]) !== '검 Fam') {
+  throw new Error('member count is removed from the open-chat name')
+}
+if (withoutMemberCount('검 Fam 1424', 8) !== '검 Fam 1424') throw new Error('a real numbered title stays')
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

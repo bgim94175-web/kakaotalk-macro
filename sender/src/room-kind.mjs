@@ -54,6 +54,17 @@ export function openMultiCandidate(ch) {
   return !(members > 0 && members <= 2)
 }
 
+// 헤더의 1424, 1428 처럼 인원 수가 이름 뒤에 붙는 경우는 방 이름이 아니다.
+export function withoutMemberCount(name, members) {
+  const s = text(name)
+  const n = Number(members)
+  if (!s || !Number.isInteger(n) || n < 10) return s
+  const suffix = ' ' + String(n)
+  if (!s.endsWith(suffix)) return s
+  const bare = s.slice(0, s.length - suffix.length).trim()
+  return bare || s
+}
+
 // 오픈링크 이름(ln)을 단체방 제목으로 붙인다. 없는 이름은 만들지 않는다.
 export function stampOpenLinkTitles(chats, nameByLinkId) {
   const list = Array.isArray(chats) ? chats : []
@@ -61,7 +72,7 @@ export function stampOpenLinkTitles(chats, nameByLinkId) {
     if (!ch || !openMultiCandidate(ch) || !nameByLinkId) return ch
     const id = linkId(ch)
     const raw = typeof nameByLinkId.get === 'function' ? nameByLinkId.get(id) : nameByLinkId[id]
-    const name = text(raw)
+    const name = withoutMemberCount(raw, ch.active_members)
     if (!name) return ch
     return Object.assign({}, ch, { title: name })
   })
