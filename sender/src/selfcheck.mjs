@@ -261,7 +261,10 @@ if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== no
   throw new Error('one mention of the joiner')
 }
 const extra = visitMentionExtra(note, mention)
-if (extra !== `{"mentions":[{"user_id":7,"at":[${mention.at}],"len":3}]}`) throw new Error('mention attachment')
+const byteAt = Buffer.byteLength(note.slice(0, note.indexOf('홍길동')), 'utf8')
+const byteLen = Buffer.byteLength('홍길동', 'utf8')
+if (byteAt === note.indexOf('홍길동') || byteLen === 3) throw new Error('the mention span is in bytes')
+if (extra !== `{"mentions":[{"user_id":7,"at":[${byteAt}],"len":${byteLen}}]}`) throw new Error('mention attachment')
 if (extra.split('user_id').length !== 2) throw new Error('the notice mentions one person')
 const laterJoin = guardOnChat(firstVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
@@ -442,7 +445,15 @@ const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
   at: feedJoin.sends[0].text.indexOf('홍길동'),
   len: 3,
 })
-if (bigExtra.indexOf(bigId) < 0) throw new Error('mention keeps the full user id')
+if (bigExtra.indexOf('"user_id":' + bigId) < 0) throw new Error('mention keeps the full user id')
+const ascii = '[입장안내]\n이름 : @GOLD_AEC1908\n올링 : https://open.kakao.com/o/abc\n입장로그\n- 2026-10-05 21:04'
+const asciiAt = ascii.indexOf('GOLD_AEC1908')
+const asciiExtra = visitMentionExtra(ascii, { userId: '42', at: asciiAt, len: 'GOLD_AEC1908'.length })
+const asciiByte = Buffer.byteLength(ascii.slice(0, asciiAt), 'utf8')
+if (asciiByte === asciiAt) throw new Error('a korean header changes the byte index')
+if (asciiExtra !== `{"mentions":[{"user_id":42,"at":[${asciiByte}],"len":12}]}`) {
+  throw new Error('an ascii nickname is mentioned in bytes')
+}
 if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') >= 0 || feedJoin.sends[0].text.indexOf('퇴장') >= 0) {
   throw new Error('the leave time stays off the enter notice')
 }

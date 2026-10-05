@@ -571,13 +571,22 @@ class Slot {
       }
     }
     if (this.record.needs_register) return
-    const mine = author.length > 0 && author === creds.user_id
+    let mine = author.length > 0 && author === creds.user_id
     let profileLink = ''
-    if (!mine && author && this.client && visitNeedsProfile(this.record, chatId)) {
+    if (!mine && this.client && visitNeedsProfile(this.record, chatId) && (author || authorName)) {
       try {
-        const card = await this.memberCard(chatId, author)
+        let card = author ? await this.memberCard(chatId, author) : { name: '', link: '', userId: '' }
+        if (!card.userId && authorName) {
+          const found = await this.memberIdByName(chatId, authorName)
+          if (found) {
+            author = found
+            card = await this.memberCard(chatId, found)
+          }
+        }
+        if (card.userId) author = card.userId
         if (card.name) authorName = card.name
         profileLink = card.link
+        mine = author.length > 0 && author === creds.user_id
       } catch (e) {
         await this.onError(e)
       }
@@ -616,14 +625,15 @@ class Slot {
   }
 
   async memberCard(chatId, userId) {
-    if (!this.client || !userId) return { name: '', link: '' }
+    if (!this.client || !userId) return { name: '', link: '', userId: '' }
     const members = await this.client.getMembersByIds(chatId, [userId])
     const row = (members || []).find((m) => m && String(m.user_id) === String(userId))
-    if (!row) return { name: '', link: '' }
+    if (!row) return { name: '', link: '', userId: '' }
     const name = String(row.nickname || '').trim()
     const pli = row.open_profile_link_id ? String(row.open_profile_link_id) : ''
     const link = pli ? await this.openProfileLink(pli) : ''
-    return { name, link }
+    const memberUserId = /^[1-9][0-9]*$/.test(String(row.user_id || '')) ? String(row.user_id) : ''
+    return { name, link, userId: memberUserId }
   }
 
   async openProfileLink(linkId) {

@@ -1486,7 +1486,16 @@ function visitNotice(row, kind) {
   return { text, mention: { userId, at: start, len: name.length } }
 }
 
-/** One WRITE mention attachment. The span is the nickname after the @. */
+function utf8Len(text) {
+  return Buffer.byteLength(String(text), 'utf8')
+}
+
+/**
+ * One WRITE mention of one open-chat member.
+ * Kakao reads at and len as UTF-8 bytes, and user_id must be that member's id
+ * as a number. A character index in a Korean header is ignored and the name
+ * stays plain text. The span is the nickname after @.
+ */
 export function visitMentionExtra(text, mention) {
   if (!text || !mention) return ''
   const id = String(mention.userId || '')
@@ -1498,7 +1507,11 @@ export function visitMentionExtra(text, mention) {
   if (text.charAt(at - 1) !== '@') return ''
   const mark = text.indexOf('@')
   if (mark !== at - 1) return ''
-  return `{"mentions":[{"user_id":${id},"at":[${at}],"len":${len}}]}`
+  const name = text.slice(at, at + len)
+  const byteAt = utf8Len(text.slice(0, at))
+  const byteLen = utf8Len(name)
+  if (byteAt < 1 || byteLen < 1) return ''
+  return `{"mentions":[{"user_id":${id},"at":[${byteAt}],"len":${byteLen}}]}`
 }
 
 /**
