@@ -15,7 +15,10 @@ import {
   noteMacroSent,
   onInbound,
   chatLogsFromBody,
+  coverNeedsAuthor,
   coverPlan,
+  coverSkipsLink,
+  hasCoverLink,
   isProfanity,
   parseRoomKey,
   visitEventsFromMessage,
@@ -514,6 +517,17 @@ if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '', messageType:
 if (coverPlan(coverRec, { chatId: '9', text: '씨발', logId: '95', messageType: 1, mine: false })) throw new Error('an unwatched room is not covered')
 coverRec.config.cover.enabled = false
 if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '96', messageType: 1, mine: false })) throw new Error('cover stays off')
+coverRec.config.cover.enabled = true
+const linkEv = { chatId: '555', text: '여기 https://example.com', logId: '97', messageType: 1, mine: false }
+if (!hasCoverLink(linkEv.text) || !coverNeedsAuthor(coverRec, linkEv)) throw new Error('a member link needs the author')
+if (coverPlan(coverRec, linkEv)) throw new Error('a link stays until the author is known')
+const memberLink = coverPlan(coverRec, Object.assign({}, linkEv, { staff: false }))
+if (!memberLink || memberLink.logId !== '97') throw new Error('a member link is covered')
+if (coverPlan(coverRec, Object.assign({}, linkEv, { staff: true, logId: '98' }))) throw new Error('a host link stays')
+if (!coverSkipsLink(1) || !coverSkipsLink(4) || !coverSkipsLink(null) || coverSkipsLink(2)) throw new Error('host and deputy links stay')
+if (!coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '99', messageType: 1, mine: false, staff: true })) {
+  throw new Error('staff profanity is still covered')
+}
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

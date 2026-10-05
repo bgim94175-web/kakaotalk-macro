@@ -1189,7 +1189,8 @@ export function macroMinMessages(record) {
   return n < 0 || Number.isNaN(n) ? 0 : n
 }
 
-// 욕설이 보이면 그 글만 가린다. 강퇴하지 않는다.
+// 욕설이나 링크가 보이면 그 글만 가린다. 강퇴하지 않는다.
+// 부방장과 방장이 올린 링크는 가리지 않는다. 권한을 모르면 링크는 그대로 둔다.
 // 가리기 패킷은 node-kakao TalkOpenChannelSession.hideChat 과 같다.
 // REWRITE { li, c, logId, t } 이고 t 는 그 글의 메시지 타입이다.
 const SWEAR_TYPES = new Set([1, 2, 26])
@@ -1225,8 +1226,19 @@ export function isProfanity(text) {
   return false
 }
 
-/** A staff cover for one profane open-chat message. Null when this message stays. */
-export function coverPlan(record, ev) {
+export function hasCoverLink(text) {
+  return LINK_RE.test(String(text || ''))
+}
+
+/** True when this open-chat permission is the host, a deputy, or unknown. */
+export function coverSkipsLink(openPermission) {
+  if (openPermission == null || openPermission === '') return true
+  const p = Number(openPermission)
+  if (!Number.isFinite(p)) return true
+  return (p & 1) !== 0 || (p & 4) !== 0
+}
+
+function coverRoom(record, ev) {
   const cfg = record && record.config && record.config.cover
   if (!cfg || cfg.enabled !== true || !ev || ev.mine) return null
   const type = Number(ev.messageType)
@@ -1237,8 +1249,23 @@ export function coverPlan(record, ev) {
   const room = roomByChat(record.rooms, chatId)
   if (!room || !realId(String(room.chat_id))) return null
   if (!coversList(cfg.rooms, room.key)) return null
-  if (!isProfanity(ev.text)) return null
   return { chatId: String(room.chat_id), logId, type }
+}
+
+/** True when a link cover still needs the author's open-chat permission. */
+export function coverNeedsAuthor(record, ev) {
+  if (!coverRoom(record, ev)) return false
+  if (isProfanity(ev.text)) return false
+  return hasCoverLink(ev.text)
+}
+
+/** A staff cover for one profane or linked open-chat message. Null when this message stays. */
+export function coverPlan(record, ev) {
+  const plan = coverRoom(record, ev)
+  if (!plan) return null
+  if (isProfanity(ev.text)) return plan
+  if (hasCoverLink(ev.text) && ev.staff === false) return plan
+  return null
 }
 
 // ── 방 관리봇 ──────────────────────────────────────────────────────────────

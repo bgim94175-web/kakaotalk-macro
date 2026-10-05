@@ -23,7 +23,9 @@ import {
   onInbound,
   othersSinceMine,
   chatLogsFromBody,
+  coverNeedsAuthor,
   coverPlan,
+  coverSkipsLink,
   realId,
   visitEventsFromMessage,
   visitMentionExtra,
@@ -540,13 +542,23 @@ class Slot {
       authorId: ev.author_id,
       attachment: ev.attachment,
     })
-    const cover = coverPlan(this.record, {
+    const coverEv = {
       chatId,
       text: ev.message || '',
       logId: ev.log_id ? String(ev.log_id) : '',
       messageType: ev.message_type,
       mine: author.length > 0 && author === creds.user_id,
-    })
+      staff: true,
+    }
+    if (coverNeedsAuthor(this.record, coverEv)) {
+      try {
+        coverEv.staff = coverSkipsLink(await this.openPerm(chatId, author))
+      } catch (e) {
+        coverEv.staff = true
+        await this.onError(e)
+      }
+    }
+    const cover = coverPlan(this.record, coverEv)
     if (cover) await this.coverMessage(cover)
     if (taken) return
     const sends = onInbound(this.record, {
@@ -621,6 +633,15 @@ class Slot {
       if (id && !ids.includes(id)) ids.push(id)
     }
     return ids.length === 1 ? ids[0] : ''
+  }
+
+  async openPerm(chatId, userId) {
+    if (!this.client || !userId) return null
+    const members = await this.client.getMembersByIds(chatId, [userId])
+    const row = (members || []).find((m) => m && String(m.user_id) === String(userId))
+    if (!row || row.open_permission == null || row.open_permission === '') return null
+    const n = Number(row.open_permission)
+    return Number.isFinite(n) ? n : null
   }
 
   async memberCard(chatId, userId) {
