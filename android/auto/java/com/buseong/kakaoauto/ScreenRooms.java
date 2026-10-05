@@ -3,6 +3,8 @@ package com.buseong.kakaoauto;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
@@ -26,7 +28,9 @@ import java.util.Map;
  *
  * 한 화면에서 선택·삭제·추가를 다 한다:
  *   - 계정별 섹션 → 그 계정의 대화방을 체크박스 목록으로 (계정 1개면 머리글 숨김)
- *   - 체크하면 즉시 저장. 확인 버튼 없음.
+ *   - 체크하면 즉시 저장. 단체방은 확인창 없이 바로 켜지고 스낵바로 되돌릴 수 있다.
+ *     (1:1 개인 대화방과 아직 종류를 모르는 방만 확인창을 띄운다 — 사고가 나는 쪽이 그쪽이다)
+ *   - 방이 많으면 위에 이름 검색칸과 「단체방 전체 선택」 이 생긴다
  *   - ✕ 는 감지 목록에서 1건 삭제 (멤버 이름이 방으로 잘못 들어간 항목 정리) + 5초 실행 취소
  *   - [직접 입력 추가] 는 아직 감지 안 된 방을 손으로 넣는다
  *   - [초기화] 서브화면에 세 가지가 있다 — 감지 목록만 / 개별 설정 전체 / 방 목록 전체.
@@ -55,6 +59,11 @@ public final class ScreenRooms {
 
     private static final Handler H = new Handler(Looper.getMainLooper());
 
+    /** 목록 부분만 담는 칸 (검색어가 바뀔 때 여기만 다시 그린다) */
+    private static WeakReference<LinearLayout> LIST;
+    /** 이름 검색어. 화면을 새로 열 때 비운다. */
+    private static String QUERY = "";
+
     /** ✕ 를 눌렀지만 아직 실제로 지우지 않은 방 (키 = RoomRef.key()) */
     private static final LinkedHashMap<String, Pending> PENDING =
             new LinkedHashMap<String, Pending>();
@@ -82,6 +91,7 @@ public final class ScreenRooms {
         LinearLayout col = Ui.screen(a);
         ACT = new WeakReference<MainActivity>(a);
         BODY = new WeakReference<LinearLayout>(col);
+        QUERY = "";
         try {
             fill(a, col);
         } catch (Throwable t) {
@@ -115,14 +125,6 @@ public final class ScreenRooms {
         final List<Row> rows = rows(a);
         final List<String> accs = accounts(a, rows);
         final int accCount = Accounts.count(a);
-        final boolean multi = (accCount >= 2) || (accs.size() >= 2);
-
-        int detected = 0;
-        int selected = 0;
-        for (int i = 0; i < rows.size(); i++) {
-            if (rows.get(i).detected) detected++;
-            if (rows.get(i).selected) selected++;
-        }
 
         // 계정이 2개 이상이면 계정 화면으로 가는 길을 맨 위에 둔다 (UI_V3 5장)
         if (accCount >= 2) {
@@ -142,23 +144,30 @@ public final class ScreenRooms {
         if (rn != null) col.addView(rn);
 
         if (rows.isEmpty()) {
+            LIST = null;
             col.addView(Nav.note(a, "감지된 대화방이 없습니다. 카카오톡 메시지를 1회 수신하면 "
                     + "자동으로 등록되며, 직접 입력하여 추가할 수도 있습니다.", Theme.ACCENT2, null, null));
-        } else if (!multi) {
-            LinearLayout sh = Ui.sectionHeader(a, null, "선택 " + selected + "개 · 감지 " + detected + "개");
-            rememberHeader(SINGLE_KEY, sh);
-            col.addView(sh);
-            addRooms(a, col, rows);
         } else {
-            for (int i = 0; i < accs.size(); i++) {
-                String acc = accs.get(i);
-                List<Row> mine = filter(rows, acc);
-                LinearLayout sh = Ui.sectionHeader(a, null, header(a, acc, mine));
-                rememberHeader(acc, sh);
-                col.addView(sh);
-                addRooms(a, col, mine);
-            }
+            View tools = toolsCard(a, rows);
+            if (tools != null) col.addView(tools);
+
+            LinearLayout list = new LinearLayout(a);
+            list.setOrientation(LinearLayout.VERTICAL);
+            list.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            LIST = new WeakReference<LinearLayout>(list);
+            col.addView(list);
+            relist(a);
         }
+
+        // 방 공지 — 각 대화방에 방장·부방장이 올려 둔 공지사항을 한곳에서 본다
+        final int noticeN = RoomNotice.count(a);
+        LinearLayout gnot = Ui.group(a);
+        gnot.addView(Ui.navRow(a, "방 공지",
+                (noticeN == 0) ? "없음" : noticeN + "개 대화방",
+                (noticeN == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "방 공지", noticeListScreen(a)); }
+                }));
+        col.addView(gnot);
 
         TextView add = Nav.wideBtn(a, "직접 입력 추가", false, new Runnable() {
             @Override public void run() { addDialog(a); }
@@ -177,6 +186,283 @@ public final class ScreenRooms {
         hp.topMargin = Theme.dp(a, 10);
         help.setLayoutParams(hp);
         col.addView(help);
+    }
+
+    // ── 목록 부분 · 검색 · 빠른 선택 ─────────────────────────────────────────
+    //
+    // 손님 의견: "방 선택이 불편하다". 재어 보니 방 20개를 고르는 데 확인창까지 42번을
+    // 눌러야 했다. 원인이 넷이었고 넷 다 여기서 고친다 —
+    //   (1) 단체방까지 확인창을 띄웠다      → 단체방은 바로 켜고 스낵바로 되돌린다
+    //   (2) 여러 개를 한 번에 고를 길이 없었다 → 「단체방 전체 선택」
+    //   (3) 이름으로 찾을 길이 없었다        → 이름 검색칸
+    //   (4) 하나 켤 때마다 목록이 다시 정렬돼 줄이 튀었다 → 목록만, 그것도 필요할 때만 그린다
+
+    /**
+     * 목록 부분만 다시 그린다.
+     *
+     * 화면 전체({@link #refresh})를 다시 그리지 않는 이유가 둘이다 —
+     * (1) 검색어를 한 글자 칠 때마다 전체를 그리면 입력칸이 포커스를 잃어 글자가 끊긴다.
+     * (2) 선택을 켤 때 전체를 그리면 '선택된 것 먼저' 정렬로 방금 누른 줄이 위로 튄다.
+     */
+    private static void relist(final MainActivity a) {
+        LinearLayout list = (LIST == null) ? null : LIST.get();
+        // ★ 붙어 있는지(isAttachedToWindow)는 보지 않는다 — fill() 이 화면을 조립하는
+        //   도중에도 여기를 부르기 때문이다. 그때는 아직 붙어 있지 않다.
+        if (list == null || a == null || a.isFinishing()) return;
+        list.removeAllViews();
+        HEADERS.clear();
+
+        List<Row> all = rows(a);
+        List<Row> shown = applyQuery(all);
+
+        if (shown.isEmpty()) {
+            LinearLayout g = Ui.group(a);
+            TextView t = Ui.sub(a, "「" + QUERY + "」 이(가) 이름에 들어간 대화방이 없습니다.");
+            int ph = Theme.dp(a, 16);
+            t.setPadding(ph, Theme.dp(a, 18), ph, Theme.dp(a, 18));
+            t.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            g.addView(t);
+            list.addView(g);
+            return;
+        }
+
+        List<String> accs = accounts(a, all);
+        boolean multi = (Accounts.count(a) >= 2) || (accs.size() >= 2);
+
+        if (!multi) {
+            int detected = 0;
+            int selected = 0;
+            for (int i = 0; i < all.size(); i++) {
+                if (all.get(i).detected) detected++;
+                if (all.get(i).selected) selected++;
+            }
+            LinearLayout sh = Ui.sectionHeader(a, null,
+                    "선택 " + selected + "개 · 감지 " + detected + "개");
+            rememberHeader(SINGLE_KEY, sh);
+            list.addView(sh);
+            addRooms(a, list, shown);
+        } else {
+            for (int i = 0; i < accs.size(); i++) {
+                String acc = accs.get(i);
+                List<Row> mine = filter(shown, acc);
+                // 검색 중에 결과가 없는 계정은 머리글까지 숨긴다 (빈 칸만 쌓이면 더 헷갈린다)
+                if (mine.isEmpty() && QUERY.length() > 0) continue;
+                LinearLayout sh = Ui.sectionHeader(a, null, header(a, acc, filter(all, acc)));
+                rememberHeader(acc, sh);
+                list.addView(sh);
+                addRooms(a, list, mine);
+            }
+        }
+    }
+
+    /** 검색어에 맞는 방만 (검색어가 없으면 그대로) */
+    private static List<Row> applyQuery(List<Row> in) {
+        if (QUERY.length() == 0) return in;
+        String q = loose(QUERY);
+        if (q.length() == 0) return in;
+        ArrayList<Row> out = new ArrayList<Row>();
+        for (int i = 0; i < in.size(); i++) {
+            Row r = in.get(i);
+            if (loose(r.ref.name).contains(q)) out.add(r);
+        }
+        return out;
+    }
+
+    /** 공백·대소문자를 무시한 비교용 글자 (검색에만 쓴다 — 발송 대상 판정에는 쓰지 않는다) */
+    private static String loose(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (Character.isWhitespace(ch)) continue;
+            b.append(Character.toLowerCase(ch));
+        }
+        return b.toString();
+    }
+
+    /**
+     * 이름 검색 + 빠른 선택 카드. 방이 적으면 아무것도 만들지 않는다 —
+     * 방 3개짜리 화면에 검색칸이 있으면 그게 더 불편하다.
+     */
+    private static View toolsCard(final MainActivity a, List<Row> rows) {
+        int bulk = bulkTargets(a, rows).size();
+        int selected = 0;
+        for (int i = 0; i < rows.size(); i++) if (rows.get(i).selected) selected++;
+
+        boolean wantSearch = rows.size() >= 8;
+        boolean wantBulk = bulk >= 2;
+        boolean wantClear = selected >= 2;
+        if (!wantSearch && !wantBulk && !wantClear) {
+            QUERY = "";
+            return null;
+        }
+
+        LinearLayout g = Ui.group(a);
+        boolean first = true;
+
+        if (wantSearch) {
+            LinearLayout box = new LinearLayout(a);
+            box.setOrientation(LinearLayout.VERTICAL);
+            int ph = Theme.dp(a, 16);
+            box.setPadding(ph, Theme.dp(a, 12), ph, Theme.dp(a, 12));
+            box.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+
+            final EditText f = Ui.field(a, "대화방 이름 검색");
+            f.setSingleLine(true);
+            f.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            f.setText(QUERY);
+            f.setSelection(QUERY.length());
+            f.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int af) { }
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) { }
+                @Override public void afterTextChanged(Editable e) {
+                    final String v = (e == null) ? "" : e.toString();
+                    // 한 글자마다 바로 그리면 한글 조합 중에 깜빡인다 → 조금 모아서 그린다
+                    H.removeCallbacks(SEARCH);
+                    SEARCH_TEXT = v;
+                    H.postDelayed(SEARCH, 180L);
+                }
+            });
+            box.addView(f);
+            g.addView(box);
+            first = false;
+        }
+
+        if (wantBulk) {
+            if (!first) g.addView(Ui.divider(a));
+            g.addView(Ui.navRow(a, "단체방 전체 선택", "한 번에 켜기", Theme.ACCENT,
+                    new Runnable() {
+                        @Override public void run() { bulkSelect(a); }
+                    }));
+            first = false;
+        }
+
+        if (wantClear) {
+            if (!first) g.addView(Ui.divider(a));
+            g.addView(Ui.navRow(a, "선택 전체 해제", null, Theme.DIM,
+                    new Runnable() {
+                        @Override public void run() { bulkClear(a); }
+                    }));
+        }
+        return g;
+    }
+
+    /** 검색어가 멈춘 뒤 목록만 다시 그린다 */
+    private static String SEARCH_TEXT = "";
+    private static final Runnable SEARCH = new Runnable() {
+        @Override public void run() {
+            MainActivity a = (ACT == null) ? null : ACT.get();
+            if (a == null || a.isFinishing()) return;
+            if (SEARCH_TEXT.equals(QUERY)) return;
+            QUERY = SEARCH_TEXT;
+            relist(a);
+        }
+    };
+
+    /**
+     * 「단체방 전체 선택」 의 대상.
+     *
+     * 아래는 제외한다 — 전부 '한 번에 켜면 사고가 나는' 것들이다.
+     *   · 1:1 개인 대화방, 아직 종류를 모르는 방 (한 사람에게 광고가 반복 발송된다)
+     *   · 보호 대화방 (어떤 기능으로도 발송하지 않기로 지정한 방)
+     *   · 이미 선택된 방
+     * 검색 중이면 <b>화면에 보이는 방</b>만 대상이다 — 안 보이는 방이 켜지면 안 된다.
+     */
+    private static List<RoomRef> bulkTargets(Context c, List<Row> rows) {
+        ArrayList<RoomRef> out = new ArrayList<RoomRef>();
+        List<Row> shown = applyQuery(rows);
+        for (int i = 0; i < shown.size(); i++) {
+            Row r = shown.get(i);
+            if (r.selected) continue;
+            if (!r.groupKnown || !r.group) continue;
+            if (SendGuard.isProtected(c, r.ref.name)) continue;
+            out.add(r.ref);
+        }
+        return out;
+    }
+
+    private static void bulkSelect(final MainActivity a) {
+        final List<RoomRef> targets = bulkTargets(a, rows(a));
+        if (targets.isEmpty()) {
+            Nav.snack("새로 켤 단체방이 없습니다.", null, null);
+            return;
+        }
+        StringBuilder names = new StringBuilder();
+        for (int i = 0; i < targets.size() && i < 6; i++) {
+            names.append("\n· ").append(targets.get(i).name);
+        }
+        if (targets.size() > 6) names.append("\n· 그 외 ").append(targets.size() - 6).append("개");
+
+        Nav.confirm(a, "단체방 " + targets.size() + "개 선택",
+                "아래 단체방을 발송 대상으로 사용합니다. 설정한 주기에 따라 메시지가 자동 "
+                        + "발송됩니다." + names
+                        + "\n\n1:1 개인 대화방과 보호 대화방은 포함되지 않습니다.",
+                targets.size() + "개 사용", new Runnable() {
+                    @Override public void run() {
+                        int n = selectMany(a, targets, true);
+                        Nav.snack(n + "개를 발송 대상으로 켰습니다.", null, null);
+                        refresh();
+                    }
+                });
+    }
+
+    private static void bulkClear(final MainActivity a) {
+        final List<RoomRef> cur = new ArrayList<RoomRef>(Settings.load(a).macro.roomRefs());
+        if (cur.isEmpty()) {
+            Nav.snack("선택된 대화방이 없습니다.", null, null);
+            return;
+        }
+        Nav.confirm(a, "선택 전체 해제",
+                cur.size() + "개 대화방의 발송 대상 선택을 모두 해제합니다.\n\n"
+                        + "그 대화방들의 개별 설정도 함께 지워집니다. 감지 목록과 보호 대화방은 "
+                        + "그대로 유지됩니다.",
+                "전체 해제", new Runnable() {
+                    @Override public void run() {
+                        int n = selectMany(a, cur, false);
+                        Log.add(a, "발송 대상 선택을 전체 해제했습니다 (" + n + "개).");
+                        Nav.snack(n + "개 선택을 해제했습니다.", null, null);
+                        refresh();
+                    }
+                });
+    }
+
+    /**
+     * 여러 방의 선택을 한 번에 바꾸고 <b>한 번만</b> 저장한다.
+     * {@link #select} 를 N 번 부르면 N 번 저장돼 느리고, 중간에 실패하면 절반만 반영된다.
+     *
+     * @return 실제로 바뀐 개수
+     */
+    private static int selectMany(Context c, List<RoomRef> refs, boolean on) {
+        if (c == null || refs == null || refs.isEmpty()) return 0;
+        Settings s = Settings.load(c);
+        List<RoomRef> cur = s.macro.roomRefs();
+        int n = 0;
+        for (int i = 0; i < refs.size(); i++) {
+            RoomRef ref = refs.get(i);
+            if (ref == null || !ref.valid()) continue;
+            boolean has = false;
+            for (int k = 0; k < cur.size(); k++) {
+                if (ref.equals(cur.get(k))) { has = true; break; }
+            }
+            if (has == on) continue;
+            if (on) {
+                cur.add(ref);
+            } else {
+                for (int k = cur.size() - 1; k >= 0; k--) {
+                    if (ref.equals(cur.get(k))) cur.remove(k);
+                }
+                // select() 와 같은 규칙 — 해제한 방의 개별 설정·타이머도 정리한다
+                if (s.macro.roomCfgs != null) s.macro.roomCfgs.remove(ref.key());
+            }
+            n++;
+        }
+        if (n == 0) return 0;
+        s.macro.setRoomRefs(cur);
+        if (!s.save(c)) {
+            Nav.snack("저장하지 못했습니다. 내정보 탭에서 라이선스 인증을 먼저 진행하십시오.", null, null);
+            return 0;
+        }
+        return n;
     }
 
     /**
@@ -357,7 +643,10 @@ public final class ScreenRooms {
                 @Override public void run() { delete(a, r.ref); }
             };
         }
-        g.addView(Ui.checkRow(a, r.ref.name, rowSub(a, r),
+        // 체크 줄의 뷰를 들고 있어야 취소할 때 그 줄만 되돌릴 수 있다 (목록 전체를 다시
+        // 그리면 '선택된 것 먼저' 정렬로 방금 누른 줄이 위로 튄다).
+        final View[] rowView = new View[1];
+        View check = Ui.checkRow(a, r.ref.name, rowSub(a, r),
                 badges, r.selected, new Ui.OnToggle() {
                     @Override public void on(boolean v) {
                         if (!v) {
@@ -367,9 +656,22 @@ public final class ScreenRooms {
                             Nav.reload();
                             return;
                         }
-                        confirmSelect(a, r);
+                        turnOn(a, r, rowView[0]);
                     }
-                }, del));
+                }, del);
+        rowView[0] = check;
+        g.addView(check);
+
+        // 방 공지 — 방장·부방장이 그 방에 올려 둔 공지사항. 저장된 것이 있을 때만 보여준다
+        // (없는 방까지 줄을 만들면 목록이 두 배로 길어진다. 가져오기는 대화방 설정 안에 있다).
+        RoomNotice.Entry nt = RoomNotice.get(a, r.ref);
+        if (nt != null) {
+            g.addView(Ui.navRow(a, "방 공지", nt.oneLine(), Theme.TEXT, new Runnable() {
+                @Override public void run() {
+                    Nav.push(a, "방 공지", noticeScreen(a, r.ref));
+                }
+            }));
+        }
 
         // 방별 덮어쓰기 요약 — 맵을 직접 읽어 빈 cfg 가 생성되지 않게 한다 (저장 시 어차피 생략되지만 메모리도 깨끗이).
         Settings.RoomCfg rc = storedCfg(Settings.load(a), r.ref);
@@ -589,6 +891,37 @@ public final class ScreenRooms {
     }
 
     /**
+     * 체크를 켰을 때.
+     *
+     * <b>단체방은 확인창 없이 바로 켜고</b> 스낵바의 [취소] 로 되돌린다. 방 20개를 고르려면
+     * 확인창이 20번 떴는데, 단체방은 애초에 고르려고 들어온 대상이라 그 20번이 전부 헛걸음
+     * 이었다(손님 의견: "방 선택이 불편하다"). 되돌릴 수 있으면 확인창의 목적인 실수 방지는
+     * 그대로 남는다.
+     *
+     * 확인창을 그대로 두는 경우는 셋뿐이고, 셋 다 실제로 사고가 나는 쪽이다 —
+     *   · 1:1 개인 대화방 — 한 사람에게 광고가 반복 발송된다 (신고·차단 대상)
+     *   · 아직 단체/1:1 을 모르는 방 — 무엇이 될지 모른다
+     *   · 보호 대화방 — 발송하지 않기로 지정한 방이다
+     */
+    private static void turnOn(final MainActivity a, final Row r, final View rowView) {
+        if (SendGuard.isProtected(a, r.ref.name) || !r.groupKnown || !r.group) {
+            confirmSelect(a, r, rowView);
+            return;
+        }
+        select(a, r.ref, true);
+        updateHeaders(a);
+        Nav.snack("「" + r.ref.name + "」 을(를) 발송 대상으로 사용합니다.", "취소",
+                new Runnable() {
+                    @Override public void run() {
+                        select(a, r.ref, false);
+                        updateHeaders(a);
+                        Ui.setChecked(rowView, false);
+                        Nav.reload();
+                    }
+                });
+    }
+
+    /**
      * 대화방을 발송 대상으로 켤 때 확인을 받는다.
      *
      * 잘못 눌러서 켜지는 사고가 실제로 났다. 그래서 <b>이름과 단체/1:1 을 보여주고</b>
@@ -596,9 +929,12 @@ public final class ScreenRooms {
      * 그 방의 1:1 발송 동의로 기록한다 ({@link Settings.RoomCfg#allowOneToOne}).
      * 동의가 없으면 {@link SendGuard} 가 발송을 막는다.
      */
-    private static void confirmSelect(final MainActivity a, final Row r) {
+    private static void confirmSelect(final MainActivity a, final Row r, final View rowView) {
         final Runnable revert = new Runnable() {
-            @Override public void run() { refresh(); }
+            @Override public void run() {
+                if (rowView != null) Ui.setChecked(rowView, false);
+                else refresh();
+            }
         };
 
         if (SendGuard.isProtected(a, r.ref.name)) {
@@ -623,6 +959,9 @@ public final class ScreenRooms {
                     + "카카오톡 알림이 1회 수신되면 확인됩니다. 확인 전까지는 발송되지 않습니다.";
             ok = "사용";
         } else if (r.group) {
+            // 지금은 turnOn 이 단체방을 여기로 보내지 않는다(확인창 없이 켠다). 남겨 두는
+            // 이유: 다른 화면에서 confirmSelect 를 부르게 되는 날 단체방이 아무 안내도 없이
+            // 켜지는 것보다, 쓰이지 않는 분기 하나가 남는 편이 낫다.
             msg = "「" + r.ref.name + "」(단체방)을 발송 대상으로 사용합니다.\n\n"
                     + "설정한 주기에 따라 이 대화방으로 메시지가 자동 발송됩니다.";
             ok = "사용";
@@ -640,7 +979,7 @@ public final class ScreenRooms {
                 select(a, r.ref, true);
                 if (oneToOne) allowOneToOne(a, r.ref);
                 updateHeaders(a);
-                refresh();
+                Nav.reload();
             }
         }, revert);
     }
@@ -663,6 +1002,257 @@ public final class ScreenRooms {
     /** 이 방에 덮어쓰기(또는 끄기)가 하나라도 걸려 있나 */
     private static boolean hasOverride(Settings.RoomCfg rc) {
         return rc != null && (!rc.enabled || rc.hasMsg || rc.hasCd || rc.hasMin);
+    }
+
+    // ── 방 공지 모아보기 ─────────────────────────────────────────────────────
+
+    private static WeakReference<LinearLayout> NLIST_BODY;
+
+    static View noticeListScreen(final MainActivity a) {
+        LinearLayout col = Ui.screen(a);
+        NLIST_BODY = new WeakReference<LinearLayout>(col);
+        try {
+            fillNoticeList(a, col);
+        } catch (Throwable t) {
+            Log.add(a, "방 공지 목록 화면 구성에 실패했습니다: " + t);
+        }
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshNoticeList() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (NLIST_BODY == null) ? null : NLIST_BODY.get();
+        if (a == null || col == null || a.isFinishing() || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillNoticeList(a, col);
+        } catch (Throwable t) {
+            Log.add(a, "방 공지 목록 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillNoticeList(final MainActivity a, LinearLayout col) {
+        col.addView(Ui.sub(a, "각 대화방에 방장·부방장이 올려 둔 공지사항입니다. "
+                + "이 앱이 어느 대화방에도 발송하지 않습니다."));
+
+        LinearLayout gs = Ui.group(a);
+        gs.addView(Ui.navRowSwitch(a, "메시지로 자동 저장",
+                "단체방에 올라온 공지를 알림으로 받았을 때 자동으로 저장합니다.",
+                RoomNotice.autoOn(a), new Ui.OnToggle() {
+                    @Override public void on(boolean v) {
+                        RoomNotice.setAutoOn(a, v);
+                        Log.add(a, "방 공지 자동 저장을 " + (v ? "사용" : "미사용") + "으로 변경했습니다.");
+                    }
+                }));
+        col.addView(gs);
+
+        List<RoomNotice.Entry> list = RoomNotice.all(a);
+        col.addView(Ui.sectionHeader(a, null, "저장된 공지 " + list.size() + "개"));
+
+        if (list.isEmpty()) {
+            LinearLayout g = Ui.group(a);
+            TextView none = Ui.sub(a, "저장된 공지가 없습니다. 대상 대화방 › 대화방별 설정 › "
+                    + "공지 보기 에서 「지금 가져오기」 로 읽어올 수 있습니다.");
+            int ph = Theme.dp(a, 16);
+            none.setPadding(ph, Theme.dp(a, 16), ph, Theme.dp(a, 16));
+            none.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            g.addView(none);
+            col.addView(g);
+            return;
+        }
+
+        LinearLayout g = Ui.group(a);
+        for (int i = 0; i < list.size(); i++) {
+            RoomNotice.Entry e = list.get(i);
+            final RoomRef ref = RoomRef.parse(e.roomKey);
+            if (ref == null || !ref.valid()) continue;
+            if (i > 0) g.addView(Ui.divider(a));
+            g.addView(Ui.navRow(a, ref.label(a), e.oneLine(), Theme.TEXT, new Runnable() {
+                @Override public void run() { Nav.push(a, "방 공지", noticeScreen(a, ref)); }
+            }));
+        }
+        col.addView(g);
+
+        col.addView(Nav.wideBtn(a, "저장된 공지 전체 삭제", false, new Runnable() {
+            @Override public void run() {
+                Nav.confirm(a, "저장된 공지 전체 삭제",
+                        "앱에 저장된 공지 " + RoomNotice.count(a) + "건을 모두 지웁니다.\n\n"
+                                + "카카오톡의 공지는 그대로 있습니다. 다시 가져올 수 있습니다.",
+                        "전체 삭제", new Runnable() {
+                            @Override public void run() {
+                                int n = RoomNotice.clear(a);
+                                Log.add(a, "저장된 방 공지를 전체 삭제했습니다 (" + n + "건).");
+                                Nav.snack(n + "건을 지웠습니다.", null, null);
+                                refreshNoticeList();
+                                refresh();
+                            }
+                        });
+            }
+        }));
+    }
+
+    // ── 방 공지 (서브화면) ───────────────────────────────────────────────────
+    //
+    // 보여주는 것은 <b>방장·부방장이 그 방에 올려 둔 공지사항</b>이다. 이 앱이 어디에도
+    // 보내지 않는다. 방 관리봇의 「공지문」(사장이 적어 두고 명령으로 뿌리는 글)과는
+    // 다른 것이라, 화면에서도 섞이지 않게 「방 공지」 라는 이름으로 분리해 둔다.
+    //
+    // 가져오는 방법과 각 방법의 한계는 {@link RoomNotice} 머리말에 적어 뒀다.
+
+    private static WeakReference<LinearLayout> NOTICE_BODY;
+    private static RoomRef NOTICE_REF;
+
+    static View noticeScreen(final MainActivity a, final RoomRef ref) {
+        LinearLayout col = Ui.screen(a);
+        NOTICE_BODY = new WeakReference<LinearLayout>(col);
+        NOTICE_REF = ref;
+        try {
+            fillNotice(a, col, ref);
+        } catch (Throwable t) {
+            Log.add(a, "방 공지 화면 구성에 실패했습니다: " + t);
+        }
+        return Ui.scroll(a, col);
+    }
+
+    private static void refreshNotice() {
+        MainActivity a = (ACT == null) ? null : ACT.get();
+        LinearLayout col = (NOTICE_BODY == null) ? null : NOTICE_BODY.get();
+        RoomRef ref = NOTICE_REF;
+        if (a == null || col == null || ref == null || a.isFinishing()
+                || !col.isAttachedToWindow()) return;
+        try {
+            col.removeAllViews();
+            fillNotice(a, col, ref);
+        } catch (Throwable t) {
+            Log.add(a, "방 공지 화면 갱신에 실패했습니다: " + t);
+        }
+    }
+
+    private static void fillNotice(final MainActivity a, LinearLayout col, final RoomRef ref) {
+        final RoomNotice.Entry nt = RoomNotice.get(a, ref);
+
+        col.addView(Ui.sectionHeader(a, null, ref.label(a)));
+
+        LinearLayout g = Ui.group(a);
+        if (nt == null) {
+            TextView none = Ui.sub(a, "저장된 공지가 없습니다.\n\n"
+                    + "카카오톡의 공지는 대화방 화면에 고정되는 내용이라 알림으로는 들어오지 "
+                    + "않습니다. 아래 「지금 가져오기」 로 대화방을 열어 읽어올 수 있고, "
+                    + "직접 입력할 수도 있습니다.");
+            int ph = Theme.dp(a, 16);
+            none.setPadding(ph, Theme.dp(a, 16), ph, Theme.dp(a, 16));
+            none.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            g.addView(none);
+        } else {
+            TextView body = Ui.body(a, nt.text);
+            body.setTextIsSelectable(true);
+            int ph = Theme.dp(a, 16);
+            body.setPadding(ph, Theme.dp(a, 16), ph, Theme.dp(a, 12));
+            body.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            g.addView(body);
+            g.addView(Ui.divider(a));
+            g.addView(Ui.kv(a, "가져온 방법", nt.where()));
+        }
+        col.addView(g);
+
+        // ── 가져오기 ──
+        final TextView fetch = Nav.wideBtn(a, "지금 가져오기", nt == null, null);
+        fetch.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { doFetchNotice(a, ref, fetch); }
+        });
+        col.addView(fetch);
+
+        col.addView(Nav.wideBtn(a, (nt == null) ? "직접 입력" : "공지 수정", false, new Runnable() {
+            @Override public void run() {
+                Nav.editText(a, "방 공지", "공지 내용을 입력하십시오",
+                        (nt == null) ? "" : nt.text, true,
+                        "여기 적은 내용은 어느 대화방에도 발송되지 않습니다. 이 화면에서 보기 위한 "
+                                + "기록입니다.",
+                        new Nav.OnText() {
+                            @Override public String text(String value) {
+                                String val = (value == null) ? "" : value.trim();
+                                if (val.length() > RoomNotice.MAX_LEN) {
+                                    return RoomNotice.MAX_LEN + "자 이하로 입력하십시오.";
+                                }
+                                if (val.length() == 0) {
+                                    RoomNotice.remove(a, ref);
+                                } else {
+                                    RoomNotice.put(a, ref, val, RoomNotice.SRC_TYPED);
+                                }
+                                refreshNotice();
+                                return null;
+                            }
+                        });
+            }
+        }));
+
+        if (nt != null) {
+            col.addView(Nav.wideBtn(a, "공지 삭제", false, new Runnable() {
+                @Override public void run() {
+                    Nav.confirm(a, "공지 삭제",
+                            "이 대화방에 저장된 공지를 지웁니다. 카카오톡의 공지는 그대로 있습니다.",
+                            "삭제", new Runnable() {
+                                @Override public void run() {
+                                    RoomNotice.remove(a, ref);
+                                    Nav.snack("공지를 지웠습니다.", null, null);
+                                    refreshNotice();
+                                }
+                            });
+                }
+            }));
+        }
+
+        TextView help = Ui.sub(a, "「지금 가져오기」 는 카카오톡에서 이 대화방을 열어 공지 칸의 "
+                + "글자만 읽습니다. 아무것도 누르거나 보내지 않습니다. 접근성 권한이 필요하며, "
+                + "이 대화방의 카카오톡 알림을 1회 이상 받은 뒤부터 사용할 수 있습니다.");
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        hp.topMargin = Theme.dp(a, 10);
+        help.setLayoutParams(hp);
+        col.addView(help);
+
+        String dump = RoomNotice.dump(a);
+        if (dump != null && dump.length() > 0) {
+            col.addView(Ui.sectionHeader(a, null, "마지막 실패 기록"));
+            LinearLayout gd = Ui.group(a);
+            TextView d = Ui.mono(a, dump.length() > 4000 ? dump.substring(0, 4000) + "\n…" : dump);
+            d.setTextIsSelectable(true);
+            int ph = Theme.dp(a, 12);
+            d.setPadding(ph, ph, ph, ph);
+            d.setLayoutParams(new LinearLayout.LayoutParams(MATCH, WRAP));
+            gd.addView(d);
+            col.addView(gd);
+            col.addView(Ui.sub(a, "공지를 읽지 못했을 때 어느 단계에서 막혔는지 확인하는 기록입니다. "
+                    + "카카오톡 화면 구성이 변경되면 이 기록이 필요합니다."));
+        }
+    }
+
+    /** 「지금 가져오기」 — 누르는 동안 버튼을 잠그고, 끝나면 결과를 그 자리에 보여준다 */
+    private static void doFetchNotice(final MainActivity a, final RoomRef ref, final TextView btn) {
+        if (KakaoAccessibility.noticeBusy()) {
+            Nav.snack("이미 공지를 읽고 있습니다.", null, null);
+            return;
+        }
+        Nav.busy(btn, true, "가져오는 중…", "지금 가져오기");
+        RoomNotice.fetch(a, ref, new RoomNotice.Result() {
+            @Override public void done(final boolean ok, String text, final String why) {
+                H.post(new Runnable() {
+                    @Override public void run() {
+                        Nav.busy(btn, false, "가져오는 중…", "지금 가져오기");
+                        if (ok) {
+                            Nav.snack("공지를 가져왔습니다.", null, null);
+                            refreshNotice();
+                            refresh();
+                            return;
+                        }
+                        Nav.confirm(a, "공지를 가져오지 못했습니다",
+                                (why == null) ? "원인을 확인하지 못했습니다." : why,
+                                "확인", new Runnable() {
+                                    @Override public void run() { refreshNotice(); }
+                                });
+                    }
+                });
+            }
+        });
     }
 
     // ── 방별 덮어쓰기 편집 (서브화면) ─────────────────────────────────────────
@@ -713,6 +1303,18 @@ public final class ScreenRooms {
             col.addView(Nav.note(a, "보호 대화방입니다. 아래 설정과 무관하게 이 대화방에는 "
                     + "어떤 기능으로도 자동 발송되지 않습니다.", Theme.ACCENT2, null, null));
         }
+
+        // ── 방 공지 ──
+        // 방장·부방장이 그 방에 올려 둔 공지사항이다. 발송과 무관하게 보여주기만 한다.
+        col.addView(Ui.sectionHeader(a, null, "방 공지"));
+        LinearLayout gn = Ui.group(a);
+        RoomNotice.Entry nt = RoomNotice.get(a, ref);
+        gn.addView(Ui.navRow(a, "공지 보기",
+                (nt == null) ? "없음" : nt.oneLine(),
+                (nt == null) ? Theme.DIM : Theme.TEXT, new Runnable() {
+                    @Override public void run() { Nav.push(a, "방 공지", noticeScreen(a, ref)); }
+                }));
+        col.addView(gn);
 
         // ── 이 대화방 매크로 on/off ──
         col.addView(Ui.sectionHeader(a, null, "대화방 매크로"));
@@ -1232,6 +1834,7 @@ public final class ScreenRooms {
         now.addView(Ui.kv(a, "발송 대상", selected + "개"));
         now.addView(Ui.kv(a, "대화방 개별 설정", cfgs + "개"));
         now.addView(Ui.kv(a, "계정 개별 설정", accs + "개"));
+        now.addView(Ui.kv(a, "저장된 방 공지", RoomNotice.count(a) + "개"));
         now.addView(Ui.kv(a, "보호 대화방", SendGuard.protectedRooms(a).size() + "개 (유지)"));
         col.addView(now);
 
@@ -1310,7 +1913,8 @@ public final class ScreenRooms {
                                        final int selected, final int cfgs) {
         Nav.confirm(a, "방 목록 전체 초기화",
                 "감지된 대화방 " + detected + "개, 발송 대상 " + selected + "개, "
-                        + "대화방 개별 설정 " + cfgs + "개를 모두 삭제합니다.\n\n"
+                        + "대화방 개별 설정 " + cfgs + "개, 저장된 방 공지 "
+                        + RoomNotice.count(a) + "개를 모두 삭제합니다.\n\n"
                         + "발송 대상이 비면 자동발송이 중단됩니다. 대화방을 다시 선택해야 "
                         + "발송이 재개됩니다.\n"
                         + "보호 대화방과 전체 정지는 유지됩니다. 봇의 대상 대화방은 "
@@ -1331,6 +1935,12 @@ public final class ScreenRooms {
                             KakaoListener.clearRooms(a);
                         } catch (Throwable t) {
                             Log.add(a, "감지 목록을 비우지 못했습니다: " + t);
+                        }
+                        // 방 목록을 비우면 방마다 저장해 둔 공지도 가리킬 방이 없어진다
+                        try {
+                            RoomNotice.clear(a);
+                        } catch (Throwable t) {
+                            Log.add(a, "저장된 방 공지를 비우지 못했습니다: " + t);
                         }
                         cancelPending();
                         Log.add(a, "방 목록을 전체 초기화했습니다. (감지 " + detected

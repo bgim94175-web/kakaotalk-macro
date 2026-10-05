@@ -375,6 +375,29 @@ public final class Ui {
     }
 
     /**
+     * checkRow 의 체크 표시를 코드로 되돌린다 (콜백은 부르지 않는다).
+     *
+     * 확인창에서 취소했을 때 목록 전체를 다시 그리지 않고 그 줄만 되돌리기 위한 것이다.
+     * 전체를 다시 그리면 '선택된 것 먼저' 정렬 때문에 줄이 위아래로 튀어서,
+     * 여러 방을 연달아 고를 때 방금 누른 줄을 다시 찾아야 한다.
+     */
+    public static void setChecked(View checkRow, boolean on) {
+        Check box = findCheck(checkRow);
+        if (box != null) box.set(on);
+    }
+
+    private static Check findCheck(View v) {
+        if (v instanceof Check) return (Check) v;
+        if (!(v instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            Check r = findCheck(g.getChildAt(i));
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    /**
      * 기능 카드. ON 이면 초록 "사용중 · D-N" 칩, EXPIRING 이면 AMBER "만료 임박 · D-N" 칩 + [연장],
      * OFF 면 회색 "미구매" 칩 + [구매하기]. onOpen 이 있으면 카드 전체가 눌린다.
      */

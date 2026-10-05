@@ -3,6 +3,7 @@ package com.buseong.kakaoauto;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Path;
@@ -939,6 +940,12 @@ public final class KakaoAccessibility extends AccessibilityService {
             finish(false, w);
         }
         if (INSTANCE == this) INSTANCE = null;
+        // 공지 읽기가 걸려 있으면 여기서 끝낸다. 안 그러면 noticeRef 가 영구히 남아
+        // 다음 「지금 가져오기」 가 "이미 읽고 있습니다" 로 막힌다.
+        if (noticeRef != null) {
+            noticeFinish(false, null, "접근성 권한이 해제되어 공지를 읽지 못했습니다. "
+                    + "권한을 다시 활성화한 뒤 시도하십시오.");
+        }
         Log.add(this, "접근성 서비스가 비활성화되었습니다. 이미지 전송이 불가합니다.");
         try {
             h.removeCallbacksAndMessages(null);
@@ -949,10 +956,379 @@ public final class KakaoAccessibility extends AccessibilityService {
     @Override
     public void onDestroy() {
         if (INSTANCE == this) INSTANCE = null;
+        if (noticeRef != null) {
+            noticeFinish(false, null, "접근성 서비스가 종료되어 공지를 읽지 못했습니다.");
+        }
         try {
             h.removeCallbacksAndMessages(null);
         } catch (Throwable ignore) { }
         super.onDestroy();
+    }
+
+    // ── 공지 읽기 ────────────────────────────────────────────────────────────
+    //
+    // 하는 일: 사장이 「지금 가져오기」 를 누르면 그 대화방을 열고, 화면 위쪽 공지 칸의
+    // 글자를 읽어서 돌려준다. <b>아무것도 누르지 않는다</b> — 읽기만 한다. 그래서 이
+    // 길에는 클릭·제스처·뒤로가기가 한 줄도 없다.
+    //
+    // 공유창 흐름(arm/step)과 상태를 전혀 공유하지 않는다. 섞으면 사진 발송 도중에 공지를
+    // 읽다가 발송이 깨진다. 그래서 발송 예약(armed)이 걸려 있으면 시작하지 않고, 읽는 중에
+    // 발송 예약이 생기면 공지 읽기를 포기한다(발송이 우선이다).
+    //
+    // ★ 엉뚱한 방의 공지를 저장하지 않는다 — 화면에 떠 있는 대화방 이름이 가져오려는 방
+    //   이름과 같을 때만 돌려준다. 이름을 못 읽으면 실패로 끝낸다. 추측해서 저장하면
+    //   A 방 공지가 B 방 공지로 보이는데, 그건 오발송 사고와 같은 종류의 실수다.
+
+    public interface NoticeResult {
+        /**
+         * @param ok   읽었나
+         * @param text 읽은 공지 (실패면 null)
+         * @param why  사람이 읽을 실패 사유 (성공이면 null)
+         */
+        void done(boolean ok, String text, String why);
+    }
+
+    /** 전체 제한 시간 */
+    private static final long NOTICE_TIMEOUT_MS = 12000L;
+    /** 창이 뜨고 글자가 채워질 때까지 첫 번째로 기다리는 시간 */
+    private static final long NOTICE_FIRST_MS = 1200L;
+    /** 다시 볼 간격 */
+    private static final long NOTICE_AGAIN_MS = 600L;
+    /** 한 번에 훑을 최대 칸 수 (아주 긴 대화방에서 멈추지 않게) */
+    private static final int NOTICE_MAX_NODES = 2500;
+
+    private static volatile RoomRef noticeRef = null;
+    private static volatile NoticeResult noticeCb = null;
+    private static volatile Context noticeCtx = null;
+    private static volatile long noticeDeadline = 0L;
+    /** 대화방 이름은 찾았나 (공지 칸만 못 찾은 것과 아예 다른 화면인 것을 구분한다) */
+    private static volatile boolean noticeSawRoom = false;
+    /** 마지막으로 훑은 화면 요약 (실패 사유를 적을 때 쓴다) */
+    private static volatile String noticeDump = "";
+
+    /** 공지를 읽는 중인가 */
+    public static boolean noticeBusy() { return noticeRef != null; }
+
+    /**
+     * 공지 읽기를 시작한다. 결과는 {@code cb} 로 <b>한 번만</b> 온다.
+     * 부르는 쪽({@link RoomNotice#fetch})이 권한·열기 정보를 이미 확인하지만,
+     * 그 사이에 상태가 바뀔 수 있으니 여기서 다시 확인한다.
+     */
+    public static void readNotice(Context ctx, RoomRef ref, NoticeResult cb) {
+        KakaoAccessibility me = INSTANCE;
+        if (me == null) { noticeFail(cb, "접근성 권한이 비활성 상태입니다."); return; }
+        if (ref == null || !ref.valid()) { noticeFail(cb, "대화방 정보가 올바르지 않습니다."); return; }
+        if (armed) {
+            noticeFail(cb, "지금 이미지 발송이 진행 중입니다. 끝난 뒤 다시 시도하십시오.");
+            return;
+        }
+        if (noticeRef != null) {
+            noticeFail(cb, "이미 공지를 읽고 있습니다. 잠시 뒤 다시 시도하십시오.");
+            return;
+        }
+        PendingIntent open = KakaoListener.openIntentFor(ref);
+        if (open == null) {
+            noticeFail(cb, "대화방을 여는 정보가 없습니다. 「" + ref.name
+                    + "」 의 카카오톡 알림을 1회 받은 뒤 다시 시도하십시오.");
+            return;
+        }
+
+        noticeRef = ref;
+        noticeCb = cb;
+        noticeCtx = (ctx == null) ? null : ctx.getApplicationContext();
+        noticeSawRoom = false;
+        noticeDump = "";
+        noticeDeadline = System.currentTimeMillis() + NOTICE_TIMEOUT_MS;
+
+        try {
+            open.send();
+        } catch (Throwable t) {
+            noticeFinish(false, null, "대화방을 열지 못했습니다 — " + t.getClass().getSimpleName()
+                    + ". 카카오톡 알림을 다시 받은 뒤 시도하십시오.");
+            return;
+        }
+        try {
+            me.h.postDelayed(me.NOTICE_STEP, NOTICE_FIRST_MS);
+        } catch (Throwable t) {
+            noticeFinish(false, null, "공지 읽기를 예약하지 못했습니다 — " + t.getClass().getSimpleName());
+        }
+    }
+
+    private final Runnable NOTICE_STEP = new Runnable() {
+        @Override public void run() { noticeStep(); }
+    };
+
+    private void noticeStep() {
+        RoomRef ref = noticeRef;
+        if (ref == null) return;                 // 이미 끝났다
+        if (armed) {
+            noticeFinish(false, null, "이미지 발송이 시작되어 공지 읽기를 멈췄습니다. 끝난 뒤 다시 시도하십시오.");
+            return;
+        }
+
+        NoticeScan sc = null;
+        try {
+            ArrayList<AccessibilityNodeInfo> rs = roots();
+            if (!rs.isEmpty()) sc = scanNotice(rs, ref.name);
+        } catch (Throwable t) {
+            noticeFinish(false, null, "카카오톡 화면을 읽지 못했습니다 — " + t.getClass().getSimpleName());
+            return;
+        }
+
+        if (sc != null) {
+            if (sc.roomMatched) noticeSawRoom = true;
+            noticeDump = sc.dump;
+            if (sc.roomMatched && sc.notice.length() > 0) {
+                noticeFinish(true, sc.notice, null);
+                return;
+            }
+        }
+
+        if (System.currentTimeMillis() >= noticeDeadline) {
+            noticeFinish(false, null, noticeWhy(ref, sc));
+            return;
+        }
+        try {
+            h.postDelayed(NOTICE_STEP, NOTICE_AGAIN_MS);
+        } catch (Throwable t) {
+            noticeFinish(false, null, "공지 읽기를 이어가지 못했습니다 — " + t.getClass().getSimpleName());
+        }
+    }
+
+    /** 실패 사유를 조치까지 담아 적는다 (단계별로 조치가 전혀 다르다) */
+    private static String noticeWhy(RoomRef ref, NoticeScan sc) {
+        if (sc == null || sc.nodes == 0) {
+            return "카카오톡 화면이 열리지 않았습니다. 화면 잠금이 걸려 있거나 카카오톡이 "
+                    + "다른 화면에 머물러 있을 수 있습니다.";
+        }
+        if (!noticeSawRoom) {
+            return "열린 화면에서 「" + ref.name + "」 을(를) 찾지 못했습니다. 대화방 이름이 "
+                    + "바뀌었거나 다른 대화방이 열렸을 수 있습니다. 엉뚱한 방의 공지를 "
+                    + "저장하지 않기 위해 저장하지 않았습니다.";
+        }
+        if (sc.sawNoticeLabel) {
+            return "공지 칸은 찾았지만 내용을 읽지 못했습니다. 공지가 접혀 있으면 카카오톡에서 "
+                    + "공지를 한 번 펼친 뒤 다시 시도하십시오.";
+        }
+        return "이 대화방에 등록된 공지가 없거나, 카카오톡 화면 구성이 변경되어 공지 칸을 "
+                + "찾지 못했습니다. 공지를 직접 입력할 수도 있습니다.";
+    }
+
+    private static void noticeFail(NoticeResult cb, String why) {
+        if (cb == null) return;
+        try { cb.done(false, null, why); } catch (Throwable ignore) { }
+    }
+
+    /** 결과를 한 번만 넘기고 상태를 비운다 */
+    private static void noticeFinish(boolean ok, String text, String why) {
+        NoticeResult cb = noticeCb;
+        Context ctx = noticeCtx;
+        String dump = noticeDump;
+        KakaoAccessibility me = INSTANCE;
+        RoomRef ref = noticeRef;
+
+        noticeRef = null;
+        noticeCb = null;
+        noticeCtx = null;
+        noticeDeadline = 0L;
+        noticeDump = "";
+
+        if (me != null) {
+            try { me.h.removeCallbacks(me.NOTICE_STEP); } catch (Throwable ignore) { }
+        }
+        // 실패했을 때만 화면 구성 기록을 남긴다 (성공했으면 볼 이유가 없다)
+        if (ctx != null) {
+            try {
+                if (ok) {
+                    RoomNotice.saveDump(ctx, null);
+                } else {
+                    RoomNotice.saveDump(ctx, noticeHeader(ref, why) + dump);
+                }
+            } catch (Throwable ignore) { }
+        }
+        if (cb == null) return;
+        try { cb.done(ok, text, why); } catch (Throwable ignore) { }
+    }
+
+    private static String noticeHeader(RoomRef ref, String why) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("공지 읽기 실패\n");
+        sb.append("시각: ").append(JoinLog.kst(System.currentTimeMillis())).append('\n');
+        sb.append("대화방: ").append(ref == null ? "-" : ref.name).append('\n');
+        sb.append("사유: ").append(why == null ? "-" : why).append('\n');
+        sb.append("마지막 화면: ").append(lastActivityCls).append("\n\n");
+        return sb.toString();
+    }
+
+    /** 한 번 훑은 결과 */
+    private static final class NoticeScan {
+        String notice = "";
+        boolean roomMatched = false;
+        /** 「공지」 라는 표시는 보였나 (칸은 있는데 내용을 못 읽은 경우를 구분한다) */
+        boolean sawNoticeLabel = false;
+        int nodes = 0;
+        String dump = "";
+    }
+
+    /**
+     * 화면을 훑어 (1) 대화방 이름이 맞는지 (2) 공지 칸의 글자를 찾는다.
+     *
+     * 공지 칸을 찾는 방법은 둘이다. 카카오톡 버전마다 어느 쪽이 되는지 달라서 둘 다 본다.
+     *   ㄱ. 칸 식별자에 notice 가 들어간 칸의 글자  ← 확실하다
+     *   ㄴ. 「공지」 로 <b>시작하는</b> 글자이고, 그 칸이 화면 위쪽에 있을 때  ← 추측이다
+     *
+     * ★ ㄱ 이 하나라도 있으면 ㄴ 은 버린다. 그리고 ㄴ 에 조건을 둘이나 거는 이유가 있다 —
+     *   예전 설계는 「공지」 가 <b>들어간</b> 글자를 모두 후보로 보고 가장 긴 것을 골랐다.
+     *   그러면 대화 중에 누군가 "공지 봤어? …" 하고 길게 쓴 <b>일반 메시지</b>가 공지를
+     *   이기고 저장된다. 공지 칸은 대화방 맨 위에 고정되므로, 위치와 앞글자로 가른다.
+     */
+    private NoticeScan scanNotice(List<AccessibilityNodeInfo> roots, String room) {
+        NoticeScan out = new NoticeScan();
+        StringBuilder dump = new StringBuilder(2048);
+        ArrayList<AccessibilityNodeInfo> q = new ArrayList<AccessibilityNodeInfo>(64);
+        for (int i = 0; i < roots.size(); i++) {
+            if (roots.get(i) != null) q.add(roots.get(i));
+        }
+        String bestId = "";     // ㄱ 식별자로 찾은 것 (확실)
+        String bestTop = "";    // ㄴ 위치·앞글자로 찾은 것 (추측)
+        int seen = 0;
+        int top35 = screenTop35();
+        while (!q.isEmpty() && seen < NOTICE_MAX_NODES) {
+            AccessibilityNodeInfo n = q.remove(q.size() - 1);
+            if (n == null) continue;
+            seen++;
+
+            String id = shortId(viewId(n));
+            String tx = textOnly(n);
+            String ds = desc(n);
+            String any = (tx.length() > 0) ? tx : ds;
+
+            if (any.length() > 0 && dump.length() < 6000) {
+                dump.append(id.length() > 0 ? id : "-").append(" | ")
+                        .append(any.length() > 120 ? any.substring(0, 120) + "…" : any)
+                        .append('\n');
+            }
+
+            if (any.length() > 0 && !out.roomMatched && roomish(any, room)) out.roomMatched = true;
+
+            boolean byId = id.length() > 0 && id.toLowerCase(Locale.ROOT).contains("notice");
+            if (byId) {
+                out.sawNoticeLabel = true;
+                String cand = noticeBody(any);
+                if (cand.length() > bestId.length() && !roomish(cand, room)) bestId = cand;
+                // 식별자로 찾은 칸은 내용이 자식에 쪼개져 있을 수 있다
+                String kid = noticeBody(deepText(n));
+                if (kid.length() > bestId.length() && !roomish(kid, room)) bestId = kid;
+            } else if (any.startsWith("공지") || ds.startsWith("공지")) {
+                out.sawNoticeLabel = true;
+                if (nodeTop(n) <= top35) {
+                    String cand = noticeBody(any);
+                    if (cand.length() > bestTop.length() && !roomish(cand, room)) bestTop = cand;
+                }
+            }
+
+            int cc = 0;
+            try { cc = n.getChildCount(); } catch (Throwable ignore) { }
+            for (int i = 0; i < cc; i++) {
+                AccessibilityNodeInfo ch = null;
+                try { ch = n.getChild(i); } catch (Throwable ignore) { }
+                if (ch != null) q.add(ch);
+            }
+        }
+        out.nodes = seen;
+        out.notice = (bestId.length() > 0) ? bestId : bestTop;
+        out.dump = dump.toString();
+        return out;
+    }
+
+    /** 화면 높이의 35% 지점 (공지 칸은 대화방 맨 위에 고정된다) */
+    private int screenTop35() {
+        try {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            if (dm != null && dm.heightPixels > 0) return (int) (dm.heightPixels * 0.35f);
+        } catch (Throwable ignore) { }
+        return Integer.MAX_VALUE;   // 못 재면 위치로 거르지 않는다 (식별자 쪽이 본선이다)
+    }
+
+    /** 그 칸의 화면상 위쪽 좌표 (못 재면 거르지 않도록 0) */
+    private static int nodeTop(AccessibilityNodeInfo n) {
+        try {
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            if (r.height() > 0) return r.top;
+        } catch (Throwable ignore) { }
+        return 0;
+    }
+
+    /** 「공지」 머리말·버튼 이름을 떼어낸 본문 (공지가 아니면 "") */
+    private static String noticeBody(String s) {
+        if (s == null) return "";
+        String t = norm(s).trim();
+        if (t.length() == 0) return "";
+        // 「공지」 로 시작하면 그 표시를 떼고 본문만 본다
+        if (t.startsWith("공지")) {
+            String rest = t.substring(2).trim();
+            while (rest.startsWith(":") || rest.startsWith("·") || rest.startsWith("-")
+                    || rest.startsWith("|")) {
+                rest = rest.substring(1).trim();
+            }
+            t = rest;
+        }
+        if (t.length() < 2) return "";
+        // 버튼·안내 이름은 공지가 아니다
+        if (t.equals("등록") || t.equals("보기") || t.equals("더보기") || t.equals("접기")
+                || t.equals("펼치기") || t.equals("닫기") || t.equals("수정") || t.equals("삭제")
+                || t.contains("등록된 공지가 없") || t.contains("공지를 등록")) return "";
+        if (t.length() > RoomNotice.MAX_LEN) t = t.substring(0, RoomNotice.MAX_LEN);
+        return t;
+    }
+
+    /** 그 칸과 자식들의 글자를 이어 붙인다 (공지가 여러 줄로 쪼개진 경우) */
+    private String deepText(AccessibilityNodeInfo n) {
+        StringBuilder sb = new StringBuilder(256);
+        ArrayList<AccessibilityNodeInfo> q = new ArrayList<AccessibilityNodeInfo>(16);
+        q.add(n);
+        int seen = 0;
+        while (!q.isEmpty() && seen < 120) {
+            AccessibilityNodeInfo x = q.remove(q.size() - 1);
+            if (x == null) continue;
+            seen++;
+            String tx = textOnly(x);
+            if (tx.length() > 0) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(tx);
+            }
+            int cc = 0;
+            try { cc = x.getChildCount(); } catch (Throwable ignore) { }
+            for (int i = 0; i < cc; i++) {
+                AccessibilityNodeInfo ch = null;
+                try { ch = x.getChild(i); } catch (Throwable ignore) { }
+                if (ch != null) q.add(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 화면의 글자가 그 대화방 이름인가.
+     *
+     * 이름이 <b>완전히 같을 때</b>, 또는 뒤에 인원수(숫자)만 붙었을 때만 인정한다.
+     * 포함 매칭은 쓰지 않는다 — 「수학」 이 「수학 선생님」 에 걸리는 바로 그 실수다.
+     */
+    private static boolean roomish(String screen, String want) {
+        String a = letters(screen);
+        String b = letters(want);
+        if (b.length() < 2 || a.length() == 0) return false;
+        if (a.equals(b)) return true;
+        if (a.length() > b.length() && a.startsWith(b)) {
+            String tail = a.substring(b.length());
+            if (tail.length() > 4) return false;
+            for (int i = 0; i < tail.length(); i++) {
+                if (!Character.isDigit(tail.charAt(i))) return false;
+            }
+            return true;
+        }
+        return false;
     }
 
     // ── 이벤트 ──────────────────────────────────────────────────────────────
@@ -960,6 +1336,20 @@ public final class KakaoAccessibility extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e == null) return;
+
+        // 공지 읽기는 예약(armed)과 별개 길이다. 창이 바뀌면 한 번 더 보게만 한다
+        // (누르지 않는다). 공지 읽기를 요청하지 않았으면 이 줄은 아무 일도 하지 않는다.
+        if (noticeRef != null) {
+            CharSequence np = null;
+            try { np = e.getPackageName(); } catch (Throwable ignore) { }
+            if (np != null && KAKAO.contentEquals(np)) {
+                try {
+                    h.removeCallbacks(NOTICE_STEP);
+                    h.postDelayed(NOTICE_STEP, 350L);
+                } catch (Throwable ignore) { }
+            }
+        }
+
         if (!isArmed()) return;             // ★ 예약 없으면 손대지 않는다
 
         CharSequence pkg = null;

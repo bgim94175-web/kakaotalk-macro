@@ -524,6 +524,17 @@ public final class KakaoListener extends NotificationListenerService {
         // 판정 근거 로그는 여기서 남긴다 (Log.add 가 Prefs 를 동기로 쓰니까 메인 스레드에서 안 부른다)
         whyLog(ctx, m);
 
+        // 방 공지 포착 — 방장이 올린 공지문이 메시지로 들어오면 그 방의 공지로 저장한다.
+        // 보여주기만 하는 기능이라 어느 방에도 보내지 않고, 실패해도 그냥 넘어간다.
+        // 1:1 대화에는 공지가 없으므로 단체방만 본다. 내 메시지는 내 공지가 아니다.
+        if (m.group && !m.fromMe) {
+            try {
+                RoomNotice.observe(ctx, m.ref, m.text);
+            } catch (Throwable t) {
+                Log.add(ctx, "방 공지 포착 중 오류: " + t);
+            }
+        }
+
         // 매크로(트리거·자동응답)
         try {
             if (License.allowed(ctx, Features.MACRO)) {
