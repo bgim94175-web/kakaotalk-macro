@@ -207,6 +207,163 @@ function personOf(body) {
   return head.replace(/[,\s·]+$/g, '').trim()
 }
 
+function decimalId(v) {
+  if (v == null || v === '') return ''
+  if (typeof v === 'string') {
+    const s = v.trim()
+    return /^[1-9][0-9]*$/.test(s) ? s : ''
+  }
+  if (typeof v === 'bigint') return v > 0n ? v.toString() : ''
+  if (typeof v === 'number') return Number.isSafeInteger(v) && v > 0 ? String(v) : ''
+  if (typeof v === 'object' && typeof v.toString === 'function') {
+    const s = v.toString()
+    if (/^[1-9][0-9]*$/.test(s)) return s
+  }
+  return ''
+}
+
+function feedKind(ft) {
+  if (ft === 1 || ft === 4) return 'join'
+  if (ft === 2 || ft === 3) return 'leave'
+  return ''
+}
+
+function feedTypeOf(raw, obj) {
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    const n = Number(obj.feedType)
+    if (Number.isInteger(n)) return n
+  }
+  const m = /"feedType"\s*:\s*(-?\d+)/.exec(String(raw || ''))
+  return m ? Number(m[1]) : NaN
+}
+
+function decodeNick(raw) {
+  if (!raw) return ''
+  try {
+    return JSON.parse('"' + raw + '"')
+  } catch {
+    return raw
+  }
+}
+
+function peopleInJson(raw) {
+  const text = String(raw || '')
+  const out = []
+  const re = /\{[^{}]*"userId"\s*:\s*"?([0-9]+)"?[^{}]*\}/g
+  let m
+  while ((m = re.exec(text))) {
+    const id = /^[1-9][0-9]*$/.test(m[1]) ? m[1] : ''
+    if (!id) continue
+    const nick = /"nickName"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(m[0])
+    const name = String(decodeNick(nick ? nick[1] : '') || '').trim().slice(0, 40)
+    out.push({ id, name })
+  }
+  return out
+}
+
+function inviterIds(raw) {
+  const set = new Set()
+  const re = /"inviter"\s*:\s*(\{[^{}]*\})/g
+  let m
+  while ((m = re.exec(String(raw || '')))) {
+    for (const p of peopleInJson(m[1])) set.add(p.id)
+  }
+  return set
+}
+
+function uniquePeople(list) {
+  const out = []
+  const seen = new Set()
+  for (const p of list) {
+    if (!p || !p.id || seen.has(p.id)) continue
+    seen.add(p.id)
+    out.push(p)
+  }
+  return out
+}
+
+function peopleFromFeedObject(obj, ft) {
+  const rows = []
+  const push = (m) => {
+    if (!m || typeof m !== 'object') return
+    const id = decimalId(m.userId != null ? m.userId : m.user_id)
+    if (!id) return
+    const name = String(m.nickName || m.nickname || '').trim().slice(0, 40)
+    rows.push({ id, name })
+  }
+  if (Array.isArray(obj.members)) {
+    for (const m of obj.members) push(m)
+  }
+  if (ft !== 1) push(obj.member)
+  push(obj.leaver)
+  return rows
+}
+
+function eventsFromFeed(raw, obj) {
+  const ft = feedTypeOf(raw, obj)
+  const kind = feedKind(ft)
+  if (!kind) return []
+  let people = raw ? peopleInJson(raw) : []
+  if (!people.length && obj) people = peopleFromFeedObject(obj, ft)
+  if (ft === 1) {
+    const skip = inviterIds(raw)
+    people = people.filter((p) => !skip.has(p.id))
+  }
+  return uniquePeople(people).map((p) => ({ kind, authorId: p.id, authorName: p.name }))
+}
+
+function eventsFromKoreanFeed(text, author) {
+  const body = String(text || '').trim()
+  if (!body || body.length > 80 || body.charAt(0) === '{') return []
+  const kindN = joinLeaveKind(body)
+  if (!kindN) return []
+  const id = decimalId(author)
+  if (!id) return []
+  return [{
+    kind: kindN === 1 ? 'join' : 'leave',
+    authorId: id,
+    authorName: personOf(body).slice(0, 40),
+  }]
+}
+
+/**
+ * Open-chat join and leave arrive as a MSG feed (chat type 0), not NEWMEM/DELMEM.
+ * Kakao shows "님이 들어왔습니다" / "님이 나갔습니다". The packet is often
+ * JSON: feedType 4 members, or feedType 2 member.
+ * Returns one event per person. Kick feeds are left for the room guard.
+ */
+export function visitEventsFromMessage(ev) {
+  if (!ev || typeof ev !== 'object') return []
+  const type = ev.message_type != null ? ev.message_type : ev.messageType
+  const typeNum = type == null || type === '' ? null : Number(type)
+  if (typeNum != null && typeNum !== 0) return []
+  const message = ev.message != null ? ev.message : ev.text
+  const text = message == null ? '' : String(message).trim()
+  if (text.charAt(0) === '{') {
+    let obj = null
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) obj = parsed
+    } catch {
+      obj = null
+    }
+    const fromText = eventsFromFeed(text, obj)
+    if (fromText.length) return fromText
+  }
+  const attachment = ev.attachment
+  if (typeof attachment === 'string' && attachment.trim().charAt(0) === '{') {
+    const fromRaw = eventsFromFeed(attachment.trim(), null)
+    if (fromRaw.length) return fromRaw
+  }
+  if (attachment && typeof attachment === 'object' && !Array.isArray(attachment)) {
+    const fromObj = eventsFromFeed('', attachment)
+    if (fromObj.length) return fromObj
+  }
+  if (typeNum !== 0) return []
+  const author = ev.author_id != null ? ev.author_id : ev.authorId
+  return eventsFromKoreanFeed(text, author)
+}
+
 function isAdmin(cfg, who) {
   const n = String(who || '').trim()
   return (cfg.adminNames || []).some((a) => String(a || '').trim() === n)
@@ -1128,7 +1285,22 @@ function visitState(record) {
   const v = state.visit
   if (!v.people || typeof v.people !== 'object' || Array.isArray(v.people)) v.people = {}
   if (!v.nextAt || typeof v.nextAt !== 'object' || Array.isArray(v.nextAt)) v.nextAt = {}
+  if (!v.seen || typeof v.seen !== 'object' || Array.isArray(v.seen)) v.seen = {}
   return v
+}
+
+function visitSeen(v, chatId, author, kind, now) {
+  const key = `${chatId}${SEP}${author}${SEP}${kind}`
+  const prev = Number(v.seen[key] || 0)
+  if (prev && now - prev < 60000) return true
+  v.seen[key] = now
+  const keys = Object.keys(v.seen)
+  if (keys.length > 400) {
+    for (const k of keys) {
+      if (now - Number(v.seen[k] || 0) > 60000) delete v.seen[k]
+    }
+  }
+  return false
 }
 
 function trimTimes(list, now) {
@@ -1222,6 +1394,7 @@ function applyVisit(record, ev, sends) {
   if (!/^[1-9][0-9]*$/.test(author)) return false
   const now = Number(ev.now) || Date.now()
   const v = visitState(record)
+  if (visitSeen(v, String(room.chat_id), author, ev.kind, now)) return true
   const row = rememberPerson(v, String(room.chat_id), author, now, ev.kind, ev.authorName, ev.profileLink)
   if (ev.kind !== 'join') return true
   sends.push({

@@ -23,9 +23,10 @@ import {
   onInbound,
   othersSinceMine,
   realId,
+  visitEventsFromMessage,
   visitNeedsProfile,
 } from './features.mjs'
-import { roomListKind, roomTitle } from './room-kind.mjs'
+import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
 import { listIds, loadRecord, saveRecord } from './store.mjs'
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
@@ -36,40 +37,77 @@ function log(id, msg) {
   process.stderr.write(`[sender] ${id} ${msg}\n`)
 }
 
-function openCandidate(ch) {
-  const s = ch && ch.type == null ? '' : String(ch.type)
-  if (s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat' || s === '13' || s === '15') return true
-  return !!(ch && ch.link_id)
+function chatLinkId(ch) {
+  const v = ch && (ch.link_id || ch.li)
+  const s = v == null ? '' : String(v).trim()
+  return /^[1-9][0-9]*$/.test(s) ? s : ''
 }
 
-async function fillOpenTitles(client, list) {
-  const queue = []
-  for (let i = 0; i < list.length; i++) {
-    if (openCandidate(list[i]) && !roomTitle(list[i])) queue.push(i)
+function olName(ol) {
+  if (!ol || typeof ol !== 'object') return ''
+  if (typeof ol.ln === 'string' && ol.ln.trim()) return ol.ln.trim()
+  const moim = ol.omt || ol.moim
+  if (typeof moim === 'string' && moim.trim()) return moim.trim()
+  if (moim && typeof moim === 'object') {
+    const inner = moim.name || moim.title || moim.ln
+    if (typeof inner === 'string' && inner.trim()) return inner.trim()
   }
-  async function worker() {
-    for (;;) {
-      const i = queue.shift()
-      if (i == null) return
-      const ch = list[i]
-      try {
-        const full = await client.getChat(String(ch.chat_id))
-        if (!full) continue
-        list[i] = {
-          ...ch,
-          type: full.type == null ? ch.type : full.type,
-          title: full.title || ch.title || null,
-          link_id: full.link_id || ch.link_id || null,
-        }
-      } catch {
-        // 제목을 못 읽은 오픈채팅은 고르는 목록에 넣지 않는다.
-      }
+  return ''
+}
+
+function olLinkKey(ol) {
+  if (!ol || typeof ol !== 'object' || ol.li == null) return ''
+  const v = ol.li
+  if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v.trim())) return v.trim()
+  if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return String(v)
+  if (typeof v === 'bigint' && v > 0n) return v.toString()
+  if (typeof v.toString === 'function') {
+    const s = v.toString()
+    if (/^[1-9][0-9]*$/.test(s)) return s
+  }
+  return ''
+}
+
+// One INFOLINK for the open multi chats. Per-room CHATINFO made 대화방 불러오기
+// stall until the browser dropped it, and a missing ln dropped every row.
+async function openLinkNames(client, list) {
+  const names = new Map()
+  const ids = []
+  const seen = new Set()
+  for (const ch of list || []) {
+    if (!openMultiCandidate(ch)) continue
+    const id = chatLinkId(ch)
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  if (!ids.length || !client || typeof client.acquireSession !== 'function') return names
+  let session
+  try {
+    session = await client.acquireSession()
+  } catch {
+    return names
+  }
+  for (let i = 0; i < ids.length; i += 20) {
+    const part = ids.slice(i, i + 20)
+    let body = null
+    try {
+      const response = await session.getOpenLinkInfo(part.map((id) => Long.fromString(id)))
+      body = response && response.body
+    } catch {
+      body = null
+    }
+    const ols = body && Array.isArray(body.ols) ? body.ols : []
+    for (let j = 0; j < part.length; j++) {
+      const ol = ols[j]
+      const name = olName(ol)
+      if (!name) continue
+      const key = olLinkKey(ol)
+      if (key) names.set(key, name)
+      else names.set(part[j], name)
     }
   }
-  const workers = []
-  const n = Math.min(4, queue.length)
-  for (let w = 0; w < n; w++) workers.push(worker())
-  await Promise.all(workers)
+  return names
 }
 
 function realLogId(v) {
@@ -179,9 +217,10 @@ export class Hub {
 
   async chats(id) {
     const slot = this.requireLive(id)
-    const list = await slot.client.getChats({ all: true, resolveTitles: true })
-    await fillOpenTitles(slot.client, list)
-    return list.map((ch) => {
+    const list = await slot.client.getChats({ all: true })
+    const names = await openLinkNames(slot.client, list)
+    const stamped = stampOpenLinkTitles(list, names)
+    return stamped.map((ch) => {
       const listKind = roomListKind(ch)
       const title = listKind === 'open_room' ? (roomTitle(ch) || null) : (ch.title || null)
       return {
@@ -445,6 +484,17 @@ class Slot {
     const chatId = String(ev.chat_id || '')
     const author = ev.author_id == null ? '' : String(ev.author_id)
     if (ev.log_id) this.lastLog.set(chatId, String(ev.log_id))
+    const visits = visitEventsFromMessage(ev)
+    if (visits.length) {
+      for (const v of visits) {
+        await this.onMember(v.kind, {
+          chat_id: chatId,
+          member: { user_id: v.authorId },
+          author_name: v.authorName,
+        })
+      }
+      return
+    }
     const sends = onInbound(this.record, {
       chatId,
       text: ev.message || '',
@@ -471,12 +521,12 @@ class Slot {
     const chatId = String(ev.chat_id || '')
     const author = memberId(ev.member)
     const mine = author.length > 0 && author === creds.user_id
-    let authorName = ''
+    let authorName = typeof ev.author_name === 'string' ? ev.author_name.trim() : ''
     let profileLink = ''
     if (!mine && this.client && visitNeedsProfile(this.record, chatId)) {
       try {
         const card = await this.memberCard(chatId, author)
-        authorName = card.name
+        if (card.name) authorName = card.name
         profileLink = card.link
       } catch (e) {
         await this.onError(e)

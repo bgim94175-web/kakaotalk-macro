@@ -1,6 +1,6 @@
 import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
-import { roomListKind } from './room-kind.mjs'
+import { roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
 import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -15,6 +15,7 @@ import {
   noteMacroSent,
   onInbound,
   parseRoomKey,
+  visitEventsFromMessage,
 } from './features.mjs'
 
 process.env.SENDER_KEY = process.env.SENDER_KEY || '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
@@ -248,6 +249,88 @@ const otherRoom = guardOnChat(noLeave, {
 if (otherRoom.sends.length !== 0) throw new Error('unwatched room stays quiet')
 const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', now: t0 + 200 })
 if (left.sends.length !== 0) throw new Error('a leave is recorded and not announced')
+const repeatJoin = guardOnChat(noLeave, {
+  kind: 'join', chatId: '555', authorId: '9', authorName: '김', now: t0 + 500,
+})
+if (repeatJoin.sends.length !== 0) throw new Error('the same join is not sent twice')
+
+const bigId = '9007199254740993'
+const openJoin = visitEventsFromMessage({
+  message_type: 0,
+  message: `{"feedType":4,"members":[{"userId":${bigId},"nickName":"김ㅇㅇ"}]}`,
+})
+if (openJoin.length !== 1 || openJoin[0].kind !== 'join' || openJoin[0].authorId !== bigId) {
+  throw new Error('open-chat join feed')
+}
+if (openJoin[0].authorName !== '김ㅇㅇ') throw new Error('open-chat join name')
+const openLeave = visitEventsFromMessage({
+  message_type: 0,
+  message: '{"feedType":2,"member":{"userId":7,"nickName":"홍길동"}}',
+})
+if (openLeave.length !== 1 || openLeave[0].kind !== 'leave' || openLeave[0].authorId !== '7') {
+  throw new Error('open-chat leave feed')
+}
+const typedJoin = visitEventsFromMessage({
+  message_type: 0,
+  message: '김ㅇㅇ님이 들어왔습니다.',
+  author_id: '42',
+})
+if (typedJoin.length !== 1 || typedJoin[0].kind !== 'join' || typedJoin[0].authorName !== '김ㅇㅇ') {
+  throw new Error('visible join line')
+}
+const typedLeave = visitEventsFromMessage({
+  message_type: 0,
+  message: 'ㅇㅇㅇ님이 나갔습니다.',
+  author_id: '43',
+})
+if (typedLeave.length !== 1 || typedLeave[0].kind !== 'leave' || typedLeave[0].authorName !== 'ㅇㅇㅇ') {
+  throw new Error('visible leave line')
+}
+if (visitEventsFromMessage({ message_type: 1, message: '김ㅇㅇ님이 들어왔습니다.', author_id: '42' }).length !== 0) {
+  throw new Error('a typed sentence is not a join')
+}
+const invited = visitEventsFromMessage({
+  message_type: 0,
+  message: '{"feedType":1,"inviter":{"userId":1,"nickName":"호스트"},"members":[{"userId":2,"nickName":"손님"}]}',
+})
+if (invited.length !== 1 || invited[0].authorId !== '2' || invited[0].kind !== 'join') {
+  throw new Error('an invite counts the guest only')
+}
+const kickedFeed = visitEventsFromMessage({
+  message_type: 0,
+  message: '{"feedType":6,"member":{"userId":5,"nickName":"강퇴"}}',
+})
+if (kickedFeed.length !== 0) throw new Error('a kick feed is not a join notice')
+const feedRoom = visitRecord()
+guardOnChat(feedRoom, {
+  kind: openLeave[0].kind, chatId: '555', authorId: openLeave[0].authorId,
+  authorName: openLeave[0].authorName, now: t0,
+})
+const feedJoin = guardOnChat(feedRoom, {
+  kind: openJoin[0].kind, chatId: '555', authorId: '7',
+  authorName: '홍길동', profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
+})
+if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[들낙 안내]') < 0) {
+  throw new Error('a feed join posts one notice')
+}
+if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') < 0) throw new Error('the leave time is on the next join')
+
+const stamped = stampOpenLinkTitles([
+  { type: 13, link_id: '42', title: null, display_name: '김, 이', active_members: 8 },
+  { type: 'OD', link_id: '7', title: null, display_name: '김', active_members: 2 },
+  { type: 2, link_id: '42', title: null, display_name: '김, 이', active_members: 8 },
+  { type: 'MultiChat', title: '가족', display_name: '김', active_members: 3 },
+], new Map([['42', '검 Fam 1424'], ['7', '프로필']]))
+if (stamped[0].title !== '검 Fam 1424' || roomListKind(stamped[0]) !== 'open_room') throw new Error('open multi uses the link name')
+if (roomTitle(stamped[0]) !== '검 Fam 1424') throw new Error('link name is the row')
+if (stamped[1].title != null) throw new Error('open profile chat is not named here')
+if (stamped[2].title !== '검 Fam 1424' || roomListKind(stamped[2]) !== 'open_room') throw new Error('type 2 open multi uses the link name')
+if (stamped[3].title !== '가족' || roomListKind(stamped[3]) !== 'normal') throw new Error('a normal room stays out')
+const unnamed = stampOpenLinkTitles(
+  [{ type: 13, link_id: '1', title: null, display_name: '김, 이', active_members: 4 }],
+  new Map(),
+)
+if (unnamed[0].title != null) throw new Error('missing link name is not invented')
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

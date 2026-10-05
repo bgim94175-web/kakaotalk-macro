@@ -728,7 +728,8 @@
       account = res.account;
       fillDetail();
     } catch (e) {
-      say('room-error', e.message);
+      var msg = e && e.status ? e.message : '대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+      say('room-error', msg);
     } finally {
       this.disabled = false;
     }

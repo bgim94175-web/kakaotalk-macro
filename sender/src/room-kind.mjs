@@ -43,3 +43,26 @@ export function roomListKind(ch) {
   if (roomTitle(ch)) return 'open_room'
   return 'normal'
 }
+
+// 오픈 단체방. 오픈프로필 1:1 과 일반 채팅은 이름을 붙이지 않는다.
+export function openMultiCandidate(ch) {
+  const s = ch && ch.type == null ? '' : String(ch.type)
+  if (directType(s)) return false
+  if (multiType(s)) return true
+  if (s !== '2' || !linkId(ch)) return false
+  const members = Number(ch && ch.active_members)
+  return !(members > 0 && members <= 2)
+}
+
+// 오픈링크 이름(ln)을 단체방 제목으로 붙인다. 없는 이름은 만들지 않는다.
+export function stampOpenLinkTitles(chats, nameByLinkId) {
+  const list = Array.isArray(chats) ? chats : []
+  return list.map((ch) => {
+    if (!ch || !openMultiCandidate(ch) || !nameByLinkId) return ch
+    const id = linkId(ch)
+    const raw = typeof nameByLinkId.get === 'function' ? nameByLinkId.get(id) : nameByLinkId[id]
+    const name = text(raw)
+    if (!name) return ch
+    return Object.assign({}, ch, { title: name })
+  })
+}
