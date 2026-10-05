@@ -21,11 +21,32 @@ const SCHEMA = `
 let pool = null
 let schemaReady = null
 
+function keyMaterial() {
+  return String(process.env.SENDER_KEY || '').trim().replace(/^['"]|['"]$/g, '')
+}
+
 function key() {
-  const raw = process.env.SENDER_KEY || ''
+  const raw = keyMaterial()
   if (!raw) throw new Error('SENDER_KEY is required')
   if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, 'hex')
   return scryptSync(raw, 'kakao-sender-v1', 32)
+}
+
+// pg 는 연결 문자열의 sslmode=require 를 인증서 검증으로 덮어써서
+// Pool 에 넣은 rejectUnauthorized:false 가 사라진다. Neon 문자열의
+// channel_binding 도 이 클라이언트가 처리하지 않는다. 둘 다 떼고 SSL 은 여기서 정한다.
+function connectionString() {
+  const raw = process.env.DATABASE_URL
+  if (!raw) throw new Error('DATABASE_URL is required')
+  const url = String(raw)
+  if (/[?&]sslmode=disable/i.test(url) || String(process.env.PGSSLMODE || '').toLowerCase() === 'disable') {
+    return url
+  }
+  return url
+    .replace(/([?&])channel_binding=[^&]*/gi, '$1')
+    .replace(/([?&])sslmode=[^&]*/gi, '$1')
+    .replace(/\?&/g, '?')
+    .replace(/[?&]$/g, '')
 }
 
 export function assertKey() {
@@ -61,8 +82,7 @@ function sslOf(url) {
 
 function getPool() {
   if (pool) return pool
-  const url = process.env.DATABASE_URL
-  if (!url) throw new Error('DATABASE_URL is required')
+  const url = connectionString()
   pool = new pg.Pool({
     connectionString: url,
     ssl: sslOf(url),

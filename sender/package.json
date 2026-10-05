@@ -5,7 +5,7 @@
   "description": "Kakao send loop spawned by the license server. Sessions live in the existing Neon database.",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "start": "node src/boot.mjs",

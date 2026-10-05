@@ -49,7 +49,7 @@
   }
 
   function reasonText(row) {
-    if (!me || !me.sender_up) return '발송 프로세스가 멈춰 있습니다';
+    if (!me || !me.sender_up) return (me && me.sender_reason) || '발송 프로세스가 멈춰 있습니다';
     if (row.connected) return '이 서버에서 보내는 중';
     if (row.needs_register) return '다시 등록이 필요합니다';
     if (row.linked) return '서버에 등록됨 · 접속을 붙이는 중';
@@ -75,7 +75,7 @@
     runstate.textContent = '';
     var p = el('p', '', up
       ? '발송 위치: 이 서버. 계정 등록이 끝나면 폰이 꺼져 있어도 이 서버가 보냅니다.'
-      : '발송 프로세스가 지금 멈춰 있습니다. 키 확인은 그대로 됩니다. 프로세스가 다시 뜨면 저장된 계정으로 이어서 접속합니다.');
+      : ((me && me.sender_reason) || '발송 프로세스가 지금 멈춰 있습니다. 키 확인은 그대로 됩니다. 프로세스가 다시 뜨면 저장된 계정으로 이어서 접속합니다.'));
     runstate.appendChild(p);
   }
 

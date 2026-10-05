@@ -70,13 +70,13 @@ async function session(req, res) {
 function senderDown(res) {
   res.status(503).json({
     ok: false,
-    error: '발송 프로세스가 지금 멈춰 있습니다. 키 확인은 그대로 됩니다.',
+    error: sender.reason(),
     sender_up: false,
   });
 }
 
 async function senderCall(method, path, body, timeoutMs) {
-  if (!sender.configured() || !sender.status().port) {
+  if (!sender.up()) {
     const err = new Error('sender_down');
     err.code = 'sender_down';
     throw err;
@@ -172,7 +172,7 @@ router.get('/panel/api/me', wrap(async (req, res) => {
     'SELECT device_id, email FROM panel_accounts WHERE license_key=$1 ORDER BY created_at',
     [s.key]);
   const accounts = [];
-  const up = !!(sender.configured() && sender.status().port);
+  const up = sender.up();
   for (let i = 0; i < rows.rows.length; i++) {
     const row = rows.rows[i];
     let st = { linked: false, needs_register: false, connected: false, reason: up ? 'absent' : 'sender_down' };
@@ -203,6 +203,7 @@ router.get('/panel/api/me', wrap(async (req, res) => {
     mask: auth.maskKey(s.key),
     expires_at: s.gate.expires_at,
     sender_up: up,
+    sender_reason: up ? '' : sender.reason(),
     accounts: accounts,
   });
 }));
@@ -210,7 +211,7 @@ router.get('/panel/api/me', wrap(async (req, res) => {
 router.get('/panel/api/account', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   try {
     const view = await loadView(s.key, String(req.query.device_id || ''));
     if (!view) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
@@ -224,7 +225,7 @@ router.get('/panel/api/account', wrap(async (req, res) => {
 router.post('/panel/api/register/begin', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   const email = cleanEmail(req.body && req.body.email);
   const password = cleanPassword(req.body && req.body.password);
   if (!email || !password) return res.status(400).json({ ok: false, error: '카카오계정과 비밀번호를 입력해 주세요.' });
@@ -272,7 +273,7 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
 router.post('/panel/api/register/confirm', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   const pendingId = String((req.body && req.body.pending_id) || '');
   const row = await db.one(
     'SELECT pending_id, device_id, email, expires_at FROM panel_pending WHERE pending_id=$1 AND license_key=$2',
@@ -316,7 +317,7 @@ router.post('/panel/api/register/cancel', wrap(async (req, res) => {
     'SELECT pending_id FROM panel_pending WHERE pending_id=$1 AND license_key=$2',
     [pendingId, s.key]);
   if (row) await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
-  if (sender.status().port) {
+  if (sender.up()) {
     try { await senderCall('POST', '/v1/register/cancel', { pending_id: pendingId }, 10000); } catch (e) { /* 자식이 없어도 화면은 닫는다 */ }
   }
   res.json({ ok: true });
@@ -328,7 +329,7 @@ router.post('/panel/api/unlink', wrap(async (req, res) => {
   const deviceId = String((req.body && req.body.device_id) || '');
   const row = await accountRow(s.key, deviceId);
   if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   const r = await senderCall('POST', '/v1/unlink', { device_id: deviceId }, 20000);
   if (!r.json.ok) return res.status(502).json({ ok: false, error: '등록을 해제하지 못했습니다. 잠시 뒤 다시 해 주세요.' });
   await db.q('DELETE FROM panel_accounts WHERE device_id=$1 AND license_key=$2', [deviceId, s.key]);
@@ -338,7 +339,7 @@ router.post('/panel/api/unlink', wrap(async (req, res) => {
 router.post('/panel/api/rooms', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   const deviceId = String((req.body && req.body.device_id) || '');
   const row = await accountRow(s.key, deviceId);
   if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
@@ -374,7 +375,7 @@ router.post('/panel/api/rooms', wrap(async (req, res) => {
 router.post('/panel/api/settings', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.status().port) return senderDown(res);
+  if (!sender.up()) return senderDown(res);
   const body = req.body || {};
   const deviceId = String(body.device_id || '');
   const row = await accountRow(s.key, deviceId);

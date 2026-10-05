@@ -5,16 +5,8 @@ import { beginLogin, cancelLogin, confirmLogin } from './register.mjs'
 import { Hub } from './runner.mjs'
 import { assertKey, loadRecord } from './store.mjs'
 
-const token = process.env.SENDER_TOKEN || ''
-if (!token) {
-  process.stderr.write('[sender] SENDER_TOKEN is required. Refusing to start.\n')
-  process.exit(1)
-}
-try {
-  assertKey()
-} catch (e) {
-  process.stderr.write(`[sender] ${e.message}\n`)
-  process.exit(1)
+function senderToken() {
+  return String(process.env.SENDER_TOKEN || '').trim()
 }
 
 const hub = new Hub()
@@ -24,7 +16,7 @@ app.use(express.json({ limit: '20mb' }))
 
 function auth(req, res, next) {
   const got = req.get('x-sender-token') || ''
-  if (got !== token) {
+  if (got !== senderToken()) {
     res.status(401).json({ ok: false, error: 'unauthorized' })
     return
   }
@@ -252,18 +244,13 @@ process.on('unhandledRejection', (e) => {
   process.exit(1)
 })
 
-const bind = process.env.SENDER_BIND || '0.0.0.0'
-const portEnv = process.env.PORT
-const port = portEnv == null || portEnv === '' ? 8787 : Number(portEnv)
-await hub.boot()
-const server = app.listen(port, bind)
-server.on('error', (e) => {
-  process.stderr.write(`[sender] listen failed: ${e && e.message ? e.message : e}\n`)
-  process.exit(1)
-})
-server.on('listening', () => {
-  const addr = server.address()
-  const actual = addr && typeof addr === 'object' ? addr.port : port
-  if (bind === '127.0.0.1') process.stdout.write(`SENDER_LISTENING ${actual}\n`)
-  process.stderr.write(`[sender] Kakao sender on ${bind}:${actual}\n`)
-})
+export async function createApp() {
+  if (!senderToken()) throw new Error('SENDER_TOKEN is required')
+  assertKey()
+  try {
+    await hub.boot()
+  } catch (e) {
+    process.stderr.write(`[sender] session restore skipped: ${e && e.message ? e.message : e}\n`)
+  }
+  return app
+}
