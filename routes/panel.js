@@ -457,13 +457,21 @@ function chatNeedsRegister(res) {
   return res.status(409).json({ ok: false, error: '카카오 로그인이 끊겼습니다. 계정을 다시 등록해 주세요.', needs_register: true });
 }
 
+// 채팅 화면은 목록을 9초, 열린 방을 3초마다 읽는다 — 켜 두면 분당 약 27번이다.
+// 그 횟수만큼 Neon 을 깨우지 않으려고, 읽기 경로는 DB 대신 기기 아이디만 본다.
+// 기기 아이디는 'w' + sha256('panel:' + 라이선스키) 앞 12자 + 무작위 16자라서,
+// 다른 키의 기기 아이디는 이 검사를 통과하지 못한다 (lib/panel-ids.js).
+// 등록되지 않은 기기는 sender 가 needs_register 로 돌려보낸다.
+function ownsDevice(key, deviceId) {
+  return ids.ownsDeviceId(key, deviceId);
+}
+
 router.get('/panel/api/chats', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
   if (!sender.up()) return senderDown(res);
   const deviceId = String(req.query.device_id || '');
-  const row = await accountRow(s.key, deviceId);
-  if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  if (!ownsDevice(s.key, deviceId)) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
   try {
     const r = await senderCall('GET', '/v1/inbox?device_id=' + encodeURIComponent(deviceId), null, 30000);
     if (!r.json.ok) {
@@ -484,8 +492,7 @@ router.get('/panel/api/chat', wrap(async (req, res) => {
   const deviceId = String(req.query.device_id || '');
   const chatId = String(req.query.chat_id || '');
   if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
-  const row = await accountRow(s.key, deviceId);
-  if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  if (!ownsDevice(s.key, deviceId)) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
   try {
     const r = await senderCall('GET',
       '/v1/thread?device_id=' + encodeURIComponent(deviceId) + '&chat_id=' + encodeURIComponent(chatId),

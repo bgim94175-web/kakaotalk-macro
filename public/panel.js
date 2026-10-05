@@ -797,8 +797,8 @@
   // 목록은 9초, 열린 방은 3초마다 새로 읽는다. 방을 열면 그 방의 안 읽음은 서버에서 0 이 된다.
   var chat = {
     deviceId: '', openId: '', openName: '', openKind: '',
-    dmOnly: false, listBusy: false, roomBusy: false, sending: false,
-    listTimer: null, roomTimer: null, roomSig: '',
+    dmOnly: false, listBusy: false, roomBusy: false, roomAgain: false, sending: false,
+    listTimer: null, roomTimer: null, roomSig: '', listSig: '', renderedIds: {},
   };
   var kkt = document.getElementById('kkt');
   var chatRooms = document.getElementById('chat-rooms');
@@ -824,7 +824,10 @@
   }
   function sameSender(a, b) {
     if (!a || !b || a.mine !== b.mine) return false;
-    return a.mine ? true : (a.author || '') === (b.author || '');
+    if (a.mine) return true;
+    // 보낸 사람 아이디가 있으면 그걸로 묶는다. 이름은 비어 올 수 있다.
+    if (a.author_id || b.author_id) return a.author_id === b.author_id;
+    return (a.author || '') === (b.author || '');
   }
   function bigGap(a, b) {
     return Math.abs((Number(b.at) || 0) - (Number(a.at) || 0)) > 5 * 60 * 1000;
@@ -884,7 +887,9 @@
     chat.openName = '';
     chat.openKind = '';
     chat.roomSig = '';
+    chat.listSig = '';
     chat.renderedIds = {};
+    chat.roomAgain = false;
     if (kkt) kkt.setAttribute('data-view', 'list');
     if (chatRooms) chatRooms.textContent = '';
     if (chatLog) chatLog.textContent = '';
@@ -892,6 +897,7 @@
     if (chatNote) chatNote.textContent = '';
     if (chatText) chatText.value = '';
     clearHead();
+    autoGrow();
     updateComposeState();
     say('chat-error', '');
     setComposeEnabled(false);
@@ -910,12 +916,15 @@
   async function loadChatList() {
     if (chat.listBusy || !chat.deviceId) return;
     chat.listBusy = true;
+    var want = chat.deviceId;
     try {
-      var res = await api('/panel/api/chats?device_id=' + encodeURIComponent(chat.deviceId));
+      var res = await api('/panel/api/chats?device_id=' + encodeURIComponent(want));
+      if (chat.deviceId !== want) return;
       if (chatNote) chatNote.textContent = '';
       say('chat-error', '');
       renderChatList(res.chats || []);
     } catch (e) {
+      if (chat.deviceId !== want) return;
       if (e && e.status === 409) {
         if (chatNote) chatNote.textContent = '카카오 로그인이 끊겼습니다. 위에서 이 계정을 다시 등록해 주세요.';
         renderChatList([]);
@@ -931,6 +940,12 @@
 
   function renderChatList(chats) {
     var rows = chat.dmOnly ? chats.filter(function (c) { return c.list_kind === 'open_dm'; }) : chats;
+    // 바뀐 게 없으면 그대로 둔다. 9초마다 새로 그리면 마우스·포커스가 끊긴다.
+    var sig = rows.map(function (c) {
+      return c.chat_id + '\u0001' + c.unread + '\u0001' + c.last_at + '\u0001' + c.name + '\u0001' + c.preview;
+    }).join('|') + '#' + chat.openId;
+    if (sig === chat.listSig) return;
+    chat.listSig = sig;
     chatRooms.textContent = '';
     if (!rows.length) {
       chatRooms.appendChild(emptyState('🗨️', chat.dmOnly
@@ -956,7 +971,10 @@
       meta.appendChild(el('div', 'kkt-prev', c.preview || ''));
       var right = el('div', 'kkt-right');
       right.appendChild(el('div', 'kkt-time', fmtTime(c.last_at)));
-      if (c.unread > 0) right.appendChild(el('div', 'kkt-badge', c.unread > 99 ? '99+' : String(c.unread)));
+      // 열어 둔 방은 읽는 중이다. 서버가 0 으로 돌리기 전까지 잠깐 뜨는 배지를 숨긴다.
+      if (c.unread > 0 && c.chat_id !== chat.openId) {
+        right.appendChild(el('div', 'kkt-badge', c.unread > 99 ? '99+' : String(c.unread)));
+      }
       row.appendChild(ava);
       row.appendChild(meta);
       row.appendChild(right);
@@ -978,6 +996,7 @@
     chat.openKind = kind;
     chat.roomSig = '';
     chat.renderedIds = {};
+    chat.roomAgain = false;
     chatPeer.textContent = name;
     var isDm = kind === 'open_dm';
     if (chatHeadAva) {
@@ -1002,13 +1021,23 @@
   }
 
   async function loadThread(initial) {
-    if (!chat.openId || !chat.deviceId || chat.roomBusy) return;
+    if (!chat.openId || !chat.deviceId) return;
+    // 이미 읽는 중이면 끝난 뒤에 한 번 더 읽는다. 보낸 직후의 새로고침이 폴링에 묻히지 않게.
+    if (chat.roomBusy) {
+      if (initial) chat.roomAgain = true;
+      return;
+    }
     chat.roomBusy = true;
+    var wantRoom = chat.openId;
+    var wantDevice = chat.deviceId;
     try {
-      var res = await api('/panel/api/chat?device_id=' + encodeURIComponent(chat.deviceId) +
-        '&chat_id=' + encodeURIComponent(chat.openId));
+      var res = await api('/panel/api/chat?device_id=' + encodeURIComponent(wantDevice) +
+        '&chat_id=' + encodeURIComponent(wantRoom));
+      // 기다리는 사이에 방이나 계정이 바뀌었으면 늦게 온 응답은 버린다.
+      if (chat.openId !== wantRoom || chat.deviceId !== wantDevice) return;
       renderThread(res.messages || [], initial);
     } catch (e) {
+      if (chat.openId !== wantRoom || chat.deviceId !== wantDevice) return;
       if (e && e.status === 409) {
         if (chatNote) chatNote.textContent = '카카오 로그인이 끊겼습니다. 위에서 이 계정을 다시 등록해 주세요.';
         setComposeEnabled(false);
@@ -1018,6 +1047,10 @@
       }
     } finally {
       chat.roomBusy = false;
+      if (chat.roomAgain) {
+        chat.roomAgain = false;
+        loadThread(true);
+      }
     }
   }
 
@@ -1061,9 +1094,10 @@
 
       if (!m.mine && grouped) {
         if (start) {
-          var who = m.author || chat.openName || '';
-          var av = el('div', 'kkt-ava-sm', initialOf(who));
-          av.style.setProperty('--ava', avaColor(who));
+          // 이름을 모르면 방 이름을 빌려 쓰지 않는다. 색은 아이디로 갈라 둔다.
+          var who = m.author || '';
+          var av = el('div', 'kkt-ava-sm', who ? initialOf(who) : '?');
+          av.style.setProperty('--ava', avaColor(who || m.author_id || ''));
           line.appendChild(av);
         } else {
           line.appendChild(el('div', 'kkt-ava-sm spacer'));
@@ -1136,6 +1170,12 @@
       ev.preventDefault();
       sendChat();
     }
+  });
+  // 탭을 숨기면 폴링을 쉬므로, 다시 보이면 기다리지 말고 바로 읽는다.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || !chat.deviceId) return;
+    loadChatList();
+    if (chat.openId) loadThread(false);
   });
 
   api('/panel/api/me').then(function (res) {

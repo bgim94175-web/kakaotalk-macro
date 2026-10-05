@@ -537,35 +537,42 @@ const got = client.getCredentials()
 if (got.oauthToken !== 'tok' || got.userId !== '42') throw new Error('credentials not restored')
 
 // ── 채팅 버퍼: 갠톡/오픈방 목록 · 대화 불러오기 · 보낸 메시지 기록 ──────────────
+// 카카오는 sent_at 을 초로 준다. 버퍼는 밀리초로 들고 있어야 화면 시각이 맞는다.
+const SEC = 1700000000
 const chatSlot = new Slot('chat-dev', { credentials: { user_id: '111' }, needs_register: false, reason: 'ok' })
 chatSlot.client = {
   async getMessages() { return [] },
   async sendMessage() { return { success: true, log_id: '900' } },
   async getChats() {
     return [
-      { chat_id: '5', type: 'OD', title: '', display_name: '구매자', active_members: 2, last_message: { sent_at: 500, message: '이전글' } },
-      { chat_id: '9', type: 'OM', link_id: '77', active_members: 50, title: '오픈방', display_name: 'a,b', last_message: { sent_at: 300, message: '방글' } },
-      { chat_id: '42', type: '2', active_members: 2, title: '친구', display_name: '친구', last_message: { sent_at: 100, message: '없음' } },
+      { chat_id: '5', type: 'OD', title: '', display_name: '구매자', active_members: 2, last_message: { sent_at: SEC - 600, message: '이전글' } },
+      { chat_id: '9', type: 'OM', link_id: '77', active_members: 50, title: '오픈방', display_name: 'a,b', unread_count: 4, last_message: { sent_at: SEC - 900, message: '방글' } },
+      { chat_id: '42', type: '2', active_members: 2, title: '친구', display_name: '친구', last_message: { sent_at: SEC - 1200, message: '없음' } },
     ]
   },
 }
-chatSlot.noteChat('5', { logId: '100', text: '로벅 사려고요', mine: false, at: 1000, author: '구매자', type: 1 })
-chatSlot.noteChat('5', { logId: '100', text: '중복', mine: false, at: 1000, author: '구매자', type: 1 })
-chatSlot.noteChat('5', { logId: '101', text: '', mine: false, at: 2000, author: '구매자', type: 2 })
-chatSlot.noteChat('5', { logId: '102', text: '', mine: false, at: 2500, type: 999 })
+chatSlot.noteChat('5', { logId: '100', text: '로벅 사려고요', mine: false, at: SEC, author: '구매자', type: 1 })
+chatSlot.noteChat('5', { logId: '100', text: '중복', mine: false, at: SEC, author: '구매자', type: 1 })
+chatSlot.noteChat('5', { logId: '101', text: '', mine: false, at: SEC + 60, author: '구매자', type: 2 })
+chatSlot.noteChat('5', { logId: '102', text: '', mine: false, at: SEC + 90, type: 999 })
 const conv5 = chatSlot.inbox.get('5')
 if (!conv5 || conv5.list.length !== 2) throw new Error('chat: dedupe/record failed')
 if (conv5.unread !== 2) throw new Error('chat: unread count wrong')
 if (conv5.lastText !== '(사진)') throw new Error('chat: media preview wrong')
 if (conv5.peer !== '구매자') throw new Error('chat: peer not tracked')
+if (conv5.list[0].at !== SEC * 1000) throw new Error('chat: 초 단위 sent_at 을 ms 로 바꾸지 않았다')
+if (conv5.lastAt !== (SEC + 60) * 1000) throw new Error('chat: lastAt 이 ms 가 아니다')
 
 const chatHub = new Hub()
 chatHub.accounts.set('chat-dev', chatSlot)
 const inbox = await chatHub.inbox('chat-dev')
 const row5 = inbox.find((c) => c.chat_id === '5')
 if (!row5 || row5.list_kind !== 'open_dm' || row5.name !== '구매자') throw new Error('chat: 갠톡 row wrong')
-if (row5.unread !== 2 || row5.last_at !== 2000) throw new Error('chat: inbox merge wrong')
-if (!inbox.find((c) => c.chat_id === '9')) throw new Error('chat: open_room not listed')
+if (row5.unread !== 2 || row5.last_at !== (SEC + 60) * 1000) throw new Error('chat: inbox merge wrong')
+const row9 = inbox.find((c) => c.chat_id === '9')
+if (!row9) throw new Error('chat: open_room not listed')
+// 받아 둔 기록이 없는 방은 카카오가 세어 둔 안읽음 수를 그대로 보여야 한다
+if (row9.unread !== 4) throw new Error('chat: 버퍼가 없을 때 카카오의 안읽음 수를 쓰지 않았다')
 if (inbox.find((c) => c.chat_id === '42')) throw new Error('chat: quiet normal chat should be hidden')
 if (inbox[0].chat_id !== '5') throw new Error('chat: not sorted recent-first')
 
@@ -584,14 +591,16 @@ const backfillSlot = new Slot('bf', { credentials: { user_id: '111' }, needs_reg
 backfillSlot.client = {
   async getMessages() {
     return [
-      { log_id: '201', message: '백필1', author_id: '222', sent_at: 10 },
-      { log_id: '202', message: '백필2', author_id: '111', sent_at: 20 },
+      { log_id: '201', message: '백필1', author_id: '222', sent_at: SEC - 20 },
+      { log_id: '202', message: '백필2', author_id: '111', sent_at: SEC - 10 },
     ]
   },
 }
 chatHub.accounts.set('bf', backfillSlot)
 const bf = await chatHub.thread('bf', '7')
 if (bf.length !== 2 || bf[1].mine !== true) throw new Error('chat: backfill wrong')
+// 말풍선을 사람별로 묶으려면 보낸 사람 아이디가 화면까지 가야 한다
+if (bf[0].author_id !== '222') throw new Error('chat: 보낸 사람 아이디를 넘기지 않았다')
 if (backfillSlot.inbox.get('7').unread !== 0) throw new Error('chat: backfill must not create unread')
 
 process.stdout.write('sender selfcheck ok\n')

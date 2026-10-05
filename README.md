@@ -6,7 +6,7 @@
 |---|---|---|
 | 라이선스 서버 | `server.js` `lib/` `routes/` | Render(Node) + Neon(Postgres). 키 검증 · 기능별 권한 · 관리자 API · 자동 입금확인 |
 | 구매 웹사이트 | `public/` | 동일 서버가 서빙. 3종 상품 · 주문 · 키 조회 |
-| 발송 관리 | `public/panel.html` `routes/panel.js` | 같은 서비스의 `/panel`. 라이선스 키로 들어가 카카오 계정을 등록하고 매크로를 고친다. 앱의 기기 등록은 바꾸지 않는다. |
+| 발송 관리 | `public/panel.html` `routes/panel.js` | 같은 서비스의 `/panel`. 라이선스 키로 들어가 카카오 계정을 등록하고 매크로를 고친다. 오픈프로필 갠톡·오픈채팅방 대화를 이 화면에서 보고 답할 수도 있다(카카오톡을 열지 않는다). 앱의 기기 등록은 바꾸지 않는다. |
 | 카카오 발송 | `sender/` | 라이선스 서버가 띄우는 자식 프로세스. 세션은 Neon `kakao_sessions`. 자식이 죽으면 부모가 다시 띄우고, 라이선스와 구매 사이트는 유지한다. |
 | 사용자앱 KakaoAuto | `android/auto/` | `com.buseong.kakaoauto` · 매크로 · 방관리봇 · 미니게임봇 |
 | 관리자앱 KakaoAdmin | `android/admin/` | `com.buseong.kakaoadmin` · 키/주문/기록/입금 관리 |

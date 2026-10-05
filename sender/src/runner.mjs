@@ -183,6 +183,14 @@ function recordable(text, type) {
   return !!(typeof text === 'string' && text) || !!mediaLabel(type)
 }
 
+// 카카오가 주는 sent_at 은 초 단위다(LOCO sendAt). 화면은 밀리초로 읽으므로 여기서 맞춘다.
+// 1e12 ms 는 2001년이다 — 그보다 작은 값은 초로 보고 1000 을 곱한다.
+function atMs(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n)
+}
+
 // log_id 는 큰 정수 문자열이다. 시각이 같을 때 순서를 가른다.
 function cmpLog(a, b) {
   const sa = a || ''
@@ -350,7 +358,9 @@ export class Hub {
     const out = []
     for (const ch of byId.values()) {
       const kind = ch.list_kind || 'normal'
-      const unread = ch.unread || 0
+      // 받아 둔 기록이 있으면 그걸 믿는다(방을 열면 0 이 된다).
+      // 기록이 없으면 — 프로세스가 막 떴을 때 — 카카오가 세어 둔 값을 쓴다.
+      const unread = ch.has_buffer ? (ch.unread || 0) : (ch.unread_count || 0)
       if (kind === 'normal' && !ch.has_buffer && unread === 0) continue
       out.push({
         chat_id: ch.chat_id,
@@ -371,7 +381,7 @@ export class Hub {
     const slot = this.requireLive(id)
     const key = String(chatId)
     let conv = slot.inbox.get(key)
-    if (!conv || conv.list.length < 5) {
+    if ((!conv || conv.list.length < 5) && slot.client) {
       try {
         const msgs = await slot.client.getMessages(key, { count: 25 })
         const self = credsOf(slot.record).user_id
@@ -385,6 +395,7 @@ export class Hub {
             mine: self.length > 0 && authorId === self,
             at: m.sent_at || 0,
             author: m.author_name || '',
+            authorId,
             type: m.type == null ? m.message_type : m.type,
             backfill: true,
           })
@@ -403,11 +414,17 @@ export class Hub {
       mine: x.mine,
       at: x.at,
       author: x.author,
+      author_id: x.author_id || '',
     }))
   }
 
   async sendText(id, chatId, text) {
     const slot = this.requireLive(id)
+    if (!slot.client) {
+      const err = new Error('not_connected')
+      err.status = 503
+      throw err
+    }
     const res = await slot.client.sendMessage(chatId, text)
     const logId = realLogId(res && res.log_id)
     if (!res || res.success !== true || !logId) {
@@ -514,13 +531,15 @@ class Slot {
       this.inbox.set(id, conv)
     }
     if (logId && conv.list.some((x) => x.log_id === logId)) return
-    const at = Number(m.at) > 0 ? Number(m.at) : Date.now()
+    const at = atMs(m.at) || Date.now()
     conv.list.push({
       log_id: logId,
       text,
       mine: !!m.mine,
       at,
       author: m.author ? String(m.author) : '',
+      // 이름은 캐시가 비면 빈 값이 온다. 말풍선을 사람별로 묶을 때는 이 아이디를 쓴다.
+      author_id: m.authorId ? String(m.authorId) : '',
       type: m.type == null ? null : m.type,
     })
     conv.list.sort((a, b) => (a.at - b.at) || cmpLog(a.log_id, b.log_id))
@@ -536,6 +555,8 @@ class Slot {
   // 방 목록 캐시. 열려 있는 세션의 채팅 목록을 가볍게 읽어 둔다(오픈링크 이름 조회는 빼서 빠르게).
   // 12초는 그대로 쓰고, 지나면 새로 읽되 이미 캐시가 있으면 옛 값을 바로 주고 뒤에서 갱신한다.
   catalog() {
+    // 소켓을 다시 붙이는 사이에는 client 가 잠깐 없다. 그때는 가진 캐시를 준다.
+    if (!this.client) return Promise.resolve(this.catalogCache.list || [])
     const fresh = this.catalogCache.at > 0 && (Date.now() - this.catalogCache.at < 12000)
     if (fresh) return Promise.resolve(this.catalogCache.list)
     const run = () => {
@@ -552,8 +573,10 @@ class Slot {
             title: title || '',
             display_name: ch.display_name || '',
             members: ch.active_members || 0,
-            last_at: lm && lm.sent_at ? lm.sent_at : 0,
+            last_at: lm ? atMs(lm.sent_at) : 0,
             last_text: lm && typeof lm.message === 'string' ? lm.message : '',
+            // 카카오가 세는 안읽음. 프로세스가 다시 떠서 버퍼가 비었을 때 이 값을 쓴다.
+            unread_count: Number(ch.unread_count) > 0 ? Number(ch.unread_count) : 0,
           }
         })
         this.catalogCache = { at: Date.now(), list: mapped }
@@ -635,6 +658,8 @@ class Slot {
     try { this.client && this.client.close() } catch {}
     this.listener = null
     this.client = null
+    this.inbox.clear()
+    this.catalogCache = { at: 0, list: [] }
   }
 
   enqueue(fn) {
@@ -750,6 +775,7 @@ class Slot {
       mine: author.length > 0 && author === creds.user_id,
       at: ev.sent_at || Date.now(),
       author: ev.author_name || '',
+      authorId: author,
       type: ev.message_type,
     })
     const taken = await this.takeVisit(chatId, {
