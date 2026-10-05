@@ -10,6 +10,7 @@ const auth = require('../lib/panel-auth');
 const ids = require('../lib/panel-ids');
 const text = require('../lib/auth-text');
 const cfg = require('../lib/panel-config');
+const audit = require('../lib/audit');
 const sender = require('../lib/sender-child');
 
 const router = express.Router();
@@ -45,6 +46,28 @@ async function licenseOf(key) {
     [key]);
   const rows = lic ? await db.entitlements(key) : [];
   return auth.assess(lic, rows, Date.now());
+}
+
+// 아직 한 번도 쓰지 않은 키는 이 화면의 첫 로그인이 사용 기간을 시작시킨다.
+// 앱의 최초 활성화(/verify)와 같은 계산을 쓰되 device_id 는 건드리지 않는다
+// — 기기 1대 슬롯은 앱 몫으로 남겨 둔다. 이미 시작된 키는 아무것도 바꾸지 않는다.
+async function startPeriod(key) {
+  const now = Date.now();
+  return db.tx(async (client) => {
+    const lic = await db.one(
+      'SELECT key, revoked, blocked_reason FROM licenses WHERE key=$1 FOR UPDATE', [key], client);
+    if (!lic || lic.revoked || lic.blocked_reason) return false;
+    const started = await db.q(
+      `UPDATE entitlements SET starts_at=$1::bigint, expires_at=$1::bigint + duration_ms
+        WHERE key=$2 AND expires_at IS NULL`,
+      [now, key], client);
+    if (!started.rowCount) return false;          // 그 사이 다른 요청이 먼저 시작했다
+    await db.q(
+      'UPDATE licenses SET activated_at=COALESCE(activated_at,$1::bigint) WHERE key=$2',
+      [now, key], client);
+    await db.syncSummary(key, client);
+    return true;
+  });
 }
 
 async function session(req, res) {
@@ -155,7 +178,18 @@ router.post('/panel/api/login', wrap(async (req, res) => {
   }
   const key = keys.normKey(req.body && req.body.key);
   if (!/^[A-Z0-9-]{8,40}$/.test(key)) return res.status(401).json({ ok: false, error: '없는 키입니다.' });
-  const gate = await licenseOf(key);
+  let gate = await licenseOf(key);
+  if (!gate.ok && gate.not_started) {
+    const began = await startPeriod(key);
+    if (began) {
+      await audit.log('activate', {
+        key: key,
+        detail: '관리 화면 첫 로그인으로 사용 기간 시작 (기기는 등록하지 않음)',
+        ip: audit.ipOf(req),
+      });
+    }
+    gate = await licenseOf(key);                  // 시작됐든 아니든 다시 본다
+  }
   if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
   auth.writeCookie(req, res, key, Date.now() + auth.TTL_MS);
   res.json({ ok: true, mask: auth.maskKey(key), expires_at: gate.expires_at });
