@@ -477,7 +477,11 @@ public final class BotDetail {
                             @Override public void run() {
                                 Nav.editText(a, "입장 메시지", "예) {이름}님 환영합니다",
                                         r.welcomeMsg, true,
-                                        "{이름} 은 입장한 사람의 이름으로 바뀝니다.", new Nav.OnText() {
+                                        "{이름} 은 입장한 사람의 이름으로 바뀝니다.\n"
+                                                + "{입장로그} {퇴장로그} 를 적으면 그 사람의 최근 "
+                                                + "입·퇴장 시각(최대 " + RoomBot.VISIT_LOG_LINES
+                                                + "건, 한국시간)이 들어갑니다. 기록이 없으면 "
+                                                + "「없음」 으로 적힙니다.", new Nav.OnText() {
                                             @Override public String text(String value) {
                                                 if (value == null || value.trim().length() == 0) {
                                                     return "입장 메시지를 입력하십시오.";
@@ -506,7 +510,11 @@ public final class BotDetail {
                             @Override public void run() {
                                 Nav.editText(a, "퇴장 메시지", "예) {이름}님 안녕히 가십시오",
                                         r.leaveMsg, true,
-                                        "{이름} 은 퇴장한 사람의 이름으로 바뀝니다.", new Nav.OnText() {
+                                        "{이름} 은 퇴장한 사람의 이름으로 바뀝니다.\n"
+                                                + "{입장로그} {퇴장로그} 를 적으면 그 사람의 최근 "
+                                                + "입·퇴장 시각(최대 " + RoomBot.VISIT_LOG_LINES
+                                                + "건, 한국시간)이 들어갑니다. 기록이 없으면 "
+                                                + "「없음」 으로 적힙니다.", new Nav.OnText() {
                                             @Override public String text(String value) {
                                                 if (value == null || value.trim().length() == 0) {
                                                     return "퇴장 메시지를 입력하십시오.";
@@ -523,6 +531,18 @@ public final class BotDetail {
 
                 col.addView(Nav.note(a, "입·퇴장 알림이 대화방 알림으로 수신될 때만 감지됩니다.",
                         Theme.ACCENT2, null, null));
+
+                // 이 충돌은 반드시 적어야 한다 — 이력을 가장 보고 싶은 사람(들낙하는 사람)이
+                // 바로 인사가 생략되는 사람이다. 적지 않으면 "왜 안 올라오나" 가 된다.
+                if (s.roombot.churnMute && (r.welcomeMsg + r.leaveMsg).contains("로그")) {
+                    col.addView(Nav.note(a, "들낙 방지의 「인사 생략」 이 켜져 있습니다. 반복 "
+                            + "입·퇴장으로 판정된 사람에게는 인사가 발송되지 않으므로 그 사람의 "
+                            + "입·퇴장 시각도 방에 올라가지 않습니다. 기록은 「들낙 · 기록」 "
+                            + "화면에서 볼 수 있습니다.", Theme.AMBER, null, null));
+                }
+
+                col.addView(Ui.sub(a, "사용 가능한 표시: {이름} {방} {시간} {날짜} "
+                        + "{입장로그} {퇴장로그}"));
             }
         });
     }
@@ -544,11 +564,37 @@ public final class BotDetail {
                                 Nav.push(a, "금지어", words(a, WORDS_BAN));
                             }
                         }));
+                // 내장 비속어 사전 — 방장이 변형 표기를 손으로 다 적는 건 불가능하다.
+                // 기본은 꺼짐: 되돌리기 판정은 오탐이 반드시 나므로 방장이 보고 켜야 한다.
+                g1.addView(Ui.navRowSwitch(a, "내장 비속어 사전",
+                        "흔한 욕설과 변형 표기(시1발·시이발·ㅅㅂ)를 자동으로 잡습니다.",
+                        r.swearOn, new Ui.OnToggle() {
+                            @Override public void on(boolean v) {
+                                r.swearOn = v;
+                                store(a, s);
+                            }
+                        }));
+                if (r.swearOn) {
+                    g1.addView(Ui.navRow(a, "예외 단어",
+                            r.swearAllow.isEmpty() ? "기본만" : (r.swearAllow.size() + "개 추가"),
+                            r.swearAllow.isEmpty() ? Theme.DIM : Theme.TEXT, new Runnable() {
+                                @Override public void run() {
+                                    Nav.push(a, "예외 단어", words(a, WORDS_ALLOW));
+                                }
+                            }));
+                    g1.addView(Ui.navRow(a, "시험해 보기", "걸리는지 확인", Theme.ACCENT2,
+                            new Runnable() {
+                                @Override public void run() { trySwear(a, r); }
+                            }));
+                }
                 g1.addView(Ui.navRow(a, "경고문", msgValue(r.warnMsg),
                         msgColor(r.warnMsg, !r.banWords.isEmpty()), new Runnable() {
                             @Override public void run() {
                                 editOptional(a, s, "금지어 경고문", r.warnMsg,
-                                        "{이름} {단어} 를 사용할 수 있습니다. 비워 두면 발송하지 않습니다.",
+                                        "{이름} {금지어} 를 사용할 수 있습니다. 비워 두면 발송하지 않습니다. "
+                                                + "내장 사전에 걸린 경우 {금지어} 자리에는 「"
+                                                + Profanity.LABEL + "」 만 들어갑니다 — 걸린 욕설을 "
+                                                + "그대로 적으면 봇이 그 말을 방에 다시 올리게 됩니다.",
                                         new Nav.OnText() {
                                             @Override public String text(String value) {
                                                 r.warnMsg = value;
@@ -1126,10 +1172,52 @@ public final class BotDetail {
         return empty ? Theme.AMBER : Theme.TEXT;
     }
 
+    /**
+     * 내장 비속어 사전 시험 — 문장을 넣어 걸리는지 바로 본다.
+     *
+     * 이 화면이 필요한 이유: 되돌리기 판정은 오탐이 반드시 나는데, 방에서 오탐이 터진 뒤에
+     * 알게 되면 이미 늦다. 되돌린 글까지 같이 보여줘야 방장이 예외 목록에 무엇을 넣어야
+     * 하는지 판단할 수 있다.
+     */
+    private static void trySwear(final MainActivity a, final Settings.RoomBotCfg r) {
+        Nav.editText(a, "시험해 보기", "검사할 문장을 입력하십시오", "", true,
+                "이 문장이 방에 올라왔을 때 경고가 가는지 확인합니다. 아무것도 발송되지 않습니다.",
+                new Nav.OnText() {
+                    @Override public String text(String value) {
+                        String v = (value == null) ? "" : value.trim();
+                        if (v.length() == 0) return "검사할 문장을 입력하십시오.";
+                        String hit = Profanity.hit(v, r.swearAllow);
+                        String folded = Profanity.folded(v, r.swearAllow);
+                        String ban = RoomBot.banHit(r, v);
+                        StringBuilder sb = new StringBuilder(256);
+                        if (ban != null) {
+                            sb.append("경고 발송 — 금지어 목록의 「").append(ban).append("」 에 걸립니다.");
+                        } else if (hit != null) {
+                            sb.append("경고 발송 — 내장 사전의 「").append(hit).append("」 에 걸립니다.\n");
+                            sb.append("방에 올라가는 경고문에는 「").append(Profanity.LABEL)
+                                    .append("」 로만 적힙니다.");
+                        } else {
+                            sb.append("걸리지 않습니다. 경고가 발송되지 않습니다.");
+                        }
+                        sb.append("\n\n비교에 쓰인 글: ").append(folded.length() == 0 ? "(없음)" : folded);
+                        sb.append("\n\n공백·기호를 지우고, 한글 사이의 숫자와 「이」 를 빼고, 반복 글자를 "
+                                + "하나로 줄인 뒤 비교합니다. 평범한 말이 걸리면 예외 단어에 등록하십시오.");
+                        // 결과만 보여주는 창이라 Nav.confirm 을 쓰지 않는다 (「취소」 가 붙는다)
+                        android.app.AlertDialog.Builder b = Ui.dialog(a, "시험 결과");
+                        b.setMessage(sb.toString());
+                        b.setPositiveButton("확인", null);
+                        Ui.showDark(b);
+                        return null;
+                    }
+                });
+    }
+
     // ── 문자열 목록 (금지어 · 관리자 명단) ──────────────────────────────────
 
     private static final int WORDS_BAN = 0;
     private static final int WORDS_ADMIN = 1;
+    /** 내장 비속어 사전의 예외 단어 (되돌린 글에서 먼저 지운다) */
+    private static final int WORDS_ALLOW = 2;
 
     /**
      * 금지어·관리자 명단처럼 짧은 문자열이 여러 건인 목록. 칩을 누르면 확인 후 삭제된다.
@@ -1141,9 +1229,11 @@ public final class BotDetail {
                 final Settings s = Settings.load(a);
                 final Settings.RoomBotCfg r = s.roombot;
                 final boolean ban = (which == WORDS_BAN);
-                final List<String> items = ban ? r.banWords : r.adminNames;
-                final int color = ban ? Theme.RED : Theme.VIOLET;
-                final String what = ban ? "금지어" : "관리자";
+                final boolean allow = (which == WORDS_ALLOW);
+                final List<String> items = allow ? r.swearAllow
+                        : (ban ? r.banWords : r.adminNames);
+                final int color = allow ? Theme.ACCENT2 : (ban ? Theme.RED : Theme.VIOLET);
+                final String what = allow ? "예외 단어" : (ban ? "금지어" : "관리자");
 
                 col.addView(Ui.sectionHeader(a, null, what + " " + items.size() + "개"));
 
@@ -1153,7 +1243,8 @@ public final class BotDetail {
                 Nav.chipEditor(flow, items, color, "등록된 " + what + "이(가) 없습니다.",
                         new Runnable() {
                             @Override public void run() {
-                                if (ban) r.banWords = items;
+                                if (allow) r.swearAllow = items;
+                                else if (ban) r.banWords = items;
                                 else r.adminNames = items;
                                 save(a, s);
                             }
@@ -1163,10 +1254,13 @@ public final class BotDetail {
                 col.addView(Nav.wideBtn(a, what + " 추가", false, new Runnable() {
                     @Override public void run() {
                         Nav.editText(a, what + " 추가",
-                                ban ? "쉼표로 여러 개 입력" : "카카오톡 표시 이름 (쉼표로 여러 명)",
+                                allow ? "쉼표로 여러 개 입력"
+                                      : (ban ? "쉼표로 여러 개 입력" : "카카오톡 표시 이름 (쉼표로 여러 명)"),
                                 "", false,
-                                ban ? "해당 단어가 포함된 메시지에 경고를 발송합니다."
-                                    : "관리자 전용 명령을 사용할 수 있으며, 경고 누적 시 호출됩니다.",
+                                allow ? "이 낱말이 들어간 메시지는 내장 사전에서 제외됩니다. "
+                                        + "「시발점」 처럼 평범한 말이 욕설로 걸릴 때 등록하십시오."
+                                      : (ban ? "해당 단어가 포함된 메시지에 경고를 발송합니다."
+                                             : "관리자 전용 명령을 사용할 수 있으며, 경고 누적 시 호출됩니다."),
                                 new Nav.OnText() {
                                     @Override public String text(String value) {
                                         List<String> got = split(value);
@@ -1186,7 +1280,8 @@ public final class BotDetail {
                                                     ? ("최대 " + LIST_MAX + "개까지 등록됩니다.")
                                                     : "이미 등록된 항목입니다.";
                                         }
-                                        if (ban) r.banWords = items;
+                                        if (allow) r.swearAllow = items;
+                                        else if (ban) r.banWords = items;
                                         else r.adminNames = items;
                                         save(a, s);
                                         Log.add(a, what + " " + added + "개를 추가했습니다.");

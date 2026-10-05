@@ -589,6 +589,17 @@ public final class Settings {
         public String leaveMsg = "";
         /** 금지어 목록 */
         public List<String> banWords = new ArrayList<String>();
+        /**
+         * 내장 비속어 사전 사용 (기본 꺼짐).
+         *
+         * 기본을 꺼 두는 이유 — 되돌리기 판정은 오탐이 반드시 난다
+         * ({@link Profanity} 머리말). 「개 새끼 고양이」 가 걸리는 식이다. 방장이
+         * 무엇이 걸리는지 보고 켜는 것이 맞다. 켜 두고 오탐이 나면 방 분위기가
+         * 금지어보다 더 상한다.
+         */
+        public boolean swearOn = false;
+        /** 내장 사전 예외 (되돌린 글에서 먼저 지운다). 기본 예외는 코드에 따로 있다 */
+        public List<String> swearAllow = new ArrayList<String>();
         /** 금지어 걸렸을 때 보낼 경고 */
         public String warnMsg = "";
         /** floodSecs 초 안에 floodCount 개를 넘기면 도배로 본다 */
@@ -1130,6 +1141,8 @@ public final class Settings {
             r.put("leaveOn", roombot.leaveOn);
             r.put("leaveMsg", roombot.leaveMsg);
             r.put("banWords", arr(roombot.banWords));
+            r.put("swearOn", roombot.swearOn);
+            r.put("swearAllow", arr(roombot.swearAllow));
             r.put("warnMsg", roombot.warnMsg);
             r.put("floodCount", roombot.floodCount);
             r.put("floodSecs", roombot.floodSecs);
@@ -1364,6 +1377,8 @@ public final class Settings {
             s.roombot.leaveOn = r.optBoolean("leaveOn", s.roombot.leaveOn);
             s.roombot.leaveMsg = str(r, "leaveMsg", s.roombot.leaveMsg);
             s.roombot.banWords = list(r, "banWords");
+            s.roombot.swearOn = r.optBoolean("swearOn", s.roombot.swearOn);
+            s.roombot.swearAllow = list(r, "swearAllow");
             s.roombot.warnMsg = str(r, "warnMsg", s.roombot.warnMsg);
             s.roombot.floodCount = clamp(r.optInt("floodCount", s.roombot.floodCount), 2, 99);
             s.roombot.floodSecs = clamp(r.optInt("floodSecs", s.roombot.floodSecs), 1, 600);

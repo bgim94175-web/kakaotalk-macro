@@ -212,13 +212,25 @@ public final class RoomBot {
         }
 
         // 3) 금지어 (대소문자·공백 무시 포함 검사)
+        //
+        // 순서가 둘이다 — 방장이 적은 목록을 먼저 보고, 안 걸리면 내장 비속어 사전을 본다.
+        // 방장 목록이 먼저인 이유: 경고문의 {금지어} 에 **그 방장이 적은 단어 그대로** 를
+        // 넣어 주는 쪽이 방장이 의도한 바에 맞다. 내장 사전은 걸린 어간을 방에 올리지 않고
+        // 「비속어」 로만 적는다(올리면 봇이 그 욕을 방에 다시 쓰는 셈이다 — Profanity 머리말).
         String ban = banHit(cfg, body);
+        String swear = null;
+        if (ban == null && cfg.swearOn) {
+            swear = Profanity.hit(body, cfg.swearAllow);
+            if (swear != null) ban = Profanity.LABEL;
+        }
         if (ban != null) {
             int n = bumpWarn(c, room, who, now);
             String msg = warnText(cfg, room, who, ban, n, now);
             if (send(c, cfg, room, msg, now)) {
+                // 활동 로그는 기기 안에만 남으므로 걸린 어간을 그대로 적는다 —
+                // 오탐이 났을 때 방장이 예외 목록에 무엇을 넣어야 하는지 알아야 한다.
                 Log.add(c, "대화방 관리봇 금지어 감지 · 「" + label + "」 " + nameOf(who)
-                        + " (경고 " + n + "회, 단어 " + ban + ")");
+                        + " (경고 " + n + "회, 단어 " + ((swear == null) ? ban : (ban + " · 내장 어간 " + swear)) + ")");
             }
             return;
         }
@@ -471,7 +483,7 @@ public final class RoomBot {
             return;
         }
         String person = churnWho;
-        String msg = render(tpl, room.name, person, now, 0, "");
+        String msg = renderVisit(c, tpl, room, person, now, 0);
         if (msg.trim().length() == 0) {
             note(c, "jl-empty:" + (join ? "w" : "l"),
                     "대화방 관리봇 " + kindName + " 안내에 들어갈 내용이 없습니다. 메시지 내용을 확인하십시오.");
@@ -712,6 +724,50 @@ public final class RoomBot {
         else sb.append("관리자 확인이 필요합니다.");
         sb.append(" (봇은 강제퇴장을 수행할 수 없습니다.)");
         return sb.toString();
+    }
+
+    /** 입·퇴장 안내에 끼워 넣을 이력의 최대 줄 수 (설정으로 열지 않는다 — 길면 그 자체가 도배다) */
+    public static final int VISIT_LOG_LINES = 5;
+
+    /**
+     * {입장로그} {퇴장로그} 까지 치환한다 (입·퇴장 안내 전용).
+     *
+     * 이력은 {@link JoinLog} 가 설정과 무관하게 이미 쌓아 둔 것을 읽는다. 시각은 한국시간
+     * 고정이다. 토큰이 문구에 없으면 아무 일도 하지 않으므로 <b>이 기능의 on/off 는
+     * 토큰을 적었는지 그 자체</b>다 — 설정을 하나 더 만들지 않는다.
+     *
+     * 사람을 가리키는 단서가 이름 문자열뿐이라 이름을 바꾸면 이력이 끊긴다
+     * ({@link JoinLog} 머리말). 그래서 '이력 없음' 도 흔한 정상 결과다.
+     */
+    public static String renderVisit(Context c, String tpl, RoomRef ref, String who,
+                                     long at, int count) {
+        String out = render(tpl, (ref == null) ? "" : ref.name, who, at, count, "");
+        if (out.indexOf("{입장로그}") < 0 && out.indexOf("{퇴장로그}") < 0) return out;
+        out = out.replace("{입장로그}", visitLog(c, ref, who, JoinLog.JOIN, at));
+        out = out.replace("{퇴장로그}", visitLog(c, ref, who, JoinLog.LEAVE, at));
+        return out;
+    }
+
+    /** 「10/05 14:32:07, 10/04 22:10:41」 — 그 사람의 최근 입장(또는 퇴장) 시각들 */
+    private static String visitLog(Context c, RoomRef ref, String who, int kind, long at) {
+        if (c == null || ref == null) return "없음";
+        try {
+            List<JoinLog.Entry> all = JoinLog.of(c, ref, who);
+            StringBuilder sb = new StringBuilder(64);
+            int n = 0;
+            for (int i = 0; i < all.size() && n < VISIT_LOG_LINES; i++) {
+                JoinLog.Entry e = all.get(i);
+                if (e == null || e.kind != kind) continue;
+                // 지금 막 기록한 이 건은 빼고 보여준다 — 안내에 '지금' 이 또 적히면 군더더기다
+                if (Math.abs(e.at - at) < 2000L) continue;
+                if (n > 0) sb.append(", ");
+                sb.append(JoinLog.kst(e.at));
+                n++;
+            }
+            return (n == 0) ? "없음" : sb.toString();
+        } catch (Throwable t) {
+            return "없음";
+        }
     }
 
     /** {방} {이름} {시간} {날짜} {횟수} {금지어} 치환 */
