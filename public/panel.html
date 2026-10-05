@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=5">
+<link rel="stylesheet" href="/panel.css?v=6">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -97,13 +97,21 @@
           </div>
           <div class="kkt-room">
             <div class="kkt-head">
-              <button type="button" id="chat-back" class="kkt-back" aria-label="대화 목록으로">‹</button>
-              <strong id="chat-peer" class="kkt-peer">대화를 고르세요</strong>
+              <button type="button" id="chat-back" class="kkt-back" aria-label="대화 목록으로">
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div id="chat-head-ava" class="kkt-head-ava" aria-hidden="true"></div>
+              <div class="kkt-head-meta">
+                <strong id="chat-peer" class="kkt-peer">대화를 고르세요</strong>
+                <span id="chat-head-sub" class="kkt-sub"></span>
+              </div>
             </div>
             <div id="chat-log" class="kkt-log" aria-live="polite" tabindex="0"></div>
             <form id="chat-form" class="kkt-compose">
               <textarea id="chat-text" rows="1" placeholder="메시지 입력" autocomplete="off" disabled></textarea>
-              <button type="submit" id="chat-send" class="kkt-sendbtn" disabled>전송</button>
+              <button type="submit" id="chat-send" class="kkt-sendbtn" aria-label="보내기" disabled>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.3 20.7l18-8.7-18-8.7.02 6.9L15 12 3.32 13.8z" fill="currentColor"/></svg>
+              </button>
             </form>
           </div>
         </div>
@@ -221,6 +229,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=9"></script>
+<script src="/panel.js?v=10"></script>
 </body>
 </html>

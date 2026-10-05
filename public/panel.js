@@ -807,6 +807,41 @@
   var chatSend = document.getElementById('chat-send');
   var chatPeer = document.getElementById('chat-peer');
   var chatNote = document.getElementById('chat-note');
+  var chatHeadAva = document.getElementById('chat-head-ava');
+  var chatHeadSub = document.getElementById('chat-head-sub');
+  var chatForm = document.getElementById('chat-form');
+
+  var AVA_COLORS = ['#6c8ebf', '#7e9f6b', '#b9795b', '#8a6fb0', '#c08a4e', '#5aa2a2', '#b56a8a', '#5f87b5', '#7a9a3e', '#a4704f'];
+  function avaColor(name) {
+    var s = String(name || '');
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return AVA_COLORS[h % AVA_COLORS.length];
+  }
+  function initialOf(name) {
+    var s = String(name || '').trim();
+    return s ? s.slice(0, 1).toUpperCase() : '?';
+  }
+  function sameSender(a, b) {
+    if (!a || !b || a.mine !== b.mine) return false;
+    return a.mine ? true : (a.author || '') === (b.author || '');
+  }
+  function bigGap(a, b) {
+    return Math.abs((Number(b.at) || 0) - (Number(a.at) || 0)) > 5 * 60 * 1000;
+  }
+  function updateComposeState() {
+    if (!chatForm || !chatText) return;
+    if (chatText.value.trim()) chatForm.classList.add('has-text');
+    else chatForm.classList.remove('has-text');
+  }
+  function clearHead() {
+    if (chatHeadAva) {
+      chatHeadAva.className = 'kkt-head-ava';
+      chatHeadAva.textContent = '';
+      chatHeadAva.style.removeProperty('--ava');
+    }
+    if (chatHeadSub) chatHeadSub.textContent = '';
+  }
 
   function fmtTime(ms) {
     var d = new Date(Number(ms) || 0);
@@ -849,11 +884,15 @@
     chat.openName = '';
     chat.openKind = '';
     chat.roomSig = '';
+    chat.renderedIds = {};
     if (kkt) kkt.setAttribute('data-view', 'list');
     if (chatRooms) chatRooms.textContent = '';
     if (chatLog) chatLog.textContent = '';
     if (chatPeer) chatPeer.textContent = '대화를 고르세요';
     if (chatNote) chatNote.textContent = '';
+    if (chatText) chatText.value = '';
+    clearHead();
+    updateComposeState();
     say('chat-error', '');
     setComposeEnabled(false);
   }
@@ -894,9 +933,9 @@
     var rows = chat.dmOnly ? chats.filter(function (c) { return c.list_kind === 'open_dm'; }) : chats;
     chatRooms.textContent = '';
     if (!rows.length) {
-      chatRooms.appendChild(el('p', 'kkt-empty', chat.dmOnly
+      chatRooms.appendChild(emptyState('🗨️', chat.dmOnly
         ? '갠톡이 아직 없습니다.'
-        : '대화가 아직 없습니다. 상대가 메시지를 보내면 여기에 나타납니다.'));
+        : '대화가 아직 없습니다.\n상대가 메시지를 보내면 여기에 나타납니다.'));
       return;
     }
     rows.forEach(function (c) {
@@ -905,12 +944,14 @@
       row.type = 'button';
       row.dataset.id = c.chat_id;
       if (c.chat_id === chat.openId) row.setAttribute('aria-current', 'true');
-      var ava = el('div', 'kkt-ava' + (c.list_kind === 'open_dm' ? ' dm' : ''), name.slice(0, 1).toUpperCase());
+      var isDm = c.list_kind === 'open_dm';
+      var ava = el('div', 'kkt-ava' + (isDm ? ' dm' : ''), initialOf(name));
+      if (!isDm) ava.style.setProperty('--ava', avaColor(name));
       var meta = el('div', 'kkt-meta');
       var nameRow = el('div', 'kkt-name');
       nameRow.appendChild(el('b', '', name));
       var tag = kindTag(c.list_kind);
-      if (tag) nameRow.appendChild(el('span', 'kkt-tag', tag));
+      if (tag) nameRow.appendChild(el('span', 'kkt-tag' + (c.list_kind === 'open_room' ? ' tagroom' : ''), tag));
       meta.appendChild(nameRow);
       meta.appendChild(el('div', 'kkt-prev', c.preview || ''));
       var right = el('div', 'kkt-right');
@@ -936,8 +977,18 @@
     chat.openName = name;
     chat.openKind = kind;
     chat.roomSig = '';
+    chat.renderedIds = {};
     chatPeer.textContent = name;
+    var isDm = kind === 'open_dm';
+    if (chatHeadAva) {
+      chatHeadAva.className = 'kkt-head-ava show' + (isDm ? ' dm' : '');
+      chatHeadAva.textContent = initialOf(name);
+      if (isDm) chatHeadAva.style.removeProperty('--ava');
+      else chatHeadAva.style.setProperty('--ava', avaColor(name));
+    }
+    if (chatHeadSub) chatHeadSub.textContent = isDm ? '오픈프로필 갠톡' : (kind === 'open_room' ? '오픈채팅방' : '채팅');
     setComposeEnabled(true);
+    updateComposeState();
     if (kkt) kkt.setAttribute('data-view', 'room');
     markOpenRow(id);
     chatLog.textContent = '';
@@ -970,35 +1021,70 @@
     }
   }
 
+  function emptyState(emoji, text) {
+    var box = el('div', 'kkt-empty');
+    box.appendChild(el('span', 'kkt-emoji', emoji));
+    box.appendChild(document.createTextNode(text));
+    return box;
+  }
+
   function renderThread(messages, initial) {
     var sig = messages.map(function (m) { return (m.log_id || '') + '.' + (m.text || '').length; }).join('|') + '#' + messages.length;
     if (!initial && sig === chat.roomSig) return;
-    var nearBottom = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 60;
+    var nearBottom = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 70;
     chat.roomSig = sig;
+    var prevIds = chat.renderedIds || {};
     chatLog.textContent = '';
     if (!messages.length) {
-      chatLog.appendChild(el('p', 'kkt-empty', '아직 메시지가 없습니다. 먼저 인사를 보내 보세요.'));
+      chatLog.appendChild(emptyState('💬', '아직 메시지가 없습니다. 먼저 인사를 보내 보세요.'));
+      chat.renderedIds = {};
       return;
     }
+    var grouped = chat.openKind !== 'open_dm';
     var lastDay = '';
-    messages.forEach(function (m) {
+    messages.forEach(function (m, i) {
       var day = fmtDay(m.at);
-      if (day && day !== lastDay) {
+      var newDay = !!day && day !== lastDay;
+      if (newDay) {
         chatLog.appendChild(el('div', 'kkt-date', day));
         lastDay = day;
       }
+      var prev = messages[i - 1];
+      var next = messages[i + 1];
+      var start = newDay || !prev || !sameSender(prev, m) || bigGap(prev, m) || fmtDay(prev.at) !== day;
+      var end = !next || !sameSender(next, m) || bigGap(m, next) || fmtDay(next.at) !== day;
+      var isNew = !initial && m.log_id && !prevIds[m.log_id];
+
       var line = el('div', 'kkt-line ' + (m.mine ? 'me' : 'them'));
-      if (!m.mine && chat.openKind !== 'open_dm' && m.author) {
-        line.appendChild(el('div', 'kkt-who', m.author));
+      if (start) line.classList.add('grp-start');
+      if (isNew) line.classList.add('enter');
+
+      if (!m.mine && grouped) {
+        if (start) {
+          var who = m.author || chat.openName || '';
+          var av = el('div', 'kkt-ava-sm', initialOf(who));
+          av.style.setProperty('--ava', avaColor(who));
+          line.appendChild(av);
+        } else {
+          line.appendChild(el('div', 'kkt-ava-sm spacer'));
+        }
       }
+
+      var col = el('div', 'kkt-col');
+      if (!m.mine && grouped && start && m.author) col.appendChild(el('div', 'kkt-who', m.author));
       var body = m.text || (m.label ? '(' + m.label + ')' : '');
       var bubble = el('div', 'kkt-bubble' + (m.text ? '' : ' media'), body);
       var pair = el('div', 'kkt-pair');
       pair.appendChild(bubble);
-      pair.appendChild(el('div', 'kkt-at', fmtTime(m.at)));
-      line.appendChild(pair);
+      if (end) pair.appendChild(el('div', 'kkt-at', fmtTime(m.at)));
+      col.appendChild(pair);
+      line.appendChild(col);
       chatLog.appendChild(line);
     });
+
+    var nextIds = {};
+    messages.forEach(function (m) { if (m.log_id) nextIds[m.log_id] = 1; });
+    chat.renderedIds = nextIds;
     if (initial || nearBottom) chatLog.scrollTop = chatLog.scrollHeight;
   }
 
@@ -1012,6 +1098,7 @@
       await api('/panel/api/chat/send', { device_id: chat.deviceId, chat_id: chat.openId, text: text });
       chatText.value = '';
       autoGrow();
+      updateComposeState();
       await loadThread(true);
       loadChatList();
     } catch (e) {
@@ -1036,13 +1123,14 @@
     if (chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
     setComposeEnabled(false);
     chatPeer.textContent = '대화를 고르세요';
+    clearHead();
     markOpenRow('');
   });
   document.getElementById('chat-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
     sendChat();
   });
-  chatText.addEventListener('input', autoGrow);
+  chatText.addEventListener('input', function () { autoGrow(); updateComposeState(); });
   chatText.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter' && !ev.shiftKey) {
       ev.preventDefault();
