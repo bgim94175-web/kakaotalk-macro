@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=8">
+<link rel="stylesheet" href="/panel.css?v=9">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -44,7 +44,33 @@
   <div id="app" hidden>
     <section class="strip" id="runstate" aria-live="polite"></section>
 
-    <section class="card" id="account-block" data-band="account">
+    <div class="shell">
+    <nav class="tabs" id="tabs" aria-label="관리 메뉴">
+      <button type="button" class="tab" data-tab="chat" aria-current="false">
+        <span class="tname">채팅</span><span class="tval" data-sum="chat"></span>
+      </button>
+      <button type="button" class="tab" data-tab="macro" aria-current="false">
+        <span class="tname">매크로</span><span class="tval" data-sum="macro"></span>
+      </button>
+      <button type="button" class="tab" data-tab="visit" aria-current="false">
+        <span class="tname">들낙 방지</span><span class="tval" data-sum="visit"></span>
+      </button>
+      <button type="button" class="tab" data-tab="cover" aria-current="false">
+        <span class="tname">욕설 가리기</span><span class="tval" data-sum="cover"></span>
+      </button>
+      <button type="button" class="tab" data-tab="reply" aria-current="false">
+        <span class="tname">자동응답</span><span class="tval" data-sum="reply"></span>
+      </button>
+      <button type="button" class="tab" data-tab="snipe" aria-current="false">
+        <span class="tname">저격</span><span class="tval" data-sum="snipe"></span>
+      </button>
+      <button type="button" class="tab" data-tab="account" aria-current="true">
+        <span class="tname">계정</span><span class="tval" data-sum="account"></span>
+      </button>
+    </nav>
+    <div class="panes">
+
+    <section class="card" id="account-block" data-band="account" data-tab="account">
       <h2>카카오 계정</h2>
       <p class="lead">한 키에 계정을 여러 개 둘 수 있습니다. 등록이 끝나면 그 계정의 발송은 이 서버가 합니다.</p>
       <div id="account-list" class="account-list"></div>
@@ -73,17 +99,9 @@
     </section>
 
     <div id="detail" hidden>
-      <nav class="jumps" aria-label="이 계정의 설정">
-        <a href="#chat-title">채팅</a>
-        <a href="#macro-title">매크로</a>
-        <a href="#visit-title">들낙 방지</a>
-        <a href="#cover-title">욕설 가리기</a>
-        <a href="#reply-title">자동응답</a>
-        <a href="#snipe-title">저격</a>
-      </nav>
       <p id="detail-where" class="where"></p>
 
-      <section class="card" data-band="chat" aria-labelledby="chat-title">
+      <section class="card" data-band="chat" data-tab="chat" aria-labelledby="chat-title">
         <h2 id="chat-title">채팅</h2>
         <p class="lead">오픈프로필 1:1 채팅(갠톡)만 모아 보여 줍니다. 카카오톡을 열지 않아도 등록된 계정으로 이 서버가 답장을 보냅니다. 오픈채팅 단체방은 여기 올라오지 않습니다.</p>
         <p id="chat-note" class="hint"></p>
@@ -118,7 +136,7 @@
         </div>
       </section>
 
-      <section class="card" data-band="macro" aria-labelledby="macro-title">
+      <section class="card" data-band="macro" data-tab="macro" aria-labelledby="macro-title">
         <h2 id="macro-title">매크로</h2>
         <p class="lead">이 계정이 고른 방에 글을 보냅니다. 발송은 서버에서 합니다.</p>
         <form id="macro-form" class="stack">
@@ -166,7 +184,7 @@
         </form>
       </section>
 
-      <section class="card" data-band="visit" aria-labelledby="visit-title">
+      <section class="card" data-band="visit" data-tab="visit" aria-labelledby="visit-title">
         <h2 id="visit-title">들낙 방지</h2>
         <p class="lead">고른 방에 누군가 들어오면 입장 안내를, 나가면 퇴장 안내를 보냅니다. 그 사람을 한 번 멘션하고, 오픈프로필 링크와 그 시각을 적습니다. 매크로와 갠톡 자동응답과는 따로입니다.</p>
         <form id="visit-form" class="stack">
@@ -181,7 +199,7 @@
         </form>
       </section>
 
-      <section class="card" data-band="cover" aria-labelledby="cover-title">
+      <section class="card" data-band="cover" data-tab="cover" aria-labelledby="cover-title">
         <h2 id="cover-title">욕설 가리기</h2>
         <p class="lead">고른 오픈채팅방에 욕설이나 링크가 올라오면 그 글을 가립니다. 부방장과 방장이 올린 링크는 가리지 않습니다. 이 계정이 그 방의 부방장일 때 동작합니다. 사람을 내보내지 않습니다.</p>
         <form id="cover-form" class="stack">
@@ -196,7 +214,7 @@
         </form>
       </section>
 
-      <section class="card" data-band="reply" aria-labelledby="reply-title">
+      <section class="card" data-band="reply" data-tab="reply" aria-labelledby="reply-title">
         <h2 id="reply-title">갠톡 자동응답</h2>
         <p class="lead">개인 채팅에 온 말에 답합니다. 매크로의 보낼 방과는 따로입니다.</p>
         <form id="reply-form" class="stack">
@@ -214,7 +232,7 @@
         </form>
       </section>
 
-      <section class="card" data-band="snipe" aria-labelledby="snipe-title">
+      <section class="card" data-band="snipe" data-tab="snipe" aria-labelledby="snipe-title">
         <h2 id="snipe-title">경쟁사 저격</h2>
         <p class="lead">고른 말이 올라오면 답합니다. 매크로 발송, 갠톡 자동응답과 따로입니다.</p>
         <div id="triggers"></div>
@@ -223,6 +241,8 @@
         <button type="button" id="save-triggers" class="btn">저격 저장</button>
       </section>
     </div>
+    </div>
+    </div>
 
     <footer class="limit">
       <p>발송은 이 웹 서버에서 합니다. 카카오 계정을 등록한 뒤에는 폰을 꺼도, 이 서버 프로세스가 살아 있는 동안은 그 계정이 보냅니다. 폰은 등록할 때 카카오톡에 인증번호를 넣을 때만 필요합니다.</p>
@@ -230,6 +250,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=12"></script>
+<script src="/panel.js?v=13"></script>
 </body>
 </html>

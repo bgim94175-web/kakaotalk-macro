@@ -17,6 +17,64 @@
   var list = document.getElementById('account-list');
   var detail = document.getElementById('detail');
   var passcode = document.getElementById('passcode');
+  var tabsEl = document.getElementById('tabs');
+
+  /* ── 탭 ─────────────────────────────────────────────────
+     한 번에 한 가지만 보여 준다. 설정 하나를 고치려고 긴 화면을 훑지 않게 하고,
+     탭마다 지금 값을 같이 적어 어디를 손봐야 하는지 바로 보이게 한다. */
+  function tabButtons() {
+    return tabsEl ? Array.prototype.slice.call(tabsEl.querySelectorAll('.tab')) : [];
+  }
+  function showTab(name) {
+    if (!tabsEl) return;
+    tabButtons().forEach(function (b) {
+      b.setAttribute('aria-current', b.dataset.tab === name ? 'true' : 'false');
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (node) {
+      if (node.classList.contains('tab')) return;
+      node.hidden = node.dataset.tab !== name;
+    });
+    // 채팅을 보고 있지 않으면 열어 둔 방을 계속 읽을 이유가 없다
+    if (name !== 'chat' && chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
+    if (name === 'chat' && chat.openId && !chat.roomTimer) {
+      loadThread(true);
+      chat.roomTimer = setInterval(function () {
+        if (document.hidden || !chat.openId) return;
+        loadThread(false);
+      }, 3000);
+    }
+  }
+  function setTabsEnabled(on) {
+    tabButtons().forEach(function (b) {
+      if (b.dataset.tab !== 'account') b.disabled = !on;
+    });
+  }
+  function sumText(name, value) {
+    var n = tabsEl && tabsEl.querySelector('[data-sum="' + name + '"]');
+    if (n) n.textContent = value || '';
+  }
+  function updateTabSummaries() {
+    sumText('account', me && me.accounts ? me.accounts.length + '개' : '');
+    if (!account) {
+      ['chat', 'macro', 'visit', 'cover', 'reply', 'snipe'].forEach(function (k) { sumText(k, ''); });
+      return;
+    }
+    function rooms(v) { return (v || []).length; }
+    var m = account.macro || {};
+    sumText('macro', m.enabled ? '켜짐 · 방 ' + rooms(m.rooms) + '개' : '꺼짐');
+    var v = account.visit || {};
+    sumText('visit', v.enabled ? '켜짐 · 방 ' + rooms(v.rooms) + '개' : '꺼짐');
+    var c = account.cover || {};
+    sumText('cover', c.enabled ? '켜짐 · 방 ' + rooms(c.rooms) + '개' : '꺼짐');
+    sumText('reply', (account.autoreply || {}).enabled ? '켜짐' : '꺼짐');
+    var on = (account.triggers || []).filter(function (t) { return t && t.enabled !== false; }).length;
+    sumText('snipe', on ? on + '개 켜짐' : '꺼짐');
+  }
+  function updateChatSummary(chats) {
+    var unread = 0;
+    (chats || []).forEach(function (c) { unread += (c.unread || 0); });
+    sumText('chat', unread ? '안 읽음 ' + unread : ((chats && chats.length) ? chats.length + '명' : ''));
+  }
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -86,6 +144,7 @@
   }
 
   function renderAccounts() {
+    updateTabSummaries();
     list.textContent = '';
     var rows = (me && me.accounts) || [];
     if (!rows.length) {
@@ -384,6 +443,7 @@
     document.getElementById('reply-hours').value = String(a.cooldown_hours == null ? 6 : a.cooldown_hours);
     triggers = (account.triggers || []).map(function (t) { return Object.assign({}, t); });
     renderTriggers();
+    updateTabSummaries();
   }
 
   async function refreshMe() {
@@ -399,6 +459,8 @@
     account = res.account;
     fillDetail();
     chatStart(account.device_id);
+    setTabsEnabled(true);
+    showTab('chat');
     detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -789,6 +851,7 @@
     }
   });
   var actions = el('div', 'row-actions');
+  actions.dataset.tab = 'account';   // 계정 손보는 버튼이니 계정 탭에 둔다
   actions.appendChild(again);
   actions.appendChild(unlink);
   document.getElementById('detail').insertBefore(actions, document.getElementById('macro-title').parentNode);
@@ -897,6 +960,9 @@
     updateComposeState();
     say('chat-error', '');
     setComposeEnabled(false);
+    setTabsEnabled(false);
+    showTab('account');
+    updateTabSummaries();
   }
   function chatStart(deviceId) {
     chatReset();
@@ -944,6 +1010,7 @@
   }
 
   function renderChatList(chats) {
+    updateChatSummary(chats);
     // 서버가 이미 갠톡만 주지만, 한 번 더 걸러 오픈방이 섞여 들어올 여지를 없앤다.
     var rows = chats.filter(function (c) { return c && c.list_kind === 'open_dm'; });
     // 바뀐 게 없으면 그대로 둔다. 9초마다 새로 그리면 마우스·포커스가 끊긴다.
@@ -1153,6 +1220,13 @@
     }
   }
 
+  if (tabsEl) {
+    tabsEl.addEventListener('click', function (ev) {
+      var b = ev.target.closest ? ev.target.closest('.tab') : null;
+      if (!b || b.disabled) return;
+      showTab(b.dataset.tab);
+    });
+  }
   document.getElementById('chat-reload').addEventListener('click', function () { loadChatList(true); });
   document.getElementById('chat-back').addEventListener('click', function () {
     if (kkt) kkt.setAttribute('data-view', 'list');
