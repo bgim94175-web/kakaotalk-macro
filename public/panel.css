@@ -19,6 +19,7 @@
   --band-reply: #3e4d57;
   --band-snipe: #4a4450;
   --band-cover: #5a3d45;
+  --band-chat: #2f5d50;
 }
 
 * { box-sizing: border-box; }
@@ -132,6 +133,7 @@ main { padding: 16px 0 40px; }
 .card[data-band="reply"] > h2 { border-left-color: var(--band-reply); }
 .card[data-band="snipe"] > h2 { border-left-color: var(--band-snipe); }
 .card[data-band="cover"] > h2 { border-left-color: var(--band-cover); }
+.card[data-band="chat"] > h2 { border-left-color: var(--band-chat); }
 .lead, .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 label { font-size: 14px; font-weight: 650; }
@@ -324,4 +326,199 @@ legend { padding: 0 4px; font-weight: 650; }
   .row-actions .btn,
   .card > .btn,
   .file-line .btn { width: 100%; }
+}
+
+/* ── 채팅 (카카오톡풍) ──────────────────────────────────────── */
+.kkt {
+  display: flex;
+  flex-direction: column;
+  height: 68vh;
+  max-height: 560px;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.kkt-list { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.kkt-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #fafbfc;
+  border-bottom: 1px solid var(--line);
+}
+.kkt-filter { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 550; min-height: 36px; }
+.kkt-filter input { width: 18px; height: 18px; margin: 0; }
+.kkt-tools .btn { margin-left: auto; width: auto; min-height: 36px; padding: 4px 12px; }
+#chat-error { margin: 6px 10px; }
+.kkt-rooms { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.kkt-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #eef1f4;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kkt-row:hover { background: #f5f7f9; }
+.kkt-row[aria-current="true"] { background: #e7f0ec; }
+.kkt-ava {
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  background: #dfe6ea;
+  color: #40566b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+}
+.kkt-ava.dm { background: #fee500; color: #3a2e00; }
+.kkt-meta { min-width: 0; }
+.kkt-name { font-weight: 650; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.kkt-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kkt-tag {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a6a00;
+  background: #fff3b0;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.kkt-prev { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kkt-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.kkt-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.kkt-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kkt-empty { padding: 22px 14px; color: var(--muted); font-size: 14px; text-align: center; }
+
+.kkt-room { display: flex; flex-direction: column; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
+.kkt-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  min-height: 48px;
+  background: #a1b8cc;
+  color: #10243a;
+  font-weight: 650;
+}
+.kkt-back {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 6px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.kkt-peer { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kkt-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #b2c7d9;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kkt-date {
+  align-self: center;
+  margin: 8px 0;
+  background: rgba(0, 0, 0, 0.16);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+.kkt-line { display: flex; flex-direction: column; max-width: 86%; }
+.kkt-line.me { align-self: flex-end; align-items: flex-end; }
+.kkt-line.them { align-self: flex-start; align-items: flex-start; }
+.kkt-who { font-size: 11px; color: #33475b; margin: 0 4px 2px; }
+.kkt-pair { display: flex; align-items: flex-end; gap: 6px; }
+.kkt-line.me .kkt-pair { flex-direction: row-reverse; }
+.kkt-bubble {
+  padding: 7px 10px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
+}
+.kkt-line.them .kkt-bubble { background: #fff; color: #1c2430; border-top-left-radius: 4px; }
+.kkt-line.me .kkt-bubble { background: #fee500; color: #1c1c00; border-top-right-radius: 4px; }
+.kkt-bubble.media { color: #556; font-style: italic; }
+.kkt-at { font-size: 10px; color: #42566a; white-space: nowrap; margin-bottom: 1px; }
+.kkt-compose {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px;
+  background: #fff;
+  border-top: 1px solid var(--line);
+}
+.kkt-compose textarea {
+  flex: 1;
+  min-height: 42px;
+  max-height: 120px;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 9px 13px;
+  font: inherit;
+  font-size: 15px;
+}
+.kkt-compose textarea:disabled { background: #f3f5f7; }
+.kkt-sendbtn {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 18px;
+  min-height: 42px;
+  padding: 0 16px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.kkt-sendbtn:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 719px) {
+  .kkt[data-view="list"] .kkt-room { display: none; }
+  .kkt[data-view="room"] .kkt-list { display: none; }
+}
+@media (min-width: 720px) {
+  .kkt { flex-direction: row; }
+  .kkt-list { flex: 0 0 264px; min-height: 0; border-right: 1px solid var(--line); }
+  .kkt-room { flex: 1; border-top: 0; }
+  .kkt-back { display: none; }
 }

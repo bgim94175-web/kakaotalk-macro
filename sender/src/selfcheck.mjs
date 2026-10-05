@@ -1,6 +1,7 @@
 import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
 import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from './room-kind.mjs'
+import { Hub, Slot } from './runner.mjs'
 import { open, seal } from './store.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -534,5 +535,63 @@ await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', 
 if (client.isConnected()) throw new Error('login() must not open a LOCO socket')
 const got = client.getCredentials()
 if (got.oauthToken !== 'tok' || got.userId !== '42') throw new Error('credentials not restored')
+
+// ── 채팅 버퍼: 갠톡/오픈방 목록 · 대화 불러오기 · 보낸 메시지 기록 ──────────────
+const chatSlot = new Slot('chat-dev', { credentials: { user_id: '111' }, needs_register: false, reason: 'ok' })
+chatSlot.client = {
+  async getMessages() { return [] },
+  async sendMessage() { return { success: true, log_id: '900' } },
+  async getChats() {
+    return [
+      { chat_id: '5', type: 'OD', title: '', display_name: '구매자', active_members: 2, last_message: { sent_at: 500, message: '이전글' } },
+      { chat_id: '9', type: 'OM', link_id: '77', active_members: 50, title: '오픈방', display_name: 'a,b', last_message: { sent_at: 300, message: '방글' } },
+      { chat_id: '42', type: '2', active_members: 2, title: '친구', display_name: '친구', last_message: { sent_at: 100, message: '없음' } },
+    ]
+  },
+}
+chatSlot.noteChat('5', { logId: '100', text: '로벅 사려고요', mine: false, at: 1000, author: '구매자', type: 1 })
+chatSlot.noteChat('5', { logId: '100', text: '중복', mine: false, at: 1000, author: '구매자', type: 1 })
+chatSlot.noteChat('5', { logId: '101', text: '', mine: false, at: 2000, author: '구매자', type: 2 })
+chatSlot.noteChat('5', { logId: '102', text: '', mine: false, at: 2500, type: 999 })
+const conv5 = chatSlot.inbox.get('5')
+if (!conv5 || conv5.list.length !== 2) throw new Error('chat: dedupe/record failed')
+if (conv5.unread !== 2) throw new Error('chat: unread count wrong')
+if (conv5.lastText !== '(사진)') throw new Error('chat: media preview wrong')
+if (conv5.peer !== '구매자') throw new Error('chat: peer not tracked')
+
+const chatHub = new Hub()
+chatHub.accounts.set('chat-dev', chatSlot)
+const inbox = await chatHub.inbox('chat-dev')
+const row5 = inbox.find((c) => c.chat_id === '5')
+if (!row5 || row5.list_kind !== 'open_dm' || row5.name !== '구매자') throw new Error('chat: 갠톡 row wrong')
+if (row5.unread !== 2 || row5.last_at !== 2000) throw new Error('chat: inbox merge wrong')
+if (!inbox.find((c) => c.chat_id === '9')) throw new Error('chat: open_room not listed')
+if (inbox.find((c) => c.chat_id === '42')) throw new Error('chat: quiet normal chat should be hidden')
+if (inbox[0].chat_id !== '5') throw new Error('chat: not sorted recent-first')
+
+await chatHub.sendText('chat-dev', '5', '네 가능합니다')
+const afterSend = chatSlot.inbox.get('5').list
+const mineRow = afterSend[afterSend.length - 1]
+if (!mineRow.mine || mineRow.text !== '네 가능합니다') throw new Error('chat: sent not recorded')
+
+const t5 = await chatHub.thread('chat-dev', '5')
+if (chatSlot.inbox.get('5').unread !== 0) throw new Error('chat: thread did not clear unread')
+if (!t5.length || t5[t5.length - 1].mine !== true) throw new Error('chat: thread order wrong')
+const photoRow = t5.find((m) => m.log_id === '101')
+if (!photoRow || photoRow.label !== '사진') throw new Error('chat: media label wrong')
+
+const backfillSlot = new Slot('bf', { credentials: { user_id: '111' }, needs_register: false })
+backfillSlot.client = {
+  async getMessages() {
+    return [
+      { log_id: '201', message: '백필1', author_id: '222', sent_at: 10 },
+      { log_id: '202', message: '백필2', author_id: '111', sent_at: 20 },
+    ]
+  },
+}
+chatHub.accounts.set('bf', backfillSlot)
+const bf = await chatHub.thread('bf', '7')
+if (bf.length !== 2 || bf[1].mine !== true) throw new Error('chat: backfill wrong')
+if (backfillSlot.inbox.get('7').unread !== 0) throw new Error('chat: backfill must not create unread')
 
 process.stdout.write('sender selfcheck ok\n')

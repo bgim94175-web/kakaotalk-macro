@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=4">
+<link rel="stylesheet" href="/panel.css?v=5">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -73,6 +73,7 @@
 
     <div id="detail" hidden>
       <nav class="jumps" aria-label="이 계정의 설정">
+        <a href="#chat-title">채팅</a>
         <a href="#macro-title">매크로</a>
         <a href="#visit-title">들낙 방지</a>
         <a href="#cover-title">욕설 가리기</a>
@@ -80,6 +81,33 @@
         <a href="#snipe-title">저격</a>
       </nav>
       <p id="detail-where" class="where"></p>
+
+      <section class="card" data-band="chat" aria-labelledby="chat-title">
+        <h2 id="chat-title">채팅</h2>
+        <p class="lead">오픈프로필 갠톡과 오픈채팅방의 대화를 여기서 보고 답합니다. 카카오톡을 열지 않아도 등록된 계정으로 이 서버가 보냅니다.</p>
+        <p id="chat-note" class="hint"></p>
+        <div id="kkt" class="kkt" data-view="list" hidden>
+          <div class="kkt-list">
+            <div class="kkt-tools">
+              <label class="kkt-filter"><input type="checkbox" id="chat-dm-only"> 갠톡만</label>
+              <button type="button" id="chat-reload" class="btn ghost">새로고침</button>
+            </div>
+            <p id="chat-error" class="error" role="alert"></p>
+            <div id="chat-rooms" class="kkt-rooms" role="list"></div>
+          </div>
+          <div class="kkt-room">
+            <div class="kkt-head">
+              <button type="button" id="chat-back" class="kkt-back" aria-label="대화 목록으로">‹</button>
+              <strong id="chat-peer" class="kkt-peer">대화를 고르세요</strong>
+            </div>
+            <div id="chat-log" class="kkt-log" aria-live="polite" tabindex="0"></div>
+            <form id="chat-form" class="kkt-compose">
+              <textarea id="chat-text" rows="1" placeholder="메시지 입력" autocomplete="off" disabled></textarea>
+              <button type="submit" id="chat-send" class="kkt-sendbtn" disabled>전송</button>
+            </form>
+          </div>
+        </div>
+      </section>
 
       <section class="card" data-band="macro" aria-labelledby="macro-title">
         <h2 id="macro-title">매크로</h2>
@@ -193,6 +221,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=8"></script>
+<script src="/panel.js?v=9"></script>
 </body>
 </html>

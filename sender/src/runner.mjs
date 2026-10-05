@@ -157,6 +157,47 @@ function credsOf(record) {
   }
 }
 
+// 채팅 화면용 보조 — 들어온 메시지를 사람이 읽을 미리보기로 바꾼다.
+// 글이 있으면 그대로, 없으면 종류만 알려 준다. 종류도 모르면 버린다(피드·알림 줄).
+function mediaLabel(type) {
+  switch (Number(type)) {
+    case 2: case 16: case 27: return '사진'
+    case 3: return '동영상'
+    case 5: return '음성 메시지'
+    case 6: return '연락처'
+    case 12: case 17: case 20: return '이모티콘'
+    case 18: return '파일'
+    case 71: return '링크'
+    default: return ''
+  }
+}
+
+function previewText(text, type) {
+  const s = typeof text === 'string' ? text : ''
+  if (s) return s
+  const label = mediaLabel(type)
+  return label ? `(${label})` : ''
+}
+
+function recordable(text, type) {
+  return !!(typeof text === 'string' && text) || !!mediaLabel(type)
+}
+
+// log_id 는 큰 정수 문자열이다. 시각이 같을 때 순서를 가른다.
+function cmpLog(a, b) {
+  const sa = a || ''
+  const sb = b || ''
+  if (sa === sb) return 0
+  if (!sa) return -1
+  if (!sb) return 1
+  try {
+    const d = BigInt(sa) - BigInt(sb)
+    return d < 0n ? -1 : d > 0n ? 1 : 0
+  } catch {
+    return sa < sb ? -1 : 1
+  }
+}
+
 export class Hub {
   constructor() {
     this.accounts = new Map()
@@ -283,6 +324,88 @@ export class Hub {
     return out
   }
 
+  // 채팅 목록. 이 계정이 든 방을 최근 대화순으로 돌려준다. 오픈프로필 갠톡(open_dm)과
+  // 오픈채팅방(open_room), 그리고 말이 오간 방을 올린다. 조용한 일반 채팅은 빼서 목록을 깨끗이 둔다.
+  async inbox(id) {
+    const slot = this.requireLive(id)
+    let catalog = []
+    try {
+      catalog = await slot.catalog()
+    } catch {
+      catalog = (slot.catalogCache && slot.catalogCache.list) || []
+    }
+    const byId = new Map()
+    for (const ch of catalog) byId.set(ch.chat_id, Object.assign({}, ch))
+    for (const [cid, conv] of slot.inbox) {
+      const base = byId.get(cid) || {
+        chat_id: cid, list_kind: 'normal', title: '', display_name: '', members: 0, last_at: 0, last_text: '',
+      }
+      base.last_at = Math.max(base.last_at || 0, conv.lastAt || 0)
+      base.last_text = conv.lastText || base.last_text || ''
+      base.unread = conv.unread || 0
+      base.peer = conv.peer || ''
+      base.has_buffer = true
+      byId.set(cid, base)
+    }
+    const out = []
+    for (const ch of byId.values()) {
+      const kind = ch.list_kind || 'normal'
+      const unread = ch.unread || 0
+      if (kind === 'normal' && !ch.has_buffer && unread === 0) continue
+      out.push({
+        chat_id: ch.chat_id,
+        list_kind: kind,
+        name: ch.title || ch.display_name || ch.peer || '',
+        preview: ch.last_text || '',
+        unread,
+        last_at: ch.last_at || 0,
+      })
+    }
+    out.sort((a, b) => (b.last_at - a.last_at) || (b.unread - a.unread))
+    return out
+  }
+
+  // 한 방의 대화. 서버가 받아 둔 메시지를 돌려주고, 처음 열 때는 카카오에서 최근 글을 채운다.
+  // 여는 순간 그 방의 안 읽음은 0 으로 돌린다.
+  async thread(id, chatId) {
+    const slot = this.requireLive(id)
+    const key = String(chatId)
+    let conv = slot.inbox.get(key)
+    if (!conv || conv.list.length < 5) {
+      try {
+        const msgs = await slot.client.getMessages(key, { count: 25 })
+        const self = credsOf(slot.record).user_id
+        for (const m of msgs || []) {
+          const logId = realLogId(m && m.log_id)
+          if (!logId) continue
+          const authorId = m.author_id == null ? '' : String(m.author_id)
+          slot.noteChat(key, {
+            logId,
+            text: typeof m.message === 'string' ? m.message : '',
+            mine: self.length > 0 && authorId === self,
+            at: m.sent_at || 0,
+            author: m.author_name || '',
+            type: m.type == null ? m.message_type : m.type,
+            backfill: true,
+          })
+        }
+        conv = slot.inbox.get(key)
+      } catch (e) {
+        if (!conv) throw e
+      }
+    }
+    if (conv) conv.unread = 0
+    const list = conv ? conv.list : []
+    return list.map((x) => ({
+      log_id: x.log_id,
+      text: x.text,
+      label: x.text ? '' : (mediaLabel(x.type) || ''),
+      mine: x.mine,
+      at: x.at,
+      author: x.author,
+    }))
+  }
+
   async sendText(id, chatId, text) {
     const slot = this.requireLive(id)
     const res = await slot.client.sendMessage(chatId, text)
@@ -292,6 +415,7 @@ export class Hub {
       err.status = 502
       throw err
     }
+    slot.noteChat(String(chatId), { logId, text: String(text), mine: true, at: Date.now(), author: '', type: 1 })
     return { log_id: logId, kind: 'text' }
   }
 
@@ -361,6 +485,92 @@ class Slot {
     this.coverLogs = new Set()
     this.unpush = null
     this.mentionSeq = 0
+    // 채팅 화면용. 들어오고 나간 메시지를 방마다 메모리에 담아 둔다(프로세스가 다시 뜨면 비고,
+    // 방을 열 때 카카오에서 최근 글로 다시 채운다). catalog 는 방 목록 캐시다.
+    this.inbox = new Map()
+    this.catalogCache = { at: 0, list: [] }
+    this.catalogPromise = null
+  }
+
+  // 한 메시지를 그 방의 기록에 넣는다. log_id 로 중복을 막고, 최근 80개만 남긴다.
+  // 내가 보낸 게 아니고 backfill(과거 채우기)도 아니면 안 읽음을 하나 올린다.
+  noteChat(chatId, m) {
+    const id = String(chatId || '')
+    if (!id) return
+    const text = typeof m.text === 'string' ? m.text : ''
+    if (!recordable(text, m.type)) return
+    const logId = m.logId ? String(m.logId) : ''
+    let conv = this.inbox.get(id)
+    if (!conv) {
+      if (this.inbox.size >= 240) {
+        let oldestKey = null
+        let oldestAt = Infinity
+        for (const [k, c] of this.inbox) {
+          if ((c.lastAt || 0) < oldestAt) { oldestAt = c.lastAt || 0; oldestKey = k }
+        }
+        if (oldestKey != null) this.inbox.delete(oldestKey)
+      }
+      conv = { chatId: id, list: [], unread: 0, lastAt: 0, lastText: '', lastMine: false, peer: '' }
+      this.inbox.set(id, conv)
+    }
+    if (logId && conv.list.some((x) => x.log_id === logId)) return
+    const at = Number(m.at) > 0 ? Number(m.at) : Date.now()
+    conv.list.push({
+      log_id: logId,
+      text,
+      mine: !!m.mine,
+      at,
+      author: m.author ? String(m.author) : '',
+      type: m.type == null ? null : m.type,
+    })
+    conv.list.sort((a, b) => (a.at - b.at) || cmpLog(a.log_id, b.log_id))
+    if (conv.list.length > 80) conv.list = conv.list.slice(-80)
+    const last = conv.list[conv.list.length - 1]
+    conv.lastAt = last.at
+    conv.lastText = previewText(last.text, last.type)
+    conv.lastMine = last.mine
+    if (!m.mine && last.author) conv.peer = last.author
+    if (!m.mine && !m.backfill) conv.unread = Math.min(conv.unread + 1, 999)
+  }
+
+  // 방 목록 캐시. 열려 있는 세션의 채팅 목록을 가볍게 읽어 둔다(오픈링크 이름 조회는 빼서 빠르게).
+  // 12초는 그대로 쓰고, 지나면 새로 읽되 이미 캐시가 있으면 옛 값을 바로 주고 뒤에서 갱신한다.
+  catalog() {
+    const fresh = this.catalogCache.at > 0 && (Date.now() - this.catalogCache.at < 12000)
+    if (fresh) return Promise.resolve(this.catalogCache.list)
+    const run = () => {
+      if (this.catalogPromise) return this.catalogPromise
+      this.catalogPromise = (async () => {
+        const list = await this.client.getChats({ all: true })
+        const mapped = (Array.isArray(list) ? list : []).map((ch) => {
+          const listKind = roomListKind(ch)
+          const title = listKind === 'open_room' ? (roomTitle(ch) || '') : (ch.title || '')
+          const lm = ch.last_message
+          return {
+            chat_id: String(ch.chat_id),
+            list_kind: listKind,
+            title: title || '',
+            display_name: ch.display_name || '',
+            members: ch.active_members || 0,
+            last_at: lm && lm.sent_at ? lm.sent_at : 0,
+            last_text: lm && typeof lm.message === 'string' ? lm.message : '',
+          }
+        })
+        this.catalogCache = { at: Date.now(), list: mapped }
+        return mapped
+      })()
+        .catch((e) => {
+          if (this.catalogCache.at) return this.catalogCache.list
+          throw e
+        })
+        .finally(() => { this.catalogPromise = null })
+      return this.catalogPromise
+    }
+    if (this.catalogCache.at > 0) {
+      run().catch(() => {})
+      return Promise.resolve(this.catalogCache.list)
+    }
+    return run()
   }
 
   async start() {
@@ -534,6 +744,14 @@ class Slot {
     const chatId = String(ev.chat_id || '')
     const author = ev.author_id == null ? '' : String(ev.author_id)
     if (ev.log_id) this.lastLog.set(chatId, String(ev.log_id))
+    this.noteChat(chatId, {
+      logId: ev.log_id ? String(ev.log_id) : '',
+      text: typeof ev.message === 'string' ? ev.message : '',
+      mine: author.length > 0 && author === creds.user_id,
+      at: ev.sent_at || Date.now(),
+      author: ev.author_name || '',
+      type: ev.message_type,
+    })
     const taken = await this.takeVisit(chatId, {
       chatId,
       logId: ev.log_id ? String(ev.log_id) : '',
@@ -1032,4 +1250,4 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export { realId }
+export { realId, Slot }

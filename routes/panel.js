@@ -451,6 +451,81 @@ router.post('/panel/api/settings', wrap(async (req, res) => {
   res.json({ ok: true, account: viewAccount(row, again) });
 }));
 
+// ── 채팅 ──────────────────────────────────────────────────────────────────
+// 오픈프로필 갠톡·오픈채팅방의 대화를 이 화면에서 보고 답한다. 발송은 sender 세션이 한다.
+function chatNeedsRegister(res) {
+  return res.status(409).json({ ok: false, error: '카카오 로그인이 끊겼습니다. 계정을 다시 등록해 주세요.', needs_register: true });
+}
+
+router.get('/panel/api/chats', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  if (!sender.up()) return senderDown(res);
+  const deviceId = String(req.query.device_id || '');
+  const row = await accountRow(s.key, deviceId);
+  if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  try {
+    const r = await senderCall('GET', '/v1/inbox?device_id=' + encodeURIComponent(deviceId), null, 30000);
+    if (!r.json.ok) {
+      if (r.json.needs_register) return chatNeedsRegister(res);
+      return res.status(502).json({ ok: false, error: '대화 목록을 가져오지 못했습니다.' });
+    }
+    res.json({ ok: true, chats: Array.isArray(r.json.chats) ? r.json.chats : [] });
+  } catch (e) {
+    if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
+    throw e;
+  }
+}));
+
+router.get('/panel/api/chat', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  if (!sender.up()) return senderDown(res);
+  const deviceId = String(req.query.device_id || '');
+  const chatId = String(req.query.chat_id || '');
+  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
+  const row = await accountRow(s.key, deviceId);
+  if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  try {
+    const r = await senderCall('GET',
+      '/v1/thread?device_id=' + encodeURIComponent(deviceId) + '&chat_id=' + encodeURIComponent(chatId),
+      null, 30000);
+    if (!r.json.ok) {
+      if (r.json.needs_register) return chatNeedsRegister(res);
+      return res.status(502).json({ ok: false, error: '대화를 가져오지 못했습니다.' });
+    }
+    res.json({ ok: true, messages: Array.isArray(r.json.messages) ? r.json.messages : [] });
+  } catch (e) {
+    if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
+    throw e;
+  }
+}));
+
+router.post('/panel/api/chat/send', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  if (!sender.up()) return senderDown(res);
+  const body = req.body || {};
+  const deviceId = String(body.device_id || '');
+  const chatId = String(body.chat_id || '');
+  const text = (typeof body.text === 'string' ? body.text : '').slice(0, 1000);
+  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
+  if (!text.trim()) return res.status(400).json({ ok: false, error: '보낼 내용을 입력해 주세요.' });
+  const row = await accountRow(s.key, deviceId);
+  if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  try {
+    const r = await senderCall('POST', '/v1/send', { device_id: deviceId, chat_id: chatId, text: text }, 20000);
+    if (!r.json.ok) {
+      if (r.json.needs_register) return chatNeedsRegister(res);
+      return res.status(502).json({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 뒤 다시 해 주세요.' });
+    }
+    res.json({ ok: true, log_id: r.json.log_id || '' });
+  } catch (e) {
+    if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
+    throw e;
+  }
+}));
+
 async function rememberAccount(key, deviceId, email, now) {
   await db.q(
     `INSERT INTO panel_accounts (device_id, license_key, email, created_at)

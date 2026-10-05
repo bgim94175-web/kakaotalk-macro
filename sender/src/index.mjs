@@ -195,6 +195,39 @@ app.get('/v1/recent', async (req, res) => {
   }
 })
 
+app.get('/v1/inbox', async (req, res) => {
+  const id = deviceId(req.query.device_id)
+  if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  try {
+    const chats = await hub.inbox(id)
+    res.json({ ok: true, chats })
+  } catch (e) {
+    res.status(e.status || 500).json({
+      ok: false,
+      error: e.message || 'failed',
+      needs_register: !!e.needs_register,
+    })
+  }
+})
+
+app.get('/v1/thread', async (req, res) => {
+  const id = deviceId(req.query.device_id)
+  const chatId = req.query && String(req.query.chat_id || '')
+  if (!id || !/^[1-9][0-9]*$/.test(chatId)) {
+    return res.status(400).json({ ok: false, error: 'bad_request' })
+  }
+  try {
+    const messages = await hub.thread(id, chatId)
+    res.json({ ok: true, messages })
+  } catch (e) {
+    res.status(e.status || 500).json({
+      ok: false,
+      error: e.message || 'failed',
+      needs_register: !!e.needs_register,
+    })
+  }
+})
+
 app.post('/v1/send', async (req, res) => {
   const id = deviceId(req.body && req.body.device_id)
   const chatId = req.body && String(req.body.chat_id || '')

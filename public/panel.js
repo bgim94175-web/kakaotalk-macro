@@ -68,6 +68,7 @@
     app.hidden = true;
     logout.hidden = true;
     who.textContent = '';
+    chatReset();
   }
 
   function showApp() {
@@ -397,6 +398,7 @@
     var res = await api('/panel/api/account?device_id=' + encodeURIComponent(id));
     account = res.account;
     fillDetail();
+    chatStart(account.device_id);
     detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -780,6 +782,7 @@
       await api('/panel/api/unlink', { device_id: account.device_id });
       account = null;
       detail.hidden = true;
+      chatReset();
       await refreshMe();
     } catch (e) {
       say('macro-error', e.message);
@@ -789,6 +792,263 @@
   actions.appendChild(again);
   actions.appendChild(unlink);
   document.getElementById('detail').insertBefore(actions, document.getElementById('macro-title').parentNode);
+
+  // ── 채팅 (카카오톡풍) ──────────────────────────────────────
+  // 목록은 9초, 열린 방은 3초마다 새로 읽는다. 방을 열면 그 방의 안 읽음은 서버에서 0 이 된다.
+  var chat = {
+    deviceId: '', openId: '', openName: '', openKind: '',
+    dmOnly: false, listBusy: false, roomBusy: false, sending: false,
+    listTimer: null, roomTimer: null, roomSig: '',
+  };
+  var kkt = document.getElementById('kkt');
+  var chatRooms = document.getElementById('chat-rooms');
+  var chatLog = document.getElementById('chat-log');
+  var chatText = document.getElementById('chat-text');
+  var chatSend = document.getElementById('chat-send');
+  var chatPeer = document.getElementById('chat-peer');
+  var chatNote = document.getElementById('chat-note');
+
+  function fmtTime(ms) {
+    var d = new Date(Number(ms) || 0);
+    if (!ms || isNaN(d.getTime())) return '';
+    var h = d.getHours();
+    var m = d.getMinutes();
+    var ap = h < 12 ? '오전' : '오후';
+    var hh = h % 12;
+    if (hh === 0) hh = 12;
+    return ap + ' ' + hh + ':' + (m < 10 ? '0' + m : m);
+  }
+  function fmtDay(ms) {
+    var d = new Date(Number(ms) || 0);
+    if (!ms || isNaN(d.getTime())) return '';
+    return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
+  }
+  function kindTag(k) {
+    if (k === 'open_dm') return '갠톡';
+    if (k === 'open_room') return '오픈방';
+    return '';
+  }
+  function setComposeEnabled(on) {
+    if (chatText) chatText.disabled = !on;
+    if (chatSend) chatSend.disabled = !on;
+  }
+  function autoGrow() {
+    if (!chatText) return;
+    chatText.style.height = 'auto';
+    chatText.style.height = Math.min(120, chatText.scrollHeight) + 'px';
+  }
+
+  function chatStop() {
+    if (chat.listTimer) { clearInterval(chat.listTimer); chat.listTimer = null; }
+    if (chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
+  }
+  function chatReset() {
+    chatStop();
+    chat.deviceId = '';
+    chat.openId = '';
+    chat.openName = '';
+    chat.openKind = '';
+    chat.roomSig = '';
+    if (kkt) kkt.setAttribute('data-view', 'list');
+    if (chatRooms) chatRooms.textContent = '';
+    if (chatLog) chatLog.textContent = '';
+    if (chatPeer) chatPeer.textContent = '대화를 고르세요';
+    if (chatNote) chatNote.textContent = '';
+    say('chat-error', '');
+    setComposeEnabled(false);
+  }
+  function chatStart(deviceId) {
+    chatReset();
+    chat.deviceId = deviceId;
+    if (kkt) kkt.hidden = false;
+    loadChatList();
+    chat.listTimer = setInterval(function () {
+      if (document.hidden || !chat.deviceId) return;
+      loadChatList();
+    }, 9000);
+  }
+
+  async function loadChatList() {
+    if (chat.listBusy || !chat.deviceId) return;
+    chat.listBusy = true;
+    try {
+      var res = await api('/panel/api/chats?device_id=' + encodeURIComponent(chat.deviceId));
+      if (chatNote) chatNote.textContent = '';
+      say('chat-error', '');
+      renderChatList(res.chats || []);
+    } catch (e) {
+      if (e && e.status === 409) {
+        if (chatNote) chatNote.textContent = '카카오 로그인이 끊겼습니다. 위에서 이 계정을 다시 등록해 주세요.';
+        renderChatList([]);
+      } else if (e && e.status === 503) {
+        if (chatNote) chatNote.textContent = (e.body && e.body.error) || '발송 프로세스가 멈춰 있습니다.';
+      } else {
+        say('chat-error', '대화 목록을 불러오지 못했습니다.');
+      }
+    } finally {
+      chat.listBusy = false;
+    }
+  }
+
+  function renderChatList(chats) {
+    var rows = chat.dmOnly ? chats.filter(function (c) { return c.list_kind === 'open_dm'; }) : chats;
+    chatRooms.textContent = '';
+    if (!rows.length) {
+      chatRooms.appendChild(el('p', 'kkt-empty', chat.dmOnly
+        ? '갠톡이 아직 없습니다.'
+        : '대화가 아직 없습니다. 상대가 메시지를 보내면 여기에 나타납니다.'));
+      return;
+    }
+    rows.forEach(function (c) {
+      var name = c.name || '대화상대';
+      var row = el('button', 'kkt-row');
+      row.type = 'button';
+      row.dataset.id = c.chat_id;
+      if (c.chat_id === chat.openId) row.setAttribute('aria-current', 'true');
+      var ava = el('div', 'kkt-ava' + (c.list_kind === 'open_dm' ? ' dm' : ''), name.slice(0, 1).toUpperCase());
+      var meta = el('div', 'kkt-meta');
+      var nameRow = el('div', 'kkt-name');
+      nameRow.appendChild(el('b', '', name));
+      var tag = kindTag(c.list_kind);
+      if (tag) nameRow.appendChild(el('span', 'kkt-tag', tag));
+      meta.appendChild(nameRow);
+      meta.appendChild(el('div', 'kkt-prev', c.preview || ''));
+      var right = el('div', 'kkt-right');
+      right.appendChild(el('div', 'kkt-time', fmtTime(c.last_at)));
+      if (c.unread > 0) right.appendChild(el('div', 'kkt-badge', c.unread > 99 ? '99+' : String(c.unread)));
+      row.appendChild(ava);
+      row.appendChild(meta);
+      row.appendChild(right);
+      row.addEventListener('click', function () { openConversation(c.chat_id, name, c.list_kind); });
+      chatRooms.appendChild(row);
+    });
+  }
+
+  function markOpenRow(id) {
+    Array.prototype.forEach.call(chatRooms.querySelectorAll('.kkt-row'), function (r) {
+      if (r.dataset.id === id) r.setAttribute('aria-current', 'true');
+      else r.removeAttribute('aria-current');
+    });
+  }
+
+  function openConversation(id, name, kind) {
+    chat.openId = id;
+    chat.openName = name;
+    chat.openKind = kind;
+    chat.roomSig = '';
+    chatPeer.textContent = name;
+    setComposeEnabled(true);
+    if (kkt) kkt.setAttribute('data-view', 'room');
+    markOpenRow(id);
+    chatLog.textContent = '';
+    chatLog.appendChild(el('p', 'kkt-empty', '불러오는 중…'));
+    loadThread(true);
+    if (chat.roomTimer) clearInterval(chat.roomTimer);
+    chat.roomTimer = setInterval(function () {
+      if (document.hidden || !chat.openId) return;
+      loadThread(false);
+    }, 3000);
+  }
+
+  async function loadThread(initial) {
+    if (!chat.openId || !chat.deviceId || chat.roomBusy) return;
+    chat.roomBusy = true;
+    try {
+      var res = await api('/panel/api/chat?device_id=' + encodeURIComponent(chat.deviceId) +
+        '&chat_id=' + encodeURIComponent(chat.openId));
+      renderThread(res.messages || [], initial);
+    } catch (e) {
+      if (e && e.status === 409) {
+        if (chatNote) chatNote.textContent = '카카오 로그인이 끊겼습니다. 위에서 이 계정을 다시 등록해 주세요.';
+        setComposeEnabled(false);
+      } else if (initial) {
+        chatLog.textContent = '';
+        chatLog.appendChild(el('p', 'kkt-empty', '대화를 불러오지 못했습니다.'));
+      }
+    } finally {
+      chat.roomBusy = false;
+    }
+  }
+
+  function renderThread(messages, initial) {
+    var sig = messages.map(function (m) { return (m.log_id || '') + '.' + (m.text || '').length; }).join('|') + '#' + messages.length;
+    if (!initial && sig === chat.roomSig) return;
+    var nearBottom = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 60;
+    chat.roomSig = sig;
+    chatLog.textContent = '';
+    if (!messages.length) {
+      chatLog.appendChild(el('p', 'kkt-empty', '아직 메시지가 없습니다. 먼저 인사를 보내 보세요.'));
+      return;
+    }
+    var lastDay = '';
+    messages.forEach(function (m) {
+      var day = fmtDay(m.at);
+      if (day && day !== lastDay) {
+        chatLog.appendChild(el('div', 'kkt-date', day));
+        lastDay = day;
+      }
+      var line = el('div', 'kkt-line ' + (m.mine ? 'me' : 'them'));
+      if (!m.mine && chat.openKind !== 'open_dm' && m.author) {
+        line.appendChild(el('div', 'kkt-who', m.author));
+      }
+      var body = m.text || (m.label ? '(' + m.label + ')' : '');
+      var bubble = el('div', 'kkt-bubble' + (m.text ? '' : ' media'), body);
+      var pair = el('div', 'kkt-pair');
+      pair.appendChild(bubble);
+      pair.appendChild(el('div', 'kkt-at', fmtTime(m.at)));
+      line.appendChild(pair);
+      chatLog.appendChild(line);
+    });
+    if (initial || nearBottom) chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function sendChat() {
+    if (!chat.openId || chat.sending) return;
+    var text = chatText.value;
+    if (!text.trim()) return;
+    chat.sending = true;
+    chatSend.disabled = true;
+    try {
+      await api('/panel/api/chat/send', { device_id: chat.deviceId, chat_id: chat.openId, text: text });
+      chatText.value = '';
+      autoGrow();
+      await loadThread(true);
+      loadChatList();
+    } catch (e) {
+      if (chatNote) chatNote.textContent = (e && e.status === 409)
+        ? '카카오 로그인이 끊겼습니다. 다시 등록해 주세요.'
+        : ((e && e.message) || '메시지를 보내지 못했습니다.');
+    } finally {
+      chat.sending = false;
+      chatSend.disabled = false;
+      chatText.focus();
+    }
+  }
+
+  document.getElementById('chat-dm-only').addEventListener('change', function () {
+    chat.dmOnly = this.checked;
+    loadChatList();
+  });
+  document.getElementById('chat-reload').addEventListener('click', function () { loadChatList(); });
+  document.getElementById('chat-back').addEventListener('click', function () {
+    if (kkt) kkt.setAttribute('data-view', 'list');
+    chat.openId = '';
+    if (chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
+    setComposeEnabled(false);
+    chatPeer.textContent = '대화를 고르세요';
+    markOpenRow('');
+  });
+  document.getElementById('chat-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    sendChat();
+  });
+  chatText.addEventListener('input', autoGrow);
+  chatText.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      sendChat();
+    }
+  });
 
   api('/panel/api/me').then(function (res) {
     me = res;
