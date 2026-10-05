@@ -515,13 +515,14 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
   const body = req.body || {};
   const deviceId = String(body.device_id || '');
   const chatId = String(body.chat_id || '');
-  const text = (typeof body.text === 'string' ? body.text : '').slice(0, 1000);
+  // 이름을 text 로 두면 위쪽의 auth-text 모듈(const text)을 가린다.
+  const msg = (typeof body.text === 'string' ? body.text : '').slice(0, 1000);
   if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
-  if (!text.trim()) return res.status(400).json({ ok: false, error: '보낼 내용을 입력해 주세요.' });
+  if (!msg.trim()) return res.status(400).json({ ok: false, error: '보낼 내용을 입력해 주세요.' });
   const row = await accountRow(s.key, deviceId);
   if (!row) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
   try {
-    const r = await senderCall('POST', '/v1/send', { device_id: deviceId, chat_id: chatId, text: text }, 20000);
+    const r = await senderCall('POST', '/v1/send', { device_id: deviceId, chat_id: chatId, text: msg }, 20000);
     if (!r.json.ok) {
       if (r.json.needs_register) return chatNeedsRegister(res);
       return res.status(502).json({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 뒤 다시 해 주세요.' });

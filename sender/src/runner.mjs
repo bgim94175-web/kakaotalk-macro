@@ -159,16 +159,20 @@ function credsOf(record) {
 
 // 채팅 화면용 보조 — 들어온 메시지를 사람이 읽을 미리보기로 바꾼다.
 // 글이 있으면 그대로, 없으면 종류만 알려 준다. 종류도 모르면 버린다(피드·알림 줄).
+// 이모티콘 종류는 라이브러리의 KAKAO_EMOTICON_KIND_BY_TYPE(6·12·20·22·25)를 따른다.
+// 모르는 종류라도 글이 아니라는 것만 알면 버리지 않는다 — 손님이 보낸 걸 놓치면 안 된다.
+// 피드(입퇴장 안내 등, type 0 이하)만 기록하지 않는다.
 function mediaLabel(type) {
-  switch (Number(type)) {
+  const t = Number(type)
+  if (!Number.isFinite(t) || t <= 0) return ''
+  switch (t) {
     case 2: case 16: case 27: return '사진'
     case 3: return '동영상'
     case 5: return '음성 메시지'
-    case 6: return '연락처'
-    case 12: case 17: case 20: return '이모티콘'
+    case 6: case 12: case 20: case 22: case 25: return '이모티콘'
     case 18: return '파일'
     case 71: return '링크'
-    default: return ''
+    default: return '메시지'
   }
 }
 
@@ -189,6 +193,12 @@ function atMs(v) {
   const n = Number(v)
   if (!Number.isFinite(n) || n <= 0) return 0
   return n < 1e12 ? Math.round(n * 1000) : Math.round(n)
+}
+
+// 카카오가 찍는 시각은 초 단위다. 우리가 보낸 글도 초로 맞춰야
+// 같은 초에 오간 글끼리 순서가 뒤집히지 않는다(그다음은 log_id 로 가린다).
+function nowAt() {
+  return Math.floor(Date.now() / 1000) * 1000
 }
 
 // log_id 는 큰 정수 문자열이다. 시각이 같을 때 순서를 가른다.
@@ -348,8 +358,11 @@ export class Hub {
       const base = byId.get(cid) || {
         chat_id: cid, list_kind: 'normal', title: '', display_name: '', members: 0, last_at: 0, last_text: '',
       }
-      base.last_at = Math.max(base.last_at || 0, conv.lastAt || 0)
-      base.last_text = conv.lastText || base.last_text || ''
+      // 더 최근 쪽의 미리보기를 쓴다. 버퍼가 거르는 글(피드 등)이 마지막일 수 있다.
+      const bufAt = conv.lastAt || 0
+      const catAt = base.last_at || 0
+      if (!(catAt > bufAt && base.last_text)) base.last_text = conv.lastText || base.last_text || ''
+      base.last_at = Math.max(catAt, bufAt)
       base.unread = conv.unread || 0
       base.peer = conv.peer || ''
       base.has_buffer = true
@@ -365,7 +378,7 @@ export class Hub {
       out.push({
         chat_id: ch.chat_id,
         list_kind: kind,
-        name: ch.title || ch.display_name || ch.peer || '',
+        name: ch.title || ch.display_name || ch.peer || (kind === 'open_room' ? '오픈채팅방' : ''),
         preview: ch.last_text || '',
         unread,
         last_at: ch.last_at || 0,
@@ -381,7 +394,9 @@ export class Hub {
     const slot = this.requireLive(id)
     const key = String(chatId)
     let conv = slot.inbox.get(key)
-    if ((!conv || conv.list.length < 5) && slot.client) {
+    // 과거 글은 그 방을 처음 열 때 한 번만 읽는다. 조건을 글 개수로 두면 글이 적은 방은
+    // 폴링마다(3초) 카카오를 다시 두드리게 된다 — 그러다 접속이 끊긴다.
+    if ((!conv || !conv.filled) && slot.client) {
       try {
         const msgs = await slot.client.getMessages(key, { count: 25 })
         const self = credsOf(slot.record).user_id
@@ -400,7 +415,9 @@ export class Hub {
             backfill: true,
           })
         }
-        conv = slot.inbox.get(key)
+        // 읽을 글이 하나도 없는 방도 기록을 만들어 둔다. 안 그러면 계속 다시 읽는다.
+        conv = slot.convFor(key)
+        conv.filled = true
       } catch (e) {
         if (!conv) throw e
       }
@@ -432,7 +449,7 @@ export class Hub {
       err.status = 502
       throw err
     }
-    slot.noteChat(String(chatId), { logId, text: String(text), mine: true, at: Date.now(), author: '', type: 1 })
+    slot.noteChat(String(chatId), { logId, text: String(text), mine: true, at: nowAt(), author: '', type: 1 })
     return { log_id: logId, kind: 'text' }
   }
 
@@ -507,6 +524,46 @@ class Slot {
     this.inbox = new Map()
     this.catalogCache = { at: 0, list: [] }
     this.catalogPromise = null
+    // 오픈채팅방 이름(오픈링크 ln). 방 이름은 잘 바뀌지 않으니 길게 들고 있는다.
+    this.linkNames = { at: 0, map: new Map() }
+  }
+
+  // getChats 는 resolveTitles 를 주지 않으면 title 을 채우지 않는다.
+  // 그대로 두면 오픈방 이름 자리에 멤버 닉네임을 이어 붙인 문자열이 올라온다.
+  // 그래서 매크로 쪽과 같은 방식으로 오픈링크 이름을 읽어 제목에 박는다.
+  async stampNames(list) {
+    const now = Date.now()
+    if (now - this.linkNames.at > 600000) {
+      try {
+        this.linkNames = { at: now, map: await openLinkNames(this.client, list) }
+      } catch {
+        this.linkNames = { at: now, map: this.linkNames.map }
+      }
+    }
+    return stampOpenLinkTitles(list, this.linkNames.map)
+  }
+
+  // 그 방의 기록을 꺼낸다. 없으면 만든다.
+  // 프로세스가 다시 떠서 처음 만드는 방이면, 카카오가 세어 둔 안 읽음 수에서 이어 센다
+  // (그래야 새 글 하나가 왔을 때 23 → 1 로 줄어들지 않는다).
+  convFor(id) {
+    let conv = this.inbox.get(id)
+    if (conv) return conv
+    if (this.inbox.size >= 240) {
+      let oldestKey = null
+      let oldestAt = Infinity
+      for (const [k, c] of this.inbox) {
+        if ((c.lastAt || 0) < oldestAt) { oldestAt = c.lastAt || 0; oldestKey = k }
+      }
+      if (oldestKey != null) this.inbox.delete(oldestKey)
+    }
+    let seed = 0
+    for (const row of this.catalogCache.list || []) {
+      if (row.chat_id === id) { seed = row.unread_count || 0; break }
+    }
+    conv = { chatId: id, list: [], unread: seed, lastAt: 0, lastText: '', lastMine: false, peer: '', filled: false }
+    this.inbox.set(id, conv)
+    return conv
   }
 
   // 한 메시지를 그 방의 기록에 넣는다. log_id 로 중복을 막고, 최근 80개만 남긴다.
@@ -517,22 +574,10 @@ class Slot {
     const text = typeof m.text === 'string' ? m.text : ''
     if (!recordable(text, m.type)) return
     const logId = m.logId ? String(m.logId) : ''
-    let conv = this.inbox.get(id)
-    if (!conv) {
-      if (this.inbox.size >= 240) {
-        let oldestKey = null
-        let oldestAt = Infinity
-        for (const [k, c] of this.inbox) {
-          if ((c.lastAt || 0) < oldestAt) { oldestAt = c.lastAt || 0; oldestKey = k }
-        }
-        if (oldestKey != null) this.inbox.delete(oldestKey)
-      }
-      conv = { chatId: id, list: [], unread: 0, lastAt: 0, lastText: '', lastMine: false, peer: '' }
-      this.inbox.set(id, conv)
-    }
+    const conv = this.convFor(id)
     if (logId && conv.list.some((x) => x.log_id === logId)) return
-    const at = atMs(m.at) || Date.now()
-    conv.list.push({
+    const at = atMs(m.at) || nowAt()
+    const row = {
       log_id: logId,
       text,
       mine: !!m.mine,
@@ -541,15 +586,17 @@ class Slot {
       // 이름은 캐시가 비면 빈 값이 온다. 말풍선을 사람별로 묶을 때는 이 아이디를 쓴다.
       author_id: m.authorId ? String(m.authorId) : '',
       type: m.type == null ? null : m.type,
-    })
+    }
+    conv.list.push(row)
     conv.list.sort((a, b) => (a.at - b.at) || cmpLog(a.log_id, b.log_id))
     if (conv.list.length > 80) conv.list = conv.list.slice(-80)
+    // 미리보기는 가장 마지막 글이지만, 상대 이름은 방금 넣은 글에서 가져온다.
     const last = conv.list[conv.list.length - 1]
     conv.lastAt = last.at
     conv.lastText = previewText(last.text, last.type)
     conv.lastMine = last.mine
-    if (!m.mine && last.author) conv.peer = last.author
-    if (!m.mine && !m.backfill) conv.unread = Math.min(conv.unread + 1, 999)
+    if (!row.mine && row.author) conv.peer = row.author
+    if (!row.mine && !m.backfill) conv.unread = Math.min(conv.unread + 1, 999)
   }
 
   // 방 목록 캐시. 열려 있는 세션의 채팅 목록을 가볍게 읽어 둔다(오픈링크 이름 조회는 빼서 빠르게).
@@ -562,8 +609,9 @@ class Slot {
     const run = () => {
       if (this.catalogPromise) return this.catalogPromise
       this.catalogPromise = (async () => {
-        const list = await this.client.getChats({ all: true })
-        const mapped = (Array.isArray(list) ? list : []).map((ch) => {
+        const raw = await this.client.getChats({ all: true })
+        const list = await this.stampNames(Array.isArray(raw) ? raw : [])
+        const mapped = list.map((ch) => {
           const listKind = roomListKind(ch)
           const title = listKind === 'open_room' ? (roomTitle(ch) || '') : (ch.title || '')
           const lm = ch.last_message
@@ -571,7 +619,8 @@ class Slot {
             chat_id: String(ch.chat_id),
             list_kind: listKind,
             title: title || '',
-            display_name: ch.display_name || '',
+            // 단체방에서 멤버 닉네임을 이은 문자열은 방 이름이 아니다 (room-kind.mjs 와 같은 규칙).
+            display_name: listKind === 'open_room' ? '' : (ch.display_name || ''),
             members: ch.active_members || 0,
             last_at: lm ? atMs(lm.sent_at) : 0,
             last_text: lm && typeof lm.message === 'string' ? lm.message : '',
@@ -773,7 +822,7 @@ class Slot {
       logId: ev.log_id ? String(ev.log_id) : '',
       text: typeof ev.message === 'string' ? ev.message : '',
       mine: author.length > 0 && author === creds.user_id,
-      at: ev.sent_at || Date.now(),
+      at: ev.sent_at || nowAt(),
       author: ev.author_name || '',
       authorId: author,
       type: ev.message_type,
@@ -1173,7 +1222,10 @@ class Slot {
       const res = extra
         ? await this.writeMention(s.chatId, s.text, extra)
         : await this.client.sendMessage(s.chatId, s.text)
-      if (!realLogId(res && res.log_id)) log(this.id, `send missing log id chat ${s.chatId}`)
+      const sentId = realLogId(res && res.log_id)
+      if (!sentId) log(this.id, `send missing log id chat ${s.chatId}`)
+      // 자동응답·안내도 채팅 화면에 남긴다. 안 그러면 답한 줄 모르고 또 답하게 된다.
+      else this.noteChat(String(s.chatId), { logId: sentId, text: String(s.text || ''), mine: true, at: nowAt(), type: 1 })
     } catch (e) {
       await this.onError(e)
       log(this.id, `send failed: ${e && e.code ? e.code : e}`)
@@ -1204,7 +1256,9 @@ class Slot {
       }
       try {
         const res = await this.client.sendMessage(room.chatId, String(macro.message))
-        if (!realLogId(res && res.log_id)) throw new Error('undelivered')
+        const sentId = realLogId(res && res.log_id)
+        if (!sentId) throw new Error('undelivered')
+        this.noteChat(String(room.chatId), { logId: sentId, text: String(macro.message), mine: true, at: nowAt(), type: 1 })
         const withImages = noteMacroSent(this.record, room.key, Date.now())
         if (withImages) await this.sendStoredImages(room.chatId)
       } catch (e) {

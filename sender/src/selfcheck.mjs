@@ -554,13 +554,20 @@ chatSlot.client = {
 chatSlot.noteChat('5', { logId: '100', text: '로벅 사려고요', mine: false, at: SEC, author: '구매자', type: 1 })
 chatSlot.noteChat('5', { logId: '100', text: '중복', mine: false, at: SEC, author: '구매자', type: 1 })
 chatSlot.noteChat('5', { logId: '101', text: '', mine: false, at: SEC + 60, author: '구매자', type: 2 })
-chatSlot.noteChat('5', { logId: '102', text: '', mine: false, at: SEC + 90, type: 999 })
+chatSlot.noteChat('5', { logId: '102', text: '', mine: false, at: SEC + 90, type: 0 })
 const conv5 = chatSlot.inbox.get('5')
 if (!conv5 || conv5.list.length !== 2) throw new Error('chat: dedupe/record failed')
 if (conv5.unread !== 2) throw new Error('chat: unread count wrong')
 if (conv5.lastText !== '(사진)') throw new Error('chat: media preview wrong')
 if (conv5.peer !== '구매자') throw new Error('chat: peer not tracked')
 if (conv5.list[0].at !== SEC * 1000) throw new Error('chat: 초 단위 sent_at 을 ms 로 바꾸지 않았다')
+// 글이 아닌 메시지: 모르는 종류라도 남겨야 손님이 보낸 걸 놓치지 않는다. 피드만 버린다.
+chatSlot.noteChat('77', { logId: '401', text: '', mine: false, at: SEC, author: '손님', type: 22 })
+const conv77 = chatSlot.inbox.get('77')
+if (!conv77 || conv77.list.length !== 1) throw new Error('chat: 이모티콘(22) 을 버렸다')
+if (conv77.lastText !== '(이모티콘)') throw new Error('chat: 이모티콘 미리보기가 틀리다')
+chatSlot.noteChat('77', { logId: '402', text: '', mine: false, at: SEC + 10, type: 0 })
+if (chatSlot.inbox.get('77').list.length !== 1) throw new Error('chat: 피드를 기록했다')
 if (conv5.lastAt !== (SEC + 60) * 1000) throw new Error('chat: lastAt 이 ms 가 아니다')
 
 const chatHub = new Hub()
@@ -588,8 +595,10 @@ const photoRow = t5.find((m) => m.log_id === '101')
 if (!photoRow || photoRow.label !== '사진') throw new Error('chat: media label wrong')
 
 const backfillSlot = new Slot('bf', { credentials: { user_id: '111' }, needs_register: false })
+let backfillReads = 0
 backfillSlot.client = {
   async getMessages() {
+    backfillReads += 1
     return [
       { log_id: '201', message: '백필1', author_id: '222', sent_at: SEC - 20 },
       { log_id: '202', message: '백필2', author_id: '111', sent_at: SEC - 10 },
@@ -602,5 +611,17 @@ if (bf.length !== 2 || bf[1].mine !== true) throw new Error('chat: backfill wron
 // 말풍선을 사람별로 묶으려면 보낸 사람 아이디가 화면까지 가야 한다
 if (bf[0].author_id !== '222') throw new Error('chat: 보낸 사람 아이디를 넘기지 않았다')
 if (backfillSlot.inbox.get('7').unread !== 0) throw new Error('chat: backfill must not create unread')
+// 폴링은 3초마다 같은 방을 읽는다. 과거 글은 처음 한 번만 읽어야 한다.
+await chatHub.thread('bf', '7')
+await chatHub.thread('bf', '7')
+if (backfillReads !== 1) throw new Error('chat: 방을 다시 볼 때마다 과거 글을 또 읽는다 (' + backfillReads + '회)')
+// 읽을 글이 없는 방도 한 번만 읽고 만다
+const emptySlot = new Slot('empty', { credentials: { user_id: '111' }, needs_register: false })
+let emptyReads = 0
+emptySlot.client = { async getMessages() { emptyReads += 1; return [] } }
+chatHub.accounts.set('empty', emptySlot)
+await chatHub.thread('empty', '8')
+await chatHub.thread('empty', '8')
+if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 (' + emptyReads + '회)')
 
 process.stdout.write('sender selfcheck ok\n')

@@ -797,7 +797,7 @@
   // 목록은 9초, 열린 방은 3초마다 새로 읽는다. 방을 열면 그 방의 안 읽음은 서버에서 0 이 된다.
   var chat = {
     deviceId: '', openId: '', openName: '', openKind: '',
-    dmOnly: false, listBusy: false, roomBusy: false, roomAgain: false, sending: false,
+    dmOnly: false, listBusy: false, listAgain: false, roomBusy: false, roomAgain: false, sending: false,
     listTimer: null, roomTimer: null, roomSig: '', listSig: '', renderedIds: {},
   };
   var kkt = document.getElementById('kkt');
@@ -890,6 +890,7 @@
     chat.listSig = '';
     chat.renderedIds = {};
     chat.roomAgain = false;
+    chat.listAgain = false;
     if (kkt) kkt.setAttribute('data-view', 'list');
     if (chatRooms) chatRooms.textContent = '';
     if (chatLog) chatLog.textContent = '';
@@ -913,8 +914,13 @@
     }, 9000);
   }
 
-  async function loadChatList() {
-    if (chat.listBusy || !chat.deviceId) return;
+  async function loadChatList(force) {
+    if (!chat.deviceId) return;
+    // 읽는 중에 새로고침을 누르면 무시하지 말고, 끝난 뒤에 한 번 더 읽는다.
+    if (chat.listBusy) {
+      if (force) chat.listAgain = true;
+      return;
+    }
     chat.listBusy = true;
     var want = chat.deviceId;
     try {
@@ -935,6 +941,10 @@
       }
     } finally {
       chat.listBusy = false;
+      if (chat.listAgain) {
+        chat.listAgain = false;
+        loadChatList(false);
+      }
     }
   }
 
@@ -1006,6 +1016,9 @@
       else chatHeadAva.style.setProperty('--ava', avaColor(name));
     }
     if (chatHeadSub) chatHeadSub.textContent = isDm ? '오픈프로필 갠톡' : (kind === 'open_room' ? '오픈채팅방' : '채팅');
+    // 쓰던 글은 방을 옮길 때 지운다. 남겨 두면 엉뚱한 사람에게 보내게 된다.
+    chatText.value = '';
+    autoGrow();
     setComposeEnabled(true);
     updateComposeState();
     if (kkt) kkt.setAttribute('data-view', 'room');
@@ -1036,6 +1049,8 @@
       // 기다리는 사이에 방이나 계정이 바뀌었으면 늦게 온 응답은 버린다.
       if (chat.openId !== wantRoom || chat.deviceId !== wantDevice) return;
       renderThread(res.messages || [], initial);
+      // 잠깐 끊겼다가 돌아오면 입력창도 되살린다. 안 그러면 방을 다시 열기 전까지 못 쓴다.
+      setComposeEnabled(true);
     } catch (e) {
       if (chat.openId !== wantRoom || chat.deviceId !== wantDevice) return;
       if (e && e.status === 409) {
@@ -1141,8 +1156,9 @@
         : ((e && e.message) || '메시지를 보내지 못했습니다.');
     } finally {
       chat.sending = false;
-      chatSend.disabled = false;
-      chatText.focus();
+      // 보내는 사이에 방을 닫았을 수 있다. 그때는 입력창을 다시 켜지 않는다.
+      setComposeEnabled(!!chat.openId);
+      if (chat.openId) chatText.focus();
     }
   }
 
@@ -1150,11 +1166,14 @@
     chat.dmOnly = this.checked;
     loadChatList();
   });
-  document.getElementById('chat-reload').addEventListener('click', function () { loadChatList(); });
+  document.getElementById('chat-reload').addEventListener('click', function () { loadChatList(true); });
   document.getElementById('chat-back').addEventListener('click', function () {
     if (kkt) kkt.setAttribute('data-view', 'list');
     chat.openId = '';
     if (chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
+    chatText.value = '';
+    autoGrow();
+    updateComposeState();
     setComposeEnabled(false);
     chatPeer.textContent = '대화를 고르세요';
     clearHead();
