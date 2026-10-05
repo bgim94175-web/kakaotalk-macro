@@ -20,9 +20,16 @@
   --band-snipe: #4a4450;
   --band-cover: #5a3d45;
   --band-chat: #2f5d50;
+
+  /* 구매 사이트(style.css)와 같은 깊이 단계 */
+  --sh-sm: 0 1px 2px rgba(16,36,58,.05);
+  --sh-md: 0 6px 18px -10px rgba(16,36,58,.28), 0 1px 3px rgba(16,36,58,.05);
 }
 
 * { box-sizing: border-box; }
+
+/* hidden 속성은 어떤 display 규칙보다 우선한다 (.kkt 처럼 display 를 지정한 요소 때문에 필요하다) */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -45,9 +52,12 @@ body {
 .skip:focus { left: 8px; top: 8px; z-index: 30; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+/* 이 머리글은 페이지 제목까지 품고 있어 높다. 고정하면 폰 화면을 그만큼 먹고
+   본문의 바로가기로 이동했을 때 제목을 가린다 — 고정하지 않는다. */
 .top {
   background: var(--paper);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 10px 24px -24px rgba(16, 36, 58, 0.7);
 }
 .bar, .pagehead, main {
   width: min(720px, calc(100% - 28px));
@@ -116,9 +126,11 @@ main { padding: 16px 0 40px; }
 .card {
   background: var(--paper);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 0 16px 16px;
   margin: 0 0 22px;
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
 }
 .card > h2 {
   margin: 0 -16px 14px;
@@ -149,12 +161,12 @@ input[type="text"], input[type="password"], input[type="number"], input:not([typ
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 10px;
   background: #fff;
   color: var(--ink);
   font: inherit;
   font-size: 16px;
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 textarea { resize: vertical; min-height: 96px; }
 input[type="number"] { max-width: 140px; }
@@ -176,18 +188,20 @@ input[type="number"] { max-width: 140px; }
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
-  border-radius: 6px;
+  border-radius: 10px;
   min-height: 44px;
   padding: 8px 14px;
   font: inherit;
   font-weight: 650;
   cursor: pointer;
   text-align: center;
+  box-shadow: 0 3px 10px -4px rgba(31, 75, 58, 0.55);
 }
 .btn.ghost {
   background: #fff;
   color: var(--ink);
   border-color: var(--line);
+  box-shadow: none;
 }
 .btn:disabled { opacity: 0.55; cursor: default; }
 .error {
@@ -203,7 +217,7 @@ input[type="number"] { max-width: 140px; }
 .strip {
   border: 1px solid var(--ok-line);
   background: var(--ok-bg);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 12px 14px;
   margin-bottom: 16px;
 }
@@ -216,9 +230,10 @@ input[type="number"] { max-width: 140px; }
   gap: 12px;
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 11px 13px;
   background: #fff;
+  box-shadow: var(--sh-sm);
 }
 .account strong { display: block; overflow-wrap: anywhere; }
 .account span { color: var(--muted); font-size: 13px; }
@@ -267,7 +282,7 @@ input[type="number"] { max-width: 140px; }
 }
 fieldset {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   margin: 0;
   padding: 10px 12px 12px;
   min-width: 0;
