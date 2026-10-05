@@ -41,14 +41,32 @@ if (!has('사과')) throw new Error('dict missing 사과')
 if (!correct(0, '서울')) throw new Error('quiz')
 
 const kinds = [
-  ['OM', 'open_room'], ['OD', 'open_dm'], ['OpenMultiChat', 'open_room'], ['OpenDirectChat', 'open_dm'],
-  [2, 'open_room'], [13, 'open_room'], [15, 'open_room'], [14, 'open_dm'], [16, 'open_dm'],
-  ['DirectChat', 'normal'], ['MultiChat', 'normal'], [11, 'normal'], [10, 'normal'],
-  ['PlusChat', 'normal'], ['MemoChat', 'normal'],
+  [{ type: 'OM' }, 'open_room'],
+  [{ type: 'OD' }, 'open_dm'],
+  [{ type: 'OpenMultiChat' }, 'open_room'],
+  [{ type: 'OpenDirectChat' }, 'open_dm'],
+  [{ type: 2, display_name: '김, 이, 박', active_members: 4 }, 'normal'],
+  [{ type: 13 }, 'normal'],
+  [{ type: 15 }, 'normal'],
+  [{ type: 14 }, 'open_dm'],
+  [{ type: 16 }, 'open_dm'],
+  [{ type: 'DirectChat' }, 'normal'],
+  [{ type: 'MultiChat' }, 'normal'],
+  [{ type: 11 }, 'normal'],
+  [{ type: 10 }, 'normal'],
+  [{ type: 'PlusChat' }, 'normal'],
+  [{ type: 'MemoChat' }, 'normal'],
+  [{ type: 2, link_id: '9', display_name: '김, 이, 박', title: '김, 이, 박', active_members: 4 }, 'normal'],
+  [{ type: 2, link_id: '9', title: '동네모임', display_name: '김, 이, 박', active_members: 4 }, 'open_room'],
+  [{ type: 2, link_id: '9', title: '홍길동', display_name: '홍길동', active_members: 2 }, 'open_dm'],
+  [{ type: 13, link_id: '9', title: '모임방', display_name: '김, 이', active_members: 3 }, 'open_room'],
+  [{ type: 13, link_id: '9', display_name: '김, 이', active_members: 3 }, 'normal'],
+  [{ type: 'OM', title: '김, 이, 박', display_name: '김, 이, 박' }, 'open_room'],
+  [{ type: 15, link_id: '3', title: '별명방', display_name: '가, 나', active_members: 2 }, 'open_room'],
 ]
-for (const [type, want] of kinds) {
-  const got = roomListKind({ type })
-  if (got !== want) throw new Error(`room kind ${type} -> ${got}, want ${want}`)
+for (const [ch, want] of kinds) {
+  const got = roomListKind(ch)
+  if (got !== want) throw new Error(`room kind ${JSON.stringify(ch)} -> ${got}, want ${want}`)
 }
 
 const roomKey = parseRoomKey('0\u0001공지').key

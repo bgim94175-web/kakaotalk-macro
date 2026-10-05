@@ -270,28 +270,66 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
   res.json({ ok: true, ...view });
 }));
 
+async function sessionReady(deviceId) {
+  if (!sender.up()) return false;
+  try {
+    const snap = await snapshot(deviceId);
+    return !!(snap && snap.linked && !snap.needs_register);
+  } catch (e) {
+    return false;
+  }
+}
+
+function waitingView(deviceId) {
+  return { ok: true, state: 'waiting', text: '', device_id: deviceId };
+}
+
+function okView(deviceId) {
+  return { ok: true, state: 'ok', text: '', device_id: deviceId };
+}
+
 router.post('/panel/api/register/confirm', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
-  if (!sender.up()) return senderDown(res);
   const pendingId = String((req.body && req.body.pending_id) || '');
   const row = await db.one(
     'SELECT pending_id, device_id, email, expires_at FROM panel_pending WHERE pending_id=$1 AND license_key=$2',
     [pendingId, s.key]);
-  if (!row || Number(row.expires_at) < Date.now()) {
+  if (row && await accountRow(s.key, row.device_id)) return res.json(okView(row.device_id));
+  const expired = !row || Number(row.expires_at) < Date.now();
+  if (expired) {
+    if (row && !sender.up()) return res.json(waitingView(row.device_id));
+    if (row && await sessionReady(row.device_id)) {
+      await rememberAccount(s.key, row.device_id, row.email, Date.now());
+      return res.json(okView(row.device_id));
+    }
     if (row) await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
     return res.json({ ok: true, state: 'expired', text: text.customerText({ state: 'expired' }) });
   }
+  if (await sessionReady(row.device_id)) {
+    await rememberAccount(s.key, row.device_id, row.email, Date.now());
+    return res.json(okView(row.device_id));
+  }
+  if (!sender.up()) return res.json(waitingView(row.device_id));
   let out;
   try {
-    const r = await senderCall('POST', '/v1/register/confirm', { pending_id: pendingId }, 120000);
+    const r = await senderCall('POST', '/v1/register/confirm', { pending_id: pendingId }, 20000);
     out = r.json;
   } catch (e) {
-    if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
-    return res.status(502).json({ ok: false, error: '카카오 서버에 연결하지 못했습니다.' });
+    if (await sessionReady(row.device_id)) {
+      await rememberAccount(s.key, row.device_id, row.email, Date.now());
+      return res.json(okView(row.device_id));
+    }
+    return res.json(waitingView(row.device_id));
   }
-  if (!out || out.ok === false) return res.status(502).json({ ok: false, error: '카카오 서버에 연결하지 못했습니다.' });
-  if (out.state === 'ok') {
+  if (!out || out.ok === false) {
+    if (await sessionReady(row.device_id)) {
+      await rememberAccount(s.key, row.device_id, row.email, Date.now());
+      return res.json(okView(row.device_id));
+    }
+    return res.json(waitingView(row.device_id));
+  }
+  if (out.state === 'ok' || (out.state === 'expired' && await sessionReady(row.device_id))) {
     const still = await db.one(
       'SELECT pending_id FROM panel_pending WHERE pending_id=$1 AND license_key=$2',
       [pendingId, s.key]);
@@ -300,7 +338,7 @@ router.post('/panel/api/register/confirm', wrap(async (req, res) => {
       return res.json({ ok: true, state: 'expired', text: text.customerText({ state: 'expired' }) });
     }
     await rememberAccount(s.key, row.device_id, row.email, Date.now());
-    await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
+    out = { state: 'ok' };
   } else if (out.state !== 'waiting') {
     await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
   }

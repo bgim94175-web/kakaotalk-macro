@@ -39,10 +39,15 @@
     var res = await fetch(path, opt);
     var json = null;
     try { json = await res.json(); } catch (e) { json = null; }
-    if (!json) throw new Error('응답을 읽지 못했습니다.');
+    if (!json) {
+      var unreadable = new Error('응답을 읽지 못했습니다.');
+      unreadable.status = res.status;
+      throw unreadable;
+    }
     if (!res.ok || json.ok === false) {
       var err = new Error(json.error || '처리하지 못했습니다.');
       err.body = json;
+      err.status = res.status;
       throw err;
     }
     return json;
@@ -448,13 +453,30 @@
     document.getElementById('code').textContent = '';
   }
 
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
   async function confirmLoop() {
     if (confirming) return;
     confirming = true;
     stopConfirm = false;
     try {
       while (!stopConfirm && pendingId) {
-        var view = await api('/panel/api/register/confirm', { pending_id: pendingId });
+        var view = null;
+        try {
+          view = await api('/panel/api/register/confirm', { pending_id: pendingId });
+        } catch (e) {
+          if (stopConfirm) return;
+          if (e && (e.status === 401 || e.status === 403)) {
+            say('code-error', e.message || '다시 로그인해 주세요.');
+            return;
+          }
+          document.getElementById('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
+          say('code-error', '연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.');
+          await sleep(2000);
+          continue;
+        }
         if (stopConfirm) return;
         if (view.state === 'ok') {
           document.getElementById('add-form').dataset.reauth = '';
@@ -466,14 +488,14 @@
         }
         if (view.state === 'waiting') {
           document.getElementById('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
+          say('code-error', '');
+          await sleep(2000);
           continue;
         }
         showPass(view);
         document.getElementById('code-wait').textContent = '';
         return;
       }
-    } catch (e) {
-      say('code-error', e.message);
     } finally {
       confirming = false;
     }

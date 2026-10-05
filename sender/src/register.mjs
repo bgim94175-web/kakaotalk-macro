@@ -192,7 +192,8 @@ export async function confirmLogin(hub, input) {
     return failBody(again.error || 'login_failed', again.message || '', statusOf(again), tablet)
   } catch (e) {
     row.running = false
-    return failBody('upstream_error', e && e.message ? e.message : 'login_failed', statusOf(e), tablet)
+    process.stderr.write('[sender] register confirm interrupted\n')
+    return { state: 'waiting' }
   }
 }
 

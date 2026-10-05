@@ -143,17 +143,20 @@ export class Hub {
 
   async chats(id) {
     const slot = this.requireLive(id)
-    const list = await slot.client.getChats({ all: true })
-    return list.map((ch) => ({
-      chat_id: String(ch.chat_id),
-      kind: classifyKakaoChat(ch),
-      type: ch.type,
-      list_kind: roomListKind(ch),
-      title: ch.title || null,
-      display_name: ch.display_name || null,
-      members: ch.active_members,
-      last_at: ch.last_message ? ch.last_message.sent_at : 0,
-    }))
+    const list = await slot.client.getChats({ all: true, resolveTitles: true })
+    return list.map((ch) => {
+      const listKind = roomListKind(ch)
+      return {
+        chat_id: String(ch.chat_id),
+        kind: classifyKakaoChat(ch),
+        type: ch.type,
+        list_kind: listKind,
+        title: ch.title || null,
+        display_name: listKind === 'open_room' ? null : (ch.display_name || null),
+        members: ch.active_members,
+        last_at: ch.last_message ? ch.last_message.sent_at : 0,
+      }
+    })
   }
 
   async recent(id, chatId) {

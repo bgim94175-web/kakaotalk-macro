@@ -118,6 +118,22 @@ export function patchKakaoLibrary() {
   let media = readFileSync(mediaPath, 'utf8')
   media = replaceOnce('post size', media, 's: totalSize,', 's: Long.fromNumber(totalSize),')
   writeFileSync(mediaPath, media)
+
+  const clientPath = join(base, 'client.js')
+  let client = readFileSync(clientPath, 'utf8')
+  client = replaceOnce(
+    'chat link id',
+    client,
+    `        title,
+        active_members: chat.a,`,
+    `        title,
+        link_id: (() => {
+            const link = getOpenLinkId(chat);
+            return link ? longToString(link) : null;
+        })(),
+        active_members: chat.a,`,
+  )
+  writeFileSync(clientPath, client)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
