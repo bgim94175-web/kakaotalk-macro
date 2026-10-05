@@ -26,6 +26,7 @@ import {
   realId,
   visitEventsFromMessage,
   visitMentionExtra,
+  visitMemberId,
   visitNeedsProfile,
 } from './features.mjs'
 import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
@@ -355,6 +356,7 @@ class Slot {
     this.visitEntered = new Set()
     this.visitLogs = new Set()
     this.unpush = null
+    this.mentionSeq = 0
   }
 
   async start() {
@@ -563,35 +565,22 @@ class Slot {
     const chatId = String(ev.chat_id || '')
     let author = memberId(ev.member)
     let authorName = typeof ev.author_name === 'string' ? ev.author_name.trim() : ''
-    if (!author && authorName && this.client && visitNeedsProfile(this.record, chatId)) {
-      try {
-        author = await this.memberIdByName(chatId, authorName)
-      } catch (e) {
-        await this.onError(e)
-      }
-    }
-    if (this.record.needs_register) return
-    let mine = author.length > 0 && author === creds.user_id
     let profileLink = ''
-    if (!mine && this.client && visitNeedsProfile(this.record, chatId) && (author || authorName)) {
+    if (this.client && visitNeedsProfile(this.record, chatId) && (author || authorName)) {
       try {
-        let card = author ? await this.memberCard(chatId, author) : { name: '', link: '', userId: '' }
-        if (!card.userId && authorName) {
-          const found = await this.memberIdByName(chatId, authorName)
-          if (found) {
-            author = found
-            card = await this.memberCard(chatId, found)
-          }
-        }
-        if (card.userId) author = card.userId
-        if (card.name) authorName = card.name
-        profileLink = card.link
-        mine = author.length > 0 && author === creds.user_id
+        const lookedUp = authorName ? await this.memberIdByName(chatId, authorName) : ''
+        const cardFor = lookedUp || author
+        const card = cardFor ? await this.memberCard(chatId, cardFor) : { name: '', link: '', userId: '' }
+        const resolved = visitMemberId(author, authorName, lookedUp, card)
+        author = resolved.userId
+        if (resolved.name) authorName = resolved.name
+        if (author && card.link && (!card.userId || card.userId === author)) profileLink = card.link
       } catch (e) {
         await this.onError(e)
       }
     }
     if (this.record.needs_register) return
+    const mine = author.length > 0 && author === creds.user_id
     const guard = guardOnChat(this.record, {
       kind,
       chatId,
@@ -839,12 +828,16 @@ class Slot {
   }
 
   async writeMention(chatId, text, extra) {
+    this.mentionSeq += 1
+    const msgId = Long.fromNumber(this.mentionSeq)
     const response = await this.client.executeWithReconnect(async ({ session }) => {
       return session.getConnection().sendPacket('WRITE', {
         chatId: Long.fromString(String(chatId)),
+        msgId,
         msg: text,
         type: 1,
         noSeen: false,
+        scope: 1,
         extra,
       })
     })

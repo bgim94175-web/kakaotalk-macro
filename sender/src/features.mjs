@@ -1486,32 +1486,55 @@ function visitNotice(row, kind) {
   return { text, mention: { userId, at: start, len: name.length } }
 }
 
-function utf8Len(text) {
-  return Buffer.byteLength(String(text), 'utf8')
+function mentionIdJson(id) {
+  let n
+  try {
+    n = BigInt(id)
+  } catch {
+    return ''
+  }
+  if (n <= 0n) return ''
+  if (n <= BigInt(Number.MAX_SAFE_INTEGER)) return id
+  return JSON.stringify(id)
+}
+
+/**
+ * The open-chat member id Kakao mentions, not the enter line's author.
+ * A unique member-list match wins. A member card is used only when its
+ * nickname is that person. A card for someone else is dropped. When the
+ * member list has not caught up, the feed id is kept.
+ */
+export function visitMemberId(feedId, name, lookedUpId, card) {
+  const feed = /^[1-9][0-9]*$/.test(String(feedId || '')) ? String(feedId) : ''
+  const found = /^[1-9][0-9]*$/.test(String(lookedUpId || '')) ? String(lookedUpId) : ''
+  const cardId = card && /^[1-9][0-9]*$/.test(String(card.userId || '')) ? String(card.userId) : ''
+  const cardName = String(card && card.name || '').trim()
+  const want = String(name || '').trim()
+  if (found) return { userId: cardId || found, name: cardName || want }
+  if (cardId && cardName && want && cardName !== want) return { userId: '', name: want }
+  if (cardId) return { userId: cardId, name: cardName || want }
+  return { userId: feed, name: want }
 }
 
 /**
  * One WRITE mention of one open-chat member.
- * Kakao reads at and len as UTF-8 bytes, and user_id must be that member's id
- * as a number. A character index in a Korean header is ignored and the name
- * stays plain text. The span is the nickname after @.
+ * Kakao's at is the 1-based order of that mention in the message, not a
+ * character or UTF-8 index. len is the nickname length in characters.
+ * user_id is a JSON number when it fits in a safe integer, and a decimal
+ * string when it is a larger int64. Open chat uses this same extra.
+ * A byte offset is ignored and the name stays plain text.
  */
 export function visitMentionExtra(text, mention) {
   if (!text || !mention) return ''
-  const id = String(mention.userId || '')
-  const at = Number(mention.at)
+  const idJson = mentionIdJson(String(mention.userId || ''))
   const len = Number(mention.len)
-  if (!/^[1-9][0-9]*$/.test(id)) return ''
-  if (!Number.isInteger(at) || at < 1 || !Number.isInteger(len) || len < 1) return ''
-  if (at + len > text.length) return ''
-  if (text.charAt(at - 1) !== '@') return ''
+  if (!idJson) return ''
+  if (!Number.isInteger(len) || len < 1) return ''
   const mark = text.indexOf('@')
-  if (mark !== at - 1) return ''
-  const name = text.slice(at, at + len)
-  const byteAt = utf8Len(text.slice(0, at))
-  const byteLen = utf8Len(name)
-  if (byteAt < 1 || byteLen < 1) return ''
-  return `{"mentions":[{"user_id":${id},"at":[${byteAt}],"len":${byteLen}}]}`
+  if (mark < 0 || text.indexOf('@', mark + 1) >= 0) return ''
+  if (text.slice(mark + 1, mark + 1 + len).length !== len) return ''
+  if (text.charAt(mark + 1 + len) && text.charAt(mark + 1 + len) !== '\n') return ''
+  return `{"mentions":[{"user_id":${idJson},"at":[1],"len":${len}}]}`
 }
 
 /**
