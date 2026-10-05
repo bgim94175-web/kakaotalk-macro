@@ -1465,29 +1465,20 @@ function timeLines(times) {
   return times.map((t) => '- ' + kstStamp(t))
 }
 
-const VISIT_RULE = '————————-'
-
-function visitNotice(row) {
+function visitNotice(row, kind) {
   const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
   const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
   const link = row && row.link ? row.link : '찾지 못했습니다'
   const mentioned = !!(userId && name)
   const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
-  const joins = timeLines(row && row.joins)
-  const leaves = row && row.leaves && row.leaves.length
-    ? timeLines(row.leaves)
-    : ['- 아직 나간 기록이 없습니다']
+  const leave = kind === 'leave'
+  const times = timeLines(leave ? (row && row.leaves) : (row && row.joins))
   const text = [
-    '[들낙방지]',
+    leave ? '[퇴장안내]' : '[입장안내]',
     nameLine,
-    '옾링 : ' + link,
-    VISIT_RULE,
-    '입장로그',
-    ...joins,
-    '',
-    VISIT_RULE,
-    '퇴장로그',
-    ...leaves,
+    '올링 : ' + link,
+    leave ? '퇴장로그' : '입장로그',
+    ...times,
   ].join('\n')
   if (!mentioned) return { text, mention: null }
   const at = text.indexOf('\n이름 : @')
@@ -1511,8 +1502,8 @@ export function visitMentionExtra(text, mention) {
 }
 
 /**
- * Record a join or leave for a watched room. A join also queues one notice.
- * Leaves are stored and are not announced.
+ * Record a join or leave for a watched room and queue that one notice.
+ * An enter lists join times. A leave lists leave times. The other log stays out.
  */
 function applyVisit(record, ev, sends) {
   if (!ev || (ev.kind !== 'join' && ev.kind !== 'leave')) return false
@@ -1525,8 +1516,7 @@ function applyVisit(record, ev, sends) {
   const v = visitState(record)
   if (visitSeen(v, String(room.chat_id), who, ev.kind, now)) return true
   const row = rememberPerson(v, String(room.chat_id), who, now, ev.kind, ev.profileLink)
-  if (ev.kind !== 'join') return true
-  const notice = visitNotice(row)
+  const notice = visitNotice(row, ev.kind)
   sends.push({
     chatId: String(room.chat_id),
     text: notice.text,

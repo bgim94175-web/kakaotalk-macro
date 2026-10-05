@@ -223,31 +223,39 @@ const quietJoin = guardOnChat(quietVisit, {
 })
 if (quietJoin.sends.length !== 0 || quietVisit.runtime.visit) throw new Error('join notice is off by default')
 const firstVisit = visitRecord()
-guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
+const firstLeft = guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
+if (firstLeft.sends.length !== 1) throw new Error('a leave posts one notice')
+const leftNote = firstLeft.sends[0].text
+const expectedLeave = [
+  '[퇴장안내]',
+  '이름 : @홍길동',
+  '올링 : 찾지 못했습니다',
+  '퇴장로그',
+  '- 2023-11-15 07:13',
+].join('\n')
+if (leftNote !== expectedLeave) throw new Error('leave notice layout')
+if (leftNote.indexOf('입장로그') >= 0 || leftNote.indexOf('[입장안내]') >= 0) throw new Error('a leave notice has no enter log')
 const joined = guardOnChat(firstVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
   profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
 if (joined.sends.length !== 1) throw new Error('one join notice')
-const rule = '————————-'
 const note = joined.sends[0].text
 const expected = [
-  '[들낙방지]',
+  '[입장안내]',
   '이름 : @홍길동',
-  '옾링 : https://open.kakao.com/o/abc',
-  rule,
+  '올링 : https://open.kakao.com/o/abc',
   '입장로그',
   '- 2023-11-15 07:14',
-  '',
-  rule,
-  '퇴장로그',
-  '- 2023-11-15 07:13',
 ].join('\n')
-if (note !== expected) throw new Error('visit notice layout')
+if (note !== expected) throw new Error('enter notice layout')
+if (note.indexOf('퇴장로그') >= 0 || note.indexOf('[퇴장안내]') >= 0 || note.indexOf('07:13') >= 0) {
+  throw new Error('an enter notice has no leave log')
+}
 if (note.indexOf('들어온 방') >= 0 || note.indexOf('들어온 시각') >= 0 || note.indexOf('나간 시각') >= 0) {
   throw new Error('old labels')
 }
-if (note.indexOf('강퇴') >= 0) throw new Error('notice must not kick')
+if (note.indexOf('강퇴') >= 0 || note.indexOf('들낙방지') >= 0 || note.indexOf('옾링') >= 0) throw new Error('notice must not kick')
 const mention = joined.sends[0].mention
 if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== note.indexOf('홍길동')) {
   throw new Error('one mention of the joiner')
@@ -261,24 +269,26 @@ const laterJoin = guardOnChat(firstVisit, {
 })
 if (laterJoin.sends.length !== 1) throw new Error('a later join posts again')
 const laterText = laterJoin.sends[0].text
-const enterAt = laterText.indexOf('입장로그')
-const leaveAt = laterText.indexOf('퇴장로그')
-if (enterAt < 0 || leaveAt < enterAt) throw new Error('join times stay above leave times')
-const enterPart = laterText.slice(enterAt, leaveAt)
-const leavePart = laterText.slice(leaveAt)
-if (enterPart.indexOf('- 2023-11-15 07:14') < 0 || enterPart.indexOf('- 2023-11-15 07:15') < 0) {
+if (laterText.indexOf('[입장안내]') < 0 || laterText.indexOf('퇴장') >= 0) throw new Error('a later join is only an enter notice')
+if (laterText.indexOf('- 2023-11-15 07:14') < 0 || laterText.indexOf('- 2023-11-15 07:15') < 0) {
   throw new Error('every join time is listed')
 }
-if (leavePart.indexOf('- 2023-11-15 07:13') < 0 || enterPart.indexOf('07:13') >= 0) {
-  throw new Error('leave times stay under the leave log')
-}
 if (!laterJoin.sends[0].mention || laterJoin.sends[0].mention.userId !== '7') throw new Error('still one mention')
+const laterLeft = guardOnChat(firstVisit, {
+  kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 + 180000,
+})
+if (laterLeft.sends.length !== 1 || laterLeft.sends[0].text.indexOf('[퇴장안내]') < 0) throw new Error('a later leave posts')
+if (laterLeft.sends[0].text.indexOf('입장') >= 0) throw new Error('a leave notice has no enter log')
+if (laterLeft.sends[0].text.indexOf('- 2023-11-15 07:13') < 0 || laterLeft.sends[0].text.indexOf('- 2023-11-15 07:16') < 0) {
+  throw new Error('every leave time is listed')
+}
+if (laterLeft.sends[0].text.indexOf('올링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
 const noLeave = visitRecord()
 const onlyJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
 })
-if (onlyJoin.sends[0].text.indexOf('퇴장로그\n- 아직 나간 기록이 없습니다') < 0) throw new Error('missing leave is stated')
-if (onlyJoin.sends[0].text.indexOf('옾링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].text.indexOf('퇴장') >= 0) throw new Error('an enter notice has no leave log')
+if (onlyJoin.sends[0].text.indexOf('올링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
 if (!onlyJoin.sends[0].mention || onlyJoin.sends[0].mention.userId !== '9') throw new Error('the named person is the mention')
 if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
 const burst = guardOnChat(noLeave, {
@@ -289,8 +299,10 @@ const otherRoom = guardOnChat(noLeave, {
   kind: 'join', chatId: '999', authorId: '10', authorName: '이', now: t0,
 })
 if (otherRoom.sends.length !== 0) throw new Error('unwatched room stays quiet')
-const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', now: t0 + 200 })
-if (left.sends.length !== 0) throw new Error('a leave is recorded and not announced')
+const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', authorName: '김', now: t0 + 200 })
+if (left.sends.length !== 1 || left.sends[0].text.indexOf('[퇴장안내]') < 0) throw new Error('a leave is announced')
+if (left.sends[0].text.indexOf('입장') >= 0) throw new Error('a leave notice has no enter log')
+if (left.sends[0].delayMs < 3000) throw new Error('a leave waits behind the previous notice')
 const repeatJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', now: t0 + 500,
 })
@@ -353,7 +365,7 @@ const plainPosted = guardOnChat(visitRecord(), {
 if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보ㄱㄱ') < 0) {
   throw new Error('plain sentence posts one notice')
 }
-if (plainPosted.sends[0].text.indexOf('[들낙방지]') < 0) throw new Error('plain sentence uses the summary')
+if (plainPosted.sends[0].text.indexOf('[입장안내]') < 0) throw new Error('plain sentence uses the enter notice')
 if (plainPosted.sends[0].text.indexOf('@') >= 0 || plainPosted.sends[0].mention) {
   throw new Error('a sentence without a user id is not a fake mention')
 }
@@ -407,15 +419,21 @@ const kickedFeed = visitEventsFromMessage({
 })
 if (kickedFeed.length !== 0) throw new Error('a kick feed is not a join notice')
 const feedRoom = visitRecord()
-guardOnChat(feedRoom, {
+const feedLeft = guardOnChat(feedRoom, {
   kind: openLeave[0].kind, chatId: '555', authorId: openLeave[0].authorId,
   authorName: openLeave[0].authorName, now: t0,
 })
+if (feedLeft.sends.length !== 1 || feedLeft.sends[0].text.indexOf('[퇴장안내]') < 0) {
+  throw new Error('a feed leave posts one notice')
+}
+if (feedLeft.sends[0].text.indexOf('2023-11-15 07:13') < 0 || feedLeft.sends[0].text.indexOf('입장') >= 0) {
+  throw new Error('the leave time is on the leave notice')
+}
 const feedJoin = guardOnChat(feedRoom, {
   kind: openJoin[0].kind, chatId: '555', authorId: '7',
   authorName: '홍길동', profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
-if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[들낙방지]') < 0) {
+if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[입장안내]') < 0) {
   throw new Error('a feed join posts one notice')
 }
 if (!feedJoin.sends[0].mention || feedJoin.sends[0].mention.userId !== '7') throw new Error('the feed mention is the joiner')
@@ -425,7 +443,9 @@ const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
   len: 3,
 })
 if (bigExtra.indexOf(bigId) < 0) throw new Error('mention keeps the full user id')
-if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') < 0) throw new Error('the leave time is on the next join')
+if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') >= 0 || feedJoin.sends[0].text.indexOf('퇴장') >= 0) {
+  throw new Error('the leave time stays off the enter notice')
+}
 
 const stamped = stampOpenLinkTitles([
   { type: 13, link_id: '42', title: null, display_name: '김, 이', active_members: 8 },
