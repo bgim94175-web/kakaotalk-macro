@@ -308,7 +308,14 @@ public final class RoomBot {
     private static int bumpChurn(Context c, Settings.RoomBotCfg cfg, RoomRef room,
                                  String who, long now) {
         if (cfg == null || !cfg.churnOn) return 0;
-        if (who == null || who.trim().length() == 0) return 0;   // 이름을 못 뽑으면 셀 수 없다
+        if (who == null || who.trim().length() == 0) {
+            // 이름을 못 뽑으면 사람 단위로 셀 수 없다. 조용히 빠지면 사장은 들낙 방지가
+            // 동작하는 줄 알고 명단이 왜 비어 있는지 모른다 → 1회 알린다.
+            note(c, "churn-noname", "들낙 방지 · 입·퇴장 안내에서 이름을 읽지 못해 집계하지 "
+                    + "못했습니다. 카카오톡 문구 형식이 바뀐 것으로 보입니다. 활동 로그의 "
+                    + "입·퇴장 기록을 전달해 주시면 조치가 가능합니다.");
+            return 0;
+        }
         int need = (cfg.churnCount < 2) ? 2 : cfg.churnCount;
         long win = (long) ((cfg.churnMin < 1) ? 1 : cfg.churnMin) * 60000L;
         String k = key(room, who);
@@ -906,6 +913,7 @@ public final class RoomBot {
         int limit = (cfg == null) ? 0 : cfg.dailyLimit;
         final String rk = room.key();
         final String label = room.label(c);
+        Long prevLast;
         synchronized (RoomBot.class) {
             load(c);
             rollDay(now);
@@ -919,25 +927,22 @@ public final class RoomBot {
                         + (ROOM_COOLDOWN_MS / 1000) + "초) 중이므로 1건을 건너뛰었습니다.");
                 return false;
             }
+            prevLast = LAST_BOT.get(rk);        // 실패·보류 시 되돌리기용
             LAST_BOT.put(rk, Long.valueOf(now));
             sentToday = sentToday + 1;
             remember(rk, msg, now);
             save(c);
         }
         int r = KakaoListener.send(c, room, msg, SendGuard.ROOMBOT);
+        boolean ok = (r == KakaoListener.SEND_OK);
+        // 보내지 못했으면 소모한 것(한도·쿨타임·메아리 기록)을 전부 되돌린다
+        if (!ok) rollBack(c, rk, msg, prevLast);
         if (r == KakaoListener.SEND_HELD) {
             // 다른 계정의 봇이 방금 그 대화방에 답했다. 같은 명령에 두 번 답하면 도배다.
             KakaoListener.noteHeld(c, room, SendGuard.ROOMBOT, 0L, true);
             return false;
         }
-        boolean ok = (r == KakaoListener.SEND_OK);
-        if (!ok) {
-            synchronized (RoomBot.class) {
-                if (sentToday > 0) sentToday = sentToday - 1;
-                save(c);
-            }
-            Log.add(c, "대화방 관리봇 발송에 실패했습니다. 「" + label + "」");
-        }
+        if (!ok) Log.add(c, "대화방 관리봇 발송에 실패했습니다. 「" + label + "」");
         return ok;
     }
 
@@ -951,6 +956,36 @@ public final class RoomBot {
     }
 
     // ── 메아리 차단 ───────────────────────────────────────────────────────────
+
+
+    /**
+     * 보내지 못한 건이 소모한 것을 되돌린다 — 하루 한도 · 방 쿨타임 · 메아리 기록.
+     *
+     * ★ 되돌리지 않으면 <b>다음 정상 응답이 씹힌다.</b> 보내지도 않은 건이 3초 쿨타임을
+     *   찍어버려서, 그 사이에 들어온 명령의 답이 "쿨타임 중" 으로 건너뛰어진다.
+     *   메아리 기록도 지워야 한다 — 나가지 않은 문구를 기억하고 있으면 사람이 그 말을
+     *   실제로 했을 때 봇이 자기 메아리로 보고 무시한다.
+     */
+    private static void rollBack(Context c, String rk, String msg, Long prevLast) {
+        synchronized (RoomBot.class) {
+            if (sentToday > 0) sentToday = sentToday - 1;
+            if (prevLast == null) LAST_BOT.remove(rk);
+            else LAST_BOT.put(rk, prevLast);
+            forgetSaid(rk, msg);
+            save(c);
+        }
+    }
+
+    /** 기억해둔 발송 문구 1건을 지운다 (되돌리기용) */
+    private static void forgetSaid(String r, String msg) {
+        ArrayList<Said> list = SAID.get(r);
+        if (list == null) return;
+        String flat = flat(msg);
+        for (int i = list.size() - 1; i >= 0; i--) {
+            Said s = list.get(i);
+            if (s != null && flat.equals(s.norm)) { list.remove(i); return; }
+        }
+    }
 
     private static void remember(String r, String msg, long now) {
         ArrayList<Said> list = SAID.get(r);

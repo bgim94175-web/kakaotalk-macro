@@ -894,6 +894,7 @@ public final class MiniGame {
         long cool = (cfg == null) ? MIN_COOLDOWN_MS : Math.max(MIN_COOLDOWN_MS, cfg.cooldownMs);
         final String rk = r.key();
         final String label = r.label(c);
+        Long prevLast;
         synchronized (MiniGame.class) {
             load(c);
             rollDay(now);
@@ -907,25 +908,22 @@ public final class MiniGame {
                         + "초) 중이므로 1건을 건너뛰었습니다.");
                 return false;
             }
+            prevLast = LAST_BOT.get(rk);        // 실패·보류 시 되돌리기용
             LAST_BOT.put(rk, Long.valueOf(now));
             sentToday = sentToday + 1;
             remember(rk, msg, now);
             save(c);
         }
         int rr = KakaoListener.send(c, r, msg, SendGuard.MINIGAME);
+        boolean ok = (rr == KakaoListener.SEND_OK);
+        // 보내지 못했으면 소모한 것(한도·쿨타임·메아리 기록)을 전부 되돌린다
+        if (!ok) rollBack(c, rk, msg, prevLast);
         if (rr == KakaoListener.SEND_HELD) {
             // 다른 계정의 봇이 방금 답했다. 같은 명령에 두 번 답하지 않는다.
             KakaoListener.noteHeld(c, r, SendGuard.MINIGAME, 0L, true);
             return false;
         }
-        boolean ok = (rr == KakaoListener.SEND_OK);
-        if (!ok) {
-            synchronized (MiniGame.class) {
-                if (sentToday > 0) sentToday = sentToday - 1;
-                save(c);
-            }
-            Log.add(c, "미니게임봇 발송에 실패했습니다. 「" + label + "」");
-        }
+        if (!ok) Log.add(c, "미니게임봇 발송에 실패했습니다. 「" + label + "」");
         return ok;
     }
 
@@ -947,6 +945,35 @@ public final class MiniGame {
     }
 
     // ── 메아리 차단 ───────────────────────────────────────────────────────────
+
+    /**
+     * 보내지 못한 건이 소모한 것을 되돌린다 — 하루 한도 · 방 쿨타임 · 메아리 기록.
+     *
+     * ★ 되돌리지 않으면 <b>다음 정상 응답이 씹힌다.</b> 보내지도 않은 건이 쿨타임을
+     *   찍어버려서, 그 사이에 들어온 명령의 답이 "쿨타임 중" 으로 건너뛰어진다.
+     *   메아리 기록도 지워야 한다 — 나가지 않은 문구를 기억하고 있으면 사람이 그 말을
+     *   실제로 했을 때 봇이 자기 메아리로 보고 무시한다.
+     */
+    private static void rollBack(Context c, String rk, String msg, Long prevLast) {
+        synchronized (MiniGame.class) {
+            if (sentToday > 0) sentToday = sentToday - 1;
+            if (prevLast == null) LAST_BOT.remove(rk);
+            else LAST_BOT.put(rk, prevLast);
+            forgetSaid(rk, msg);
+            save(c);
+        }
+    }
+
+    /** 기억해둔 발송 문구 1건을 지운다 (되돌리기용) */
+    private static void forgetSaid(String rk, String msg) {
+        ArrayList<Said> list = SAID.get(rk);
+        if (list == null) return;
+        String f = flat(msg);
+        for (int i = list.size() - 1; i >= 0; i--) {
+            Said s = list.get(i);
+            if (s != null && f.equals(s.norm)) { list.remove(i); return; }
+        }
+    }
 
     private static void remember(String rk, String msg, long now) {
         final String r = rk;
