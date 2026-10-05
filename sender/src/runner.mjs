@@ -23,6 +23,7 @@ import {
   onInbound,
   othersSinceMine,
   chatLogsFromBody,
+  coverPlan,
   realId,
   visitEventsFromMessage,
   visitMentionExtra,
@@ -355,6 +356,7 @@ class Slot {
     this.visitCursor = new Map()
     this.visitEntered = new Set()
     this.visitLogs = new Set()
+    this.coverLogs = new Set()
     this.unpush = null
     this.mentionSeq = 0
   }
@@ -538,6 +540,14 @@ class Slot {
       authorId: ev.author_id,
       attachment: ev.attachment,
     })
+    const cover = coverPlan(this.record, {
+      chatId,
+      text: ev.message || '',
+      logId: ev.log_id ? String(ev.log_id) : '',
+      messageType: ev.message_type,
+      mine: author.length > 0 && author === creds.user_id,
+    })
+    if (cover) await this.coverMessage(cover)
     if (taken) return
     const sends = onInbound(this.record, {
       chatId,
@@ -822,6 +832,50 @@ class Slot {
     if (!logId) return
     try {
       await this.client.markRead(chatId, logId, opts)
+    } catch (e) {
+      await this.onError(e)
+    }
+  }
+
+  async linkIdFor(chatId) {
+    const have = this.linkIds.get(String(chatId))
+    if (have && /^[1-9][0-9]*$/.test(have)) return have
+    if (!this.client) return ''
+    const infoRes = await this.client.executeWithReconnect(async ({ session }) => {
+      return session.getChannelInfo(Long.fromString(String(chatId)))
+    })
+    const info = infoRes && infoRes.body && infoRes.body.chatInfo
+    const li = idText(info && info.li)
+    if (li) this.linkIds.set(String(chatId), li)
+    return li || ''
+  }
+
+  async coverMessage(plan) {
+    if (!this.client || !plan) return
+    const key = `${plan.chatId}\u0001${plan.logId}`
+    if (this.coverLogs.has(key)) return
+    this.coverLogs.add(key)
+    if (this.coverLogs.size > 800) {
+      const first = this.coverLogs.values().next().value
+      this.coverLogs.delete(first)
+    }
+    try {
+      const li = await this.linkIdFor(plan.chatId)
+      if (!li) {
+        log(this.id, `cover skipped, no link chat ${plan.chatId}`)
+        return
+      }
+      const response = await this.client.executeWithReconnect(async ({ session }) => {
+        return session.getConnection().sendPacket('REWRITE', {
+          li: Long.fromString(li),
+          c: Long.fromString(plan.chatId),
+          logId: Long.fromString(plan.logId),
+          t: plan.type,
+        })
+      })
+      const status = response && response.statusCode
+      if (status !== 0) log(this.id, `cover failed status ${status} chat ${plan.chatId}`)
+      else log(this.id, `covered chat ${plan.chatId}`)
     } catch (e) {
       await this.onError(e)
     }

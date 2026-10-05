@@ -1189,6 +1189,58 @@ export function macroMinMessages(record) {
   return n < 0 || Number.isNaN(n) ? 0 : n
 }
 
+// 욕설이 보이면 그 글만 가린다. 강퇴하지 않는다.
+// 가리기 패킷은 node-kakao TalkOpenChannelSession.hideChat 과 같다.
+// REWRITE { li, c, logId, t } 이고 t 는 그 글의 메시지 타입이다.
+const SWEAR_TYPES = new Set([1, 2, 26])
+const SWEAR_STEMS = [
+  '씨발', '시발', '씨팔', '시팔', '씨벌', '시벌',
+  '병신', '벙신', '병쉰',
+  '좆', '좇', '존나', '존내', '지랄',
+  '개새끼', '개새기', '개색기', '개색끼', '개쉐', '개자식',
+  '니미', '느금',
+  '창녀', '창년',
+  '미친놈', '미친년', '미친새끼',
+  '엿먹', '닥쳐',
+  'fuck', 'shit', 'bitch',
+  'ㅅㅂ', 'ㅆㅂ', 'ㅂㅅ', 'ㅈㄹ', 'ㅈㄴ',
+]
+
+function foldSwear(text) {
+  let s = String(text || '').toLowerCase()
+  s = s.replace(/[^\p{L}\p{N}]/gu, '')
+  s = s.replace(/([가-힣])[0-9]+(?=[가-힣])/g, '$1')
+  s = s.replace(/([가-힣ㄱ-ㅎㅏ-ㅣ])\1+/g, '$1')
+  s = s.replace(/([가-힣])이(?=[가-힣])/g, '$1')
+  s = s.replace(/시발점/g, '')
+  return s
+}
+
+export function isProfanity(text) {
+  const s = foldSwear(text)
+  if (!s) return false
+  for (const stem of SWEAR_STEMS) {
+    if (s.includes(stem)) return true
+  }
+  return false
+}
+
+/** A staff cover for one profane open-chat message. Null when this message stays. */
+export function coverPlan(record, ev) {
+  const cfg = record && record.config && record.config.cover
+  if (!cfg || cfg.enabled !== true || !ev || ev.mine) return null
+  const type = Number(ev.messageType)
+  if (!SWEAR_TYPES.has(type)) return null
+  const logId = String(ev.logId || '')
+  if (!/^[1-9][0-9]*$/.test(logId)) return null
+  const chatId = String(ev.chatId || '')
+  const room = roomByChat(record.rooms, chatId)
+  if (!room || !realId(String(room.chat_id))) return null
+  if (!coversList(cfg.rooms, room.key)) return null
+  if (!isProfanity(ev.text)) return null
+  return { chatId: String(room.chat_id), logId, type }
+}
+
 // ── 방 관리봇 ──────────────────────────────────────────────────────────────
 // Acts only in rooms the customer turned on. Does not kick, spam, mention-bomb,
 // or rewrite text. Empty customer text means that action sends nothing.

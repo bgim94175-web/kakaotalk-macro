@@ -134,6 +134,7 @@ function viewAccount(row, snap) {
     reason: snap.reason || '',
     macro: cfg.presentMacro(config.macro),
     visit: cfg.presentVisit(config.visit),
+    cover: cfg.presentCover(config.cover),
     autoreply: cfg.presentReply(config.autoreply),
     triggers: cfg.presentTriggers(config.triggers),
     images: Array.isArray(snap.images) ? snap.images : [],

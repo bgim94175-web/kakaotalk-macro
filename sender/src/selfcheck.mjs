@@ -15,6 +15,8 @@ import {
   noteMacroSent,
   onInbound,
   chatLogsFromBody,
+  coverPlan,
+  isProfanity,
   parseRoomKey,
   visitEventsFromMessage,
   visitMemberId,
@@ -490,6 +492,28 @@ if (countedTitle[0].title !== '검 Fam' || roomTitle(countedTitle[0]) !== '검 F
   throw new Error('member count is removed from the open-chat name')
 }
 if (withoutMemberCount('검 Fam 1424', 8) !== '검 Fam 1424') throw new Error('a real numbered title stays')
+
+if (!isProfanity('씨발') || !isProfanity('시 발') || !isProfanity('씨1발') || !isProfanity('씨이발')) {
+  throw new Error('profanity is recognized')
+}
+if (isProfanity('안녕하세요') || isProfanity('시발점') || isProfanity('가보지') || isProfanity('자지마') || isProfanity('날씨 바뀜')) {
+  throw new Error('ordinary words are not profanity')
+}
+const coverRec = {
+  config: { cover: { enabled: true, rooms: ['0\u0001검 Fam'] } },
+  rooms: [{ key: '0\u0001검 Fam', chat_id: '555', name: '검 Fam' }],
+}
+const covered = coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '90', messageType: 1, mine: false })
+if (!covered || covered.chatId !== '555' || covered.logId !== '90' || covered.type !== 1) throw new Error('profanity is covered')
+const replyCover = coverPlan(coverRec, { chatId: '555', text: '병신', logId: '91', messageType: 26, mine: false })
+if (!replyCover || replyCover.type !== 26) throw new Error('a profane reply is covered')
+if (coverPlan(coverRec, { chatId: '555', text: '안녕', logId: '92', messageType: 1, mine: false })) throw new Error('a normal line stays')
+if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '93', messageType: 1, mine: true })) throw new Error('own profanity stays')
+if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '94', messageType: 0, mine: false })) throw new Error('a feed is not covered')
+if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '', messageType: 1, mine: false })) throw new Error('a cover needs a log id')
+if (coverPlan(coverRec, { chatId: '9', text: '씨발', logId: '95', messageType: 1, mine: false })) throw new Error('an unwatched room is not covered')
+coverRec.config.cover.enabled = false
+if (coverPlan(coverRec, { chatId: '555', text: '씨발', logId: '96', messageType: 1, mine: false })) throw new Error('cover stays off')
 
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })

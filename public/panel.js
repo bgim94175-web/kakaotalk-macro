@@ -374,6 +374,9 @@
     document.getElementById('visit-on').checked = !!visit.enabled;
     var visitPicked = visit.rooms || [];
     fillChecks('visit-open', rooms.open || [], visitPicked);
+    var cover = account.cover || {};
+    document.getElementById('cover-on').checked = !!cover.enabled;
+    fillChecks('cover-open', rooms.open || [], cover.rooms || []);
     var a = account.autoreply || {};
     document.getElementById('reply-on').checked = !!a.enabled;
     document.getElementById('reply-message').value = a.message || '';
@@ -662,6 +665,30 @@
       fillDetail();
     } catch (e) {
       say('visit-error', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('cover-form').addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (!account) return;
+    say('cover-error', '');
+    var btn = ev.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      var res = await api('/panel/api/settings', {
+        device_id: account.device_id,
+        images_unchanged: true,
+        cover: {
+          enabled: document.getElementById('cover-on').checked,
+          rooms: checkedRooms('#cover-open'),
+        },
+      });
+      account = res.account;
+      fillDetail();
+    } catch (e) {
+      say('cover-error', e.message);
     } finally {
       btn.disabled = false;
     }

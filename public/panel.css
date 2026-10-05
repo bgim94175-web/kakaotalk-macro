@@ -18,6 +18,7 @@
   --band-visit: #6e542c;
   --band-reply: #3e4d57;
   --band-snipe: #4a4450;
+  --band-cover: #5a3d45;
 }
 
 * { box-sizing: border-box; }
@@ -130,6 +131,7 @@ main { padding: 16px 0 40px; }
 .card[data-band="visit"] > h2 { border-left-color: var(--band-visit); }
 .card[data-band="reply"] > h2 { border-left-color: var(--band-reply); }
 .card[data-band="snipe"] > h2 { border-left-color: var(--band-snipe); }
+.card[data-band="cover"] > h2 { border-left-color: var(--band-cover); }
 .lead, .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 label { font-size: 14px; font-weight: 650; }

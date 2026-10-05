@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef1f4">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/panel.css?v=3">
+<link rel="stylesheet" href="/panel.css?v=4">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -75,6 +75,7 @@
       <nav class="jumps" aria-label="이 계정의 설정">
         <a href="#macro-title">매크로</a>
         <a href="#visit-title">들낙 방지</a>
+        <a href="#cover-title">욕설 가리기</a>
         <a href="#reply-title">자동응답</a>
         <a href="#snipe-title">저격</a>
       </nav>
@@ -143,6 +144,21 @@
         </form>
       </section>
 
+      <section class="card" data-band="cover" aria-labelledby="cover-title">
+        <h2 id="cover-title">욕설 가리기</h2>
+        <p class="lead">고른 오픈채팅방에 욕설이 올라오면 그 글을 가립니다. 이 계정이 그 방의 부방장일 때 동작합니다. 사람을 내보내지 않습니다.</p>
+        <form id="cover-form" class="stack">
+          <label class="check"><input type="checkbox" id="cover-on"> 사용</label>
+          <p class="hint">꺼져 있으면 글을 가리지 않습니다. 켠 뒤에도 아래에서 고른 방에만 가립니다.</p>
+          <fieldset>
+            <legend>오픈채팅방</legend>
+            <div id="cover-open" class="rooms"></div>
+          </fieldset>
+          <p id="cover-error" class="error" role="alert"></p>
+          <button type="submit" class="btn">욕설 가리기 저장</button>
+        </form>
+      </section>
+
       <section class="card" data-band="reply" aria-labelledby="reply-title">
         <h2 id="reply-title">갠톡 자동응답</h2>
         <p class="lead">개인 채팅에 온 말에 답합니다. 매크로의 보낼 방과는 따로입니다.</p>
@@ -177,6 +193,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=7"></script>
+<script src="/panel.js?v=8"></script>
 </body>
 </html>
