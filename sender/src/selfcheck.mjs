@@ -14,6 +14,7 @@ import {
   macroRoomsDue,
   noteMacroSent,
   onInbound,
+  chatLogsFromBody,
   parseRoomKey,
   visitEventsFromMessage,
 } from './features.mjs'
@@ -312,6 +313,33 @@ if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보�
   throw new Error('plain sentence posts one notice')
 }
 if (plainPosted.sends[0].text.indexOf('[들낙 안내]') < 0) throw new Error('plain sentence uses the summary')
+const infoLogs = chatLogsFromBody({
+  chatInfo: {
+    chatId: '555',
+    lastLogId: '900',
+    lastChatLog: {
+      logId: '900',
+      type: 0,
+      message: '홍보ㄱㄱ님이 들어왔습니다.',
+    },
+  },
+})
+if (infoLogs.length !== 1 || infoLogs[0].chatId !== '555' || infoLogs[0].logId !== '900') {
+  throw new Error('the room info log is the current line')
+}
+const infoJoin = visitEventsFromMessage(infoLogs[0])
+if (infoJoin.length !== 1 || infoJoin[0].kind !== 'join' || infoJoin[0].authorName !== '홍보ㄱㄱ') {
+  throw new Error('the room info line is a join')
+}
+const pushedLogs = chatLogsFromBody({
+  chatId: '555',
+  chatLogs: [{ logId: '901', type: 1, message: '홍보ㄱㄱ님이 들어왔습니다.' }],
+})
+if (pushedLogs.length !== 1) throw new Error('a feed list is not only a MSG packet')
+const pushedJoin = visitEventsFromMessage(pushedLogs[0])
+if (pushedJoin.length !== 1 || pushedJoin[0].kind !== 'join' || pushedJoin[0].authorName !== '홍보ㄱㄱ') {
+  throw new Error('a feed list line is a join')
+}
 const countedRoom = visitRecord()
 countedRoom.config.visit.rooms = [parseRoomKey('0\u0001검 Fam 1424').key]
 countedRoom.rooms = [{ key: parseRoomKey('0\u0001검 Fam').key, chat_id: '555', name: '검 Fam', kind: 'open' }]

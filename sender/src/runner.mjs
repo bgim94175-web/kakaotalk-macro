@@ -22,6 +22,7 @@ import {
   noteMacroWait,
   onInbound,
   othersSinceMine,
+  chatLogsFromBody,
   realId,
   visitEventsFromMessage,
   visitNeedsProfile,
@@ -350,6 +351,9 @@ class Slot {
     this.lastLog = new Map()
     this.profileLinks = new Map()
     this.visitCursor = new Map()
+    this.visitEntered = new Set()
+    this.visitLogs = new Set()
+    this.unpush = null
   }
 
   async start() {
@@ -406,6 +410,10 @@ class Slot {
     this.stopped = true
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    if (this.unpush) {
+      try { this.unpush() } catch {}
+      this.unpush = null
+    }
     try { this.listener && this.listener.stop() } catch {}
     try { this.client && this.client.close() } catch {}
     this.listener = null
@@ -438,6 +446,16 @@ class Slot {
         }
       })
       await client.acquireSession()
+      if (this.unpush) {
+        try { this.unpush() } catch {}
+        this.unpush = null
+      }
+      // The listener only emits message for method MSG. Open-chat feed lines
+      // also arrive on other packets, and a throw in that handler is dropped.
+      this.unpush = client.onPush((packet) => {
+        this.enqueue(() => this.onPacket(packet)).catch(() => {})
+      })
+      this.visitEntered.clear()
       this.client = client
       this.refreshed = false
       this.record.needs_register = false
@@ -509,17 +527,15 @@ class Slot {
     const chatId = String(ev.chat_id || '')
     const author = ev.author_id == null ? '' : String(ev.author_id)
     if (ev.log_id) this.lastLog.set(chatId, String(ev.log_id))
-    const visits = visitEventsFromMessage(ev)
-    if (visits.length) {
-      for (const v of visits) {
-        await this.onMember(v.kind, {
-          chat_id: chatId,
-          member: { user_id: v.authorId },
-          author_name: v.authorName,
-        })
-      }
-      return
-    }
+    const taken = await this.takeVisit(chatId, {
+      chatId,
+      logId: ev.log_id ? String(ev.log_id) : '',
+      message: ev.message,
+      type: ev.message_type,
+      authorId: ev.author_id,
+      attachment: ev.attachment,
+    })
+    if (taken) return
     const sends = onInbound(this.record, {
       chatId,
       text: ev.message || '',
@@ -639,54 +655,123 @@ class Slot {
     }
   }
 
+  async onPacket(packet) {
+    if (this.record.needs_register || !packet) return
+    const logs = chatLogsFromBody(packet.body)
+    for (const log of logs) {
+      const chatId = log.chatId
+      if (!chatId || !visitNeedsProfile(this.record, chatId)) continue
+      await this.takeVisit(chatId, log)
+    }
+  }
+
+  async takeVisit(chatId, log) {
+    if (!log) return ''
+    const id = log.logId ? String(log.logId) : ''
+    const key = id ? `${chatId}\u0001${id}` : ''
+    if (key && this.visitLogs.has(key)) return 'seen'
+    const visits = visitEventsFromMessage({
+      message: log.message,
+      message_type: log.type,
+      author_id: log.authorId,
+      attachment: log.attachment,
+    })
+    if (!visits.length) return ''
+    if (key) {
+      this.visitLogs.add(key)
+      if (this.visitLogs.size > 800) {
+        const first = this.visitLogs.values().next().value
+        this.visitLogs.delete(first)
+      }
+    }
+    if (id) this.lastLog.set(chatId, id)
+    for (const v of visits) {
+      await this.onMember(v.kind, {
+        chat_id: chatId,
+        member: { user_id: v.authorId },
+        author_name: v.authorName,
+      })
+    }
+    return 'visit'
+  }
+
+  async consumeLogs(chatId, logs, cursor) {
+    const fresh = []
+    for (const log of logs || []) {
+      if (!log) continue
+      const rowChat = log.chatId || chatId
+      if (rowChat && rowChat !== chatId) continue
+      const id = log.logId ? String(log.logId) : ''
+      if (!id || !logAfter(id, cursor)) continue
+      fresh.push(log)
+    }
+    fresh.sort((a, b) => {
+      const aa = a.logId ? String(a.logId) : ''
+      const bb = b.logId ? String(b.logId) : ''
+      if (!aa || aa === bb) return 0
+      return logAfter(aa, bb) ? 1 : -1
+    })
+    const slice = fresh.slice(-8)
+    let tip = cursor
+    for (const log of slice) {
+      const id = log.logId ? String(log.logId) : ''
+      if (id && logAfter(id, tip)) tip = id
+      await this.takeVisit(chatId, log)
+    }
+    return tip
+  }
+
   async scanRoom(chatId) {
+    if (!this.visitEntered.has(chatId)) {
+      try {
+        const session = await this.client.acquireSession()
+        const on = await session.getChatInfo(Long.fromString(chatId))
+        this.visitEntered.add(chatId)
+        const cursor = this.visitCursor.get(chatId) || ''
+        await this.consumeLogs(chatId, chatLogsFromBody(on && on.body, chatId), cursor)
+      } catch (e) {
+        log(this.id, `room enter failed: ${e && e.message ? e.message : e}`)
+      }
+    }
     const session = await this.client.acquireSession()
     const infoRes = await session.getChannelInfo(Long.fromString(chatId))
-    const info = infoRes && infoRes.body && infoRes.body.chatInfo
+    const body = infoRes && infoRes.body
+    const info = body && body.chatInfo
     if (!info || info.left === true) return
     const max = idText(info.lastLogId) || idText(info.lastChatLog && info.lastChatLog.logId)
     if (!max) return
     const li = idText(info.li)
     if (li) this.linkIds.set(chatId, li)
     const cursor = this.visitCursor.get(chatId) || ''
-    if (!cursor) {
-      this.visitCursor.set(chatId, max)
-      return
-    }
-    if (!logAfter(max, cursor)) return
-    const response = await session.syncMessages(
-      Long.fromString(chatId),
-      40,
-      Long.fromString(cursor),
-      Long.fromString(max),
-    )
-    const logs = (response && response.body && response.body.chatLogs) || []
-    logs.sort((a, b) => {
-      const aa = idText(a && a.logId)
-      const bb = idText(b && b.logId)
-      if (!aa || aa === bb) return 0
-      return logAfter(aa, bb) ? 1 : -1
-    })
-    let tip = cursor
-    for (const entry of logs) {
-      const id = idText(entry && entry.logId)
-      if (!logAfter(id, cursor)) continue
-      if (logAfter(id, tip)) tip = id
-      const visits = visitEventsFromMessage({
-        message: entry && entry.message,
-        message_type: entry && entry.type,
-        author_id: entry && entry.authorId,
-        attachment: entry && entry.attachment,
-      })
-      for (const v of visits) {
-        await this.onMember(v.kind, {
-          chat_id: chatId,
-          member: { user_id: v.authorId },
-          author_name: v.authorName,
-        })
+    let tip = await this.consumeLogs(chatId, chatLogsFromBody(body, chatId), cursor)
+    if (cursor && logAfter(max, cursor)) {
+      try {
+        let from = cursor
+        for (let page = 0; page < 2; page++) {
+          const res = await this.client.getMessagePage(chatId, { from, count: 40 })
+          const msgs = (res && res.messages) || []
+          const mapped = msgs.map((m) => ({
+            chatId,
+            logId: m && m.log_id ? String(m.log_id) : '',
+            message: m && m.message,
+            type: m && m.type,
+            authorId: m && m.author_id,
+            attachment: m && m.attachment,
+          }))
+          const got = await this.consumeLogs(chatId, mapped, cursor)
+          if (logAfter(got, tip)) tip = got
+          const next = res && res.next_cursor ? String(res.next_cursor) : ''
+          if (!msgs.length || (res && res.complete) || !next || !logAfter(next, from)) break
+          from = next
+        }
+        if (!logAfter(max, tip)) tip = max
+      } catch (e) {
+        log(this.id, `room log read failed: ${e && e.message ? e.message : e}`)
       }
+    } else if (!cursor) {
+      tip = max
     }
-    if (tip !== cursor) this.visitCursor.set(chatId, tip)
+    if (tip && tip !== cursor) this.visitCursor.set(chatId, tip)
   }
 
   async guardTick() {

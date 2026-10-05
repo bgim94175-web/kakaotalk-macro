@@ -341,6 +341,62 @@ function eventsFromKoreanFeed(text, author) {
   }]
 }
 
+function asChatLog(raw, hint) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const message = raw.message != null ? raw.message : (raw.msg != null ? raw.msg : null)
+  const attachment = raw.attachment
+  const hasAttachment = attachment != null && attachment !== ''
+  if (message == null && !hasAttachment) return null
+  const logId = decimalId(raw.logId != null ? raw.logId : raw.log_id)
+  const chatId = decimalId(raw.chatId != null ? raw.chatId : raw.chat_id) || hint || ''
+  return {
+    chatId,
+    logId,
+    message: message == null ? '' : String(message),
+    type: raw.type != null ? raw.type : raw.message_type,
+    authorId: raw.authorId != null ? raw.authorId : raw.author_id,
+    attachment,
+  }
+}
+
+function collectChatLog(out, seen, raw, hint) {
+  const log = asChatLog(raw, hint)
+  if (!log) return
+  const key = log.logId ? `${log.chatId}\u0001${log.logId}` : `${log.chatId}\u0001${log.message}`
+  if (seen.has(key)) return
+  seen.add(key)
+  out.push(log)
+}
+
+function collectChatList(out, seen, list, hint) {
+  if (!Array.isArray(list)) return
+  for (const row of list) collectChatLog(out, seen, row, hint)
+}
+
+/**
+ * Chat logs carried by any LOCO body, not only a MSG packet.
+ * CHATINFO keeps the current line on chatInfo.lastChatLog. SYNCMSG and
+ * MCHATLOGS use chatLogs. A sub-device push may use either shape.
+ */
+export function chatLogsFromBody(body, chatHint) {
+  const out = []
+  const seen = new Set()
+  if (!body || typeof body !== 'object') return out
+  const hint = decimalId(chatHint) || decimalId(body.chatId) || decimalId(body.chat_id) || decimalId(body.c) || ''
+  collectChatLog(out, seen, body.chatLog, hint)
+  collectChatLog(out, seen, body.lastChatLog, hint)
+  collectChatList(out, seen, body.chatLogs, hint)
+  collectChatList(out, seen, body.chatlogs, hint)
+  const info = body.chatInfo && typeof body.chatInfo === 'object' ? body.chatInfo : null
+  if (info) {
+    const infoHint = decimalId(info.chatId) || decimalId(info.c) || hint
+    collectChatLog(out, seen, info.lastChatLog, infoHint)
+    collectChatLog(out, seen, info.chatLog, infoHint)
+    collectChatList(out, seen, info.chatLogs, infoHint)
+  }
+  return out
+}
+
 /**
  * Open-chat join and leave are the sentence Kakao shows:
  * "홍보ㄱㄱ님이 들어왔습니다." / "님이 나갔습니다."
