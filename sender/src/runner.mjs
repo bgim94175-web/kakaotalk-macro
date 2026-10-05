@@ -25,6 +25,7 @@ import {
   chatLogsFromBody,
   realId,
   visitEventsFromMessage,
+  visitMentionExtra,
   visitNeedsProfile,
 } from './features.mjs'
 import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
@@ -560,9 +561,17 @@ class Slot {
     if (this.record.needs_register || !ev) return
     const creds = credsOf(this.record)
     const chatId = String(ev.chat_id || '')
-    const author = memberId(ev.member)
-    const mine = author.length > 0 && author === creds.user_id
+    let author = memberId(ev.member)
     let authorName = typeof ev.author_name === 'string' ? ev.author_name.trim() : ''
+    if (!author && authorName && this.client && visitNeedsProfile(this.record, chatId)) {
+      try {
+        author = await this.memberIdByName(chatId, authorName)
+      } catch (e) {
+        await this.onError(e)
+      }
+    }
+    if (this.record.needs_register) return
+    const mine = author.length > 0 && author === creds.user_id
     let profileLink = ''
     if (!mine && author && this.client && visitNeedsProfile(this.record, chatId)) {
       try {
@@ -585,6 +594,25 @@ class Slot {
       now: Date.now(),
     })
     await this.finishGuard(guard)
+  }
+
+  async memberIdByName(chatId, nickname) {
+    const want = String(nickname || '').trim()
+    if (!want || !this.client) return ''
+    const body = await this.client.executeWithReconnect(async ({ session }) => {
+      const response = await session.getAllMembers(Long.fromString(String(chatId)))
+      return response && response.body
+    })
+    const members = body && Array.isArray(body.members) ? body.members : []
+    const ids = []
+    for (const m of members) {
+      if (!m || typeof m !== 'object') continue
+      const name = String(m.nickName || m.nickname || m.nn || '').trim()
+      if (name !== want) continue
+      const id = idText(m.userId)
+      if (id && !ids.includes(id)) ids.push(id)
+    }
+    return ids.length === 1 ? ids[0] : ''
   }
 
   async memberCard(chatId, userId) {
@@ -800,11 +828,29 @@ class Slot {
     }
   }
 
+  async writeMention(chatId, text, extra) {
+    const response = await this.client.executeWithReconnect(async ({ session }) => {
+      return session.getConnection().sendPacket('WRITE', {
+        chatId: Long.fromString(String(chatId)),
+        msg: text,
+        type: 1,
+        noSeen: false,
+        extra,
+      })
+    })
+    return {
+      log_id: idText(response && response.body && response.body.logId),
+    }
+  }
+
   async deliver(s) {
     if (this.record.needs_register) return
     if (s.delayMs > 0) await sleep(s.delayMs)
     try {
-      const res = await this.client.sendMessage(s.chatId, s.text)
+      const extra = visitMentionExtra(s.text, s.mention)
+      const res = extra
+        ? await this.writeMention(s.chatId, s.text, extra)
+        : await this.client.sendMessage(s.chatId, s.text)
       if (!realLogId(res && res.log_id)) log(this.id, `send missing log id chat ${s.chatId}`)
     } catch (e) {
       await this.onError(e)

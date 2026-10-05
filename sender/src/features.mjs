@@ -1428,18 +1428,20 @@ function rememberPerson(v, chatId, who, now, kind, link) {
   if (who.id) keys.push(`${chatId}${SEP}${who.id}`)
   if (who.name) keys.push(`${chatId}${SEP}n:${who.name}`)
   if (!keys.length) keys.push(`${chatId}${SEP}${who.key}`)
-  const prev = { joins: [], leaves: [] }
+  const prev = { joins: [], leaves: [], userId: '' }
   for (const key of keys) {
     const row = v.people[key]
     if (!row || typeof row !== 'object') continue
     if (!prev.name && row.name) prev.name = row.name
     if (!prev.link && row.link) prev.link = row.link
+    if (!prev.userId && row.userId) prev.userId = String(row.userId)
     if (Array.isArray(row.joins)) prev.joins = prev.joins.concat(row.joins)
     if (Array.isArray(row.leaves)) prev.leaves = prev.leaves.concat(row.leaves)
   }
   const row = {
     name: who.name || (prev.name ? String(prev.name) : ''),
     link: openProfileLink(link) || openProfileLink(prev.link),
+    userId: who.id || (/^[1-9][0-9]*$/.test(prev.userId) ? prev.userId : ''),
     joins: uniqTimes(prev.joins, now),
     leaves: uniqTimes(prev.leaves, now),
   }
@@ -1463,24 +1465,49 @@ function timeLines(times) {
   return times.map((t) => '- ' + kstStamp(t))
 }
 
-function visitMessage(room, row) {
-  const name = row.name || '이름 없음'
-  const link = row.link || '확인되지 않았습니다'
-  const leaves = row.leaves.length
+const VISIT_RULE = '————————-'
+
+function visitNotice(row) {
+  const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
+  const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
+  const link = row && row.link ? row.link : '찾지 못했습니다'
+  const mentioned = !!(userId && name)
+  const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
+  const joins = timeLines(row && row.joins)
+  const leaves = row && row.leaves && row.leaves.length
     ? timeLines(row.leaves)
     : ['- 아직 나간 기록이 없습니다']
-  return [
-    '[들낙 안내]',
-    '이름: ' + name,
-    '오픈프로필: ' + link,
-    '들어온 방: ' + roomLabel(room),
+  const text = [
+    '[들낙방지]',
+    nameLine,
+    '옾링 : ' + link,
+    VISIT_RULE,
+    '입장로그',
+    ...joins,
     '',
-    '들어온 시각',
-    ...timeLines(row.joins),
-    '',
-    '나간 시각',
+    VISIT_RULE,
+    '퇴장로그',
     ...leaves,
   ].join('\n')
+  if (!mentioned) return { text, mention: null }
+  const at = text.indexOf('\n이름 : @')
+  const start = at + '\n이름 : @'.length
+  return { text, mention: { userId, at: start, len: name.length } }
+}
+
+/** One WRITE mention attachment. The span is the nickname after the @. */
+export function visitMentionExtra(text, mention) {
+  if (!text || !mention) return ''
+  const id = String(mention.userId || '')
+  const at = Number(mention.at)
+  const len = Number(mention.len)
+  if (!/^[1-9][0-9]*$/.test(id)) return ''
+  if (!Number.isInteger(at) || at < 1 || !Number.isInteger(len) || len < 1) return ''
+  if (at + len > text.length) return ''
+  if (text.charAt(at - 1) !== '@') return ''
+  const mark = text.indexOf('@')
+  if (mark !== at - 1) return ''
+  return `{"mentions":[{"user_id":${id},"at":[${at}],"len":${len}}]}`
 }
 
 /**
@@ -1499,9 +1526,11 @@ function applyVisit(record, ev, sends) {
   if (visitSeen(v, String(room.chat_id), who, ev.kind, now)) return true
   const row = rememberPerson(v, String(room.chat_id), who, now, ev.kind, ev.profileLink)
   if (ev.kind !== 'join') return true
+  const notice = visitNotice(row)
   sends.push({
     chatId: String(room.chat_id),
-    text: visitMessage(room, row),
+    text: notice.text,
+    mention: notice.mention,
     delayMs: visitDelay(v, String(room.chat_id), now),
   })
   return true

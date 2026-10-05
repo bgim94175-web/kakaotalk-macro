@@ -17,6 +17,7 @@ import {
   chatLogsFromBody,
   parseRoomKey,
   visitEventsFromMessage,
+  visitMentionExtra,
 } from './features.mjs'
 
 process.env.SENDER_KEY = process.env.SENDER_KEY || '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
@@ -228,17 +229,57 @@ const joined = guardOnChat(firstVisit, {
   profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
 if (joined.sends.length !== 1) throw new Error('one join notice')
+const rule = '————————-'
 const note = joined.sends[0].text
-if (note.indexOf('https://open.kakao.com/o/abc') < 0) throw new Error('open profile link')
-if (note.indexOf('동네모임') < 0) throw new Error('room name')
-if (note.indexOf('2023-11-15 07:13') < 0 || note.indexOf('2023-11-15 07:14') < 0) throw new Error('join and leave times')
-if (note.indexOf('강퇴') >= 0 || note.indexOf('@') >= 0) throw new Error('notice must not kick or mention')
+const expected = [
+  '[들낙방지]',
+  '이름 : @홍길동',
+  '옾링 : https://open.kakao.com/o/abc',
+  rule,
+  '입장로그',
+  '- 2023-11-15 07:14',
+  '',
+  rule,
+  '퇴장로그',
+  '- 2023-11-15 07:13',
+].join('\n')
+if (note !== expected) throw new Error('visit notice layout')
+if (note.indexOf('들어온 방') >= 0 || note.indexOf('들어온 시각') >= 0 || note.indexOf('나간 시각') >= 0) {
+  throw new Error('old labels')
+}
+if (note.indexOf('강퇴') >= 0) throw new Error('notice must not kick')
+const mention = joined.sends[0].mention
+if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== note.indexOf('홍길동')) {
+  throw new Error('one mention of the joiner')
+}
+const extra = visitMentionExtra(note, mention)
+if (extra !== `{"mentions":[{"user_id":7,"at":[${mention.at}],"len":3}]}`) throw new Error('mention attachment')
+if (extra.split('user_id').length !== 2) throw new Error('the notice mentions one person')
+const laterJoin = guardOnChat(firstVisit, {
+  kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
+  profileLink: 'https://open.kakao.com/o/abc', now: t0 + 120000,
+})
+if (laterJoin.sends.length !== 1) throw new Error('a later join posts again')
+const laterText = laterJoin.sends[0].text
+const enterAt = laterText.indexOf('입장로그')
+const leaveAt = laterText.indexOf('퇴장로그')
+if (enterAt < 0 || leaveAt < enterAt) throw new Error('join times stay above leave times')
+const enterPart = laterText.slice(enterAt, leaveAt)
+const leavePart = laterText.slice(leaveAt)
+if (enterPart.indexOf('- 2023-11-15 07:14') < 0 || enterPart.indexOf('- 2023-11-15 07:15') < 0) {
+  throw new Error('every join time is listed')
+}
+if (leavePart.indexOf('- 2023-11-15 07:13') < 0 || enterPart.indexOf('07:13') >= 0) {
+  throw new Error('leave times stay under the leave log')
+}
+if (!laterJoin.sends[0].mention || laterJoin.sends[0].mention.userId !== '7') throw new Error('still one mention')
 const noLeave = visitRecord()
 const onlyJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
 })
-if (onlyJoin.sends[0].text.indexOf('아직 나간 기록이 없습니다') < 0) throw new Error('missing leave is stated')
-if (onlyJoin.sends[0].text.indexOf('확인되지 않았습니다') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].text.indexOf('퇴장로그\n- 아직 나간 기록이 없습니다') < 0) throw new Error('missing leave is stated')
+if (onlyJoin.sends[0].text.indexOf('옾링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
+if (!onlyJoin.sends[0].mention || onlyJoin.sends[0].mention.userId !== '9') throw new Error('the named person is the mention')
 if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
 const burst = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '10', authorName: '이', now: t0 + 100,
@@ -312,7 +353,13 @@ const plainPosted = guardOnChat(visitRecord(), {
 if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보ㄱㄱ') < 0) {
   throw new Error('plain sentence posts one notice')
 }
-if (plainPosted.sends[0].text.indexOf('[들낙 안내]') < 0) throw new Error('plain sentence uses the summary')
+if (plainPosted.sends[0].text.indexOf('[들낙방지]') < 0) throw new Error('plain sentence uses the summary')
+if (plainPosted.sends[0].text.indexOf('@') >= 0 || plainPosted.sends[0].mention) {
+  throw new Error('a sentence without a user id is not a fake mention')
+}
+if (visitMentionExtra(plainPosted.sends[0].text, plainPosted.sends[0].mention) !== '') {
+  throw new Error('a sentence without a user id has no mention attachment')
+}
 const infoLogs = chatLogsFromBody({
   chatInfo: {
     chatId: '555',
@@ -368,9 +415,16 @@ const feedJoin = guardOnChat(feedRoom, {
   kind: openJoin[0].kind, chatId: '555', authorId: '7',
   authorName: '홍길동', profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
-if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[들낙 안내]') < 0) {
+if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[들낙방지]') < 0) {
   throw new Error('a feed join posts one notice')
 }
+if (!feedJoin.sends[0].mention || feedJoin.sends[0].mention.userId !== '7') throw new Error('the feed mention is the joiner')
+const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
+  userId: bigId,
+  at: feedJoin.sends[0].text.indexOf('홍길동'),
+  len: 3,
+})
+if (bigExtra.indexOf(bigId) < 0) throw new Error('mention keeps the full user id')
 if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') < 0) throw new Error('the leave time is on the next join')
 
 const stamped = stampOpenLinkTitles([
