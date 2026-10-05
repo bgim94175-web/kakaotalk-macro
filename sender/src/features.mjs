@@ -1091,6 +1091,147 @@ export function guardDue(record, now) {
   return { presence, sends }
 }
 
+const VISIT_GAP_MS = 4000
+const VISIT_KEEP_MS = 14 * 24 * 60 * 60 * 1000
+const VISIT_KEEP_N = 30
+
+function kstStamp(ms) {
+  const t = new Date(Number(ms) + 9 * 60 * 60 * 1000)
+  if (!Number.isFinite(t.getTime())) return ''
+  const p = (n) => String(n).padStart(2, '0')
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`
+}
+
+function openProfileLink(raw) {
+  const s = String(raw || '').trim()
+  if (!/^https:\/\/open\.kakao\.com\/\S+$/i.test(s)) return ''
+  return s
+}
+
+function visitRoom(record, chatId) {
+  const cfg = record && record.config && record.config.visit
+  if (!cfg || cfg.enabled !== true) return null
+  const room = roomByChat(record.rooms, chatId)
+  if (!room || !realId(String(room.chat_id))) return null
+  if (!coversList(cfg.rooms, room.key)) return null
+  return room
+}
+
+/** True when this join or leave should look up the person's open profile. */
+export function visitNeedsProfile(record, chatId) {
+  return !!visitRoom(record, chatId)
+}
+
+function visitState(record) {
+  const state = rt(record)
+  if (!state.visit || typeof state.visit !== 'object') state.visit = {}
+  const v = state.visit
+  if (!v.people || typeof v.people !== 'object' || Array.isArray(v.people)) v.people = {}
+  if (!v.nextAt || typeof v.nextAt !== 'object' || Array.isArray(v.nextAt)) v.nextAt = {}
+  return v
+}
+
+function trimTimes(list, now) {
+  const out = []
+  const src = Array.isArray(list) ? list : []
+  for (const t of src) {
+    const n = Number(t)
+    if (!Number.isFinite(n)) continue
+    if (now - n > VISIT_KEEP_MS) continue
+    out.push(n)
+  }
+  if (out.length > VISIT_KEEP_N) return out.slice(out.length - VISIT_KEEP_N)
+  return out
+}
+
+function lastTouch(row) {
+  const joins = row && Array.isArray(row.joins) ? row.joins : []
+  const leaves = row && Array.isArray(row.leaves) ? row.leaves : []
+  const j = joins.length ? Number(joins[joins.length - 1]) : 0
+  const l = leaves.length ? Number(leaves[leaves.length - 1]) : 0
+  return Math.max(j, l)
+}
+
+function pruneVisit(v) {
+  const keys = Object.keys(v.people)
+  if (keys.length <= 200) return
+  keys.sort((a, b) => lastTouch(v.people[a]) - lastTouch(v.people[b]))
+  const drop = keys.length - 200
+  for (let i = 0; i < drop; i++) delete v.people[keys[i]]
+}
+
+function rememberPerson(v, chatId, author, now, kind, name, link) {
+  const key = `${chatId}${SEP}${author}`
+  const prev = v.people[key] && typeof v.people[key] === 'object' ? v.people[key] : {}
+  const row = {
+    name: name ? String(name).trim().slice(0, 40) : (prev.name ? String(prev.name) : ''),
+    link: openProfileLink(link) || openProfileLink(prev.link),
+    joins: trimTimes(prev.joins, now),
+    leaves: trimTimes(prev.leaves, now),
+  }
+  if (kind === 'join') row.joins.push(now)
+  else row.leaves.push(now)
+  row.joins = trimTimes(row.joins, now)
+  row.leaves = trimTimes(row.leaves, now)
+  v.people[key] = row
+  pruneVisit(v)
+  return row
+}
+
+function visitDelay(v, chatId, now) {
+  const next = Number(v.nextAt[chatId] || 0)
+  const at = Math.max(now, next)
+  v.nextAt[chatId] = at + VISIT_GAP_MS
+  return at - now
+}
+
+function timeLines(times) {
+  return times.map((t) => '- ' + kstStamp(t))
+}
+
+function visitMessage(room, row) {
+  const name = row.name || '이름 없음'
+  const link = row.link || '확인되지 않았습니다'
+  const leaves = row.leaves.length
+    ? timeLines(row.leaves)
+    : ['- 아직 나간 기록이 없습니다']
+  return [
+    '[들낙 안내]',
+    '이름: ' + name,
+    '오픈프로필: ' + link,
+    '들어온 방: ' + roomLabel(room),
+    '',
+    '들어온 시각',
+    ...timeLines(row.joins),
+    '',
+    '나간 시각',
+    ...leaves,
+  ].join('\n')
+}
+
+/**
+ * Record a join or leave for a watched room. A join also queues one notice.
+ * Leaves are stored and are not announced.
+ */
+function applyVisit(record, ev, sends) {
+  if (!ev || (ev.kind !== 'join' && ev.kind !== 'leave')) return false
+  const room = visitRoom(record, ev.chatId)
+  if (!room) return false
+  if (ev.mine) return false
+  const author = ev.authorId == null ? '' : String(ev.authorId).trim()
+  if (!/^[1-9][0-9]*$/.test(author)) return false
+  const now = Number(ev.now) || Date.now()
+  const v = visitState(record)
+  const row = rememberPerson(v, String(room.chat_id), author, now, ev.kind, ev.authorName, ev.profileLink)
+  if (ev.kind !== 'join') return true
+  sends.push({
+    chatId: String(room.chat_id),
+    text: visitMessage(room, row),
+    delayMs: visitDelay(v, String(room.chat_id), now),
+  })
+  return true
+}
+
 /**
  * One inbound chat, join, or leave.
  * kind: 'msg' | 'join' | 'leave'
@@ -1099,10 +1240,12 @@ export function guardDue(record, now) {
 export function guardOnChat(record, ev) {
   const sends = []
   let askHalt = null
+  if (!ev) return { sends, askHalt, active: false }
+  const visitActive = applyVisit(record, ev, sends)
   const cfg = guardCfg(record)
-  if (!cfg || !ev) return { sends, askHalt, active: false }
+  if (!cfg) return { sends, askHalt, active: visitActive }
   const room = roomOf(record, ev.chatId)
-  if (!room) return { sends, askHalt, active: false }
+  if (!room) return { sends, askHalt, active: visitActive }
   const now = Number(ev.now) || Date.now()
   const g = gstate(record)
   const chatId = String(room.chat_id)

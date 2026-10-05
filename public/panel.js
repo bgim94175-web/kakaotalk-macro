@@ -151,6 +151,40 @@
     return row;
   }
 
+  function checkRow(room, selected) {
+    var row = el('label', 'room plain');
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = selected;
+    box.dataset.key = room.key;
+    row.appendChild(box);
+    row.appendChild(el('span', 'name', room.name || '대화방'));
+    return row;
+  }
+
+  function fillChecks(id, rooms, picked) {
+    var box = document.getElementById(id);
+    box.textContent = '';
+    if (!rooms.length) {
+      box.appendChild(el('p', 'hint', '없음'));
+      return;
+    }
+    rooms.forEach(function (room) {
+      if (!room || room.list_kind === 'open_dm') return;
+      box.appendChild(checkRow(room, picked.indexOf(room.key) >= 0));
+    });
+  }
+
+  function checkedRooms(root) {
+    var keys = [];
+    document.querySelectorAll(root + ' .room').forEach(function (row) {
+      var box = row.querySelector('input[type="checkbox"]');
+      if (!box || !box.checked || !box.dataset.key) return;
+      keys.push(box.dataset.key);
+    });
+    return keys;
+  }
+
   function fillRooms(id, rooms, picked, cool) {
     var box = document.getElementById(id);
     box.textContent = '';
@@ -332,6 +366,11 @@
     var rooms = account.rooms || { open: [], normal: [] };
     fillRooms('rooms-open', rooms.open || [], picked, cool);
     fillRooms('rooms-normal', rooms.normal || [], picked, cool);
+    var visit = account.visit || {};
+    document.getElementById('visit-on').checked = !!visit.enabled;
+    var visitPicked = visit.rooms || [];
+    fillChecks('visit-open', rooms.open || [], visitPicked);
+    fillChecks('visit-normal', rooms.normal || [], visitPicked);
     var a = account.autoreply || {};
     document.getElementById('reply-on').checked = !!a.enabled;
     document.getElementById('reply-message').value = a.message || '';
@@ -579,6 +618,30 @@
       await refreshMe();
     } catch (e) {
       say('macro-error', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('visit-form').addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (!account) return;
+    say('visit-error', '');
+    var btn = ev.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      var res = await api('/panel/api/settings', {
+        device_id: account.device_id,
+        images_unchanged: true,
+        visit: {
+          enabled: document.getElementById('visit-on').checked,
+          rooms: checkedRooms('#visit-open').concat(checkedRooms('#visit-normal')),
+        },
+      });
+      account = res.account;
+      fillDetail();
+    } catch (e) {
+      say('visit-error', e.message);
     } finally {
       btn.disabled = false;
     }

@@ -1,5 +1,6 @@
 import { webcrypto } from 'node:crypto'
 
+import { Long } from 'bson'
 import {
   KakaoTalkClient,
   KakaoTalkListener,
@@ -22,6 +23,7 @@ import {
   onInbound,
   othersSinceMine,
   realId,
+  visitNeedsProfile,
 } from './features.mjs'
 import { roomListKind } from './room-kind.mjs'
 import { listIds, loadRecord, saveRecord } from './store.mjs'
@@ -244,6 +246,7 @@ class Slot {
     this.refreshed = false
     this.linkIds = new Map()
     this.lastLog = new Map()
+    this.profileLinks = new Map()
   }
 
   async start() {
@@ -424,16 +427,57 @@ class Slot {
   async onMember(kind, ev) {
     if (this.record.needs_register || !ev) return
     const creds = credsOf(this.record)
-    const author = ev.member && ev.member.user_id != null ? String(ev.member.user_id) : ''
+    const chatId = String(ev.chat_id || '')
+    const author = memberId(ev.member)
+    const mine = author.length > 0 && author === creds.user_id
+    let authorName = ''
+    let profileLink = ''
+    if (!mine && this.client && visitNeedsProfile(this.record, chatId)) {
+      try {
+        const card = await this.memberCard(chatId, author)
+        authorName = card.name
+        profileLink = card.link
+      } catch (e) {
+        await this.onError(e)
+      }
+    }
+    if (this.record.needs_register) return
     const guard = guardOnChat(this.record, {
       kind,
-      chatId: String(ev.chat_id || ''),
+      chatId,
       text: '',
       authorId: author,
-      mine: author.length > 0 && author === creds.user_id,
+      authorName,
+      profileLink,
+      mine,
       now: Date.now(),
     })
     await this.finishGuard(guard)
+  }
+
+  async memberCard(chatId, userId) {
+    if (!this.client || !userId) return { name: '', link: '' }
+    const members = await this.client.getMembersByIds(chatId, [userId])
+    const row = (members || []).find((m) => m && String(m.user_id) === String(userId))
+    if (!row) return { name: '', link: '' }
+    const name = String(row.nickname || '').trim()
+    const pli = row.open_profile_link_id ? String(row.open_profile_link_id) : ''
+    const link = pli ? await this.openProfileLink(pli) : ''
+    return { name, link }
+  }
+
+  async openProfileLink(linkId) {
+    const id = String(linkId || '').trim()
+    if (!/^[1-9][0-9]*$/.test(id)) return ''
+    const cached = this.profileLinks.get(id)
+    if (cached) return cached
+    const body = await this.client.executeWithReconnect(async ({ session }) => {
+      const response = await session.getOpenLinkInfo([Long.fromString(id)])
+      return response && response.body
+    })
+    const link = linkFromOpenInfo(body)
+    if (link) this.profileLinks.set(id, link)
+    return link
   }
 
   async finishGuard(guard) {
@@ -563,6 +607,24 @@ class Slot {
     })))
     if (!realLogId(res && res.log_id)) log(this.id, 'multi image send missing log id')
   }
+}
+
+function memberId(member) {
+  if (!member || member.user_id == null) return ''
+  const v = member.user_id
+  const s = typeof v === 'object' && typeof v.toString === 'function' ? v.toString() : String(v)
+  return /^[1-9][0-9]*$/.test(s) ? s : ''
+}
+
+function linkFromOpenInfo(body) {
+  const row = body && Array.isArray(body.ols) ? body.ols[0] : null
+  if (!row || typeof row !== 'object') return ''
+  const candidates = [row.lu, row.url, row.linkUrl]
+  for (const c of candidates) {
+    const s = typeof c === 'string' ? c.trim() : ''
+    if (/^https:\/\/open\.kakao\.com\//i.test(s)) return s
+  }
+  return ''
 }
 
 function socketUp(slot) {

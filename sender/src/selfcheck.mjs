@@ -184,6 +184,53 @@ if (later.presence.length !== 0 || later.sends.length !== 0) throw new Error('pr
 const blankNotice = guardRecord({ noticeText: '' })
 if (guardDue(blankNotice, t0).sends.length !== 0) throw new Error('empty notice must not send')
 
+function visitRecord(over) {
+  return {
+    features: { macro: true, roombot: false },
+    config: {
+      accounts: [],
+      visit: Object.assign({ enabled: true, rooms: [guardKey] }, over || {}),
+    },
+    rooms: [{ key: guardKey, chat_id: '555', name: '동네모임', kind: 'open' }],
+    runtime: {},
+  }
+}
+const quietVisit = visitRecord({ enabled: false })
+const quietJoin = guardOnChat(quietVisit, {
+  kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
+  profileLink: 'https://open.kakao.com/o/abc', now: t0,
+})
+if (quietJoin.sends.length !== 0 || quietVisit.runtime.visit) throw new Error('join notice is off by default')
+const firstVisit = visitRecord()
+guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
+const joined = guardOnChat(firstVisit, {
+  kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
+  profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
+})
+if (joined.sends.length !== 1) throw new Error('one join notice')
+const note = joined.sends[0].text
+if (note.indexOf('https://open.kakao.com/o/abc') < 0) throw new Error('open profile link')
+if (note.indexOf('동네모임') < 0) throw new Error('room name')
+if (note.indexOf('2023-11-15 07:13') < 0 || note.indexOf('2023-11-15 07:14') < 0) throw new Error('join and leave times')
+if (note.indexOf('강퇴') >= 0 || note.indexOf('@') >= 0) throw new Error('notice must not kick or mention')
+const noLeave = visitRecord()
+const onlyJoin = guardOnChat(noLeave, {
+  kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
+})
+if (onlyJoin.sends[0].text.indexOf('아직 나간 기록이 없습니다') < 0) throw new Error('missing leave is stated')
+if (onlyJoin.sends[0].text.indexOf('확인되지 않았습니다') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
+const burst = guardOnChat(noLeave, {
+  kind: 'join', chatId: '555', authorId: '10', authorName: '이', now: t0 + 100,
+})
+if (burst.sends.length !== 1 || burst.sends[0].delayMs < 3000) throw new Error('notices keep a gap')
+const otherRoom = guardOnChat(noLeave, {
+  kind: 'join', chatId: '999', authorId: '10', authorName: '이', now: t0,
+})
+if (otherRoom.sends.length !== 0) throw new Error('unwatched room stays quiet')
+const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', now: t0 + 200 })
+if (left.sends.length !== 0) throw new Error('a leave is recorded and not announced')
+
 const client = new KakaoTalkClient()
 await client.login({ oauthToken: 'tok', userId: '42', deviceUuid: 'duuid-test', deviceType: 'tablet' })
 if (client.isConnected()) throw new Error('login() must not open a LOCO socket')

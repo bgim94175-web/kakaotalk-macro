@@ -133,6 +133,7 @@ function viewAccount(row, snap) {
     connected: !!snap.connected,
     reason: snap.reason || '',
     macro: cfg.presentMacro(config.macro),
+    visit: cfg.presentVisit(config.visit),
     autoreply: cfg.presentReply(config.autoreply),
     triggers: cfg.presentTriggers(config.triggers),
     images: Array.isArray(snap.images) ? snap.images : [],

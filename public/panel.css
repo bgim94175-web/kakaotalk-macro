@@ -159,6 +159,7 @@ legend { padding: 0 4px; font-weight: 650; }
   gap: 8px;
   align-items: center;
 }
+.room.plain { grid-template-columns: auto 1fr; }
 .room .name { font-weight: 550; }
 .room .cool { width: 72px; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
