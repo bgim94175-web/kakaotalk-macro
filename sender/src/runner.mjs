@@ -25,7 +25,7 @@ import {
   realId,
   visitNeedsProfile,
 } from './features.mjs'
-import { roomListKind } from './room-kind.mjs'
+import { roomListKind, roomTitle } from './room-kind.mjs'
 import { listIds, loadRecord, saveRecord } from './store.mjs'
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
@@ -34,6 +34,44 @@ const DEAD = new Set(['invalid_access_token', 'login_rejected', 'kicked', 'reaut
 
 function log(id, msg) {
   process.stderr.write(`[sender] ${id} ${msg}\n`)
+}
+
+function openCandidate(ch) {
+  const s = ch && ch.type == null ? '' : String(ch.type)
+  if (s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat') return true
+  if (s === 'OD' || s === 'OpenDirect' || s === 'OpenDirectChat') return true
+  if (s === '2' || s === '13' || s === '14' || s === '15' || s === '16') return true
+  return !!(ch && ch.link_id)
+}
+
+async function fillOpenTitles(client, list) {
+  const queue = []
+  for (let i = 0; i < list.length; i++) {
+    if (openCandidate(list[i]) && !roomTitle(list[i])) queue.push(i)
+  }
+  async function worker() {
+    for (;;) {
+      const i = queue.shift()
+      if (i == null) return
+      const ch = list[i]
+      try {
+        const full = await client.getChat(String(ch.chat_id))
+        if (!full) continue
+        list[i] = {
+          ...ch,
+          type: full.type == null ? ch.type : full.type,
+          title: full.title || ch.title || null,
+          link_id: full.link_id || ch.link_id || null,
+        }
+      } catch {
+        // 제목을 못 읽은 오픈채팅은 고르는 목록에 넣지 않는다.
+      }
+    }
+  }
+  const workers = []
+  const n = Math.min(4, queue.length)
+  for (let w = 0; w < n; w++) workers.push(worker())
+  await Promise.all(workers)
 }
 
 function realLogId(v) {
@@ -144,14 +182,16 @@ export class Hub {
   async chats(id) {
     const slot = this.requireLive(id)
     const list = await slot.client.getChats({ all: true, resolveTitles: true })
+    await fillOpenTitles(slot.client, list)
     return list.map((ch) => {
       const listKind = roomListKind(ch)
+      const title = listKind === 'open_room' ? (roomTitle(ch) || null) : (ch.title || null)
       return {
         chat_id: String(ch.chat_id),
         kind: classifyKakaoChat(ch),
         type: ch.type,
         list_kind: listKind,
-        title: ch.title || null,
+        title: title,
         display_name: listKind === 'open_room' ? null : (ch.display_name || null),
         members: ch.active_members,
         last_at: ch.last_message ? ch.last_message.sent_at : 0,

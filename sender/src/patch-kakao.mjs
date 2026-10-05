@@ -133,6 +133,140 @@ export function patchKakaoLibrary() {
         })(),
         active_members: chat.a,`,
   )
+  client = replaceOnce(
+    'chat title meta',
+    client,
+    `function extractTitle(body) {
+    const info = body.chatInfo;
+    const metas = info?.chatMetas;
+    if (!Array.isArray(metas))
+        return null;
+    const titleMeta = metas.find((m) => m?.type === META_TYPE_TITLE);
+    const content = titleMeta?.content;
+    return typeof content === 'string' && content.length > 0 ? content : null;
+}`,
+    `function textTitle(content) {
+    if (typeof content === 'string') {
+        const s = content.trim();
+        if (!s)
+            return null;
+        if (s.charAt(0) === '{') {
+            try {
+                const obj = JSON.parse(s);
+                const inner = obj && (obj.name || obj.title || obj.ln || obj.ti);
+                if (typeof inner === 'string' && inner.trim())
+                    return inner.trim();
+            }
+            catch {
+                /* 방 제목 문자열이다 */
+            }
+        }
+        return s;
+    }
+    if (content && typeof content === 'object') {
+        const inner = content.name || content.title || content.ln || content.ti;
+        if (typeof inner === 'string' && inner.trim())
+            return inner.trim();
+    }
+    return null;
+}
+function extractTitle(body) {
+    const info = body.chatInfo;
+    const metas = info?.chatMetas;
+    if (!Array.isArray(metas))
+        return null;
+    const titleMeta = metas.find((m) => m?.type === META_TYPE_TITLE);
+    return textTitle(titleMeta?.content);
+}`,
+  )
+  client = replaceOnce(
+    'open link name',
+    client,
+    `function extractOpenLinkName(body) {
+    const ols = body.ols;
+    if (!Array.isArray(ols) || ols.length === 0)
+        return null;
+    const ln = ols[0]?.ln;
+    return typeof ln === 'string' && ln.length > 0 ? ln : null;
+}`,
+    `function extractOpenLinkName(body) {
+    const ols = body.ols;
+    if (!Array.isArray(ols) || ols.length === 0)
+        return null;
+    for (let i = 0; i < ols.length; i++) {
+        const ol = ols[i];
+        if (!ol || typeof ol !== 'object')
+            continue;
+        if (typeof ol.ln === 'string' && ol.ln.trim())
+            return ol.ln.trim();
+        const moim = ol.omt || ol.moim;
+        const named = textTitle(moim);
+        if (named)
+            return named;
+    }
+    return null;
+}`,
+  )
+  client = replaceOnce(
+    'open title from chatinfo link',
+    client,
+    `    async fetchChatTitle(session, chatId, chat) {
+        let title = null;
+        try {
+            const response = await session.getChannelInfo(chatId);
+            title = extractTitle(response.body);
+        }
+        catch {
+            title = null;
+        }
+        if (title)
+            return title;
+        if (!chat || !isOpenChat(chat))
+            return null;
+        const linkId = getOpenLinkId(chat);
+        if (!linkId)
+            return null;
+        try {
+            const response = await session.getOpenLinkInfo([linkId]);
+            return extractOpenLinkName(response.body);
+        }
+        catch {
+            return null;
+        }
+    }`,
+    `    async fetchChatTitle(session, chatId, chat) {
+        let title = null;
+        let infoChat = null;
+        try {
+            const response = await session.getChannelInfo(chatId);
+            title = extractTitle(response.body);
+            try {
+                infoChat = channelInfoToChatData(response.body, longToString(chatId));
+            }
+            catch {
+                infoChat = null;
+            }
+        }
+        catch {
+            title = null;
+        }
+        if (title)
+            return title;
+        const openChat = infoChat && isOpenChat(infoChat) ? infoChat : (chat && isOpenChat(chat) ? chat : null);
+        if (!openChat)
+            return null;
+        const linkId = getOpenLinkId(openChat) || (chat ? getOpenLinkId(chat) : null);
+        if (!linkId)
+            return null;
+        try {
+            const response = await session.getOpenLinkInfo([linkId]);
+            return extractOpenLinkName(response.body);
+        }
+        catch {
+            return null;
+        }
+    }`,
+  )
   writeFileSync(clientPath, client)
 }
 
