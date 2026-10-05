@@ -18,6 +18,15 @@ function replaceOnce(label, text, oldText, newText) {
   return text.replace(oldText, newText)
 }
 
+// oldTexts are earlier revisions of the same site, oldest first. The last one is current.
+function replaceLatest(label, text, oldTexts, newText) {
+  if (text.includes(newText)) return text
+  for (let i = oldTexts.length - 1; i >= 0; i--) {
+    if (text.includes(oldTexts[i])) return text.replace(oldTexts[i], newText)
+  }
+  throw new Error('kakao patch site missing: ' + label)
+}
+
 export function patchKakaoLibrary() {
   const base = root()
   const loginPath = join(base, 'auth/kakao-login.js')
@@ -133,19 +142,10 @@ export function patchKakaoLibrary() {
         })(),
         active_members: chat.a,`,
   )
-  client = replaceOnce(
-    'chat title meta',
-    client,
-    `function extractTitle(body) {
-    const info = body.chatInfo;
-    const metas = info?.chatMetas;
-    if (!Array.isArray(metas))
-        return null;
-    const titleMeta = metas.find((m) => m?.type === META_TYPE_TITLE);
-    const content = titleMeta?.content;
-    return typeof content === 'string' && content.length > 0 ? content : null;
-}`,
-    `function textTitle(content) {
+  if (!client.includes('function textTitle(content)')) {
+    client = client.replace(
+      'function extractTitle(body) {',
+      `function textTitle(content) {
     if (typeof content === 'string') {
         const s = content.trim();
         if (!s)
@@ -170,13 +170,64 @@ export function patchKakaoLibrary() {
     }
     return null;
 }
-function extractTitle(body) {
+function extractTitle(body) {`,
+    )
+  }
+  client = replaceLatest(
+    'chat title meta',
+    client,
+    [`function extractTitle(body) {
+    const info = body.chatInfo;
+    const metas = info?.chatMetas;
+    if (!Array.isArray(metas))
+        return null;
+    const titleMeta = metas.find((m) => m?.type === META_TYPE_TITLE);
+    const content = titleMeta?.content;
+    return typeof content === 'string' && content.length > 0 ? content : null;
+}`,
+    `function extractTitle(body) {
     const info = body.chatInfo;
     const metas = info?.chatMetas;
     if (!Array.isArray(metas))
         return null;
     const titleMeta = metas.find((m) => m?.type === META_TYPE_TITLE);
     return textTitle(titleMeta?.content);
+}`],
+    `function metaTypeNum(v) {
+    if (typeof v === 'number' && Number.isFinite(v))
+        return v;
+    if (v && typeof v === 'object' && 'low' in v)
+        return v.low;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+}
+function extractTitle(body) {
+    const info = body.chatInfo;
+    const metas = info?.chatMetas;
+    if (!Array.isArray(metas))
+        return null;
+    const titleMeta = metas.find((m) => metaTypeNum(m?.type) === META_TYPE_TITLE);
+    return textTitle(titleMeta?.content);
+}`,
+  )
+  client = replaceOnce(
+    'numeric open link id',
+    client,
+    `function getOpenLinkId(chat) {
+    return bsonToLong(chat.li) ?? null;
+}`,
+    `function getOpenLinkId(chat) {
+    const v = chat && chat.li;
+    if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0)
+        return Long.fromNumber(v);
+    if (typeof v === 'bigint' && v > 0n)
+        return Long.fromString(v.toString());
+    if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v))
+        return Long.fromString(v);
+    const asLong = bsonToLong(v);
+    if (!asLong || asLong.isZero())
+        return null;
+    return asLong;
 }`,
   )
   client = replaceOnce(
@@ -207,10 +258,10 @@ function extractTitle(body) {
     return null;
 }`,
   )
-  client = replaceOnce(
+  client = replaceLatest(
     'open title from chatinfo link',
     client,
-    `    async fetchChatTitle(session, chatId, chat) {
+    [`    async fetchChatTitle(session, chatId, chat) {
         let title = null;
         try {
             const response = await session.getChannelInfo(chatId);
@@ -256,6 +307,33 @@ function extractTitle(body) {
         if (!openChat)
             return null;
         const linkId = getOpenLinkId(openChat) || (chat ? getOpenLinkId(chat) : null);
+        if (!linkId)
+            return null;
+        try {
+            const response = await session.getOpenLinkInfo([linkId]);
+            return extractOpenLinkName(response.body);
+        }
+        catch {
+            return null;
+        }
+    }`],
+    `    async fetchChatTitle(session, chatId, chat) {
+        let title = null;
+        let info = null;
+        try {
+            const response = await session.getChannelInfo(chatId);
+            const body = response && response.body;
+            info = body && body.chatInfo;
+            title = extractTitle(body);
+            if (chat && info && info.li != null && !getOpenLinkId(chat))
+                chat.li = info.li;
+        }
+        catch {
+            title = null;
+        }
+        if (title)
+            return title;
+        const linkId = getOpenLinkId(info ? { li: info.li } : null) || (chat ? getOpenLinkId(chat) : null);
         if (!linkId)
             return null;
         try {

@@ -207,7 +207,7 @@
   function selectedRooms() {
     var keys = [];
     var cool = {};
-    document.querySelectorAll('#rooms-open .room, #rooms-normal .room').forEach(function (row) {
+    document.querySelectorAll('#rooms-open .room').forEach(function (row) {
       var box = row.querySelector('input[type="checkbox"]');
       var num = row.querySelector('input[type="number"]');
       if (!box || !box.checked || !box.dataset.key) return;
@@ -222,7 +222,7 @@
     var out = [];
     var rooms = account && account.rooms;
     if (!rooms) return out;
-    (rooms.open || []).concat(rooms.normal || []).forEach(function (r) {
+    (rooms.open || []).forEach(function (r) {
       if (r && r.list_kind !== 'open_dm') out.push(r);
     });
     return out;
@@ -305,7 +305,7 @@
       var picks = el('div', 'rooms');
       var chosen = {};
       (t.rooms || []).forEach(function (k) { chosen[k] = true; });
-      if (!choices.length) picks.appendChild(el('p', 'hint', '대화방을 불러온 뒤에 고릅니다. 비우면 오픈채팅방과 일반 채팅방 전체입니다.'));
+      if (!choices.length) picks.appendChild(el('p', 'hint', '대화방을 불러온 뒤에 고릅니다. 비우면 오픈채팅방 전체입니다.'));
       choices.forEach(function (room) {
         var lab = el('label', 'check', '');
         var cb = document.createElement('input');
@@ -370,12 +370,10 @@
     var picked = m.rooms || [];
     var rooms = account.rooms || { open: [], normal: [] };
     fillRooms('rooms-open', rooms.open || [], picked, cool);
-    fillRooms('rooms-normal', rooms.normal || [], picked, cool);
     var visit = account.visit || {};
     document.getElementById('visit-on').checked = !!visit.enabled;
     var visitPicked = visit.rooms || [];
     fillChecks('visit-open', rooms.open || [], visitPicked);
-    fillChecks('visit-normal', rooms.normal || [], visitPicked);
     var a = account.autoreply || {};
     document.getElementById('reply-on').checked = !!a.enabled;
     document.getElementById('reply-message').value = a.message || '';
@@ -657,7 +655,7 @@
         images_unchanged: true,
         visit: {
           enabled: document.getElementById('visit-on').checked,
-          rooms: checkedRooms('#visit-open').concat(checkedRooms('#visit-normal')),
+          rooms: checkedRooms('#visit-open'),
         },
       });
       account = res.account;

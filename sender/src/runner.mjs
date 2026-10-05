@@ -38,9 +38,7 @@ function log(id, msg) {
 
 function openCandidate(ch) {
   const s = ch && ch.type == null ? '' : String(ch.type)
-  if (s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat') return true
-  if (s === 'OD' || s === 'OpenDirect' || s === 'OpenDirectChat') return true
-  if (s === '2' || s === '13' || s === '14' || s === '15' || s === '16') return true
+  if (s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat' || s === '13' || s === '15') return true
   return !!(ch && ch.link_id)
 }
 

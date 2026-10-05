@@ -105,16 +105,10 @@
             <button type="button" id="reload-rooms" class="btn ghost">대화방 불러오기</button>
           </div>
           <p id="room-error" class="error" role="alert"></p>
-          <div class="room-cols">
-            <fieldset>
-              <legend>오픈채팅방</legend>
-              <div id="rooms-open" class="rooms"></div>
-            </fieldset>
-            <fieldset>
-              <legend>일반 채팅방</legend>
-              <div id="rooms-normal" class="rooms"></div>
-            </fieldset>
-          </div>
+          <fieldset>
+            <legend>오픈채팅방</legend>
+            <div id="rooms-open" class="rooms"></div>
+          </fieldset>
           <p id="macro-error" class="error" role="alert"></p>
           <button type="submit" class="btn">매크로 저장</button>
         </form>
@@ -126,16 +120,10 @@
         <form id="visit-form" class="stack">
           <label class="check"><input type="checkbox" id="visit-on"> 사용</label>
           <p class="hint">꺼져 있으면 안내를 보내지 않습니다. 켠 뒤에도 아래에서 고른 방에만 보냅니다. 여러 사람이 잇따라 들어오면 안내 사이에 잠시 둡니다.</p>
-          <div class="room-cols">
-            <fieldset>
-              <legend>오픈채팅방</legend>
-              <div id="visit-open" class="rooms"></div>
-            </fieldset>
-            <fieldset>
-              <legend>일반 채팅방</legend>
-              <div id="visit-normal" class="rooms"></div>
-            </fieldset>
-          </div>
+          <fieldset>
+            <legend>오픈채팅방</legend>
+            <div id="visit-open" class="rooms"></div>
+          </fieldset>
           <p id="visit-error" class="error" role="alert"></p>
           <button type="submit" class="btn">들낙 방지 저장</button>
         </form>
@@ -175,6 +163,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=5"></script>
+<script src="/panel.js?v=6"></script>
 </body>
 </html>
