@@ -407,8 +407,9 @@ public final class RoomBot {
                 int sep = k.indexOf('\u0001');
                 String who = (sep >= 0) ? k.substring(sep + 1) : k;
                 Long at = CHURN_AT.get(k);
+                String rk = (sep >= 0) ? k.substring(0, sep) : "";
                 out.add(who + '\u0001' + rows.get(i).getValue() + '\u0001'
-                        + (at == null ? 0L : at.longValue()));
+                        + (at == null ? 0L : at.longValue()) + '\u0001' + rk);
             }
         }
         return out;
@@ -432,6 +433,14 @@ public final class RoomBot {
                                         String body, int kind, long now) {
         boolean join = (kind == 1);
         final String churnWho = personOf(body);
+
+        // 기록은 설정과 무관하게 항상 남긴다 — 인사를 꺼두든 들낙 방지를 꺼두든,
+        // 방장이 나중에 "누가 언제 들락날락했나" 를 볼 수 있어야 한다.
+        try {
+            JoinLog.add(c, room, churnWho, join ? JoinLog.JOIN : JoinLog.LEAVE, now);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "입·퇴장 기록 실패", t);
+        }
 
         // ★ 인사를 보낼지 판단하기 <b>전에</b> 센다. 인사가 꺼져 있어도 들낙은 기록해야
         //   명단이 쌓이고, 나중에 인사를 켰을 때 바로 억제가 걸린다.

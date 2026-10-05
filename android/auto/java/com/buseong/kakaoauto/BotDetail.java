@@ -175,6 +175,11 @@ public final class BotDetail {
                         churned.isEmpty() ? Theme.DIM : Theme.TEXT, new Runnable() {
                             @Override public void run() { Nav.push(a, "들낙 명단", churnList(a)); }
                         }));
+                final int jl = JoinLog.count(a);
+                g3.addView(Ui.navRow(a, "입·퇴장 기록", (jl == 0) ? "없음" : (jl + "건"),
+                        (jl == 0) ? Theme.DIM : Theme.TEXT, new Runnable() {
+                            @Override public void run() { Nav.push(a, "입·퇴장 기록", joinLogAll(a)); }
+                        }));
                 col.addView(g3);
 
                 col.addView(Nav.note(a, RoomBot.LIMIT_NOTE, Theme.AMBER, null, null));
@@ -309,12 +314,22 @@ public final class BotDetail {
                 LinearLayout g = Ui.group(a);
                 for (int i = 0; i < rows.size(); i++) {
                     String[] f = rows.get(i).split("\u0001", -1);
-                    String who = (f.length > 0) ? f[0] : "";
+                    final String who = (f.length > 0) ? f[0] : "";
                     String n = (f.length > 1) ? f[1] : "0";
                     long at = 0L;
                     try { at = (f.length > 2) ? Long.parseLong(f[2]) : 0L; } catch (Throwable ignore) { }
-                    g.addView(Ui.kv(a, (who.length() == 0) ? "이름 미확인" : who,
-                            n + "회" + ((at > 0) ? (" · " + ScreenMacro.agoShort(at)) : "")));
+                    final RoomRef ref = (f.length > 3) ? RoomRef.parse(f[3]) : null;
+                    g.addView(Ui.navRow(a, (who.length() == 0) ? "이름 미확인" : who,
+                            n + "회" + ((at > 0) ? (" · " + JoinLog.kst(at)) : ""), Theme.TEXT,
+                            new Runnable() {
+                                @Override public void run() {
+                                    if (ref == null || !ref.valid()) {
+                                        Ui.toast(a, "대화방을 확인할 수 없습니다.");
+                                        return;
+                                    }
+                                    Nav.push(a, "입·퇴장 기록", personLog(a, ref, who));
+                                }
+                            }));
                 }
                 col.addView(g);
 
@@ -328,6 +343,108 @@ public final class BotDetail {
                                         int n = RoomBot.clearChurn(a);
                                         Log.add(a, "들낙 명단을 초기화했습니다. (" + n + "명)");
                                         Ui.toast(a, "들낙 명단을 초기화했습니다.");
+                                        refresh();
+                                    }
+                                });
+                    }
+                });
+                clear.setTextColor(Theme.RED);
+                col.addView(clear);
+            }
+        });
+    }
+
+    /**
+     * 한 사람의 입·퇴장 기록. <b>시각은 항상 한국시간</b>이다 — 기기 표준시를 따르면
+     * PC 에뮬레이터(기본 UTC)에서 9시간 어긋나 들낙 판정이 무의미해진다.
+     */
+    private static View personLog(MainActivity a, final RoomRef ref, final String who) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final List<JoinLog.Entry> rows = JoinLog.of(a, ref, who);
+
+                LinearLayout head = Ui.card(a);
+                head.addView(Ui.kv(a, "이름", (who.length() == 0) ? "이름 미확인" : who));
+                head.addView(Ui.kv(a, "대화방", ref.label(a)));
+                head.addView(Ui.kv(a, "기록", rows.size() + "건"));
+                col.addView(head);
+
+                if (JoinLog.deviceNotKst()) {
+                    col.addView(Nav.note(a, "기기 표준시가 한국이 아닙니다. 아래 시각은 "
+                            + "한국시간으로 표시됩니다.", Theme.ACCENT2, null, null));
+                }
+
+                col.addView(Ui.sectionHeader(a, null, "입·퇴장 (최신 순 · 한국시간)"));
+                if (rows.isEmpty()) {
+                    LinearLayout box = Ui.card(a);
+                    box.addView(Ui.sub(a, "기록이 없습니다. 보관 기간은 7일입니다."));
+                    col.addView(box);
+                    return;
+                }
+                LinearLayout g = Ui.group(a);
+                for (int i = 0; i < rows.size(); i++) {
+                    JoinLog.Entry e = rows.get(i);
+                    String gap = "";
+                    if (i + 1 < rows.size()) {
+                        long d = e.at - rows.get(i + 1).at;
+                        if (d > 0) gap = " · 직전 " + Nav.dur(d) + " 후";
+                    }
+                    g.addView(Ui.kv(a, JoinLog.kst(e.at), (e.join() ? "들어옴" : "나감") + gap));
+                }
+                col.addView(g);
+
+                col.addView(Ui.sub(a, "「직전 N 후」 는 바로 아래 기록과의 간격입니다. "
+                        + "짧은 간격이 반복되면 들낙입니다.\n"
+                        + "카카오톡 이름을 바꾸면 다른 사람으로 기록됩니다. 알림에는 이름 외에 "
+                        + "사람을 구분할 정보가 없습니다."));
+            }
+        });
+    }
+
+    /** 전체 입·퇴장 기록 — 이름을 바꿔 들어온 경우를 눈으로 짚는 자리 */
+    private static View joinLogAll(MainActivity a) {
+        return screen(a, new Filler() {
+            @Override public void fill(final MainActivity a, LinearLayout col) {
+                final List<JoinLog.Entry> rows = JoinLog.recent(a, 200);
+
+                col.addView(Ui.sub(a, "모든 대화방의 입·퇴장을 최신 순으로 보여줍니다. "
+                        + "시각은 한국시간이며 7일간 보관합니다.\n"
+                        + "이름을 바꿔 다시 들어온 경우는 나간 시각과 들어온 시각이 거의 "
+                        + "붙어 있습니다. 그걸로 짚을 수 있습니다."));
+
+                if (JoinLog.deviceNotKst()) {
+                    col.addView(Nav.note(a, "기기 표준시가 한국이 아닙니다. 아래 시각은 "
+                            + "한국시간으로 표시됩니다.", Theme.ACCENT2, null, null));
+                }
+
+                col.addView(Ui.sectionHeader(a, null, "입·퇴장 " + rows.size() + "건"));
+                if (rows.isEmpty()) {
+                    LinearLayout box = Ui.card(a);
+                    box.addView(Ui.sub(a, "기록이 없습니다."));
+                    col.addView(box);
+                } else {
+                    LinearLayout g = Ui.group(a);
+                    for (int i = 0; i < rows.size(); i++) {
+                        JoinLog.Entry e = rows.get(i);
+                        RoomRef rr = RoomRef.parse(e.roomKey);
+                        String who = (e.who.length() == 0) ? "이름 미확인" : e.who;
+                        g.addView(Ui.kv(a, JoinLog.kst(e.at),
+                                (e.join() ? "들어옴 · " : "나감 · ") + who
+                                        + " · " + Nav.preview(rr.name, 12)));
+                    }
+                    col.addView(g);
+                }
+
+                TextView clear = Nav.wideBtn(a, "입·퇴장 기록 초기화", false, new Runnable() {
+                    @Override public void run() {
+                        Nav.confirm(a, "입·퇴장 기록 초기화",
+                                "보관된 입·퇴장 기록을 전부 삭제합니다. 들낙 명단은 "
+                                        + "그대로 유지됩니다.",
+                                "초기화", new Runnable() {
+                                    @Override public void run() {
+                                        int n = JoinLog.clear(a);
+                                        Log.add(a, "입·퇴장 기록을 초기화했습니다. (" + n + "건)");
+                                        Ui.toast(a, "입·퇴장 기록을 초기화했습니다.");
                                         refresh();
                                     }
                                 });

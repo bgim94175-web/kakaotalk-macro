@@ -178,6 +178,8 @@ public final class KakaoListener extends NotificationListenerService {
          * 내려주는지 · 이름을 바꿔도 그 값이 유지되는지를 실제 기기에서 확인해야 한다.
          * 확인되지 않은 값으로 통로를 찾으면 엉뚱한 방으로 발송된다. 그래서 먼저 기록만 한다.
          */
+        /** 이 방에서 마지막으로 말한 사람의 Person key/uri (진단용 — personId 설명 참고) */
+        volatile String lastPersonId = "";
         volatile String idShortcut = "";
         volatile String idTag = "";
         volatile int idNum = 0;
@@ -439,6 +441,7 @@ public final class KakaoListener extends NotificationListenerService {
             s = (prev != null) ? prev : fresh;
             if (SESSIONS.size() > MAX_SESSIONS) trimSessions(skey);
         }
+        if (m.personId != null && m.personId.length() > 0) s.lastPersonId = m.personId;
         if (scId.length() > 0) s.idShortcut = scId;
         if (sbTag.length() > 0) s.idTag = sbTag;
         if (sbId != 0) s.idNum = sbId;
@@ -579,6 +582,8 @@ public final class KakaoListener extends NotificationListenerService {
     private static final class Msg {
         /** 이 알림이 온 카톡 계정키 */
         String acc = RoomRef.DEFAULT_ACC;
+        /** 마지막 발신자의 Person key/uri (있으면). 진단 기록에만 쓴다 — personId 설명 참고 */
+        String personId = "";
         /** 계정 + 방 이름. 세션 맵·방 캐시의 키가 여기서 나온다 (parse 끝에서 확정) */
         RoomRef ref = RoomRef.of(RoomRef.DEFAULT_ACC, "");
         /** 이 계정의 내 카톡 프로필 이름 (못 읽으면 "") */
@@ -689,9 +694,12 @@ public final class KakaoListener extends NotificationListenerService {
         String soleOther = only(others);
         Bundle last = lastMessage(msgs);
         String rawSender = "";
+        String lastPersonId = "";
         if (last != null) {
             m.text = getCs(last, "text");
-            rawSender = personName(getParcel(last, "sender_person"));
+            Object sp = getParcel(last, "sender_person");
+            rawSender = personName(sp);
+            lastPersonId = personId(sp);
             if (rawSender.length() == 0) rawSender = getCs(last, "sender");
             long t = 0L;
             try { t = last.getLong("time", 0L); } catch (Throwable ignore) { t = 0L; }
@@ -700,6 +708,7 @@ public final class KakaoListener extends NotificationListenerService {
         if (m.text.length() == 0) m.text = getCs(ex, Notification.EXTRA_TEXT);
 
         // 카톡이 이름을 알려준 발신자만 모은다 (폴백으로 만든 이름은 넣지 않는다 — 오염된다)
+        m.personId = lastPersonId;
         m.seenSenders.addAll(others);
         if (rawSender.trim().length() > 0) m.seenSenders.add(rawSender.trim());
 
@@ -1034,6 +1043,34 @@ public final class KakaoListener extends NotificationListenerService {
         } catch (Throwable t) {
             return "";
         }
+    }
+
+    /**
+     * {@code android.app.Person} 의 key / uri — <b>이름이 아닌 사람 식별자</b> 후보다.
+     *
+     * 들낙하는 사람이 이름을 바꾸면 이름 기준 집계가 끊긴다. 카카오톡이 이 값을 채워
+     * 주고 그 값이 이름을 바꿔도 유지된다면, 이름 대신 이 값으로 사람을 묶을 수 있다.
+     *
+     * 다만 <b>입·퇴장 안내에는 그 사람의 Person 객체가 없다</b>(시스템 문구라 발신자가
+     * 그 사람이 아니다). 그래서 이 값은 <b>그 사람이 말을 한 적이 있을 때만</b> 얻는다.
+     * 지금은 진단 기록에만 남긴다 — 실제 기기에서 값이 채워지는지, 이름을 바꿔도
+     * 유지되는지 확인한 뒤에만 집계에 쓸 수 있다. 확인 없이 쓰면 엉뚱한 사람을 묶는다.
+     */
+    private static String personId(Object p) {
+        if (p == null) return "";
+        String out = "";
+        try {
+            Object k = p.getClass().getMethod("getKey").invoke(p);
+            if (k != null && k.toString().trim().length() > 0) out = "key=" + k.toString().trim();
+        } catch (Throwable ignore) { }
+        try {
+            Object u = p.getClass().getMethod("getUri").invoke(p);
+            if (u != null && u.toString().trim().length() > 0) {
+                if (out.length() > 0) out = out + " ";
+                out = out + "uri=" + u.toString().trim();
+            }
+        } catch (Throwable ignore) { }
+        return out;
     }
 
     private static String cs(CharSequence v) {
@@ -1675,6 +1712,8 @@ public final class KakaoListener extends NotificationListenerService {
         sb.append("바로가기id=").append(s.idShortcut.length() == 0 ? "없음" : s.idShortcut);
         sb.append(" · 알림tag=").append(s.idTag.length() == 0 ? "없음" : s.idTag);
         sb.append(" · 알림id=").append(s.idNum);
+        sb.append("\n발신자 식별자: ")
+                .append(s.lastPersonId.length() == 0 ? "없음(카카오톡이 제공하지 않음)" : s.lastPersonId);
         return sb.toString();
     }
 
