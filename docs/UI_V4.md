@@ -1360,3 +1360,25 @@ GET /panel/api/chat?device_id&chat_id, POST /panel/api/chat/send {device_id, cha
 ```
 
 클라이언트 규칙 요약(양쪽 공통 이해): 대화 식별자 = `device_id + '/' + chat_id`; 전송 `device_id`는 항상 열린 대화의 `device_id`; `status`가 `error`인 계정은 응답에 chats가 없으므로 클라이언트가 이전 성공분을 유지한다; `sender_up:false`면 클라이언트는 목록을 비우지 않는다; `connected`가 `null`이면 `/me`의 `connected`로 `연결 대기`를 판단한다.
+---
+
+## 13. 구현 메모 (2026-10-08, 명세와 다른 점)
+
+구현하면서 명세와 달리 한 것. 이유가 있어 바꾼 것이니 되돌리지 않는다.
+
+| 항목 | 명세 | 구현 | 이유 |
+|---|---|---|---|
+| 11.1-A 서버 단언 | `lib/panel-check.js` 안 | `lib/panel-inbox-check.js`(별도 파일, `npm run check`에 연결) | 백엔드·프런트가 같은 파일을 동시에 고치지 않게 |
+| 머리글 폭 | `.bar` 1060px 그대로 | `body[data-screen="app"] .bar { width: min(1480px, 100%); padding: 0 12px }` | 콘솔(#app 1480px) 왼쪽 끝과 브랜드가 한 줄에 서게 |
+| 대화 열 때 배지 | 다음 렌더에서 사라짐(5.8) | `markOpenRow()`가 열린 행의 `.kkt-badge`·`.unread`를 바로 거두고, `openConversation()`이 `renderRail()`을 불러 레일 배지도 즉시 맞춤 | `안 읽음` 칩·문서 제목과 레일 숫자가 9초 동안 어긋나 보이는 것을 막음 |
+| `refreshMe()` | `loadInbox(true)`만 | 아직 부팅 전이면 `bootConsole()`(로그인 폼 → 콘솔) | 로그인 핸들러가 KEEP 범위라 부팅 지점이 여기뿐 |
+| `openAccount(id)` 탭 없음 | `selectRail` → `showTab('chat')` | `showTab('chat')` → `selectRail(id)` | `selectRail`의 설정 모드 분기가 `openAccount`를 다시 부르는 것을 피함 |
+| 레일 툴팁 | `position:absolute` | `@supports(anchor-name)`면 anchor positioning(`position:fixed`) | `#rail-accounts`의 `overflow-y:auto`가 툴팁을 자르지 않게. 미지원 브라우저는 명세대로(계정 툴팁은 잘릴 수 있음, aria-label은 그대로) |
+| 입력창 테두리 | 1px border | `border:0` + 포커스 링 `box-shadow` | 높이를 정확히 44px로 |
+| `.rail-dot` / `#thread-state` | 12px / `2px 10px` | 14px(테두리 3 + 속 8) / 높이 26px | 1x 화면에서 점이 읽히게, 56px 머리 안에서 세로 가운데 |
+| `.rail-badge` 글자 | `11px/18px` | `11px/14px` + `box-sizing:border-box` | 테두리 포함 18px를 지켜 아바타 글자를 덮지 않게 |
+| `.who` | 항상 | 400px 미만에서 숨김 | 360px 폰에서 브랜드·메뉴·나가기와 겹침 |
+| 추가 규칙 | — | `.btn.sm`(34px, 폰 44px), `.account-actions`, 스크롤 상자 `position:relative` | 명세 마크업이 쓰는 클래스에 규칙이 없었음 / 숨은 file input이 폰 설정 화면을 늘리던 문제 |
+| 계정 목록 행 | `열기` | `채팅` / `설정` 두 버튼 | 4.6 |
+
+검증 기록: `npm run check`(inbox check ok · panel check ok), `sender npm run check`, `node --check public/panel.js`, Playwright `behavior.mjs`·`profile.mjs`·`inbox.mjs`(수용 기준 12~38)·`shots.mjs` 전부 통과. 라이브 `curl`(39·42)은 이 컨테이너에 DB·sender 환경이 없어 `routes/panel.js`를 express·db·sender 스텁으로 띄운 인프로세스 하네스로 대신 확인했다.

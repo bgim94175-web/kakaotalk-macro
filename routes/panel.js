@@ -12,6 +12,7 @@ const text = require('../lib/auth-text');
 const cfg = require('../lib/panel-config');
 const audit = require('../lib/audit');
 const sender = require('../lib/sender-child');
+const inboxLib = require('../lib/panel-inbox');
 
 const router = express.Router();
 const MAX_ACCOUNTS = 8;
@@ -407,6 +408,7 @@ router.post('/panel/api/unlink', wrap(async (req, res) => {
   const r = await senderCall('POST', '/v1/unlink', { device_id: deviceId }, 20000);
   if (!r.json.ok) return res.status(502).json({ ok: false, error: '등록을 해제하지 못했습니다. 잠시 뒤 다시 해 주세요.' });
   await db.q('DELETE FROM panel_accounts WHERE device_id=$1 AND license_key=$2', [deviceId, s.key]);
+  forgetAccounts(s.key);
   res.json({ ok: true });
 }));
 
@@ -501,6 +503,40 @@ function ownsDevice(key, deviceId) {
   return ids.ownsDeviceId(key, deviceId);
 }
 
+// 통합 받은함은 9초마다 돌아온다. session() 이 라이선스 행을 이미 읽으므로 DB 를 완전히 피하진 못하지만,
+// 계정 목록까지 매번 읽지는 않는다 — 키별 60초 임시 저장, 등록·해제 때 비운다.
+const ACCOUNT_CACHE_MS = 60000;
+const acctCache = new Map();                      // license_key -> { rows, at }
+async function accountRows(key) {
+  const hit = acctCache.get(key);
+  if (hit && Date.now() - hit.at < ACCOUNT_CACHE_MS) return hit.rows;
+  const r = await db.q(
+    'SELECT device_id, email FROM panel_accounts WHERE license_key=$1 ORDER BY created_at', [key]);
+  acctCache.set(key, { rows: r.rows, at: Date.now() });
+  return r.rows;
+}
+function forgetAccounts(key) { acctCache.delete(key); }
+
+router.get('/panel/api/inbox', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const rows = await accountRows(s.key);
+  const up = sender.up();
+  const settled = up
+    ? await Promise.allSettled(rows.map((row) =>
+        senderCall('GET', '/v1/inbox?device_id=' + encodeURIComponent(row.device_id), null, 30000)))
+    : [];
+  const merged = inboxLib.mergeInbox(rows, settled, up);
+  res.json({
+    ok: true,
+    sender_up: up,
+    sender_reason: up ? '' : sender.reason(),
+    at: Date.now(),
+    accounts: merged.accounts,
+    chats: merged.chats,
+  });
+}));
+
 router.get('/panel/api/chats', wrap(async (req, res) => {
   const s = await session(req, res);
   if (!s) return;
@@ -576,6 +612,7 @@ async function rememberAccount(key, deviceId, email, now) {
      ON CONFLICT (device_id) DO UPDATE SET email=EXCLUDED.email
      WHERE panel_accounts.license_key = EXCLUDED.license_key`,
     [deviceId, key, email, now]);
+  forgetAccounts(key);
 }
 
 module.exports = router;
