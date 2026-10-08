@@ -58,6 +58,9 @@
       <button type="button" class="tab" data-tab="cover" aria-current="false">
         <span class="tname">욕설 가리기</span><span class="tval" data-sum="cover"></span>
       </button>
+      <button type="button" class="tab" data-tab="profile" aria-current="false">
+        <span class="tname">프로필 감지</span><span class="tval" data-sum="profile"></span>
+      </button>
       <button type="button" class="tab" data-tab="reply" aria-current="false">
         <span class="tname">자동응답</span><span class="tval" data-sum="reply"></span>
       </button>
@@ -214,6 +217,21 @@
         </form>
       </section>
 
+      <section class="card" data-band="profile" data-tab="profile" aria-labelledby="profile-title">
+        <h2 id="profile-title">프로필 변경 감지</h2>
+        <p class="lead">고른 오픈채팅방에서 누군가 프로필(닉네임)을 바꾸면 그 즉시 안내를 보냅니다. 그 사람을 한 번 멘션하고, 바뀐 이름·이전 이름·바뀐 시각과 누적 횟수를 적습니다. 들낙 방지와는 따로 켜고 끄며, 조회 없이 메시지만으로 잡습니다.</p>
+        <form id="profile-form" class="stack">
+          <label class="check"><input type="checkbox" id="profile-on"> 사용</label>
+          <p class="hint">꺼져 있으면 알리지 않습니다. 켠 뒤에도 아래에서 고른 방에만 보냅니다. 처음 본 사람은 기준만 잡고 넘어가며, 그 뒤 이름이 바뀔 때부터 알립니다.</p>
+          <fieldset>
+            <legend>오픈채팅방</legend>
+            <div id="profile-open" class="rooms"></div>
+          </fieldset>
+          <p id="profile-error" class="error" role="alert"></p>
+          <button type="submit" class="btn">프로필 감지 저장</button>
+        </form>
+      </section>
+
       <section class="card" data-band="reply" data-tab="reply" aria-labelledby="reply-title">
         <h2 id="reply-title">갠톡 자동응답</h2>
         <p class="lead">개인 채팅에 온 말에 답합니다. 매크로의 보낼 방과는 따로입니다.</p>
@@ -250,6 +268,6 @@
     </footer>
   </div>
 </main>
-<script src="/panel.js?v=13"></script>
+<script src="/panel.js?v=14"></script>
 </body>
 </html>

@@ -223,6 +223,17 @@ function visitRecord(over) {
     runtime: {},
   }
 }
+function profileRecord(over) {
+  return {
+    features: { macro: true, roombot: false },
+    config: {
+      accounts: [],
+      profile: Object.assign({ enabled: true, rooms: [guardKey] }, over || {}),
+    },
+    rooms: [{ key: guardKey, chat_id: '555', name: '동네모임', kind: 'open' }],
+    runtime: {},
+  }
+}
 const quietVisit = visitRecord({ enabled: false })
 const quietJoin = guardOnChat(quietVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
@@ -313,30 +324,48 @@ if (swapAgain.sends[0].text.indexOf('김철수 /') >= 0) throw new Error('the cu
 // 처음 보는 사람은 변경 이력이 없다
 if (note.indexOf('프로필 변경') >= 0) throw new Error('a first sighting has no change log')
 
-// 즉시 감지: 이미 본 사람(userId 7)이 메시지에서 다른 닉으로 나오면 바로 [프로필 변경]을 쏜다.
-const liveRec = visitRecord()
-guardOnChat(liveRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
-  profileLink: 'https://open.kakao.com/o/abc', now: t0 })
+// 즉시 감지 (들낙방지와 별개 기능, config.profile): 이미 본 사람(userId 7)이
+// 메시지에서 다른 닉으로 나오면 그 즉시 [프로필 변경 감지]를 쏜다.
+const liveRec = profileRecord()
+const firstSeen = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '홍길동',
+  text: '안녕하세요', now: t0 })
+if (firstSeen.sends.length !== 0) throw new Error('a first sighting only sets a baseline')
 const quietMsg = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '홍길동',
-  text: '안녕하세요', now: t0 + 1000 })
+  text: '또 안녕', now: t0 + 1000 })
 if (quietMsg.sends.length !== 0) throw new Error('an unchanged name posts nothing')
 const renameMsg = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '사기꾼_새닉',
   text: '싸게 팝니다', now: t0 + 2000 })
 if (renameMsg.sends.length !== 1) throw new Error('a rename posts one notice at once')
 const rtext = renameMsg.sends[0].text
-if (rtext.indexOf('[프로필 변경]') < 0) throw new Error('rename notice header')
+if (rtext.indexOf('[프로필 변경 감지]') < 0) throw new Error('rename notice header')
 if (rtext.indexOf('이름 : @사기꾼_새닉') < 0) throw new Error('rename notice mentions the new name')
 if (rtext.indexOf('이전 : 홍길동') < 0) throw new Error('rename notice keeps the old name')
 if (renameMsg.sends[0].mention.userId !== '7') throw new Error('rename notice mentions the person')
 if (visitMentionExtra(rtext, renameMsg.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
+if (renameMsg.sends[0].delayMs !== 0) throw new Error('first profile notice has no wait')
 // 한 번 알린 뒤에는 같은 닉으로 또 쏘지 않는다
 const after = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '사기꾼_새닉',
   text: '또 메시지', now: t0 + 3000 })
 if (after.sends.length !== 0) throw new Error('no repeat notice for the same new name')
+// 또 바꾸면 누적 횟수가 올라간다
+const twice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '또다른닉',
+  text: '세번째', now: t0 + 4000 })
+if (twice.sends.length !== 1) throw new Error('a second rename posts again')
+if (twice.sends[0].text.indexOf('누적 : 2회') < 0) throw new Error('repeated renames count up')
 // 처음 보는 사람의 메시지는 기준이 없어 아무것도 안 한다
 const stranger = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '88', authorName: '처음본사람',
-  text: '하이', now: t0 + 4000 })
+  text: '하이', now: t0 + 5000 })
 if (stranger.sends.length !== 0) throw new Error('a first-seen chatter is not a rename')
+// 기능이 꺼져 있으면 닉이 바뀌어도 조용하다 (전용 토글)
+const offRec = profileRecord({ enabled: false })
+guardOnChat(offRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '홍길동', text: 'a', now: t0 })
+const offChange = guardOnChat(offRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '바뀐닉', text: 'b', now: t0 + 1000 })
+if (offChange.sends.length !== 0) throw new Error('profile detection stays off until enabled')
+// 들낙방지만 켜져 있으면 메시지의 닉 변경은 쏘지 않는다 (두 기능은 독립)
+const visitOnly = visitRecord()
+guardOnChat(visitOnly, { kind: 'msg', chatId: '555', authorId: '7', authorName: '홍길동', text: 'a', now: t0 })
+const visitOnlyChange = guardOnChat(visitOnly, { kind: 'msg', chatId: '555', authorId: '7', authorName: '바뀐닉', text: 'b', now: t0 + 1000 })
+if (visitOnlyChange.sends.length !== 0) throw new Error('visit alone does not detect message renames')
 
 const noLeave = visitRecord()
 const onlyJoin = guardOnChat(noLeave, {

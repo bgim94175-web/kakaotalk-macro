@@ -1662,60 +1662,94 @@ export function visitMentionExtra(text, mention) {
 
 // 이미 기록이 있는 사람(userId 기준)이 닉을 바꾸면 그 즉시 [프로필 변경] 안내를 올린다.
 // 조회 없이 메시지의 작성자 닉만으로 판단한다. 처음 보는 사람은 기준이 없어 넘어간다.
-function applyRename(record, room, ev, sends) {
+// ── 프로필 변경 감지 (들낙 방지와 별개 기능) ─────────────────────────────
+// 조회 없이, 메시지·입장·퇴장에 따라오는 작성자 닉만으로 판단한다.
+// 이미 본 사람(userId 기준)이 닉을 바꾸면 그 즉시 알린다. 처음 본 사람은 기준만 잡는다.
+function profileRoom(record, chatId) {
+  const cfg = record && record.config && record.config.profile
+  if (!cfg || cfg.enabled !== true) return null
+  const room = roomByChat(record.rooms, chatId)
+  if (!room || !realId(String(room.chat_id))) return null
+  if (!coversList(cfg.rooms, room.key)) return null
+  return room
+}
+
+/** True when a watched room wants the author id looked up for profile tracking. */
+export function profileNeedsAuthor(record, chatId) {
+  return !!profileRoom(record, chatId)
+}
+
+function profileState(record) {
+  const state = rt(record)
+  if (!state.profile || typeof state.profile !== 'object') state.profile = {}
+  const p = state.profile
+  if (!p.people || typeof p.people !== 'object' || Array.isArray(p.people)) p.people = {}
+  if (!p.nextAt || typeof p.nextAt !== 'object' || Array.isArray(p.nextAt)) p.nextAt = {}
+  return p
+}
+
+function pruneProfile(p) {
+  const keys = Object.keys(p.people)
+  if (keys.length <= 300) return
+  keys.sort((a, b) => (Number(p.people[a] && p.people[a].at) || 0) - (Number(p.people[b] && p.people[b].at) || 0))
+  const drop = keys.length - 300
+  for (let i = 0; i < drop; i++) delete p.people[keys[i]]
+}
+
+function profileDelay(p, chatId, now) {
+  const next = Number(p.nextAt[chatId] || 0)
+  const at = Math.max(now, next)
+  p.nextAt[chatId] = at + VISIT_GAP_MS
+  return at - now
+}
+
+function applyProfile(record, ev, sends) {
+  if (!ev) return false
+  const room = profileRoom(record, ev.chatId)
+  if (!room) return false
+  if (ev.mine) return false
   const id = /^[1-9][0-9]*$/.test(String(ev.authorId || '').trim()) ? String(ev.authorId).trim() : ''
   const name = String(ev.authorName || '').trim().slice(0, 40)
   if (!id || !name) return false
-  const v = visitState(record)
+  const now = Number(ev.now) || Date.now()
+  const p = profileState(record)
   const chatId = String(room.chat_id)
   const key = `${chatId}${SEP}${id}`
-  const prev = v.people[key]
-  if (!prev || typeof prev !== 'object') return false
-  const prevName = String(prev.name || '').trim()
-  if (!prevName || prevName === name) return false
-  const now = Number(ev.now) || Date.now()
-  const changes = trimChanges((Array.isArray(prev.changes) ? prev.changes : []).concat([
-    { at: now, name: prevName, link: openProfileLink(prev.link) },
-  ]), now)
-  const row = {
-    name,
-    link: openProfileLink(prev.link),
-    userId: id,
-    joins: Array.isArray(prev.joins) ? prev.joins.slice() : [],
-    leaves: Array.isArray(prev.leaves) ? prev.leaves.slice() : [],
-    changes,
+  const prev = p.people[key]
+  if (!prev || typeof prev !== 'object' || !prev.name) {
+    p.people[key] = { name, userId: id, at: now, changes: Array.isArray(prev && prev.changes) ? prev.changes : [] }
+    pruneProfile(p)
+    return false
   }
-  v.people[key] = row
-  v.people[`${chatId}${SEP}n:${name}`] = row
-  pruneVisit(v)
-  const notice = renameNotice(row, prevName, now)
-  sends.push({
-    chatId,
-    text: notice.text,
-    mention: notice.mention,
-    delayMs: visitDelay(v, chatId, now),
-  })
+  if (String(prev.name).trim() === name) {
+    prev.at = now
+    return false
+  }
+  const prevName = String(prev.name).trim()
+  const changes = trimChanges((Array.isArray(prev.changes) ? prev.changes : []).concat([
+    { at: now, name: prevName, link: '' },
+  ]), now)
+  p.people[key] = { name, userId: id, at: now, changes }
+  pruneProfile(p)
+  const notice = profileNotice(name, id, prevName, changes, now)
+  sends.push({ chatId, text: notice.text, mention: notice.mention, delayMs: profileDelay(p, chatId, now) })
   return true
 }
 
-function renameNotice(row, prevName, now) {
-  const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
-  const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
-  const link = row && row.link ? row.link : '찾지 못했습니다'
+function profileNotice(name, userId, prevName, changes, now) {
+  const nm = String(name || '').replace(/[\r\n]/g, '').trim()
+  const uid = /^[1-9][0-9]*$/.test(String(userId || '')) ? String(userId) : ''
   const old = String(prevName || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-  const mentioned = !!(userId && name)
-  const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
-  const text = [
-    '[프로필 변경]',
-    nameLine,
-    '이전 : ' + old,
-    '옾링 : ' + link,
-    '변경 : ' + kstStamp(now),
-  ].join('\n')
+  const mentioned = !!(uid && nm)
+  const nameLine = mentioned ? ('이름 : @' + nm) : ('이름 : ' + (nm || '이름 없음'))
+  const lines = ['[프로필 변경 감지]', nameLine, '이전 : ' + old, '변경 : ' + kstStamp(now)]
+  const n = Array.isArray(changes) ? changes.length : 0
+  if (n >= 2) lines.push('누적 : ' + n + '회')
+  const text = lines.join('\n')
   if (!mentioned) return { text, mention: null }
   const at = text.indexOf('\n이름 : @')
   const start = at + '\n이름 : @'.length
-  return { text, mention: { userId, at: start, len: name.length } }
+  return { text, mention: { userId: uid, at: start, len: nm.length } }
 }
 
 /**
@@ -1723,14 +1757,10 @@ function renameNotice(row, prevName, now) {
  * An enter lists join times. A leave lists leave times. The other log stays out.
  */
 function applyVisit(record, ev, sends) {
-  if (!ev) return false
+  if (!ev || (ev.kind !== 'join' && ev.kind !== 'leave')) return false
   const room = visitRoom(record, ev.chatId)
   if (!room) return false
   if (ev.mine) return false
-  // 일반 메시지에는 작성자 닉네임이 공짜로 따라온다. 이미 본 사람이 닉을 바꿨으면
-  // 입장/퇴장을 기다리지 않고 바로 알린다. 링크 변경은 조회가 필요해 입/퇴장에서 잡는다.
-  if (ev.kind === 'msg') return applyRename(record, room, ev, sends)
-  if (ev.kind !== 'join' && ev.kind !== 'leave') return false
   const who = visitIdentity(ev.authorId, ev.authorName)
   if (!who) return false
   const now = Number(ev.now) || Date.now()
@@ -1757,10 +1787,11 @@ export function guardOnChat(record, ev) {
   let askHalt = null
   if (!ev) return { sends, askHalt, active: false }
   const visitActive = applyVisit(record, ev, sends)
+  const profileActive = applyProfile(record, ev, sends)
   const cfg = guardCfg(record)
-  if (!cfg) return { sends, askHalt, active: visitActive }
+  if (!cfg) return { sends, askHalt, active: visitActive || profileActive }
   const room = roomOf(record, ev.chatId)
-  if (!room) return { sends, askHalt, active: visitActive }
+  if (!room) return { sends, askHalt, active: visitActive || profileActive }
   const now = Number(ev.now) || Date.now()
   const g = gstate(record)
   const chatId = String(room.chat_id)

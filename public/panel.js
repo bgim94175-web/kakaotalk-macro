@@ -56,7 +56,7 @@
   function updateTabSummaries() {
     sumText('account', me && me.accounts ? me.accounts.length + '개' : '');
     if (!account) {
-      ['chat', 'macro', 'visit', 'cover', 'reply', 'snipe'].forEach(function (k) { sumText(k, ''); });
+      ['chat', 'macro', 'visit', 'cover', 'profile', 'reply', 'snipe'].forEach(function (k) { sumText(k, ''); });
       return;
     }
     function rooms(v) { return (v || []).length; }
@@ -66,6 +66,8 @@
     sumText('visit', v.enabled ? '켜짐 · 방 ' + rooms(v.rooms) + '개' : '꺼짐');
     var c = account.cover || {};
     sumText('cover', c.enabled ? '켜짐 · 방 ' + rooms(c.rooms) + '개' : '꺼짐');
+    var pf = account.profile || {};
+    sumText('profile', pf.enabled ? '켜짐 · 방 ' + rooms(pf.rooms) + '개' : '꺼짐');
     sumText('reply', (account.autoreply || {}).enabled ? '켜짐' : '꺼짐');
     var on = (account.triggers || []).filter(function (t) { return t && t.enabled !== false; }).length;
     sumText('snipe', on ? on + '개 켜짐' : '꺼짐');
@@ -437,6 +439,9 @@
     var cover = account.cover || {};
     document.getElementById('cover-on').checked = !!cover.enabled;
     fillChecks('cover-open', rooms.open || [], cover.rooms || []);
+    var profile = account.profile || {};
+    document.getElementById('profile-on').checked = !!profile.enabled;
+    fillChecks('profile-open', rooms.open || [], profile.rooms || []);
     var a = account.autoreply || {};
     document.getElementById('reply-on').checked = !!a.enabled;
     document.getElementById('reply-message').value = a.message || '';
@@ -753,6 +758,30 @@
       fillDetail();
     } catch (e) {
       say('cover-error', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('profile-form').addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (!account) return;
+    say('profile-error', '');
+    var btn = ev.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      var res = await api('/panel/api/settings', {
+        device_id: account.device_id,
+        images_unchanged: true,
+        profile: {
+          enabled: document.getElementById('profile-on').checked,
+          rooms: checkedRooms('#profile-open'),
+        },
+      });
+      account = res.account;
+      fillDetail();
+    } catch (e) {
+      say('profile-error', e.message);
     } finally {
       btn.disabled = false;
     }
