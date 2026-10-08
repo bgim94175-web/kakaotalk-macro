@@ -892,6 +892,7 @@ class Slot {
       chatId,
       text: ev.message || '',
       authorId: author,
+      authorName: ev.author_name || '',
       mine: author.length > 0 && author === creds.user_id,
       messageType: ev.message_type,
       now: Date.now(),

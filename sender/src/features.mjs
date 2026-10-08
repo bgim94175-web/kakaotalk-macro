@@ -1660,15 +1660,77 @@ export function visitMentionExtra(text, mention) {
   return `{"mentions":[{"user_id":${idJson},"at":[1],"len":${len}}]}`
 }
 
+// 이미 기록이 있는 사람(userId 기준)이 닉을 바꾸면 그 즉시 [프로필 변경] 안내를 올린다.
+// 조회 없이 메시지의 작성자 닉만으로 판단한다. 처음 보는 사람은 기준이 없어 넘어간다.
+function applyRename(record, room, ev, sends) {
+  const id = /^[1-9][0-9]*$/.test(String(ev.authorId || '').trim()) ? String(ev.authorId).trim() : ''
+  const name = String(ev.authorName || '').trim().slice(0, 40)
+  if (!id || !name) return false
+  const v = visitState(record)
+  const chatId = String(room.chat_id)
+  const key = `${chatId}${SEP}${id}`
+  const prev = v.people[key]
+  if (!prev || typeof prev !== 'object') return false
+  const prevName = String(prev.name || '').trim()
+  if (!prevName || prevName === name) return false
+  const now = Number(ev.now) || Date.now()
+  const changes = trimChanges((Array.isArray(prev.changes) ? prev.changes : []).concat([
+    { at: now, name: prevName, link: openProfileLink(prev.link) },
+  ]), now)
+  const row = {
+    name,
+    link: openProfileLink(prev.link),
+    userId: id,
+    joins: Array.isArray(prev.joins) ? prev.joins.slice() : [],
+    leaves: Array.isArray(prev.leaves) ? prev.leaves.slice() : [],
+    changes,
+  }
+  v.people[key] = row
+  v.people[`${chatId}${SEP}n:${name}`] = row
+  pruneVisit(v)
+  const notice = renameNotice(row, prevName, now)
+  sends.push({
+    chatId,
+    text: notice.text,
+    mention: notice.mention,
+    delayMs: visitDelay(v, chatId, now),
+  })
+  return true
+}
+
+function renameNotice(row, prevName, now) {
+  const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
+  const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
+  const link = row && row.link ? row.link : '찾지 못했습니다'
+  const old = String(prevName || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
+  const mentioned = !!(userId && name)
+  const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
+  const text = [
+    '[프로필 변경]',
+    nameLine,
+    '이전 : ' + old,
+    '옾링 : ' + link,
+    '변경 : ' + kstStamp(now),
+  ].join('\n')
+  if (!mentioned) return { text, mention: null }
+  const at = text.indexOf('\n이름 : @')
+  const start = at + '\n이름 : @'.length
+  return { text, mention: { userId, at: start, len: name.length } }
+}
+
 /**
  * Record a join or leave for a watched room and queue that one notice.
  * An enter lists join times. A leave lists leave times. The other log stays out.
  */
 function applyVisit(record, ev, sends) {
-  if (!ev || (ev.kind !== 'join' && ev.kind !== 'leave')) return false
+  if (!ev) return false
   const room = visitRoom(record, ev.chatId)
   if (!room) return false
   if (ev.mine) return false
+  // 일반 메시지에는 작성자 닉네임이 공짜로 따라온다. 이미 본 사람이 닉을 바꿨으면
+  // 입장/퇴장을 기다리지 않고 바로 알린다. 링크 변경은 조회가 필요해 입/퇴장에서 잡는다.
+  if (ev.kind === 'msg') return applyRename(record, room, ev, sends)
+  if (ev.kind !== 'join' && ev.kind !== 'leave') return false
   const who = visitIdentity(ev.authorId, ev.authorName)
   if (!who) return false
   const now = Number(ev.now) || Date.now()
