@@ -1507,7 +1507,7 @@ function rememberPerson(v, chatId, who, now, kind, link) {
   if (who.id) keys.push(`${chatId}${SEP}${who.id}`)
   if (who.name) keys.push(`${chatId}${SEP}n:${who.name}`)
   if (!keys.length) keys.push(`${chatId}${SEP}${who.key}`)
-  const prev = { joins: [], leaves: [], userId: '' }
+  const prev = { joins: [], leaves: [], userId: '', changes: [] }
   for (const key of keys) {
     const row = v.people[key]
     if (!row || typeof row !== 'object') continue
@@ -1516,13 +1516,27 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     if (!prev.userId && row.userId) prev.userId = String(row.userId)
     if (Array.isArray(row.joins)) prev.joins = prev.joins.concat(row.joins)
     if (Array.isArray(row.leaves)) prev.leaves = prev.leaves.concat(row.leaves)
+    if (Array.isArray(row.changes)) prev.changes = prev.changes.concat(row.changes)
+  }
+  // 같은 사람(userId 기준)이 이름이나 오픈프로필 링크를 바꾸면 그 사실을 남긴다.
+  // 지금 못 읽은 링크(빈 값)는 바뀐 것으로 치지 않는다. 이름만 아는 사람은 추적할 수 없다.
+  const prevName = prev.name ? String(prev.name) : ''
+  const prevLink = openProfileLink(prev.link)
+  const freshName = who.name ? String(who.name) : ''
+  const freshLink = openProfileLink(link)
+  const changes = trimChanges(prev.changes, now)
+  const nameChanged = !!(prevName && freshName && prevName !== freshName)
+  const linkChanged = !!(prevLink && freshLink && prevLink !== freshLink)
+  if (nameChanged || linkChanged) {
+    changes.push({ at: now, name: prevName, link: prevLink })
   }
   const row = {
-    name: who.name || (prev.name ? String(prev.name) : ''),
-    link: openProfileLink(link) || openProfileLink(prev.link),
+    name: freshName || prevName,
+    link: freshLink || prevLink,
     userId: who.id || (/^[1-9][0-9]*$/.test(prev.userId) ? prev.userId : ''),
     joins: uniqTimes(prev.joins, now),
     leaves: uniqTimes(prev.leaves, now),
+    changes: trimChanges(changes, now),
   }
   if (kind === 'join') row.joins.push(now)
   else row.leaves.push(now)
@@ -1531,6 +1545,26 @@ function rememberPerson(v, chatId, who, now, kind, link) {
   for (const key of keys) v.people[key] = row
   pruneVisit(v)
   return row
+}
+
+// 프로필 변경 이력: 14일 안, 최대 VISIT_KEEP_N개, 같은 (이름/링크)는 한 번만.
+function trimChanges(list, now) {
+  const seen = new Set()
+  const out = []
+  const src = Array.isArray(list) ? list : []
+  for (const c of src) {
+    if (!c || typeof c !== 'object') continue
+    const at = Number(c.at)
+    if (!Number.isFinite(at) || now - at > VISIT_KEEP_MS) continue
+    const name = String(c.name || '')
+    const link = String(c.link || '')
+    const sig = name + SEP + link
+    if (seen.has(sig)) continue
+    seen.add(sig)
+    out.push({ at, name, link })
+  }
+  if (out.length > VISIT_KEEP_N) return out.slice(out.length - VISIT_KEEP_N)
+  return out
 }
 
 function visitDelay(v, chatId, now) {
@@ -1552,13 +1586,23 @@ function visitNotice(row, kind) {
   const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
   const leave = kind === 'leave'
   const times = timeLines(leave ? (row && row.leaves) : (row && row.joins))
-  const text = [
+  const lines = [
     leave ? '[퇴장안내]' : '[입장안내]',
     nameLine,
-    '올링 : ' + link,
+    '옾링 : ' + link,
     leave ? '퇴장로그' : '입장로그',
     ...times,
-  ].join('\n')
+  ]
+  const changes = Array.isArray(row && row.changes) ? row.changes : []
+  if (changes.length) {
+    lines.push('프로필 변경')
+    for (const c of changes) {
+      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
+      const pastLink = c && c.link ? String(c.link) : '링크 없음'
+      lines.push('- ' + kstStamp(c && c.at) + '  ' + past + ' / ' + pastLink)
+    }
+  }
+  const text = lines.join('\n')
   if (!mentioned) return { text, mention: null }
   const at = text.indexOf('\n이름 : @')
   const start = at + '\n이름 : @'.length

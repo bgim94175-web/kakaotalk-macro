@@ -236,7 +236,7 @@ const leftNote = firstLeft.sends[0].text
 const expectedLeave = [
   '[퇴장안내]',
   '이름 : @홍길동',
-  '올링 : 찾지 못했습니다',
+  '옾링 : 찾지 못했습니다',
   '퇴장로그',
   '- 2023-11-15 07:13',
 ].join('\n')
@@ -251,7 +251,7 @@ const note = joined.sends[0].text
 const expected = [
   '[입장안내]',
   '이름 : @홍길동',
-  '올링 : https://open.kakao.com/o/abc',
+  '옾링 : https://open.kakao.com/o/abc',
   '입장로그',
   '- 2023-11-15 07:14',
 ].join('\n')
@@ -262,7 +262,7 @@ if (note.indexOf('퇴장로그') >= 0 || note.indexOf('[퇴장안내]') >= 0 || 
 if (note.indexOf('들어온 방') >= 0 || note.indexOf('들어온 시각') >= 0 || note.indexOf('나간 시각') >= 0) {
   throw new Error('old labels')
 }
-if (note.indexOf('강퇴') >= 0 || note.indexOf('들낙방지') >= 0 || note.indexOf('옾링') >= 0) throw new Error('notice must not kick')
+if (note.indexOf('강퇴') >= 0 || note.indexOf('들낙방지') >= 0) throw new Error('notice must not kick')
 const mention = joined.sends[0].mention
 if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== note.indexOf('홍길동')) {
   throw new Error('one mention of the joiner')
@@ -292,13 +292,33 @@ if (laterLeft.sends[0].text.indexOf('입장') >= 0) throw new Error('a leave not
 if (laterLeft.sends[0].text.indexOf('- 2023-11-15 07:13') < 0 || laterLeft.sends[0].text.indexOf('- 2023-11-15 07:16') < 0) {
   throw new Error('every leave time is listed')
 }
-if (laterLeft.sends[0].text.indexOf('올링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
+if (laterLeft.sends[0].text.indexOf('옾링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
+// 프로필 변경: 같은 사람(userId 7)이 이름/링크를 바꿔 다시 들어오면 그 이력을 남긴다.
+const swapRec = visitRecord()
+guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
+  profileLink: 'https://open.kakao.com/o/old', now: t0 })
+const renamed = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
+  profileLink: 'https://open.kakao.com/o/new', now: t0 + 60000 })
+const swapText = renamed.sends[0].text
+if (swapText.indexOf('프로필 변경') < 0) throw new Error('a profile change is recorded')
+if (swapText.indexOf('홍길동 / https://open.kakao.com/o/old') < 0) throw new Error('the old name and link are kept')
+if (swapText.indexOf('이름 : @김철수') < 0) throw new Error('the current name is the mention')
+if (renamed.sends[0].mention.userId !== '7') throw new Error('still one mention after a rename')
+if (visitMentionExtra(swapText, renamed.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
+// 같은 사람이 그대로 다시 들어오면 변경 이력이 늘지 않는다
+const swapAgain = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
+  profileLink: 'https://open.kakao.com/o/new', now: t0 + 120000 })
+if (swapAgain.sends[0].text.split('프로필 변경').length !== 2) throw new Error('no new change when nothing changed')
+if (swapAgain.sends[0].text.indexOf('김철수 /') >= 0) throw new Error('the current identity is not logged as a change')
+// 처음 보는 사람은 변경 이력이 없다
+if (note.indexOf('프로필 변경') >= 0) throw new Error('a first sighting has no change log')
+
 const noLeave = visitRecord()
 const onlyJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
 })
 if (onlyJoin.sends[0].text.indexOf('퇴장') >= 0) throw new Error('an enter notice has no leave log')
-if (onlyJoin.sends[0].text.indexOf('올링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].text.indexOf('옾링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
 if (!onlyJoin.sends[0].mention || onlyJoin.sends[0].mention.userId !== '9') throw new Error('the named person is the mention')
 if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
 const burst = guardOnChat(noLeave, {
@@ -455,7 +475,7 @@ const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
 if (bigExtra !== `{"mentions":[{"user_id":"${bigId}","at":[1],"len":3}]}`) {
   throw new Error('a large open-chat id is an int64 string')
 }
-const ascii = '[입장안내]\n이름 : @GOLD_AEC1908\n올링 : https://open.kakao.com/o/abc\n입장로그\n- 2026-10-05 21:04'
+const ascii = '[입장안내]\n이름 : @GOLD_AEC1908\n옾링 : https://open.kakao.com/o/abc\n입장로그\n- 2026-10-05 21:04'
 const asciiAt = ascii.indexOf('GOLD_AEC1908')
 const asciiExtra = visitMentionExtra(ascii, { userId: '42', at: asciiAt, len: 'GOLD_AEC1908'.length })
 const asciiByte = Buffer.byteLength(ascii.slice(0, asciiAt), 'utf8')
