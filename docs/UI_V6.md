@@ -657,3 +657,347 @@ V5 올킥 미리 보기(`.kt`, `.kt-strip`, `.kt-win`, `.kt-k`, `.kt-axis`, `.kt
 - 잠긴 화면은 기준값을 잡지 않고 변경 수 0.
 
 ---
+
+## 3. 서버 변경
+
+담당은 모두 A(백엔드). 파일별 변경과 지켜야 할 동작을 적는다. `lib/db.js`의 DROP 금지 규칙은 그대로다(열·테이블은 남기고 쓰지 않는다).
+
+### 3.1 `lib/panel-auth.js` — 기능 하나 이상이면 로그인
+
+`assess(lic, rows, now)`를 바꾼다. 반환 모양:
+
+```js
+// 실패
+{ ok: false, status, error, not_started?: true, features? }
+// 성공
+{ ok: true, expires_at, features: { macro: F, roombot: F, minigame: F }, unstarted: boolean }
+// F = { owned, on, started, expires_at }  — 세 기능 모두 항상 들어 있다
+```
+
+규칙(순서대로):
+1. 키 없음 → 401 `없는 키입니다.`
+2. `revoked` 또는 `blocked_reason` → 403 `정지된 키입니다.`
+3. 유효한 기능 행(`features.ALL`)이 0개 → 403 `기능이 없는 키입니다.`
+4. `on`인 기능이 하나도 없음:
+   - 미개시(`expires_at` NULL/0) 행이 하나라도 있으면 → 403 `not_started: true`, `이 키는 사용 기간이 아직 시작되지 않았습니다.`
+   - 아니면 → 403 `사용 기간이 끝났습니다.`
+5. 성공. `expires_at` = `on`인 기능의 만료 중 가장 이른 값. `unstarted` = 미개시 행이 있음.
+
+- `device_id`를 읽거나 돌려주지 않는다(`panel-check` 단언 `assess result has no device id` 유지).
+- 오류 문구는 기존 단언(`끝났`, `시작되지`)을 그대로 만족한다.
+- `featureFlags(gate)` 내보내기: `{ macro, roombot, minigame }` = 각 `features[f].on`. 실패한 gate면 모두 false.
+
+### 3.2 `lib/panel-config.js`
+
+**`featuresFor(licenseFeat)`** — 두 번째 인자는 받지만 쓰지 않는다:
+
+```js
+function featuresFor(lic) {
+  const l = lic || {};
+  return { macro: !!(l.macro && l.macro.on), roombot: !!(l.roombot && l.roombot.on), minigame: !!(l.minigame && l.minigame.on) };
+}
+```
+
+**공통 도우미**
+- `cleanPrefix(v)`: 앞뒤 공백을 지운 값이 `/^[^\p{L}\p{N}\s]$/u`이면 그 값, 아니면 `'!'`. (여러 글자를 보내면 `'!'`. 화면이 막는다.)
+- `sanitizeList(input, max, maxLen, fold)`: 지금의 `sanitizeWords`를 일반화(배열 또는 쉼표·줄바꿈 문자열, 제어문자 공백 처리, 길이 1~`maxLen`, 최대 `max`개, `fold(w)` 키로 중복 제거). `sanitizeWords(x)` = `sanitizeList(x, 200, 30, lower)`로 남긴다(기존 단언 유지).
+- `has(src, k)` = `Object.prototype.hasOwnProperty.call(src, k)`.
+
+**`sanitizeRoomBot(input, prev, allowed, now)`** — 저장되는 `config.roombot`:
+
+| 키 | 규칙 | 없을 때(본문에 키가 없음) |
+|---|---|---|
+| `enabled` | `src.enabled === true` | false |
+| `rooms` | `pickKeys(src.rooms, allowed)` | [] |
+| `welcomeOn` `leaveOn` `blockLinks` `noticeAutoOn` | `=== true` | 이전 값(`=== true`) |
+| `welcomeMsg` `leaveMsg` `warnMsg` `linkMsg` `floodMsg` | `clip(String, 2000)` (앞뒤 공백은 그대로 둔다 — 줄바꿈 서식 보존) | 이전 값 또는 '' |
+| `churnMsg` | `clip(…, 500)` | 이전 값 또는 '' |
+| `churnOn` `churnMute` `floodOn` | `src.x !== false` | 이전 값 `!== false` (없으면 true) |
+| `churnMin` | `clampInt(1, 180)` | 이전 값 또는 10 |
+| `churnCount` | `clampInt(2, 20)` | 이전 값 또는 4 |
+| `floodSecs` | `clampInt(1, 600)` | 이전 값 또는 10 |
+| `floodCount` | `clampInt(2, 99)` | 이전 값 또는 5 |
+| `noticeEveryMin` | `clampInt(30, 1440)` | 이전 값 또는 180 |
+| `dailyLimit` | `clampInt(1, 2000)` | 이전 값(범위 고정) 또는 300 |
+| `banWords` | `sanitizeList(x, 60, 30, lower)` | 이전 값 또는 [] |
+| `adminNames` | `sanitizeList(x, 60, 40, identity)` (대소문자 구분) | 이전 값 또는 [] |
+| `cmdPrefix` | `cleanPrefix` | 이전 값(`cleanPrefix`) |
+| `notice` | `clip(…, 2000)`. 이전 값과 다르면 `noticeAt = now`, `noticeBy = 'console'` | **이전 값·`noticeAt`·`noticeBy` 그대로** |
+| `noticeAt` `noticeBy` | 본문 값은 무시한다 | 이전 값 |
+
+- 이전 객체의 모르는 키는 버린다(관리봇은 서버가 쓰는 키만 저장).
+- 저장을 거부하지 않는다(빈 인사 문구 등은 화면이 막는다. sender는 빈 문구를 보내지 않는다).
+
+**`presentRoomBot(cfg)`** — `GET /panel/api/account`의 `roombot`. 위 표의 키를 모두 기본값으로 채워 돌려준다. `noticeAt` → `notice_at`(숫자, 없으면 0), `noticeBy` → `notice_by`(`'chat'` `'console'` `''`). 저장값이 범위를 벗어나면 범위로 고쳐 보여 준다.
+
+**`sanitizeMiniGame(input, prev, allowed)`** — 저장되는 `config.minigame`:
+
+| 키 | 규칙 | 없을 때 |
+|---|---|---|
+| `enabled` | `=== true` | false |
+| `rooms` | `pickKeys` | [] |
+| `cmdPrefix` | `cleanPrefix` | 이전 값 또는 `'!'` |
+| `word` `baseball` `dice` `rps` `quiz` | `src.x !== false` | 이전 값 `!== false` |
+| `cooldownMs` | 본문 `cooldown_sec` → `clampInt(sec, 3, 600) * 1000`. `cooldown_sec`이 없고 `cooldownMs`가 있으면 `clampInt(ms, 3000, 600000)` | 이전 값을 3000~600000으로, 없으면 3000 |
+| `dailyLimit` | `clampInt(1, 2000)` | 이전 값 또는 300 |
+
+**`presentMiniGame(cfg)`** — `{ enabled, rooms, cmdPrefix, word, baseball, dice, rps, quiz, cooldown_sec, dailyLimit }`(`cooldown_sec` = `round(cooldownMs / 1000)`, 기본 3).
+
+**`applySettings(prevConfig, body, catalog, imageCount, now)`** — 다섯째 인자 `now`(없으면 `Date.now()`). 분기 추가:
+
+```js
+if (body && body.roombot) next.roombot = sanitizeRoomBot(body.roombot, prev.roombot, allowed, now || Date.now());
+if (body && body.minigame) next.minigame = sanitizeMiniGame(body.minigame, prev.minigame, allowed);
+```
+
+- 다른 기능 저장이 `roombot`·`minigame`을 바꾸지 않는다(기존 `Object.assign` 그대로).
+- `sanitizeGuard`는 그대로(D12: 숨은 칸 보존). 주석 `앱이 쓰는 config.guard`는 `예전에 저장된 칸`으로 고친다.
+
+모듈 내보내기에 `featuresFor` `sanitizeRoomBot` `sanitizeMiniGame` `presentRoomBot` `presentMiniGame` `cleanPrefix` `keySet`을 더한다.
+
+### 3.3 `routes/panel.js`
+
+**권한 도우미**:
+
+```js
+const NEED_TEXT = { macro: '자동발송 매크로', roombot: '대화방 관리봇', minigame: '미니게임봇' };
+function needFeature(s, res, f) {
+  const x = s.gate.features && s.gate.features[f];
+  if (x && x.on) return true;
+  res.status(403).json({ ok: false, need: f, error: NEED_TEXT[f] + ' 기능이 없는 키입니다. 구매 후 사용할 수 있습니다.' });
+  return false;
+}
+```
+
+| 경로 | 필요한 기능 |
+|---|---|
+| `GET /panel/api/inbox`, `GET /panel/api/chats`, `GET /panel/api/chat`, `POST /panel/api/chat/send`, `GET /panel/api/logs` | `macro` |
+| `POST /panel/api/settings` | 본문에 `macro` `autoreply` `triggers` `visit` `profile` `guard` `cover` 중 하나가 있거나 `images` 배열이 있으면 `macro`; `roombot`이 있으면 `roombot`; `minigame`이 있으면 `minigame` (모두 만족해야 함) |
+| `GET /panel/api/bots` | `roombot` 또는 `minigame` 중 하나 |
+| `POST /panel/api/bots/reset` | `what`이 `warns`·`churn`이면 `roombot`, `scores`·`games`면 `minigame` |
+| `POST /panel/api/bots/simulate` | 없음(잠금 화면 시연도 쓴다. 실제 발송 없음) |
+| `me` `account` `register/*` `unlink` `rooms` `login` `logout` | 없음 |
+
+**`POST /panel/api/login`** — 지금 흐름 유지. 바뀌는 것:
+- `gate.ok`이고 `gate.unstarted`면 `startPeriod(key)`를 한 번 더 부른다(남은 미개시 기능 시작). 시작됐으면 audit `activate` `콘솔 로그인으로 추가 기능 사용 기간 시작`. 그 뒤 `gate = await licenseOf(key)`.
+- 응답에 `features: gate.features` 추가.
+- 로그인 구간(로그인~로그아웃 라우트 사이 소스)에 `device_id` 글자를 쓰지 않는다(`panel-check` 단언 유지).
+- 끝에 `sweep.key(key)`(3.5, 기다리지 않음).
+
+**`GET /panel/api/me`** — 지금 응답 + 2.1의 `features` `buy` `legacy_app`. `gate.unstarted`면 위와 같이 `startPeriod` 후 다시 읽는다. `legacy_app` = `SELECT (device_id IS NOT NULL) AS legacy FROM licenses WHERE key=$1`. `buy[f]` = `features.buyUrl(req, f, s.key)`.
+
+**`viewAccount(row, snap)`** — 추가: `roombot: cfg.presentRoomBot(config.roombot)`, `minigame: cfg.presentMiniGame(config.minigame)`, `features: snap.features || {}`(sender가 지금 가진 값, 점검용).
+
+**`POST /panel/api/settings`** — 권한 검사(위 표) → 지금 흐름. `cfg.applySettings(snap.config, body, snap.rooms || [], imageCount, Date.now())`. 본문 크기는 그대로(16mb 경로).
+
+**`POST /panel/api/rooms`** — `featuresFor(s.gate.features)`(두 번째 인자 삭제).
+
+**등록 완료 뒤** — `rememberAccount`를 부르는 세 곳(`register/begin`의 `ok`, `register/confirm`의 `ok`들) 다음에 `sweep.key(s.key)`(기다리지 않음). 새 계정의 `features`가 등록 직후부터 라이선스와 같아진다.
+
+**새 경로 3개** (모두 `session` → `sender.up()` 아니면 `senderDown` → `ownsDevice(s.key, device_id)` 아니면 404 `없는 계정입니다.`):
+
+```
+GET  /panel/api/bots?device_id=
+  → sender GET /v1/bots?device_id=  (20초)
+  → { ok, roombot: BotRoombot, minigame: BotMinigame }
+POST /panel/api/bots/reset { device_id, what: 'warns'|'churn'|'scores'|'games', room_key? }
+  → what 검사(그 밖은 400 `초기화할 항목이 올바르지 않습니다.`) → 권한 → sender POST /v1/bots/reset (20초)
+  → { ok, cleared, bots: { roombot, minigame } }
+POST /panel/api/bots/simulate { device_id, feature, config, room_name, state, events }
+  → 아래 검사 → sender POST /v1/simulate (10초)
+  → { ok, replies: [{ i, text }], notes: [{ i, code, n? }], state }
+```
+
+- `BotRoombot` = `{ today: { count, limit }, warns: [{ room_key, room, name, n, at }], churn: [{ room_key, room, name, n, at }] }` — 7일 지난 기록 제외, 많은 순·최근 순, 각 50개까지.
+- `BotMinigame` = `{ today: { count, limit }, rooms: [{ room_key, room, selected, game: null | { kind: 'word'|'baseball'|'quiz', label, at, word?, tries? }, top: [{ name, score }], players }] }` — `selected` = 지금 `config.minigame.rooms`에 있음. 선택된 방을 먼저, 그다음 점수만 남은 방. `top`은 점수 > 0인 상위 5명. 숫자야구 정답·퀴즈 정답은 내보내지 않는다.
+- 시뮬레이션 검사: `feature` ∈ {`roombot`, `minigame`}(아니면 400). `events` 배열 1~30개, `kind` ∈ {`join` `leave` `msg`}, `who` 문자열 1~40자(없으면 `하늘`), `text` ≤ 500자(`msg`만), `dt` 정수 0~600000(없으면 0). `room_name` 1~60자(없으면 `동네모임`). `state`는 객체이고 `JSON.stringify` 길이 ≤ 65,536(넘으면 `{}`). 위반은 400 `시연 요청이 올바르지 않습니다.`
+- 시뮬레이션 설정 만들기: `const KEY = '0\u0001' + roomName; const allowed = { [KEY]: true };` 화면 설정의 `rooms`가 비어 있지 않으면 `rooms: [KEY]`, 비어 있으면 `[]`(방 미선택 결과를 그대로 보여 주기 위해). `roombot`이면 `sanitizeRoomBot({...config, rooms}, {}, allowed, now)` 후 `notice`는 본문 값 그대로 넣는다(시연은 화면 값을 쓴다). `minigame`이면 `sanitizeMiniGame`. sender에는 `{ feature, config, room: { key: KEY, name: roomName }, state, events, me: short(email) }`.
+- 시연은 레이트리밋 `panel` 버킷(분당 180)을 쓴다.
+
+### 3.4 `lib/keys.js` — 기간 추가 규칙
+
+```js
+// 콘솔만 쓰는 키는 device_id 가 없다. 한 번이라도 쓴 키(활성화 시각이 있거나 시작된 기능이 있음)면 활성화된 키로 본다.
+function isActivated(lic, anyStarted) { return !!(lic && (lic.device_id || lic.activated_at != null)) || !!anyStarted; }
+```
+
+`grant()`:
+- `SELECT key, device_id, activated_at FROM licenses WHERE key=$1 FOR UPDATE`.
+- `anyStarted` = `SELECT 1 FROM entitlements WHERE key=$1 AND expires_at IS NOT NULL LIMIT 1`.
+- `activated = isActivated(lic, anyStarted)`.
+- 기존 행이 미개시(`prevExp === null`)이고 키가 활성화됨이면: `expires_at = now + prevDur + dur`, `starts_at = now`, `duration_ms = prevDur + dur`(지금 코드는 이 경우 `prevDur`를 잃는다).
+- 나머지 분기는 그대로. 반환 `activated`는 새 판정 값.
+- `isActivated`를 내보낸다(`v6-check`가 쓴다).
+
+### 3.5 새 `lib/license-sweep.js` — 기간·회수 상태를 sender에 밀어 넣기
+
+```js
+// 콘솔 키의 기능 상태를 sender 에 맞춘다. 앱 하트비트가 하던 차단을 서버가 대신한다.
+const lastSig = new Map();   // device_id → JSON(features) 마지막으로 보낸 값
+function start() { /* 부팅 60초 뒤 runAll(), 그 뒤 LICENSE_SWEEP_MS(기본 600000)마다 */ }
+async function runAll() { /* panel_accounts 전부를 키별로 묶어 pushKey */ }
+async function key(licenseKey) { /* 그 키 하나만 즉시 */ }
+async function pushKey(licenseKey, deviceIds) {
+  // lic = licenses 행, rows = entitlements → gate = panelAuth.assess(lic, rows, now)
+  // want = gate.ok ? featureFlags(gate) : { macro: false, roombot: false, minigame: false }
+  // 각 device: sig 가 lastSig 와 다르면 sender POST /v1/features { device_id, features: want } (10초), 성공하면 lastSig 갱신
+}
+```
+
+- `sender.up()`이 아니면 아무것도 하지 않는다(다음 회차에 다시).
+- 한 회차에 같은 키를 두 번 읽지 않는다. 오류는 키마다 `console.error`로 남기고 다음 키로.
+- 부르는 곳: `server.js` 부팅(`senderChild.start()` 다음), 콘솔 로그인·등록 완료(3.3), 관리자 동작(4.3 A20).
+- 기간이 끝난 키: `gate.ok`가 false → 모든 기능 false → sender가 매크로·기록·검열·올킥·관리봇·미니게임을 멈춘다(3.6 S1). 다시 사면 다음 로그인 또는 10분 안에 되살아난다.
+
+### 3.6 sender (`sender/src/*`)
+
+S1~S16. 각 항목 끝의 "검사"는 `sender/src/selfcheck.mjs`에 넣을 단언이다(`node src/selfcheck.mjs`가 `sender selfcheck ok`로 끝나야 함).
+
+**S1. 매크로 기능 차단 범위 넓히기** (`features.mjs`)
+- `coverRoom`, `visitRoom`, `applyProfile`의 방 확인, `guardOnChat`의 config.guard 부분, `guardDue` 맨 앞에 `if (!featureOn(record, 'macro')) …없음` 추가. `featureOn`은 그대로(값이 없으면 켜짐 — 옛 기록 호환).
+- 검사: `features: { macro: false }`인 기록에서 `coverPlan`·`guardOnChat`(visit·kick)·`guardDue`가 아무것도 내지 않는다. `macro` 키가 없는 기록은 지금처럼 동작한다.
+
+**S2. 관리봇 입장·퇴장 인사를 `onMember` 경로로** (`features.mjs`, `runner.mjs`)
+- `roomBot()`에서 `joinLeaveKind` 분기(입장·퇴장 문장 처리)를 지운다. 입장·퇴장 알림은 `runner.onMessage`가 `takeVisit`으로 가로채 `onMember`로 보내므로 이 분기에는 닿지 않는다. 대신 새 함수:
+
+```js
+/** One join or leave for the room bot: greeting, churn notice. Returns sends and demo notes. */
+export function roomBotOnMember(record, ev) // ev: { kind: 'join'|'leave', chatId, authorId, authorName, mine, now, skip }
+// → { sends: [{ chatId, text, delayMs: 0, meta }], notes: [{ code, n? }] }
+```
+
+  1. `featureOn(record,'roombot')`, `cfg.enabled`, `!ev.mine`, `!ev.skip`, 방이 `cfg.rooms`에 있음 — 아니면 빈 결과(시연용 notes: 꺼짐 `off`, 방 없음 `no_room`).
+  2. 중복 거르기 30초: 키 `room.key|kind|i:{authorId}`와 `room.key|kind|n:{name}` 중 하나라도 30초 안에 본 적 있으면 끝. 둘 다 기록(`state.rbSeen`, 1,000개 넘으면 오래된 것부터 삭제). LOCO `member_joined`와 입장 문장 파싱이 같은 입장을 두 번 알릴 수 있다.
+  3. 반복 입·퇴장 집계(S3). 새로 판정되면(`n > 0`) `churnMsg`가 있으면 렌더해 `botSend`, notes `churn_listed`.
+  4. `on = kind === 'join' ? welcomeOn : leaveOn`. 꺼져 있으면 notes `welcome_off`/`leave_off`로 끝. 문구가 비면 `welcome_empty`/`leave_empty`로 끝.
+  5. `churnMute !== false`이고 그 사람이 지금 반복 입·퇴장 창 안이면 notes `churn_mute`로 끝.
+  6. `renderBot(tpl, roomName, name, now, 0, '')` → `botSend`(3초 방 쿨타임 + 하루 한도).
+- `runner.onMember`: `guardOnChat` 결과를 받은 뒤 `roomBotOnMember(this.record, { kind, chatId, authorId: author, authorName, mine, now, skip: !this.botOwner('roombot', chatId) })`의 `sends`를 `guard.sends` 뒤에 붙이고 `guard.active = true`로 해 `finishGuard`가 보내고 저장하게 한다.
+- 이름: `onMember`는 지금 입장·퇴장 로그가 켜진 방에서만 이름을 찾아본다. 관리봇이 그 방에서 켜져 있고 `authorName`이 비어 있고 `author`가 있으면 `memberCard(chatId, author)`로 이름만 찾는다(`visitNeedsProfile || roomBotNeedsName(record, chatId)`). `roomBotNeedsName` = 관리봇 켜짐 + 방 포함 + (`welcomeOn || leaveOn || churnOn`).
+- 검사: 입장 사건 → `「{이름}」` 들어간 환영 1건. 같은 사람 10초 뒤 같은 사건 → 0건(중복). `welcomeOn: false` → 0건 + notes `welcome_off`. 방이 목록에 없음 → 0건. `features.roombot: false` → 0건. 이름이 비면 `누군가`.
+
+**S3. 반복 입·퇴장 감지** (`features.mjs`)
+- runtime: `rbChurn: { [roomKey|person]: number[] }`(사건 시각, 사람당 24개까지), `rbChurnList: { [roomKey|person]: { room, name, n, at, noted } }`.
+- `person` = `i:{authorId}`가 있으면 그것, 없으면 `n:{name}`. 둘 다 없으면 집계하지 않는다.
+- 사건마다: 창 `churnMin`분 밖 시각을 지우고 지금 시각 추가. 창 안 개수 ≥ `churnCount`이고 `noted`가 30분 안이 아니면 `n += 1`, `at = now`, `noted = now`, `name` 갱신 → "새로 판정"(반환값 = 창 안 개수).
+- `churning(state, cfg, roomKey, person, now)` = 창 안 개수 ≥ `churnCount`.
+- 정리: `rbChurnList`에서 `at`이 7일 지난 것 삭제, `rbChurn` 키 400개 넘으면 가장 오래된 것부터 삭제.
+- `churnOn === false`면 집계도 하지 않는다.
+- `churnMsg` 렌더: `renderBot(churnMsg, roomName, name, now, n, '')`(`{횟수}` = 창 안 개수).
+- 검사: 10분 기준 4회 → 입·퇴·입·퇴(각 1분 간격) 넷째에 새로 판정 1회, 다섯째 입장 환영은 `churnMute`면 0건·아니면 1건. `churnMsg: '{이름}님 반복 입장이 확인되었습니다 ({횟수}회)'`면 그 문장 1건. 30분 안 같은 사람 재판정 없음.
+
+**S4. 경고 7일 만료와 크기 제한**
+- `bumpWarn`: `warnAt[k]`가 7일보다 오래됐으면 0에서 다시 센다. `warnCount`도 7일 지난 값은 0.
+- `warns` 키 400개 넘으면 `warnAt`이 가장 오래된 것부터 삭제.
+- 검사: 8일 전 경고 2회인 사람이 다시 걸리면 `(경고 1회)`.
+
+**S5. 관리봇 문장 교체** — 부록 A `RB-*`와 같게.
+- 기본 금지어 경고문 `RB-WARN-DEF`(금지어를 적지 않음).
+- `!규칙` → `RB-RULES`(금지어 수, `blockLinks`, `floodOn` 반영, 공지가 있으면 덧붙임).
+- `!도움`·`!명령`·`!방도움` → `RB-HELP`.
+- `!공지 내용`·`!경고초기화` 거절 끝에 `RB-ADMIN-TAIL`.
+- `floodOn === false`면 도배 검사 안 함. 기본 도배 문장의 숫자는 저장값.
+- 검사: 각 문장이 부록 A와 글자까지 같다(부록 A의 고정 문장 목록을 `selfcheck`에 그대로 넣어 비교).
+
+**S6. 방에서 바꾼 공지를 콘솔 저장이 덮지 않게**
+- `roomCommand`의 `!공지 내용`: `cfg.notice = arg; cfg.noticeAt = now; cfg.noticeBy = 'chat'`.
+- 새 순수 함수 `export function mergeLiveConfig(prevConfig, nextConfig)`: 둘 다 `roombot`이 있고 `Number(prev.roombot.noticeAt) > Number(next.roombot.noticeAt || 0)`이면 `next.roombot.notice/noticeAt/noticeBy`를 `prev` 값으로. 새 객체를 돌려준다(입력을 바꾸지 않음).
+- `Hub.updateConfig`: `if (body.config) prev.config = mergeLiveConfig(prev.config, body.config)`. `prev`는 붙어 있는 계정이면 메모리 기록(가장 새것)이다.
+- 검사: prev `noticeAt: 200`, next `noticeAt: 100` → prev 공지 유지. next가 더 새것이면 next.
+
+**S7. 공지 자동 발송**
+- 새 순수 함수 `export function roomBotDue(record, now, owns)` → `[{ chatId, text, delayMs: 0, meta }]`. 조건: `featureOn roombot`, `cfg.enabled`, `cfg.noticeAutoOn`, `notice.trim()`. 방마다(`cfg.rooms`의 실제 방, `owns(chatId)`가 참인 방): `state.rbNoticeAt[room.key]`가 없으면 지금으로 적고 보내지 않는다(켠 뒤 한 간격 후 첫 발송). `now - last ≥ noticeEveryMin × 60000`이면 `last = now`, `botSend`로 `RB-NOTICE` 문장.
+- `runner.guardTick`에서 `guardDue` 다음에 부르고, 보낸 것이 있으면 저장.
+- 검사: 처음 호출 0건, 180분 뒤 1건, 그 직후 0건, `notice` 빈 값 0건.
+
+**S8. 미니게임 동작·문장·크기**
+- `gameSend`: 쿨타임 = `Math.max(3000, Number(cfg.cooldownMs) || 3000)`, 하루 한도 = `clampNum(cfg.dailyLimit, 1, 9999, 300)`(없거나 0이면 300).
+- 문장(부록 A): `MG-BUSY`(진행 중 게임 이름), `MG-GIVEUP`(게임 이름), `MG-RANK`(머리 줄, 0점 이하 제외, 같은 점수는 이름 순), `MG-RANK-NONE`, `MG-HELP`(켜진 게임만, `!점수` 포함, 퀴즈 수), `MG-NO-DICT`(`Word.startWord`가 null).
+- 게임 이름표: `word` 끝말잇기, `baseball` 숫자야구, `quiz` 퀴즈, `dice` 주사위, `rps` 가위바위보.
+- 크기: `scoreAdd` 뒤 그 방 점수판이 60명을 넘으면 점수가 가장 낮은 사람부터 지운다. `scores`의 방이 30개를 넘으면 `config.minigame.rooms`에 없는 방부터 지운다. `asked[room]`은 퀴즈 수를 넘지 않는다. `games`에서 대상 방이 아니고 진행 중이 아닌 항목은 지운다.
+- 검사: `cooldownMs` 없는 설정에서 1초 간격 두 명령 → 두 번째 답 없음. `dailyLimit` 없는 설정에서 301번째 답 없음. 랭킹·도움말·포기·진행 중 문장 비교. 61명 점수 → 60명.
+
+**S9. 기록·초기화 읽기 함수와 경로**
+- `features.mjs`: `export function botsView(record, now)` → 3.3의 `{ roombot: BotRoombot, minigame: BotMinigame }`(방 이름은 `logRoomName` 방식으로 `record.rooms`에서). `export function botsReset(record, what, roomKey)` → 지운 수. `warns`(+`warnAt`), `churn`(`rbChurn` + `rbChurnList`), `scores`(방 지정 시 그 방만), `games`(모든 방의 `kind = ''`, 방 지정 시 그 방).
+- `index.mjs`: `GET /v1/bots?device_id` → 붙어 있으면 메모리 기록, 아니면 `loadRecord`; 없으면 404 `absent`. `POST /v1/bots/reset {device_id, what, room_key?}` → `hub.botsReset(id, what, roomKey)`: 붙어 있으면 `slot.enqueue(async () => { n = botsReset(slot.record, …); await saveRecord(id, slot.record) })`(메시지 처리와 겹치지 않게), 아니면 불러와 고치고 저장. 응답 `{ ok, cleared, bots: botsView(rec) }`.
+- 검사: `botsView`가 7일 지난 경고를 빼고, 정답·비밀 숫자를 내보내지 않는다. `botsReset('scores')` 뒤 점수 0. `botsReset('games')` 뒤 점수 유지.
+
+**S10. 같은 키의 계정끼리 봇 중복 응답 막기**
+- 같은 라이선스 키로 등록한 계정의 `device_id`는 `'w' + sha256('panel:' + key) 앞 12자 + …`(lib/panel-ids.js)라 앞 13글자가 같다.
+- `export function botCovers(record, feature, chatId)` = `featureOn` + `cfg.enabled` + 방 포함.
+- `Hub.botOwner(feature, chatId, selfId)`: `selfId`가 `w`로 시작하면, `accounts` 중 앞 13글자가 같고 `needs_register`가 아니고 `botCovers`가 참인 계정의 `device_id` 최솟값이 `selfId`인지. `w`로 시작하지 않으면 참.
+- `Slot`에 `hub` 참조(`new Slot(id, record, hub)`; 테스트처럼 없으면 항상 참). `slot.botOwner(f, chatId)`.
+- `onMessage`: `onInbound(…, { …, skip: { roombot: !this.botOwner('roombot', chatId), minigame: !this.botOwner('minigame', chatId) } })`. `onInbound`은 `msg.skip`이 참인 봇을 건너뛴다. `onMember`(S2)·`roomBotDue`(S7, `owns`)도 같은 판정.
+- 검사: 같은 앞 13글자의 두 Slot, 둘 다 미니게임 켜짐 → 작은 `device_id`만 소유자. 하나가 꺼지면 다른 하나가 소유자.
+
+**S11. 보내지 못하면 되돌리기 (P2)**
+- `botSend`·`gameSend`가 넣는 send에 `meta: { kind: 'bot'|'game', roomKey, prevLast, text }`.
+- `runner.deliver`가 성공 여부를 돌려준다. 실패이고 `meta`가 있으면 `undoSend(record, meta)`: 하루 횟수 −1(0 아래로 안 내려감), 방 마지막 시각을 `prevLast`로, `said`에서 그 문장 하나 삭제. `onMessage`·`finishGuard`·`guardTick`이 실패를 받으면 되돌린 뒤 저장.
+- 검사: `undoSend` 뒤 `botCount`·`botLast` 원래 값.
+
+**S12. 기능 상태만 바꾸는 경로**
+- `POST /v1/features { device_id, features }` → `features`가 `{ macro, roombot, minigame }` 불린 3개가 아니면 400. `hub.setFeatures(id, f)`: 붙어 있으면 `slot.enqueue`로 `slot.record.features = f` 후 저장, 아니면 `loadRecord` → 없으면 404 → 고치고 저장. **붙이지 않는다**(`updateConfig`는 기록이 붙어 있지 않으면 접속을 시작하므로 쓰지 않는다).
+- 검사(가짜 저장소 대신 순수 함수 `applyFeatures(record, f)`): 불린 아닌 값 거부.
+
+**S13. `sender/data/quiz.json` 문장 고치기** (D16)
+- 79문항의 `q`를 합니다체 의문문 또는 명사형 의문(`…은?`)으로, `h`를 명사형 또는 합니다체로. 예: `대한민국의 수도는 어디야?` → `대한민국의 수도는 어디입니까?`, `우리나라의 전통 집을 뭐라고 불러?` → `우리나라의 전통 집을 무엇이라고 부릅니까?`, `제주도에 있어` → `제주도에 있습니다`, `이걸 먹으면 한 살 더 먹는다고 해` → `먹으면 한 살 더 먹는다고 하는 음식`.
+- **순서와 `a`는 바꾸지 않는다**(`runtime.asked`가 번호를 저장한다). 개수 79 유지.
+- 검사: 79개, `q`가 `/(야|해|불러|일까|이야|마야|어)\?$/`로 끝나지 않음, `h`가 `/(어|야|해|지)\.?$/`로 끝나지 않음, `correct(0, '서울')` 그대로.
+
+**S14. 등록 기본값** — `register.mjs` `storeSession`의 새 계정 `features`를 `{ macro: false, roombot: false, minigame: false }`로(라이선스는 등록 직후 3.3이 밀어 넣는다). 기존 계정(`prev.features`)은 그대로. `runner.upsert`의 대체 기본값(모두 true)은 손대지 않는다(부모가 늘 `features`를 보낸다).
+
+**S15. 이름 모르는 참여자 (P2)** — `onMessage`에서 `author_name`이 비어 있고 `author`가 있고 그 방에서 관리봇·미니게임이 켜져 있으면 `memberCard`로 이름을 찾는다. 결과는 `this.nameCache`(`chatId|authorId` → `{ name, at }`, 10분, 500개)에 둔다. 찾지 못하면 지금처럼 `누군가`.
+
+**S16. 시연 경로** — `POST /v1/simulate`:
+
+```js
+// body: { feature, config, room: { key, name }, state, events, me }
+// 기록을 새로 만든다. 저장하지 않고 카카오에 보내지 않는다.
+const record = { demo: true, features: { macro: true, roombot: true, minigame: true },
+  config: { accounts: [], [feature]: config }, rooms: [{ key: room.key, chat_id: '1', name: room.name, kind: 'open' }],
+  runtime: state || {} }
+let t = Date.now()
+for (const [i, ev] of events.entries()) {
+  t += ev.dt || 0
+  // msg  → onInbound(record, { chatId: '1', text: ev.text, authorName: ev.who, mine: false, now: t }) 의 text 들 → replies(i)
+  // join/leave → roomBotOnMember(record, { kind, chatId: '1', authorName: ev.who, authorId: '', mine: false, now: t }) → replies(i), notes(i)
+}
+// → { ok, replies, notes, state: pick(record.runtime) }
+```
+
+- `record.demo`이면 `botCanSend`·`gameSend`가 쿨타임·하루 한도를 건너뛴다(횟수도 세지 않는다).
+- `onInbound`이 `msg.now`를 받는다(없으면 `Date.now()` — 기존 동작). `roomBot`·`miniGame`이 notes를 낼 수 있게 내부에 `state.demoNotes` 배열을 두고(데모일 때만), 시뮬레이션이 사건마다 비운다. 관리봇 메시지 경로의 notes: 금지어·링크·도배·명령 어디에도 걸리지 않으면 `ignored`, `blockLinks`가 꺼져 있고 링크가 있으면 `links_off`, 도배 꺼짐인데 도배 조건이면 `flood_off`, 1분 안 재경고면 `flood_hold`. 미니게임: 퀴즈 진행 중 틀린 답 `quiz_wrong`, 응답 없는 말 `ignored`. 꺼짐 `off`, 방 없음 `no_room`.
+- 돌려주는 `state` = `record.runtime`에서 `warns warnAt flood floodWarn rbChurn rbChurnList rbSeen games scores asked said joinSeen` 만.
+- 크기 제한: 사건 30개, 응답 문장 수 100개.
+- 검사: 관리봇 설정 `welcomeOn` + `welcomeMsg: '{이름}님 환영합니다'` + `join` 사건 → replies `[{ i: 0, text: '하늘님 환영합니다' }]`. 같은 `ban` 사건 3번(state 이어 받기) → 셋째 문장에 관리자 호출 줄. 미니게임 `!주사위 20` → `/^하늘님 20면 주사위 결과 → \d+$/`. 쿨타임 설정 600초여도 연속 명령 모두 응답.
+
+`sender/package.json`의 `check`는 그대로(`selfcheck.mjs`가 새 단언을 포함).
+
+### 3.7 앱 전용 코드 제거와 남길 것
+
+| 파일 | 변경 |
+|---|---|
+| `routes/license.js` | **삭제**. |
+| `routes/retired.js` (새) | `POST /verify` `POST /heartbeat` `GET|POST /entitlements` `GET|POST /config` `GET /pubkey` → 410 `{ ok: false, error: 'app_retired', detail: '휴대폰 앱 지원이 종료되었습니다. 같은 키로 웹 콘솔(/panel)에 로그인하십시오.' }`. 서명·DB 접근 없음. 머리 주석에 "2027-04 이후 삭제 가능". |
+| `lib/sign.js` | `randomHex` `sha256Hex`만 남긴다(`routes/purchase.js`가 쓴다). Ed25519 서명, `pubkeyB64`, `configKey`, `cfgSecret`, `SIGNING_PRIVATE_KEY` 읽기·부팅 시 키 생성 삭제. |
+| `lib/sender-child.js` | `install()`·`proxy()` 삭제(공개 `/v1/*` 프록시). `start` `call` `up` `reason` `status` `configured` 유지. |
+| `server.js` | `senderChild.install(app)` 줄과 주석 삭제. `licenseRoutes` → `retiredRoutes`. 머리 주석의 `routes/license.js : 사용자앱 API` → `routes/retired.js : 종료된 앱 API 안내`. 루트 `/` 비 HTML 응답(`앱/curl 연결확인`)은 `curl 연결확인`으로 주석만. `warnEnv`에서 `SIGNING_PRIVATE_KEY` `ALLOWED_APP_SIGS` 경고 삭제. 4.1의 `/admin` 페이지 경로·헤더, 정적 파일 `no-cache` 규칙에 `admin.(html|js|css)` 추가. `listen` 뒤 `licenseSweep.start()`. |
+| `lib/ratelimit.js` | `verify` 종류는 이름 그대로 두고(모르는 종류의 기본값) 주석을 `종료된 앱 API 경로 + 기본값`으로. `GET /admin`(정확히)은 새 종류 `page`(`RATE_PAGE_PER_MIN`, 기본 120)로 분류해 관리자 차단 검사에서 뺀다(4.1). |
+| `routes/admin.js` | `require('./license')`, `/admin/sigs` `/admin/sig-add` `/admin/sig-del` `/admin/reset-device` 삭제. 나머지 4.3. |
+| `routes/purchase.js` | 주문 접수에서 `android_ok`를 읽지 않는다(`INSERT` 열에서 빼면 기본값 FALSE). 접수 audit의 `/ 안드로이드확인=…` 삭제. 응답의 `android_ok` 삭제. `GET /api/order/:id`의 `view.android_ok` 삭제. `POST /api/lookup`에 `console_started_at`(= `activated_at`, 없으면 null)과 `kakao_accounts`(`SELECT count(*) FROM panel_accounts WHERE license_key=$1`) 추가. `device_registered` `reset_count`는 이번 배포에서는 남긴다(사이트가 읽지 않는다). |
+| `lib/features.js` | `DESCS`를 5.5의 상품 설명과 같게. 머리 주석의 `앱` → `콘솔`. |
+| `lib/audit.js` | `KINDS`에 `admin`(관리자 작업), `admin_login`(관리자 로그인) 추가. `ALERT_KINDS` 그대로. 머리 주석 `관리자앱 [기록] 탭` → `웹 관리자 [기록]`. 앱 전용 종류(`mismatch` `takeover` `bad_sig` `tamper` `reset`)는 옛 기록 표시용으로 남긴다. |
+| `lib/keys.js` | 3.4. 주석의 `기기 활성화` → `첫 사용(콘솔 첫 로그인)`. |
+| `package.json` `check` | `node --check routes/license.js` 삭제, `node --check routes/retired.js` `node --check lib/admin-session.js` `node --check lib/license-sweep.js` 추가, 끝에 `&& node lib/v6-check.js`. |
+
+### 3.8 하위 호환
+
+- 저장된 `config.roombot`·`config.minigame`이 없으면 `present*`가 기본값을 돌려준다. 휴대폰 시절 설정은 서버에 없다.
+- 기존 기록의 `features`(`{macro:true, roombot:false, minigame:false}`)는 부팅 1분 뒤 첫 정리(3.5)에서 라이선스 값으로 바뀐다.
+- `runtime`의 새 키(`rbChurn` `rbChurnList` `rbSeen` `rbNoticeAt`)는 필요할 때 만든다(`rt()`).
+- `floodOn`이 없는 관리봇 설정은 켜짐, `noticeAt`이 없으면 0.
+- `config.guard`의 숨은 칸은 그대로 보존된다.
+- DB: `licenses.device_id/device_name/device_fp/session_token/session_at/app_sig/reset_count/last_reset_at`, `orders.android_ok`, 테이블 `configs` `app_signatures`는 남기고 새로 쓰지 않는다. `shapeLicense`·`shapeOrder`는 옛 행을 그대로 읽는다.
+- 관리자 API의 헤더 인증은 그대로라 배포 직후에도 스크립트가 동작한다.
+
+---
