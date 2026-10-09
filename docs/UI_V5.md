@@ -33,19 +33,19 @@
 2. **단색 + 상태색.** 색은 상태에만 쓴다: `--live`(동작 중), `--warn`(주의·대기), `--crit`(오류·등록 필요·올킥). 강조는 흰 버튼(`--inv`)과 글자 굵기로 한다.
 3. **헤어라인과 면 밝기로 구획.** 그림자는 떠 있는 것(계정 메뉴, 팔레트, 토스트, 저장 바, 시연 창)에만.
 4. **설정 행 문법.** 왼쪽 라벨 + 설명, 오른쪽 컨트롤(`.srow`). 기능 화면의 첫 행은 그 기능의 메인 스위치. 꺼져 있으면 옵션을 접고 점선 안내(`.off-note`)와 `켜기` 버튼만 보인다.
-5. **저장은 화면 아래 저장 바 하나.** "변경사항 N건 · 계정 · 화면"을 적는다. 저장하지 않고 떠나면 같은 바가 "저장하지 않은 변경이 있습니다"로 바뀌어 묻는다. 브라우저 `confirm()` 금지.
+5. **저장은 화면 아래 저장 바 하나.** "변경사항 N건 · 계정 · 화면"을 적는다. 저장하지 않고 떠나면 같은 바가 "저장하지 않은 변경사항이 있습니다."로 바뀌어 묻는다. 브라우저 `confirm()` 금지.
 6. **키보드.** Ctrl/⌘K 팔레트, Ctrl/⌘S 저장, G 다음 글자로 화면 이동, Esc 닫기. 받은함 `/` 검색, Alt+↑↓ 대화 이동(UI_V4 5.11 유지).
 7. **모노 글꼴은 라틴 문자 값에만.** 이메일, 기기 id, 링크, 시각, 숫자. 한글은 언제나 산세리프(Geist → IBM Plex Sans KR).
 8. **정직한 문구.** 서버가 실제로 하는 일만 적고, 못 하는 일은 적는다. 예: 올킥 방지는 감지·기록만 한다(강퇴를 막거나 다시 초대하지 않음). 금지어 검열은 이 계정이 부방장 이상일 때 글을 가리기만 한다. 입장·퇴장 로그와 프로필 로그는 방에 안내를 보낸다(4.8 안내 형식). 예시 데이터는 홈 시연 창 안에서만 쓰고 "콘솔 시연"이라고 밝힌다.
 9. **모션은 원인을 따라간다.** 누른 곳에서 결과가 나타난다. 150~380ms, 이징 하나(`--ease`). 폴링으로 다시 그릴 때는 움직이지 않는다(5.5).
-10. **폰에서도 전부 쓴다.** 390px 기준 가로 스크롤 없음, 누르는 대상 높이 44px(폰 목록 행·탭), 그 밖 컨트롤 32px 이상.
+10. **폰에서도 전부 쓴다.** 390px 기준 가로 스크롤 없음. 폰(≤760px)에서 받은함 칩·검색·안 읽음·새로고침·뒤로·전송, 사이드바 항목, 계정 메뉴·팔레트 항목, 스위치는 44px 이상(UI_V4 33항 유지), 그 밖 컨트롤 32px 이상.
 
 ### 1.3 금지 목록 (하나라도 보이면 반려)
 
 - 그라디언트 글자, 글로·네온(색이 번지는 `box-shadow`/`filter`), 민트·애시드 그린, 보라-파랑 그라디언트, 배경 점 격자·노이즈·블롭.
 - 이모지. UI 문자열과 아이콘 대용 모두. `app.js` `FEATURES[].icon`(⚡🛡🎲) 포함.
 - 같은 모양 아이콘 카드 3개짜리 그리드.
-- 큰 라운드 남발. 반경은 `--r-1..4`(6/8/10/12px)와 원형(점·스위치·아바타)만.
+- 큰 라운드 남발. 반경은 `--r-1..4`(6/8/10/12px)와 원형·알약형(점, 스위치, 아바타, 배지, 필터 칩 `999px`)만.
 - 크림색·세리프, 장식용 `01 02 03` 번호.
 - 빈말 카피("혁신적인", "손쉽게", "강력한", "완벽한", "~해 보세요").
 - 상태가 아닌 곳의 색: 기능별 색, 계정별 색. 계정은 첫 글자 네모(`.sq`)로만 구분한다.
@@ -276,7 +276,7 @@
     7. 안드로이드 확인 `#fld-android` > `label.chk` > `input#androidOk[name=android_ok]` + `#android-hint` + `#err-android`
   - `#bankHint`, `#submitErr`.
   - 오른쪽 `aside` > `#sum`(합계 + 제출 버튼 — app.js가 만든다).
-- 오류 표시: `.fld.bad`(app.js가 `#fld-…`에 `bad` 토글) → 입력 테두리 `--crit-line`, `.err` 문구 `--crit`, 첫 오류 칸으로 포커스. 오류가 생긴 칸만 `shake`(5.4) 한 번.
+- 오류 표시: `.fld.bad`(app.js가 `#fld-…`에 `bad` 토글) → 입력 테두리 `--crit`, `.err` 문구 `--crit` 12px, 첫 오류 칸으로 포커스(app.js 기존 동작).
 - 접수 뒤 `#formWrap` 숨김, `#result`에 금액 상자(`.big` 28px 모노, 뒷자리 강조), 입금 계좌, 주문번호, 주문 상태 링크(app.js 기존 DOM).
 
 ### 3.3 내 키 `my.html`
@@ -389,8 +389,7 @@ app.js의 클래스·id·`data-*`는 모두 유지한다(`.card` `.prod` `.head`
   <div class="mainc">
     <header class="topbar">…4.3…</header>
     <div class="runstate" id="runstate" role="status" hidden><i class="dot warn"></i><span class="strip-text"></span></div>
-    <main class="view" id="view" tabindex="-1">
-      <h1 class="sr">K bot 콘솔</h1>
+    <main class="view" id="view" tabindex="-1" aria-label="K bot 콘솔">
       <section class="page" data-route="overview" id="page-overview" aria-labelledby="ov-title" hidden>…4.4…</section>
       <section class="page full" data-route="inbox" id="inbox" data-view="list" aria-labelledby="chat-title" hidden>…4.5…</section>
       <section class="page" data-route="accounts" id="account-block" aria-labelledby="acc-title" hidden>…4.6…</section>
@@ -446,7 +445,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 </div>
 ```
 
-- 제출 중 `#loginBtn.busy` + `disabled`(`.spin` 보이고 글자 숨김). 실패 문구는 서버 `error` 그대로(`없는 키입니다.` 등), 입력 테두리 `--crit-line`, `#key`에 `shake` 한 번.
+- 제출 중 `#loginBtn.busy` + `disabled`(`.spin` 보이고 글자 숨김). 실패 문구는 서버 `error` 그대로(`없는 키입니다.` 등), `#key.err`(테두리 `--crit`).
 - ≥720px에서 로그인 화면이 보이면 `#key`에 포커스.
 
 ### 4.3 셸 — 사이드바·상단 바·저장 바·토스트·팔레트
@@ -493,7 +492,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 - 계정마다 `button.menu-i[role=menuitemradio][aria-checked][data-switch="{device_id}"]` > `span.sq`(첫 글자, 현재 계정 `.inv`) + `span.grow.mono` 이메일 + 상태 점(`접속 중` live / `등록 필요` crit, `aria-label`).
 - 구분선, `a.menu-i[href="#account-add"]` `계정 추가` + `{n}/8`, `a.menu-i[href="#accounts"]` `계정 관리`.
 - 키보드: ↑↓ 이동, Enter 선택, Esc 닫고 `#acctBtn`으로 포커스. 바깥 클릭 닫힘.
-- 선택 → `switchAccount(device_id)`(4.14 떠나기 확인 → `openAccount(id)` → 현재 화면 그대로 다시 채움. 개요·기능 화면이면 같은 화면 교차 전환 5.1).
+- 선택 → `switchAccount(device_id)`(4.14 떠나기 확인 → `openAccount(id)` → 현재 화면 그대로 다시 채움, 5.1) → 토스트 `{email} 계정으로 전환했습니다.` + `설정과 기록이 이 계정 기준으로 표시됩니다.`
 - `#acctState`: `<i class="dot live"></i>접속 중` / `<i class="dot crit"></i>등록 필요` / `<i class="dot warn"></i>연결 대기`(UI_V4 `stateOf()`).
 
 **상단 바** `header.topbar`:
@@ -531,7 +530,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 
 - `#saveBtn`은 `type="submit"`이고 `form` 속성을 현재 화면의 폼 id로 바꿔 단다(`macro-form` `visit-form` `profile-form` `guard-form` `cover-form` `reply-form` `snipe-form`). 그래서 저장은 V4의 폼 `submit` 핸들러가 그대로 처리한다. Ctrl/⌘S = `document.getElementById(form).requestSubmit()`.
 - 표시: `#save.show`(아래에서 올라옴). `#saveTxt` = `변경사항 <b>{N}건</b><span class="ctx"> · <span class="mono">{email}</span> · {화면 이름}</span>`. 저장 중 `#saveBtn.busy`. 성공하면 바가 내려가고 토스트 `저장했습니다.` + `{email} · {화면 이름}`. 실패하면 바 유지, 그 화면 폼의 `#…-error`에 서버 문구, 바 `shake`.
-- 떠나기 모드 `#save.show.leave`: `#saveTxt` = `저장하지 않은 변경이 있습니다.` `.when-edit` 숨김, `.when-leave` 보임, 점 `--warn`. 4.14.
+- 떠나기 모드 `#save.show.leave`: `#saveTxt` = `<b>저장하지 않은 변경사항이 있습니다.</b> <span class="ctx">이동하기 전에 저장하거나 버리십시오.</span>`. `.when-edit` 숨김, `.when-leave` 보임, 점 `--warn`. 4.14.
 - 폰: `.ctx`와 `#saveKbd` 숨김, 좌우 16px.
 
 **토스트** `#toasts`(오른쪽 아래, 저장 바가 보이면 76px 위로): `div.toast` > 점(종류별) + `div > b 제목 + span 보조` + 선택 `button.btn.sm` 작업(예: `되돌리기`) + 닫기 `button[aria-label="알림 닫기"]`. 2.8초 뒤 `.bye`로 사라짐(작업 버튼이 있으면 6초). 한 번에 최대 3개(넘치면 가장 오래된 것부터 지움). 프로토타입 `toast(title, sub, {kind, action})`와 같은 모양. V4의 `say(id, text)` 인라인 오류는 그대로 쓰고, 토스트는 저장 성공·되돌리기 제안·복사 완료·팔레트 안내에만 쓴다.
@@ -634,7 +633,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 
 동작:
 
-- **즉시 저장 스위치** `input[data-ov]`: `change` → 그 기능 객체 전체를 바꿔 `POST /panel/api/settings` `{device_id, images_unchanged: true, [key]: {...account[key], enabled: checked}}`(macro는 V4 매크로 저장과 같은 필드 구성). 요청 중 스위치 `disabled`. 성공: `account = res.account` → 행 `.off` 토글, 사이드바 `.fs` 갱신, 토스트 `{화면 이름}{을/를} 켰습니다.`/`껐습니다.` + `{email}` + 작업 버튼 `되돌리기`(같은 요청을 이전 값으로). 실패: 스위치 원위치, 토스트 kind `crit` `저장하지 못했습니다.` + 서버 문구. 저격 규칙 행은 스위치가 없다(규칙별 켜기는 저격 규칙 화면에서).
+- **즉시 저장 스위치** `input[data-ov]`: `change` → 그 기능 객체 전체를 바꿔 `POST /panel/api/settings` `{device_id, images_unchanged: true, [key]: {...account[key], enabled: checked}}`(macro는 V4 매크로 저장과 같은 필드 구성). 요청 중 스위치 `disabled`. 성공: `account = res.account` → 행 `.off` 토글, 사이드바 `.fs` 갱신, 토스트 `{화면 이름} 사용을 시작했습니다.`/`{화면 이름} 사용을 중지했습니다.` + `{email} · 저장됨` + 작업 버튼 `되돌리기`(같은 요청을 이전 값으로, 끝나면 토스트 `되돌렸습니다.` + `{화면 이름} · {email}`). 실패: 스위치 원위치, 토스트 kind `crit` `저장하지 못했습니다.` + 서버 문구. 저격 규칙 행은 스위치가 없다(규칙별 켜기는 저격 규칙 화면에서).
 - `.feat` 클릭·Enter → `data-go` 화면. 스위치 클릭은 행 이동을 막는다(`stopPropagation`).
 - 기록 읽기: 개요에 들어올 때와 그 뒤 10초마다 `GET /panel/api/logs?device_id=`(4.8 폴링 규칙 공유). 새로 생긴 피드 항목만 `.fresh`(5.4).
 - 처음 들어올 때만 지표 숫자·스파크·피드에 진입 모션(5.3). 폴링·계정 전환 재계산은 움직이지 않는다(5.5).
@@ -649,7 +648,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 2. **모드 → 라우트.** `#console[data-mode]`는 없다. 받은함은 `#app[data-route="inbox"]`. `data-view="list|room"`은 `#inbox`에 단다(폰 대화 열림).
 3. **설정 탭 → 사이드바.** `#settings`, `#settings-acct`, `#tabs`, `.tab`, `.tval`, `#detail`, `#detail-where`, `.row-actions`, `#rail-add`, `#rail-settings`는 없다. `#thread-settings`(대화 머리 `설정`)는 그 대화 계정으로 전환한 뒤 `#macro`로 간다.
 4. 폰 뒤로 가기: `history.pushState({ kview: 'room' }, '', '#inbox')`. `popstate`에서 `ev.state && ev.state.kview === 'room'`이면 무시, `#inbox[data-view="room"]`이고 `location.hash === '#inbox'`이면 `closeConversation()`.
-5. 받은함은 본문 열 제한 없음(`.page.full`), 높이 `calc(100dvh - var(--top-h))`. 목록 360px(≤1100px 320px), 대화 나머지. 폰은 한 번에 하나(목록 ↔ 대화 미끄러짐, 5.3).
+5. 받은함은 본문 열 제한 없음(`.page.full`), 높이 `calc(100dvh - var(--top-h))`. 목록 360px, 대화 나머지. 폰은 한 번에 하나(목록 ↔ 대화 미끄러짐, 5.3).
 
 DOM:
 
@@ -735,7 +734,7 @@ JS가 그리는 부분(V4 함수 이름 유지):
 ```
 
 - `renderAccounts()` → `#account-list` 행: `tr.rowx[data-acc-row]` > 계정(`.who` > `.sq` + `b.mono` 이메일 + `small` device_id) / 상태(`stateHtml`) / 안 읽음(`badge-n` 또는 `0`) / 관리(`.acts`: 등록 필요면 `a.btn.sm.primary` `재등록`(`data-reg`), `button.btn.sm` `설정`(`data-acct-set` → 그 계정으로 전환 후 `#macro`), `button.btn.sm.ghost` `[i-unlink]해제`(`data-unlink`, `aria-label="{email} 등록 해제"`)).
-- 바로 다음 `tr.confirm-row[data-confirm]` > `td[colspan=4]` > `.confirm-in > div > .confirm-box[role=group][aria-label="등록 해제 확인"]`: `{email} 등록을 해제합니다. 이 계정의 서버 발송과 기록이 중지됩니다.` + `취소`(`data-unlink-no`) + `button.btn.sm.danger.solid` `해제`(`data-unlink-yes`). `해제` 누르면 이 줄이 펼쳐지고(5.3) `취소`로 포커스. **V4 `again`·`unlink`의 `window.confirm` 호출은 모두 이 인라인 확인으로 바꾼다.** 해제 성공 → `forget` 후 `refreshMe()`, 토스트 `등록을 해제했습니다.` + 이메일. 실패 → 확인 줄 안에 서버 문구.
+- 바로 다음 `tr.confirm-row[data-confirm]` > `td[colspan=4]` > `.confirm-in > div > .confirm-box[role=group][aria-label="등록 해제 확인"]`: `{email} 등록을 해제합니다. 이 계정의 서버 발송과 기록이 중지됩니다.` + `취소`(`data-unlink-no`) + `button.btn.sm.danger.solid` `해제`(`data-unlink-yes`). `해제` 누르면 이 줄이 펼쳐지고(5.3) `취소`로 포커스. **V4 해제 핸들러의 `window.confirm('이 계정의 서버 발송을 해제합니다.')`(panel.js 912행 부근)를 이 인라인 확인으로 바꾼다.** 해제 성공 → `forget` 후 `refreshMe()`, 토스트 `등록을 해제했습니다.` + 이메일. 실패 → 확인 줄 안에 서버 문구.
 - 등록 0개: 표 대신 `p.empty` `등록된 계정이 없습니다. 계정 추가를 눌러 첫 계정을 등록하십시오.`; 부팅 기본 화면은 `#account-add`(V4 13항의 대응).
 - 8개면 `#acc-add`·`#ov-add`·메뉴 `계정 추가`에 `aria-disabled="true"`, 누르면 토스트 `계정은 8개까지 등록할 수 있습니다.`
 - 등록일 열 없음(API에 `created_at`이 없다).
@@ -759,30 +758,33 @@ JS가 그리는 부분(V4 함수 이름 유지):
         <div class="fld"><label for="email">카카오계정</label><input class="inp" id="email" type="email" autocomplete="username" placeholder="name@kakao.com 또는 전화번호"><span class="errt" id="email-error" role="alert"></span></div>
         <div class="fld"><label for="password">비밀번호</label><input class="inp" id="password" type="password" autocomplete="current-password" placeholder="카카오계정 비밀번호"><span class="errt" id="password-error" role="alert"></span></div>
         <p class="errt" id="add-error" role="alert"></p>
+        <div id="force-box" class="conflict" role="alert" hidden>
+          <span><b>같은 계정이 다른 태블릿·PC에 접속되어 있어 등록하지 못했습니다.</b> 다른 기기 접속을 끊으면 그 기기의 카카오톡이 로그아웃되고 이 계정을 다시 등록합니다.</span>
+          <div class="row"><button type="button" class="btn primary sm" id="force"><span class="spin"></span><span class="lbl-idle">다른 기기 끊기</span></button><a class="btn sm ghost" href="#accounts">취소</a></div>
+        </div>
       </div>
       <div class="sec-f"><span>비밀번호는 저장하지 않습니다.</span><span class="acts"><a class="btn" href="#accounts">취소</a><button type="submit" class="btn primary" id="add-next"><span class="spin"></span><span class="lbl-idle">다음</span></button></span></div>
     </form>
     <div class="wz-card wz-pane" id="passcode" data-step="2" hidden>
       <div class="pass-grid">
-        <div>
-          <p class="eyebrow" id="code-title">카카오톡에 입력할 번호</p>
+        <div class="pass-l">
+          <h3 id="code-title">휴대폰 카카오톡에 아래 번호를 입력하십시오</h3>
+          <p>카카오톡에 표시된 입력란에 입력하면 등록이 자동으로 완료됩니다. 이 화면에는 입력하지 않습니다.</p>
           <div class="pass-code" id="code" aria-live="polite"></div>
-          <p class="pass-copy"><span id="code-left"></span></p>
-          <p class="wait" id="code-wait" role="status"></p>
-          <div id="force-box" class="conflict" role="alert" hidden>
-            <span><b>같은 계정이 다른 태블릿·PC에 접속되어 있어 등록하지 못했습니다.</b> 다른 기기 접속을 끊으면 그 기기의 카카오톡이 로그아웃되고 이 계정을 다시 등록합니다.</span>
-            <button type="button" class="btn sm" id="force">다른 기기 끊기</button>
-          </div>
+          <div class="pass-copy"><button type="button" class="btn sm" id="code-copy">[i-copy]번호 복사</button><span class="mono" id="code-email"></span><span id="code-left"></span></div>
           <p class="errt" id="code-error" role="alert"></p>
         </div>
-        <div class="cring" aria-hidden="true"><svg viewBox="0 0 100 100"><circle class="trk" cx="50" cy="50" r="45"/><circle class="arc" id="code-ring" cx="50" cy="50" r="45"/></svg><span class="cring-t mono" id="code-ring-t"></span></div>
+        <div class="cring" id="code-cring" role="timer" aria-label="남은 시간"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="bg" cx="50" cy="50" r="46"/><circle class="fg" id="code-ring" cx="50" cy="50" r="46" stroke-dasharray="289.03" stroke-dashoffset="0"/></svg><div class="c"><b id="code-ring-t">5:00</b><small>남은 시간</small></div></div>
       </div>
-      <div class="sec-f"><span>이 화면에는 번호를 입력하지 않습니다.</span><button type="button" class="btn" id="cancel-code">취소</button></div>
+      <div class="wait"><i class="dot live pulse"></i><span class="grow" id="code-wait">카카오톡 확인을 기다리는 중입니다 <span class="dim">· 2초마다 확인</span></span><button type="button" class="btn" id="cancel-code">취소</button></div>
     </div>
     <div class="wz-card wz-pane" id="add-done" data-step="3" hidden>
-      <div class="done-box"><svg class="done-mk" …><path …/></svg><h3>등록했습니다</h3>
-        <p><span class="mono" id="add-done-email"></span> 계정이 연결되었습니다. 기능은 모두 꺼진 상태로 시작합니다.</p>
-        <div class="acts"><a class="btn primary" href="#overview" id="add-go">기능 설정</a><a class="btn" href="#inbox">받은함</a><a class="btn ghost" href="#account-add" id="add-more">계정 하나 더</a></div></div>
+      <div class="done-box"><span class="done-mk" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <h3 id="add-done-title">등록 완료</h3>
+        <p><span class="mono" id="add-done-email"></span> 계정이 <span id="add-done-msg">등록되었습니다. 기능은 모두 꺼진 상태로 시작합니다.</span></p>
+        <dl class="kvs"><dt>계정</dt><dd class="mono" id="add-done-acct"></dd><dt>기기 ID</dt><dd class="mono" id="add-done-dev"></dd><dt>등록 시각</dt><dd class="mono" id="add-done-at"></dd><dt>상태</dt><dd id="add-done-state"></dd></dl>
+        <div class="acts"><button type="button" class="btn primary" id="add-open">설정 열기</button><a class="btn" href="#inbox">받은함</a><button type="button" class="btn ghost" id="add-more">다른 계정 추가</button></div>
+      </div>
     </div>
    </div>
    <aside class="explain" id="add-ex" aria-label="안내">
@@ -799,12 +801,13 @@ JS가 그리는 부분(V4 함수 이름 유지):
 V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/begin {email, password[, device_id, forced]}` → `showPass(view)` → `confirmLoop()`가 2초마다 `POST /panel/api/register/confirm {pending_id}` → `ok`/`waiting`/`expired`; `#force` → `forced: true`로 다시 begin; `#cancel-code` → `POST /panel/api/register/cancel`). 바뀌는 것:
 
 - **단계 표시** `setStep(n)`: `#add-steps .stp`에 `done`(n보다 앞)·`cur`(n), `aria-current="step"`; `#add-ex > div[data-ex=n]`는 `.on`, 나머지 `.dim`; `.wz-pane[data-step=n]`만 보이고 전환은 5.3 가로 미끄러짐. `showPass(view)`는 `setStep(2)`, `hidePass()`는 `setStep(1)`, `state === 'ok'`는 `setStep(3)`.
-- **번호** `#code`: `view.passcode`를 글자마다 `span`(`style="--i:{k}"`)으로 넣는다(길이 제한 없음, 4자리면 56×68px 칸). 번호가 없고 `view.text`가 있으면(실패) `#code-title` `카카오 응답`, `#code` 숨김, `#code-error`에 문구.
-- **남은 시간 링** `#code-ring`: `remaining_seconds`부터 1초마다 줄어드는 원(둘레 `2π·45`, `stroke-dashoffset` = 둘레 × (1 − 남은/처음)). `#code-ring-t` = `4:59`. `#code-left` = `유효 시간 약 {분}분`(V4 문구). 60초 미만이면 링·글자 `--warn`. 0이 되면 `#code-wait` `시간이 지났습니다. 처음부터 다시 등록하십시오.` + `#cancel-code` 글자 `처음으로`.
-- **다른 기기 끊기**: `view.can_force`면 `#force-box` 보임(V4는 `#force`만 토글 — 이제 상자째). 마법사 1단계 화면에서 begin 응답이 실패 + `can_force`이면 2단계로 넘어가지 않고 `#add-form` 안 `#wz-conflict` 자리에 같은 상자를 보여도 된다(프로토타입 `d-15d`). PANEL 판단으로 한 곳만 구현한다.
+- **번호** `#code`: `view.passcode`를 글자마다 `span`(`style="--i:{k}"`)으로 넣고 `aria-label="확인 번호 {번호}"`(길이 제한 없음, 칸 56×68px, 폰 44×58px). `#code-copy`는 번호 복사(토스트 `복사했습니다.`), `#code-email` = 입력한 계정. 번호가 없고 `view.text`가 있으면(실패) `#code-title` `카카오 응답`, `#code`·`#code-copy` 숨김, `#code-error`에 문구.
+- **남은 시간 링** `#code-ring`: `remaining_seconds`(없으면 300)부터 1초마다 `stroke-dashoffset = 289.03 × (1 − 남은/처음)`(`.cring .fg` `transition: stroke-dashoffset 1s linear`), `#code-ring-t` = `4:59`. `#code-left` = `유효 시간 약 {분}분`(V4 문구). 30초 이하 `#code-cring.low`(링 `--warn`). 0이 되면 `.wait` 줄을 `<i class="dot warn"></i>번호가 만료되었습니다. 다시 시도하십시오.` + `button.btn.primary` `다시 시도`(→ `hidePass()` + 1단계)로 바꾼다.
+- **기다림 줄** `#code-wait`: 기본 `카카오톡 확인을 기다리는 중입니다 · 2초마다 확인`. `confirmLoop()`의 `waiting`·연결 끊김 문구(V4: `아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.`, `#code-error` `연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.`)는 그대로 쓴다.
+- **실패·다른 기기 끊기**: `register/begin` 응답이 `ok`도 `confirm_on_phone`도 아니면 1단계에 머문다. `#add-error` = `view.text`. `view.can_force`이면 `#force-box`를 보이고 `#force`로 포커스(프로토타입 `d-15d`). `#force` → `.busy` 후 `forced: true`로 다시 begin(V4 핸들러) → `confirm_on_phone`이면 2단계. 2단계에서 생기는 오류(`expired` 등)만 `#code-error`에 쓴다(V4 `showPass`의 오류 분기는 1단계 표시로 옮긴다).
 - **입력 검증**(서버 요청 전): 비어 있으면 `카카오계정이 비어 있습니다. 이메일 또는 전화번호를 입력하십시오.` / `비밀번호가 비어 있습니다. 비밀번호를 입력하십시오.`(`#email-error`·`#password-error`, 입력 `.err`).
 - **재등록 모드** `startReauth(deviceId, email)`(받은함 `등록`, 계정 표 `재등록`, 개요 확인 필요 `재등록`, 배너 `재등록`): `location.hash = '#account-add'` 후 `add-form.dataset.reauth = '1'`, `regDevice = deviceId`, `#email.value = email` + `readonly`, `#add-title` `계정 재등록`, `#add-desc` `{email} 계정을 다시 등록합니다. 기존 설정과 기록은 그대로 유지됩니다.`, `#password` 포커스(≥720px). 다른 경로로 `#account-add`에 들어오면 재등록 모드를 지운다.
-- **완료**: `refreshMe()` 뒤 새 계정을 현재 계정으로(`openAccount(view.device_id, 'keep')`), 3단계 표시. V4처럼 곧바로 받은함으로 보내지 않는다. `#add-go` → `#overview`.
+- **완료**: `refreshMe()` 뒤 3단계 표시. 재등록이면 `#add-done-title` `재등록 완료`, `#add-done-msg` `다시 연결되었습니다. 기존 설정과 기록이 그대로 적용됩니다.`, `#add-more` 숨김. `dl.kvs`: 계정 이메일 · `device_id` · 지금 시각 `YYYY.MM.DD HH:MM` · `접속 중`. V4처럼 곧바로 받은함으로 보내지 않는다. `#add-open` → 그 계정으로 전환 후 `#macro`. `#add-more` → 폼 비우고 1단계.
 - 8개가 차 있으면 1단계 대신 `p.empty` `계정은 8개까지 등록할 수 있습니다. 사용하지 않는 계정을 해제한 뒤 다시 시도하십시오.` + `계정` 링크.
 
 ### 4.7 매크로 `#macro`
@@ -853,7 +856,7 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 - `#macro-viz`(JS, 저장 전 미리보기): 선택한 방마다 줄 하나 — `div.mviz-sum`(방 이름 · `{lo}~{hi}분 간격`(따로 정한 방은 `{n}분 고정`) · `하루 약 {1440/hi}~{1440/lo}회`) + `div.mviz-strip`(24시간 위 예상 발송 눈금 `i`, `left = 분/1440`). 랜덤은 화면용 고정 시드(방 순서) 의사난수 — 실제 시각이 아니라는 문장이 설명에 있다. 맨 아래 축 `지금 21:16 · 03:16 · 09:16 · 15:16 · 21:16`. 방이 없으면 `보낼 방을 선택하면 방마다 예상 발송이 표시됩니다.` 값이 바뀌면 120ms 뒤 다시 그린다(눈금은 `kickIn`, 5.3).
 - 이미지 `#thumbs`(JS): 장마다 `div.img-t[title=파일 이름]` > 미리보기(`img` object URL 또는 기존 이미지 표시) + `span.fn`(파일 이름, 한 줄 말줄임) + 빼기 `button[data-img-del][aria-label="{이름} 빼기"]`; 5장 미만이면 `label.img-add[for=images][aria-label="이미지 추가"]`(+). V4 이미지 검증·크기 제한·`images_unchanged` 로직 유지.
 - `#macro-count` = `{n} / 2,000`(입력할 때 갱신). 서버 한도 2,000자와 같다.
-- `대화방 불러오기`(`[data-load-rooms]`, 이 화면과 4.8~4.10의 같은 버튼 모두): V4 `reload-rooms` 핸들러(`POST /panel/api/rooms`) 공유. 진행 중 `.busy` + `disabled`, 성공하면 새로 생긴 방만 `.pop`(5.3), 실패 문구 `대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.`(V4 문구, panel-check 단언). 방이 0개면 목록 자리에 `불러온 대화방이 없습니다. 대화방 불러오기를 누르십시오.`(`--fg-3` 13px)
+- `대화방 불러오기`(`[data-load-rooms]`, 이 화면과 4.8~4.10의 같은 버튼 모두): V4 `reload-rooms` 핸들러(`POST /panel/api/rooms`) 공유. 진행 중 `.busy` + `disabled`, 성공하면 새로 생긴 방만 `.pop`(5.3) + 토스트 `대화방 {n}개를 불러왔습니다.` + `새 대화방 {k}개`(새 방이 없으면 `대화방 목록이 최신입니다.`), 실패 문구 `대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.`(V4 문구, panel-check 단언). 방이 0개면 목록 자리에 `불러온 대화방이 없습니다. 대화방 불러오기를 누르십시오.`(`--fg-3` 13px)
 
 ### 4.8 입장·퇴장 로그 `#visit` · 프로필 로그 `#profile`
 
@@ -899,7 +902,7 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 </section>
 ```
 
-**기록 표(JS)** — `GET /panel/api/logs?device_id` 응답 `visit` 행(이 문서 머리의 API 모양: `{chat_id, room, name, user_id, link, joins[], leaves[], changes[{at, name, link}]}`, 최근 활동순 ≤300, 안쪽 배열은 오래된 것부터):
+**기록 표(JS)** — `GET /panel/api/logs?device_id` 응답 `visit` 행(부록 B: `{chat_id, room, name, user_id, link, joins[], leaves[], changes[{at, name, link}]}`, 최근 활동순 ≤300, 안쪽 배열은 오래된 것부터):
 
 - 거르기: 검색(이름·링크·이전 이름, 대소문자 무시), 방(`room` 값; 선택지는 응답 행의 `room` 중복 없이), 종류(`in`: 마지막 입장 > 마지막 퇴장, `out`: 반대, `name`: `changes.length > 0`). 검색 입력 150ms 지연.
 - 행 `tr.rowx[tabindex=0][aria-expanded][data-x]`:
@@ -1014,7 +1017,7 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 - 규칙(JS `renderTriggers()`): `div.rule(.off)(.open)[data-ri]` >
   - 머리 `div.rule-h[role=button][tabindex=0][aria-expanded]` > `.t` > `b` 이름(없으면 `이름 없는 규칙`) + `.meta`(`code` 감지할 말 · 찾는 방식 · `{n}개 방`/`모든 방` · `쿨타임 {n}초` · `{방}에 답장`(대상 방이 있을 때) · `방마다 1회`(once)) + 사용 스위치(`aria-label="{이름} 사용"`) + `span.chev`.
   - 본문 `div.rule-b > div > .rule-form`(2열 격자, 폰 1열): `이름`(`input` maxlength 40) / `찾는 방식`(`select`: `포함` `같음`; 기존 규칙이 `starts`·`regex`이면 그 값도 선택지에 남김: `앞글자` `정규식(고급)` + 정규식이면 힌트 `정규식(고급)은 잘 모르면 「포함」을 선택하십시오.`) / `감지할 말`(maxlength 200) / `다시 반응하기까지`(`.num` 0~86,400 `초`) / `답장`(전체 폭 `textarea` maxlength 500) / `감지할 방`(전체 폭 방 칩, 아래 `선택하지 않으면 저장 시점의 모든 오픈채팅방`) / `답할 방`(`select`: `감지된 그 방` + 오픈채팅방들) / 바닥 `.foot`: `방마다 한 번만 답장` 스위치 + 삭제.
-  - 삭제: `button.btn.sm.ghost.danger` `[휴지통]삭제` → 같은 자리에서 `삭제할까요?` 대신 TONE 문구 `이 규칙을 삭제합니다.` + `취소` + `button.btn.sm.danger.solid` `삭제`(인라인 확인, `confirm()` 금지). 삭제는 초안에서만 빠지고 저장해야 반영(저장 바 카운트 증가).
+  - 삭제: `button.btn.sm.ghost.danger` `[휴지통]삭제` → 같은 자리가 `이 규칙을 삭제합니다.` + `취소` + `button.btn.sm.danger.solid` `삭제`로 바뀐다(인라인 확인, `confirm()` 금지; `취소`는 원래 버튼으로 되돌리고 그 버튼에 포커스). 삭제는 초안에서만 빠지고 저장해야 반영(저장 바 카운트 증가).
 - `규칙 추가` → 맨 위에 빈 규칙(`mode: 'contains'`, `cooldown_sec: 60`, `enabled: true`) 추가·펼침(`.new` `rowIn`) + 이름 칸 포커스. 머리 클릭·Enter·Space → 펼침 토글(5.3).
 - 규칙이 없으면 `p.empty` `등록된 규칙이 없습니다. 규칙 추가를 눌러 첫 규칙을 만드십시오.`
 
@@ -1057,7 +1060,7 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 
 - **기준값**: `fillDetail()`(V4)이 계정 값을 폼에 채운 직후, 화면마다 `baseline[route] = JSON.stringify(formState(route))`. `formState(route)`는 그 폼의 `submit` 핸들러가 보낼 기능 객체(이미지는 파일 이름·크기 목록)를 돌려준다. 저격 규칙은 규칙 배열 전체.
 - **변경 수**: `input`·`change`마다 현재 `formState`와 기준값을 잎 단위로 비교한 다른 칸 수(배열은 원소 단위, 방 목록은 추가·삭제된 방마다 1). 0이면 저장 바 내림, 1 이상이면 `#save.show` + `#saveTxt` 갱신 + `#saveBtn.form = '{route}-form'` + 사이드바 `.is-dirty`.
-- **되돌리기** `#saveRevert`: 그 화면만 `fillDetail` 값으로 다시 채우고(접힘·펼침도 원래대로), 저장 바 내림, 토스트 `변경을 되돌렸습니다.`
+- **되돌리기** `#saveRevert`: 그 화면만 `fillDetail` 값으로 다시 채우고(접힘·펼침도 원래대로), 저장 바 내림, 토스트 `변경사항을 되돌렸습니다.` 떠나기의 `버리기`는 토스트 `변경사항을 버렸습니다.`
 - **저장 성공**: `account = res.account` → `fillDetail()` → 기준값 갱신 → 저장 바 내림 → 사이드바 `.fs`·개요 표 갱신 → 토스트. 저장 중 다른 입력은 막지 않는다(응답 뒤 다시 비교).
 - **떠나기**: 변경이 남은 채 다른 화면(해시 변경, 사이드바, 팔레트, G 단축키), 계정 전환, `나가기`를 하려 하면:
   1. 해시 변경이면 `history.replaceState(null, '', '#' + 현재 route)`로 되돌린다.
@@ -1077,3 +1080,521 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 - **폴링 링** `span.poll[data-poll]` > `svg.ring[viewBox="0 0 14 14"]`(`circle.bg` + `circle.fg`, r=5, `stroke-dasharray: 31.4`) + `span` 글자(`9초마다 갱신`/`10초마다 갱신`). 요청을 보낼 때마다 `runRing(ms)`: `.fg`의 `stroke-dashoffset`을 31.4로 되돌린 뒤 `ms` 동안 linear로 0까지(다음 요청까지 채워짐). 동작 줄이기에서는 링을 움직이지 않는다.
 - **빈 상태** `p.empty`: 가운데 정렬, 여백 `40px 20px`, `--fg-3` 13px, 다음 할 일을 한 문장으로.
 - **배너** `.banner`: `--crit-bg` 바탕, `--crit-line` 테두리, 경고 아이콘, 오른쪽 버튼.
+
+---
+
+## 5. 모션 카탈로그
+
+공통: 이징은 `--ease` 하나(`cubic-bezier(.2, .8, .2, 1)`), 길이는 `--d1` 150ms(hover·색), `--d2` 240ms(작은 것 나타나기·스위치·메뉴), `--d3` 380ms(펼치기·미끄러짐·진입). 움직이는 속성은 `transform`·`opacity`(+ 펼치기용 `grid-template-rows`, 링용 `stroke-dashoffset`)만. `width`/`height`/`top`/`left` 애니메이션 금지(표시 막대의 `height`만 예외).
+
+### 5.1 콘솔 화면 전환 — WAAPI 교차 전환 (빈 프레임 없음)
+
+CSS `transition`은 메인 스레드가 바쁜 첫 프레임에 멈춰서, 옛 화면이 그대로 있다가 한 번에 사라지는 문제가 프로토타입에서 확인됐다. `Element.animate()`로 한다. 두 화면은 같은 격자 칸(`grid-area: 1 / 1`)에 겹친다.
+
+```js
+var curPage = null;
+function swapPage(next, animate) {           // next: section.page
+  if (curPage === next) return;
+  next.getAnimations().forEach(function (a) { a.cancel(); });   // 되돌아온 화면의 남은 페이드 제거
+  next.hidden = false; next.inert = false; next.removeAttribute('aria-hidden');
+  var old = curPage; curPage = next;
+  if (old) {
+    old.inert = true; old.setAttribute('aria-hidden', 'true');
+    if (animate) {
+      var out = old.animate([{ opacity: 1 }, { opacity: 0 }],
+        { duration: 160, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+      out.onfinish = function () { if (old !== curPage) old.hidden = true; out.cancel(); };
+    } else old.hidden = true;
+  }
+  if (animate) next.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
+    { duration: 240, delay: 40, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' });
+}
+```
+
+- `animate = !reducedMotion() && !firstView && typeof next.animate === 'function'`. 부팅 첫 화면, 동작 줄이기, 같은 화면 다시 그리기는 즉시.
+- 전환 전에 `window.scrollTo(0, 0)`. 상단 바·사이드바는 움직이지 않는다(팔레트 이동 포함 — 검사 8.3).
+- 경로 표시(`#crPage`)·사이드바 현재 표시는 전환 시작과 동시에 바뀐다.
+- 계정 전환으로 같은 화면을 다시 채울 때: 화면 전체가 아니라 `.col`에 같은 진입(0→1, 8px)만 한 번.
+- 등록 마법사 단계(`.wz-pane`): 나가는 판 `opacity 1→0, translateX(0→-16px)` 200ms `fill: forwards` → 끝나면 `hidden`; 들어오는 판 `opacity 0→1, translateX(16px→0)` 300ms, delay 60ms, `fill: backwards`.
+
+### 5.2 홈 모션 그래픽
+
+**시연 창 `#demo`** — `requestAnimationFrame` 타임라인. 마크업 기본 상태가 **마지막 장면**(모든 요소 보임, `#dEmpty`만 `.is-off`)이라 JS가 없거나 동작 줄이기일 때도 완성된 화면이 보인다.
+
+- 상수: `CH = [0, 3200, 6800, 9800, 12800, 16400]`(장 시작 ms), `END = 18200`(한 바퀴), `TYPE0 = 3400`·`TYPE1 = 5700`(입력 글자 타이핑 구간), 보낸 문장 `현재 1만 로벅스 기준 13,500원입니다. 거래방 공지 확인 부탁드립니다.`
+- 사건표 `EV`(시각 ms → 동작). 요소를 숨길 때는 `.is-off`를 붙이고 보일 때 뗀다. `.dx`는 `opacity`+`translateY(6px)` `--d3`, `.dcol`은 `grid-template-rows 0fr↔1fr` + `opacity`, `#dAlert.is-off`는 `opacity 0, translateY(-10px) scale(.98)`.
+
+| ms | 동작 |
+|---|---|
+| 0 | 초기화: 동적 요소 전부 `.is-off`, `#dEmpty` 보임, 배지 2, 미리보기 `안녕하세요, 로벅스 1만 개 시세 문의드립니다.`, 입력 비움, `#dKicks.go` 제거 |
+| 260 | 새 대화 행 `#dNew` 등장 + 행 `.flash`(`hlFade` 900ms) |
+| 420 | 사이드 배지 3 + `bump` |
+| 1200 | 행 선택 `.sel`, `#dEmpty` 숨김, 대화 머리·받은 말 등장, 배지 2 + `bump` |
+| 3400~5700 | 입력칸에 문장이 글자 단위로 타이핑(`#dType`, 깜빡이는 `#dCaret` `blink` 1s steps(1)) |
+| 5900 | 전송 버튼 `.press`(`scale(.9)` 120ms) |
+| 6060 | 버튼 복귀, 입력 비움, 보낸 말 `#dOut` 등장(`21:16 · a@ · 전송됨`), 목록 미리보기 `나: …` |
+| 7000 / 7900 | 기록 패널 입장 `#lgJoin` / 퇴장 `#lgLeave` 줄 등장 |
+| 10000 | 프로필 변경 `#lgProf` 등장 |
+| 13000 | 올킥 알림 `#dAlert` 등장(위에서 내려옴, 점 `pulse`) |
+| 13200 | 강퇴 막대 `#dKicks.go`(막대 8개가 70ms 간격으로 `scaleY(0→1)`) |
+| 13600 | 기록 패널 올킥 `#lgKick` 줄 등장 |
+| 18200 | `dJump(0)` 후 반복 |
+
+- 장 막대: 매 프레임 `.chap .bar > i`의 `scaleX` = 그 장의 진행률(0~1), 현재 장 `.on` + `aria-current="step"`.
+- `dFrame(now)`: `dt = min(64, now - last)`(탭이 쉬다 돌아와도 건너뛰지 않음) → `dRun(prev, t)`(그 사이 사건 실행) → 타이핑 → 장 막대.
+- `dJump(k)`: `#demo.instant`(모든 `transition: none`)를 붙이고 0부터 `CH[k]` 직전까지 사건을 한꺼번에 실행 → reflow → `.instant` 제거. 장 버튼 클릭 = `dJump(k)` + 재생.
+- 시작: 페이지 로드 1.6초 뒤 사용자가 아무것도 누르지 않았으면 `dJump(0)` + 재생. 그 전까지 마지막 장면이 보인다(첫 그림이 완성된 화면).
+- 멈춤: `#demoPlay` 토글(아이콘 `i-play`/`i-pause`, `aria-label` 변경). `IntersectionObserver`(threshold .25)로 화면 밖이면 자동 정지, 다시 들어오면 사용자가 직접 멈춘 경우가 아닐 때만 재개. 다른 탭(`document.hidden`)이면 rAF가 멈추므로 별도 처리 없음.
+- 동작 줄이기: 재생하지 않는다. 장 막대 전부 채움, `#demoPlay[disabled]` + `aria-label="동작 줄이기 설정으로 시연이 정지되어 있습니다"`. 장 버튼을 누르면 그 장 이후 사건까지 즉시 적용한 정지 화면.
+
+**구조도 `#howBox`** — SVG SMIL. 연결선마다 `circle.pk` 2~3개가 `<animateMotion dur="2.6s" repeatCount="indefinite" begin="-{오프셋}s"><mpath href="#{선 id}"/></animateMotion>`로 흐른다. **`begin`은 음수**(처음부터 선 위에 흩어져 있게; 양수면 시작 전 점이 (0,0)에 보인다). `IntersectionObserver`(threshold .2)로 화면에 있을 때만 `svg.unpauseAnimations()`, 아니면 `pauseAnimations()`. 처음엔 멈춘 상태. 동작 줄이기: `.pk { display: none }`.
+
+**기능 탐색기 `.fx`** — 탭을 바꾸면:
+1. `#fxPane.out`(`opacity 0, translateY(6px)`, `--d2`) → 170ms 뒤 내용 교체 + `.out` 제거(되돌아 올라옴).
+2. `#fxInd`가 새 탭 위치·높이로 `transform`·`height` `--d3`(420ms 동안 rAF로 위치 추적 — 설명 줄이 펼쳐지며 탭 높이가 변하므로).
+3. 새 탭의 설명 `span`이 `grid-template-rows 0fr → 1fr`로 펼쳐지고 이전 탭은 접힌다.
+4. 폰: 탭 줄을 가로 스크롤해 새 탭을 보이게.
+
+### 5.3 누르면 나타나는 모션 (원인 → 결과)
+
+| 이름 | 원인 | 결과 | 구현 |
+|---|---|---|---|
+| 옵션 펼침 | 메인 스위치 켬 / `켜기` 버튼 | 아래 옵션 묶음이 펼쳐지고 점선 안내가 접힘 | `.dep[data-open]`: `grid-template-rows 0fr↔1fr` + `opacity` `--d3`; 안쪽 `.dep-in { min-height: 0; overflow: hidden }`(열린 뒤 `overflow: visible`). 스위치 `change`에서 `[data-dep="{id}"]`는 `open = checked`, `[data-dep-off="{id}"]`는 `open = !checked`. `켜기`는 스위치를 켜고 `change`를 보낸 뒤 첫 옵션 컨트롤로 포커스 |
+| 스위치 | 클릭·Space | 손잡이 14px 이동, 트랙 흰색 | `.sw::after` `transform` `--d2`; 누르는 동안 `scaleX(1.18)` |
+| 저장 바 등장 | 첫 변경 | 아래에서 올라옴 | `.save-in` `transform: translateY(calc(100% + 48px)) → none`(`--d3`) + `opacity`(`--d2`); 배경 `.save::before` 그라디언트 `opacity` |
+| 저장 바 흔들림 | 떠나려 함 / 저장 실패 | 좌우 흔들림 1회 | `.save.shake .save-in { animation: shake 360ms }` |
+| 사이드바 표시 | 화면 이동 | 현재 표시 면이 새 항목으로 미끄러짐 | `#navInd` `transform: translateY(항목 offsetTop)` + `height` `--d3`, 왼쪽 2px 흰 막대 |
+| 세그먼트 표시 | 분류·종류 선택 | 표시 면이 미끄러짐 | `.seg-ind` `translateX` + `width` `--d3` |
+| 행 펼침 | 기록 행·저격 규칙 머리·FAQ 질문 클릭 | 아래 상세가 펼쳐짐, 화살표 180도 | `.detail-in` / `.rule-b` / `.faq-a`: `grid-template-rows 0fr↔1fr` `--d3`; `.chev` `rotate(180deg)`; FAQ `+` `rotate(45deg)` |
+| 해제 확인 줄 | `해제` | 행 아래 확인 줄이 펼쳐짐 | `.confirm-row .confirm-in` 같은 0fr→1fr |
+| 메뉴 | 계정 전환기 | 위에서 살짝 내려오며 나타남 | `.menu.closed { opacity: 0; transform: translateY(-4px) scale(.98); visibility: hidden }` ↔ 열림, `--d2` |
+| 팔레트 | Ctrl/⌘K | 배경 어두워지고 창이 커지며 나타남 | `.pal-wrap` `opacity` `--d2`, `.pal` `scale(.97) translateY(-6px) → none` |
+| 서랍 | `#menuBtn` | 사이드바가 왼쪽에서 밀려 나옴 | `.side` `translateX(-102%) → none` `--d3`, `visibility`는 닫힐 때 `--d3` 뒤 |
+| 토스트 | 저장·되돌리기 등 | 아래에서 올라옴 / 내려가며 사라짐 | `toastIn` / `toastOut` `--d3`/`--d2` |
+| 방 추가 | 대화방 불러오기로 새 방 | 새 칩만 튀어나옴 | `.room.pop` `pop` 320ms |
+| 금지어 칩 | Enter·쉼표 | 새 칩 튀어나옴 / 중복이면 기존 칩 흔들림 | `.wchip.new` `pop`, `.wchip.dupe` `shake` |
+| 이미지 추가 | 파일 선택 | 썸네일 튀어나옴 | `.img-t` `pop` 300ms |
+| 규칙 추가 | `규칙 추가` | 새 규칙이 펼쳐진 채 올라옴 | `.rule.new` `rowIn` |
+| 오류 칸 | 검증 실패 | 테두리 `--crit` + 아래 문구(움직임 없음) | `.inp.err`, `.fld.bad input` |
+| 확인 번호 | 2단계 진입 | 숫자가 한 자씩 올라옴 | `.pass-code span` `digitIn` 380ms, delay `var(--i) × 60ms` |
+| 남은 시간 링 | 1초마다 | 원이 줄어듦, 30초 이하 노랑 | `.cring .fg` `stroke-dashoffset` `transition 1s linear`, `.cring.low` |
+| 완료 표시 | 3단계 | 체크가 그려짐 | `.done-mk path` `draw` 380ms delay 180ms |
+| 올킥 미리 보기 | 감지 시간·강퇴 수 변경 | 창이 넓어지고 눈금이 다시 섬, 결과 문장 바뀜 | `.kt-win` `width` `--d3`, `.kt-k` `kickIn` delay `var(--i) × 60ms`, `.kt-k.in-win` 색 `--d2` |
+| 예상 발송 | 간격·방 변경(120ms 지연) | 눈금이 다시 섬 | `.mviz-strip i` `kickIn` delay `var(--i) × 8ms` |
+| 배지 | 안 읽음 증가 | 배지 커졌다 돌아옴 | `.badge-n.bump` `bump` 380ms |
+| 행 깜빡임 | 팔레트로 설정 이동 | 그 행이 잠깐 밝아짐 | `.srow.flash::after` `hlFade` 1600ms |
+| 받은함 폰 | 대화 열기/뒤로 | 대화가 오른쪽에서 덮고, 목록은 왼쪽으로 24% 밀리며 흐려짐 | `#inbox[data-view="room"]`: `.ib-th translateX(100%)→none`, `.ib-list translateX(-24%) + opacity 0` `--d3` |
+| 사이트 진입 | 스크롤 | 화면 아래 블록이 24px 아래에서 제자리로 | `.rv.armed { transform: translateY(24px) }` → `IntersectionObserver`(rootMargin `0px 0px -6% 0px`, threshold .06)가 `.armed` 제거, `transition: transform --d3`. **투명도는 바꾸지 않는다.** 처음부터 화면 안에 있는 블록은 `.armed`를 붙이지 않는다 |
+| 기능 상태 점 | 저장으로 켜짐/꺼짐 | 점 색이 바뀜 | `.fs` `background`·`border-color` `--d2` |
+
+진입 모션(첫 로드에만):
+
+| 대상 | 키프레임 | 지연 |
+|---|---|---|
+| 받은함 행 `.kkt-row.in` | `rowIn` `--d3` both | `var(--i) × 28ms` |
+| 기록 표 행 `tr.rowx.in` | `rowIn` | `min(i, 14) × 30ms` |
+| 개요 피드 `li.in` | `rowIn` | `i × 40ms` |
+| 올킥 목록 `li.in` | `rowIn` | `i × 50ms` |
+| 대화 말 `.kkt-line.enter` | `msgIn` 320ms | `min(i, 8) × 35ms` (대화를 처음 열 때만) |
+| 스파크 막대 | `kickIn` | `i × 12ms` |
+
+### 5.4 새로 들어온 것 표시 (폴링 결과)
+
+- 받은함: 안 읽음이 는 행만 `.bump`(`::after` `--hl-2` `hlFade` 900ms). 행 자리는 바뀌어도 다른 행은 움직이지 않는다.
+- 기록 표·개요 피드·올킥 목록: 새 행만 `.fresh`(`td::before`/`li::before` `--hl-2` `hlFade` 2400ms). `rowIn` 없이 제자리에 나타난다.
+- 새 메시지(열린 대화): 새 `log_id` 말만 `.enter`(`msgIn`). 이미 그려진 말은 그대로(V4 `renderedIds`).
+- `#navUnread` 증가: `bump`.
+
+### 5.5 움직이면 안 되는 것 (폴링·자동 갱신 재렌더)
+
+1. 서명이 같으면 DOM을 건드리지 않는다(UI_V4 5.4 받은함, 4.8 기록). 다르더라도 **`.in`(진입 모션) 클래스를 다시 붙이지 않는다** — 진입은 화면 첫 로드·계정 전환·사용자가 바꾼 필터(받은함 필터·안 읽음, 기록 종류·방)에서만.
+2. 폴링으로 다시 그린 목록의 스크롤 위치·포커스·펼친 행(`aria-expanded`)·입력 중인 검색어를 유지한다(다시 그리기 전 기억 → 뒤에 복원).
+3. 지표 숫자·스파크는 값만 바꾼다(막대 `kickIn` 재생 금지).
+4. 사이드바 표시, 저장 바, 토스트는 폴링으로 나타나거나 움직이지 않는다(`#navUnread` `bump`만 예외).
+5. 시연 창·구조도·상태 점 `pulse`·폴링 링 말고는 무한 반복 없음.
+6. 숫자 칸 타이핑, 검색 입력 중 목록 갱신은 즉시(진입 모션 없음).
+
+### 5.6 동작 줄이기 (`prefers-reduced-motion: reduce`)
+
+공유 기초 블록 끝(2.2-4)에:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms !important; transition-delay: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+  .rv.armed { transform: none; }
+  .caret, .dot.pulse { animation: none !important; }
+  .how-fig .pk { display: none; }
+  .kkt-line.enter, .kkt-row.in, .tbl tr.in, .feed li.in, .alerts li.in, .rule.new, .room.pop, .wchip.new, .img-t, .spark rect, .kt-k, .mviz-strip i, .pass-code span { animation: none !important; }
+}
+```
+
+JS: `reducedMotion()`이면 WAAPI 전환·`smooth` 스크롤·시연·구조도·폴링 링·`bump`/`shake` 클래스 붙이기를 하지 않는다. 결과(보이기·숨기기·값)는 즉시 반영한다. 스크린샷 `d-25-reduced-guard`.
+
+---
+
+## 6. 모바일
+
+| 폭 | 사이트 | 콘솔 |
+|---|---|---|
+| ≥1181 | 기본 | 기본(사이드바 248 + 1040 열), 개요 2열 `ov-grid` |
+| ≤1180 | — | 개요 `ov-grid` 1열, 오른쪽 묶음(계정·최근 기록) 2열 |
+| ≤1100 | 시연 창 사이드 숨김(`200px` 열 0), 탐색기 `280px 1fr` | 마법사 안내가 아래로(2열), 기록 펼침 1열 |
+| ≤960 | — | 사이드바 → 서랍, 상단 바 56px + `#menuBtn`·`#topSearch`, 사이드바 항목 44px, 칩 36px, 저장 바 전체 폭, 공개 `.pub-grid` 1열 |
+| ≤760 | 좌우 16px, `.lnav-links` 숨김, 히어로 위 여백 52px, 시연 창 대화만(높이 540px, 대화 목록 숨김, 올킥 알림은 창 위쪽 `top: 50px` 가로 꽉, 강퇴 막대 숨김), 장 표시 가로 스크롤(설명 숨김), 섹션 간격 88px, 탐색기 탭 가로 스크롤, 구조도 세로판 `svg.v`, 단계 1열, 가격 카드 가격줄 3칸 | 아래 목록 |
+
+콘솔 ≤760 세부(프로토타입 `responsive: CONSOLE` 블록 그대로):
+
+- 페이지 여백 `28px 16px 200px`, 제목 22px, 설정 행 1열(`.srow` 라벨 위·컨트롤 아래, `.inline`은 2열 유지), 점선 안내 여백 16px.
+- 개요 지표 2×2, 기능 표는 요약을 이름 아래 한 줄로(`.fr`·대화방 열 숨김), 계정·피드 1열.
+- 받은함: 한 번에 하나(목록 ↔ 대화, 5.3). 칩·검색·안 읽음·새로고침·뒤로·전송 44px. 첫 대화 행 윗변이 260px 안(확인 필요 안내가 있어도).
+- 표는 카드(`.tbl.stack`): 머리줄 숨김, 각 칸 `data-l` 이름 표시, 오른쪽 위에 횟수.
+- 방 칩 → 44px 목록. 매크로 방 목록은 `14px 1fr 112px`(인원 숨김, 간격 칸 68px).
+- 입력 글자 16px(iOS 확대 방지), 입력 높이 42~44px, `.btn` 최소 40px, `.btn.sm` 32px.
+- 경로 표시에서 계정 부분 숨김, 저장 바의 계정·화면 글자와 단축키 숨김, 팔레트 바닥줄·단축키 숨김, `#sync` 숨김.
+- 토스트는 좌우 16px 꽉, 저장 바 위.
+- `env(safe-area-inset-*)`: 상단 바·서랍·저장 바·입력창·헤더.
+
+검사 기준: 390×844와 360×740에서 `document.documentElement.scrollWidth <= innerWidth`(모든 화면·상태).
+
+---
+
+## 7. 접근성
+
+- 언어 `lang="ko"`, 화면마다 `h1` 하나(`tabindex="-1"`, 전환 뒤 포커스). 받은함은 `h1.sr#chat-title`.
+- 건너뛰기 링크: 사이트 `#main`, 콘솔 `#view`(JS로 포커스만 옮기고 해시는 바꾸지 않는다 — 열린 대화를 닫지 않음).
+- 사이드바 `nav[aria-label="화면"]`, 현재 `aria-current="page"`, 기능 상태 `aria-description`(`켜짐`/`꺼짐`)와 `title`. 단축키 글자 `.kb`는 `aria-hidden`.
+- 스위치는 진짜 `input[type=checkbox][role=switch]` + `aria-label`. 방 칩은 `label > input[type=checkbox]`. 세그먼트·필터 칩은 `button[aria-pressed]`. 탐색기는 `tablist/tab/tabpanel` + 화살표 키. 펼침 행은 `aria-expanded` + Enter/Space.
+- 메뉴 `role=menu` + `menuitemradio[aria-checked]`, 팔레트 `role=dialog[aria-modal]` + `combobox` + `listbox/option` + `aria-activedescendant`. 열 때 포커스 이동, 닫을 때 원래 요소로 복귀, Esc 닫힘. 서랍이 열리면 본문 `inert`.
+- 실시간 알림: `#toasts`·`#save`·`#runstate`·`#chat-live`(`새 메시지 {n}건 · {이름}`)·`#code`·폼 오류(`role=alert`).
+- 대비: 2.4 표. 글자에 `--fg-4` 금지. 포커스 표시 `:focus-visible` 2px `--fg` 외곽선(입력은 테두리 `--fg-3` + `--ring`).
+- 색만으로 상태를 말하지 않는다: 점 옆에 항상 라벨(`접속 중`, `등록 필요`) 또는 `aria-label`.
+- 누르는 대상: 1.2-10.
+- 움직임: 5.6. 시연은 멈춤 버튼이 있고 화면 밖에서 멈춘다.
+- 모노 글꼴에 한글 금지(읽기 품질), `word-break: keep-all`.
+
+---
+
+## 8. 테스트 변경
+
+원칙: 동작 단언은 약하게 바꾸지 않는다. V4 선택자가 없어진 곳은 같은 동작을 V5 선택자로 단언한다. 모든 Playwright 스크립트의 `/panel/api/**` 모의 응답에 `if (p === '/panel/api/logs' || u.includes('/logs')) → { ok: true, visit: [], profile: [], guard: [] }`를 `/account` 분기보다 앞에 추가한다(V5 부팅이 기록을 읽는다).
+
+### 8.1 `lib/panel-check.js` (PANEL 담당)
+
+백엔드가 이미 고친 앞부분(설정 정리·기록 라우트 단언)은 건드리지 않는다. `const panelJs = …` 다음의 V4 문구 단언 3개(`연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.`, `Load failed` 없음, `대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.`)는 그대로 둔다. `const html = …`부터 `process.stdout.write` 직전까지를 아래로 바꾼다.
+
+```js
+const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.html'), 'utf8');
+const panelCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.css'), 'utf8');
+const siteCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
+const both = html + '\n' + panelJs;
+
+// 방·기능 (유지 + 이름 변경)
+assert(html.indexOf('오픈채팅방') >= 0, 'open room group');
+assert(html.indexOf('일반 채팅방') < 0, 'normal room group is not offered');
+assert(html.indexOf('rooms-normal') < 0 && html.indexOf('visit-normal') < 0, 'normal room lists are gone');
+assert(html.indexOf('오픈프로필로 온') < 0, 'open profile dm category is not shown');
+assert(html.indexOf('id="visit-on"') >= 0 && html.indexOf('입장·퇴장 로그') >= 0, 'join/leave log switch');
+assert(html.indexOf('id="cover-on"') >= 0 && html.indexOf('금지어 검열') >= 0, 'banned-word cover switch');
+assert(html.indexOf('id="profile-on"') >= 0 && html.indexOf('프로필 로그') >= 0 && html.indexOf('프로필 변경 감지') >= 0, 'profile log switch');
+assert(html.indexOf('id="guard-on"') >= 0 && html.indexOf('올킥 방지') >= 0, 'mass-kick guard switch');
+assert(html.indexOf('id="reply-on"') >= 0 && html.indexOf('갠톡 응답') >= 0 && html.indexOf('저격 규칙') >= 0, 'existing features stay separated');
+assert(html.indexOf('들낙 방지') < 0 && html.indexOf('욕설 가리기') < 0 && html.indexOf('경쟁사 저격') < 0, 'v4 feature names are gone');
+assert(html.indexOf('항상 켜져 있다고 보장하지 않습니다') >= 0, 'uptime limit is stated');
+assert(html.indexOf('사용 기간이 시작됩니다') >= 0, 'login screen states when the period starts');
+assert(html.indexOf('기기에 묶지 않') >= 0, 'login screen says the console does not bind a device');
+
+// 사이드바 + 해시 라우트 (docs/UI_V5.md 4.1·4.3)
+assert(html.indexOf('id="nav"') >= 0 && html.indexOf('id="tabs"') < 0, 'sidebar nav replaces the tab bar');
+assert(html.indexOf('class="jumps"') < 0, 'no anchor jump list');
+['overview', 'inbox', 'accounts', 'account-add', 'macro', 'visit', 'profile', 'guard', 'cover', 'reply', 'snipe'].forEach(function (r) {
+  assert(html.indexOf('data-route="' + r + '"') >= 0, r + ' has a page');
+});
+['overview', 'inbox', 'accounts', 'macro', 'visit', 'profile', 'guard', 'cover', 'reply', 'snipe'].forEach(function (r) {
+  assert(html.indexOf('href="#' + r + '" data-r="' + r + '"') >= 0, r + ' is in the sidebar');
+});
+['macro', 'visit', 'profile', 'guard', 'cover', 'autoreply', 'triggers'].forEach(function (k) {
+  assert(html.indexOf('data-fs="' + k + '"') >= 0, k + ' shows on/off in the sidebar');
+  assert(html.indexOf('data-sum="' + k + '"') >= 0, k + ' shows its current value on the overview');
+});
+['macro-form', 'visit-form', 'profile-form', 'guard-form', 'cover-form', 'reply-form', 'snipe-form'].forEach(function (f) {
+  assert(html.indexOf('<form id="' + f + '"') >= 0, f + ' exists');
+});
+
+// 받은함·셸·등록 마크업
+['id="inbox"', 'id="kkt"', 'id="rail"', 'id="rail-all"', 'id="rail-accounts"', 'id="chat-rooms"', 'id="chat-search"',
+ 'id="chat-unread"', 'id="chat-unread-n"', 'id="chat-notice"', 'id="chat-error"', 'id="chat-title"', 'id="chat-reload"',
+ 'id="chat-back"', 'id="chat-peer"', 'id="chat-head-sub"', 'id="thread-state"', 'id="thread-settings"', 'id="chat-log"',
+ 'id="chat-live"', 'id="chat-newpill"', 'id="chat-form"', 'id="chat-text"', 'id="chat-send"', 'id="chat-count"',
+ 'id="chat-note"', 'data-view="list"',
+ 'id="acctBtn"', 'id="acctMenu"', 'id="openPal"', 'id="palWrap"', 'id="palIn"', 'id="palList"', 'id="view"', 'id="crPage"',
+ 'id="runstate"', 'id="save"', 'id="saveBtn"', 'id="saveRevert"', 'id="leaveStay"', 'id="leaveDrop"', 'id="leaveSave"', 'id="toasts"',
+ 'id="account-list"', 'id="add-form"', 'id="email"', 'id="password"', 'id="add-error"', 'id="add-steps"', 'id="passcode"',
+ 'id="code-title"', 'id="code"', 'id="code-left"', 'id="code-wait"', 'id="code-error"', 'id="code-ring"', 'id="force"', 'id="cancel-code"',
+ 'id="rooms-open"', 'id="visit-open"', 'id="profile-open"', 'id="guard-open"', 'id="cover-open"', 'id="reload-rooms"',
+ 'id="triggers"', 'id="add-trigger"',
+ '/panel.css?v=13', '/panel.js?v=16'].forEach(function (s) {
+  assert(html.indexOf(s) >= 0, 'v5 console markup: ' + s);
+});
+['id="settings"', 'id="settings-acct"', 'id="rail-add"', 'id="rail-settings"', 'data-mode=', 'class="pagehead"', 'data-band="chat"', 'id="detail"'].forEach(function (s) {
+  assert(html.indexOf(s) < 0, 'v4 markup removed: ' + s);
+});
+
+// 문구 (V4 유지 + 변경)
+assert(both.indexOf('대화를 고르세요') < 0, 'polite-imperative placeholder is gone');
+assert(panelJs.indexOf('먼저 인사를 보내 보세요') < 0 && panelJs.indexOf('불러오는 중…') < 0, 'friendly thread copy is gone');
+assert(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(both), 'no emoji decoration');
+assert(panelJs.indexOf('/panel/api/inbox') >= 0, 'client polls the unified inbox');
+assert(panelJs.indexOf('/panel/api/chats?') < 0, 'per-account chat list is no longer polled');
+assert(panelJs.indexOf('device_id: chat.deviceId') >= 0, 'reply is sent from the conversation owner account');
+assert(panelJs.indexOf('계정 화면에서 다시 등록해 주세요.') >= 0 && both.indexOf('설정 › 계정') < 0, 'needs_register points to the account page');
+assert(both.indexOf('선택한 대화 없음') >= 0 && both.indexOf('계정으로 답장') >= 0, 'thread header copy');
+assert(panelJs.indexOf('발송 프로세스') < 0 || panelJs.indexOf('발송 프로세스') === panelJs.lastIndexOf('발송 프로세스'),
+  'new copy says 발송 작업; only the kept reasonText() may still say 발송 프로세스');
+
+// V5 새 단언
+assert(panelJs.indexOf('/panel/api/logs?device_id=') >= 0, 'logs are read per account');
+assert(/guard:\s*\{/.test(panelJs) && /secs:/.test(panelJs) && /count:/.test(panelJs), 'guard settings are saved');
+assert(/words:/.test(panelJs) && /links:/.test(panelJs), 'cover words and link switch are saved');
+assert(!/(^|[^\w.$])(alert|confirm|prompt)\(/m.test(panelJs) && panelJs.indexOf('window.confirm') < 0, 'no native dialogs');
+assert(both.indexOf('등록을 해제합니다.') >= 0, 'unlink asks inline');
+assert(html.indexOf('fonts.googleapis.com/css2?family=Geist') >= 0, 'console loads Geist');
+assert(html.indexOf('<meta name="theme-color" content="#09090b">') >= 0, 'dark theme color');
+function rootBlock(css) { var i = css.indexOf(':root {'); return i < 0 ? '' : css.slice(i, css.indexOf('}', i) + 1); }
+assert(rootBlock(panelCss).indexOf('--bg: #09090b;') >= 0 && rootBlock(panelCss) === rootBlock(siteCss),
+  'style.css and panel.css share one :root token block');
+function declColors(css) {
+  var out = [];
+  css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{([^{}]*)\}/g, function (m, decls) {
+    if (/^\s*color-scheme: dark;/.test(decls)) return m;
+    var hit = decls.match(/#[0-9a-fA-F]{3,8}(?![\w-])|rgba?\(|hsla?\(/g);
+    if (hit) out = out.concat(hit);
+    return m;
+  });
+  return out;
+}
+assert(declColors(panelCss).length === 0, 'panel.css colors come from tokens: ' + declColors(panelCss).join(' '));
+assert(declColors(siteCss).length === 0, 'style.css colors come from tokens: ' + declColors(siteCss).join(' '));
+assert(!/--acc-[0-7]/.test(panelCss), 'per-account colors are gone');
+```
+
+`style.css`가 아직 V5가 아니면 토큰 단언 두 개가 실패한다. 두 담당이 모두 끝난 뒤 `npm run check`를 수용 기준으로 본다(9장).
+
+### 8.2 scratchpad Playwright 스크립트
+
+위치: `/tmp/claude-0/-home-user-kakaotalk-macro/8c77ca9b-6258-53a2-bfae-00e7470f9ad7/scratchpad/`. 실행: `PW=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node <파일>`.
+
+**공통 선택자 대응**(모든 스크립트에 적용):
+
+| V4 | V5 |
+|---|---|
+| `pg.goto(base)` 뒤 받은함 기대 | `pg.goto(base + '#inbox')` (V5 기본 화면은 개요) |
+| `#rail-settings` 클릭 | `.nav-a[data-r="macro"]` 클릭(서랍 상태면 먼저 `#menuBtn`) 또는 `goto(base + '#macro')` |
+| `.tab[data-tab="chat"]` / `"account"` / 그 밖 `X` | `.nav-a[data-r="inbox"]` / `"accounts"` / `X`(reply·snipe 등 같은 이름) |
+| `aria-current` `'true'`(탭) | `'page'` |
+| `section[data-tab="chat"]` / `X` | `section[data-route="inbox"]` / `X` |
+| `.tab[data-tab="X"] .tval` 값 있음 | `.nav-a[data-r="X"]`의 `aria-description` ∈ {`켜짐`,`꺼짐`} **그리고** 개요 `[data-sum="{key}"]` 글자 있음 |
+| `.tab[data-tab="chat"] .tval` = `안 읽음 N` | `#navUnread.textContent === 'N'`(0이면 `hidden`) |
+| `#console[data-mode="inbox"]` / `"settings"` | `#app[data-route="inbox"]` / `#app[data-route]` ≠ `inbox` |
+| `#console[data-view]` | `#inbox[data-view]` |
+| `#settings.hidden` | `section[data-route="macro"].hidden` |
+| `#settings-acct.value === id` | `#acctEmail.textContent === email` |
+| `#account-block` 보임(등록 폼) | `section[data-route="account-add"]` 보임(목록은 `#account-block` = `section[data-route="accounts"]`) |
+| `.rail-acct[aria-current="true"]`, `#rail-all[aria-current]` | `[aria-pressed="true"]` |
+| `#profile-form button[type="submit"]` 클릭 | `#saveBtn`이 `form="profile-form"`인지 단언 후 `#saveBtn` 클릭 |
+| `.rail-tip`, `.panes`, `.settings-side`, `.tabs` | 없음(그 단언은 아래 대체) |
+
+**`behavior.mjs`**: 1~6번 그대로(`.kkt-row` `#chat-reload` `.kkt-badge` `.kkt-bubble` `#chat-peer` `#chat-text` `#chat-send`). 첫 `goto`를 `base + '#inbox'`로. 7·8번을 바꾼다:
+
+```js
+// 7) 화면: 한 번에 한 화면만 보인다
+ok(await pg.evaluate(() => !document.querySelector('section[data-route="inbox"]').hidden
+  && document.querySelector('section[data-route="macro"]').hidden), '받은함에서는 받은함만 보여야 한다')
+await pg.click('.nav-a[data-r="macro"]')
+await pg.waitForSelector('.nav-a[data-r="macro"][aria-current="page"]')
+await pg.waitForTimeout(450)                                    // 교차 전환이 끝날 때까지
+ok(await pg.evaluate(() => !document.querySelector('section[data-route="macro"]').hidden
+  && document.querySelector('section[data-route="inbox"]').hidden
+  && document.getElementById('app').dataset.route === 'macro'), '매크로를 누르면 매크로만 보여야 한다')
+// 8) 지금 설정 상태·값이 보인다 (제목만 있는 메뉴 금지)
+ok(await pg.evaluate(() => ['켜짐', '꺼짐'].includes(document.querySelector('.nav-a[data-r="macro"]').getAttribute('aria-description'))),
+  '사이드바에 지금 설정 상태가 보이지 않는다')
+await pg.click('.nav-a[data-r="overview"]'); await pg.waitForTimeout(450)
+ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textContent || '').trim().length > 0),
+  '개요에 지금 설정값이 보이지 않는다')
+```
+
+**`profile.mjs`**: `goto(base + '#profile')` → `waitForSelector('section[data-route="profile"]:not([hidden])')`. `#rail-settings`·탭 클릭 삭제.
+- 1) `section[data-route="profile"]` 보임, `section[data-route="visit"]` 숨김, `.nav-a[data-r="profile"][aria-current="page"]`.
+- 2) 그대로(`#profile-on`, `#profile-open input[type="checkbox"]` 1개).
+- 3) `#profile-on.check()` → 방 체크 → `#save.show` 확인 → `getAttribute('#saveBtn', 'form') === 'profile-form'` 단언 → `#saveBtn` 클릭 → `lastSave.profile.enabled === true`, `rooms`에 `k1`.
+- 4) `.nav-a[data-r="profile"]`의 `aria-description === '켜짐'` 그리고 `.fs[data-fs="profile"]`에 `on`. 저장 바가 내려갔는지(`#save.show` 없음).
+- 5) 그대로.
+
+**`inbox.mjs`**(UI_V4 수용 기준 12~38) — 항목별:
+
+| 항목 | V5 단언 |
+|---|---|
+| 12 | 계정 1개, `goto('#inbox')`: `#app[data-route="inbox"]`, `section[data-route="inbox"]` 보임, `section[data-route="macro"].hidden`, `section[data-route="accounts"].hidden`. 탭 disabled 단언 → 사이드바 기능 항목 7개 모두 `aria-disabled` 없음 |
+| 13 | 계정 0개, `goto(base)`: `#app[data-route="account-add"]`, `#email`에 포커스(≥720), 사이드바 기능 항목 7개 `aria-disabled="true"`(눌러도 `#account-add`), `#rail-all.disabled === false`; `goto('#inbox')` → `.kkt-empty-title` `등록된 계정 없음` + `계정 등록` 클릭 → `#account-add`, `#email` 포커스 |
+| 14 | 그대로 |
+| 15 | 부팅 때 `GET /panel/api/account?device_id=` 정확히 1회(현재 계정). `.nav-a[data-r="macro"]` 클릭 → 추가 `/account` 요청 없음, `#app[data-route="macro"]`, `[aria-current="page"]`, `section[data-route="macro"]` 보임, `#acctEmail` = 이메일, `document.activeElement === #macro-title` |
+| 16 | `.nav-a[data-r="inbox"]` 클릭 → 받은함 복귀, 열려 있던 대화가 있으면 `GET /panel/api/chat` 즉시 1회 |
+| 17 | 그대로(`.rail-acct` 3개, C `data-state="needs_register"`, `#rail-all .rail-badge` = 합) |
+| 18 | 그대로 + `등록` 클릭 → `#app[data-route="account-add"]`, `#add-form.dataset.reauth === '1'`, `#email.value === C`, `#email.readOnly`, `#add-title` = `계정 재등록` |
+| 19 | `aria-current` → `aria-pressed`, 나머지 그대로 |
+| 20 | 그대로(`#chat-head-sub.textContent === 'b@x 계정으로 답장'`) |
+| 21·22 | `aria-pressed`로, 나머지 그대로 |
+| 23 | 그대로 + `#sync` 글자 `발송 중지` |
+| 24 | 그대로(401 → `#login.hidden === false`) |
+| 25·26·28~31 | 그대로 |
+| 27 | `document.title` 그대로, 탭 요약 → `#navUnread.textContent === String(N)` |
+| 32 | 등록 완료 → `#add-done` 보임, `#add-steps .stp[data-s="3"].cur`, `#acctEmail` = 새 이메일, `.rail-acct[data-device=새 id]` 존재 |
+| 33 | 360×740: 가로 넘침 없음; `#rail` 가로 줄(`offsetWidth > offsetHeight`); `.fchip`, `.kkt-row`, `#chat-reload`, `#chat-search`, `#chat-unread`, `#chat-send`, `#chat-back`, `#menuBtn` 높이 ≥ 44; 행 클릭 → `#inbox[data-view="room"]`, `.kkt-list` 화면 밖(`getBoundingClientRect().right <= 0` 또는 `visibility hidden`), `#chat-back` 보임; `#chat-back` → `list`; `history.back()` 같음; 건너뛰기 링크 클릭은 대화를 닫지 않음 |
+| 34 | 폰 `#macro`: 받은함 섹션 숨김(`#rail` 안 보임); `#menuBtn` → 서랍 → `.nav-a[data-r="inbox"]` 높이 ≥ 44 → 클릭으로 받은함 복귀, 서랍 닫힘 |
+| 35 | 1280×900: `#side.offsetWidth === 248`, `.ib-list.offsetWidth === 360`. 940×820: `getComputedStyle(#side).visibility === 'hidden'`(서랍 닫힘), `.ib-list.offsetWidth === 360`, `#menuBtn` 보임 |
+| 36 | `body` 배경 `rgb(9, 9, 11)`, `.kkt-line.me .kkt-bubble` 배경 `rgb(244, 244, 245)`, `.kkt-at` 색 `rgb(139, 139, 148)`, `.kkt-badge` 배경 `rgb(244, 244, 245)`, `.nav-a[aria-current="page"]` 색 `rgb(237, 237, 239)` |
+| 37 | 그대로 |
+| 38 | 그대로(`.kkt-line.enter` `animationName === 'none'`, 5.6 규칙) |
+
+**`smoke.mjs`**: 76~90행 단언을 위 표대로(`#console` → `#app`/`#inbox`, `.tab .tval` → `#navUnread`). 그 밖 그대로.
+
+**`shots.mjs`**: 받은함·설정 촬영 경로를 V5 라우트로(`openSettings` = `goto('#macro')`). 결과는 `scratchpad/shots-v5-panel/`에 프로토타입과 같은 이름(`d-12-overview.png` …)으로 저장해 프로토타입 스크린샷과 나란히 비교한다.
+
+**`accept-console.mjs`**: 폐기된 DARK_V1 시안의 수용 검사다. V5에서는 실행하지 않는다(동작 항목은 `inbox.mjs`·`behavior.mjs`·`v5-panel.mjs`가 덮는다).
+
+### 8.3 새 스크립트
+
+**`scratchpad/v5-panel.mjs`**(PANEL) — 실제 `public/panel.html` + 모의 API(계정 3개: A·B live, C needs_register; A의 `account`는 매크로 켜짐·프로필 꺼짐·올킥 켜짐 `{secs:30,count:5}`·금지어 `{words:['사기','먹튀'], links:true}`; `logs`는 visit 3행(들낙 1명 포함, `user_id:''`·`link:''` 1명), profile 2행, guard 1행 24시간 안). 출력 `v5-panel: ALL PASS`. 프로토타입 `v5-final/verify.mjs`의 같은 이름 검사를 옮긴다:
+
+1. 부팅 기본 화면 `#overview`, `#ov-attn` 보임(올킥 1 + 등록 필요 1 = `2건`), 지표 4개 숫자가 모의 기록과 같음.
+2. 화면 전환에 빈 프레임 없음: `#macro`→`#visit` 클릭 후 0~400ms 동안 16ms마다 `[옛 화면 opacity, 새 화면 opacity]`를 읽어 매 표본에서 둘 중 하나 ≥ 0.4, 끝에서 옛 화면 `hidden`.
+3. 경로 표시는 클릭 직후(16ms 안) 바뀜. `#navInd` 윗변이 현재 항목 윗변과 ±1px.
+4. 스위치 펼침: `#guard-on` 끄기 → `.dep[data-dep="guard-on"]` 높이 0으로, `[data-dep-off]` 펼침; 켜기 → 반대.
+5. 저장 바: 매크로 메시지 수정 → 400ms 안 `#save.show`, `#saveTxt`에 `1건`과 `a@` 포함, `.nav-a[data-r="macro"].is-dirty`.
+6. 떠나기: 그 상태로 `.nav-a[data-r="visit"]` 클릭 → `location.hash === '#macro'` 유지, `#save.leave`; `버리기` → `#visit`로 이동, 메시지 원래 값.
+7. Ctrl+S: 수정 후 `Control+s` → `POST /panel/api/settings` 1회(본문 `macro.message` = 새 값), 토스트 `저장했습니다.`
+8. `g` `k` → `#guard`. 입력칸 안에서 `g` `k`는 무시.
+9. 팔레트: Ctrl+K → `#palWrap` 열림·`#palIn` 포커스; `추가 금지어` 입력 Enter → `#cover`, 포커스 `#cover-word-in`; 이동 내내 `.topbar`·`#side` 위치 불변; 금지어 검열이 꺼진 계정에서는 `#cover-on`에 포커스 + warn 토스트.
+10. 개요 스위치: `input[data-ov="profile"]` 클릭 → `POST /panel/api/settings` 본문 `{profile: {enabled: true, rooms: [...]}}`, 토스트 `되돌리기` 클릭 → 두 번째 POST `enabled: false`.
+11. 기록: 첫 로드에서 `#visit-tbl tr.rowx.in` 존재; 모의 기록에 1행 추가 후 다음 폴링 → 그 행만 `.fresh`, 다른 행에 `.in` 없음, 펼친 행 `aria-expanded` 유지.
+12. 올킥 미리 보기: `#guard-secs`를 60으로 → `#guard-sent`에 `60초`, `#guard-res` 문구가 기준에 맞게 바뀜; 저장 본문 `guard: {enabled, rooms, secs: 60, count: 5}`.
+13. 금지어: `#cover-word-in`에 `사기, 대리` + Enter → 칩 1개만 추가(`대리`), `#cover-word-err` = `이미 추가된 단어입니다.`; 31자 → 추가 안 됨 + 문구; 저장 본문 `cover.words` 배열.
+14. 해제: `.acts [data-unlink]` → 확인 줄 펼침, `window.confirm` 호출 없음(`page.on('dialog')` 0회).
+15. 마법사: begin 모의 `confirm_on_phone`(passcode `4829`, remaining 300) → `#code span` 4개, `#code-ring`의 `stroke-dashoffset`이 1.5초 사이 증가, confirm 모의 `ok` → `#add-done` 보임. begin 모의 `failed` + `can_force` → `#force-box` 보임 → `#force` → 본문 `forced: true`.
+16. 동작 줄이기(`reducedMotion: 'reduce'`): 화면 전환 직후(16ms) 옛 화면 `hidden`; `.rv`/`.in` 애니메이션 없음.
+17. 폰 390×844: 모든 라우트 가로 넘침 없음; 받은함 첫 행 윗변 < 260px; 대화 열기 → `.ib-th` `transform` none, 뒤로 → 목록 복귀; 버튼·입력 높이 ≥ 32(받은함 컨트롤 ≥ 44).
+18. 오류 0: `pageerror`·`console.error` 없음, 대화상자(`dialog` 이벤트) 0회.
+
+**`scratchpad/v5-site.mjs`**(PUBLIC) — 정적 `public/` + `/api/price` 모의(3기능 × 3기간, `rate .15`, `min 3`), `/api/order`·`/api/order/:id`·`/api/lookup` 모의. 출력 `v5-site: ALL PASS`.
+
+1. 네 페이지 1440×900·390×844에서 가로 넘침 없음, `pageerror` 없음, 이모지 없음(`document.body.innerText`).
+2. `getComputedStyle(body).backgroundColor === 'rgb(9, 9, 11)'`, `font-family`에 `Geist` 포함.
+3. 홈 첫 그림: 로드 직후(1.6초 전) `#dOut`·`#lgKick`·`#dAlert` 보임(`opacity 1`). 2.2초 뒤 `#dEmpty` 보임 또는 `.chap[data-ch="0"].on`(재생 시작). `#demoPlay` 클릭 → 500ms 동안 `.chap .bar i` 변환 불변.
+4. `.chap[data-ch="4"]` 클릭 → 400ms 안 `#dAlert` 보임.
+5. 스크롤 중 모든 `.rv`의 `opacity === '1'`(위치만 움직임).
+6. 탐색기: `#fxt3` 클릭 → `#fxt3[aria-selected="true"]`, `#fxCrumb`에 `프로필 로그`, `#fxInd` 윗변이 탭 윗변과 ±1px(500ms 뒤). ↓ 키 → 다음 탭.
+7. FAQ: `#faqSeg button[data-c="console"]` → 보이는 `.faq-i`가 모두 `data-cat="console"`; 질문 클릭 → `aria-expanded="true"`, 답 높이 > 0.
+8. 가격: `#prods .card.prod` 3개, 카드 안 `.ico` 없음, `.chip.tagx` 텍스트 `추천`; 3개 선택 시 `#sum .saved` 보임.
+9. 구매: 빈 제출 → `#fld-feature.bad` 또는 첫 오류 칸 포커스, `.err` 글자 색 `rgb(239, 106, 96)`; 정상 제출 → `#formWrap` 숨김, `#result`에 금액.
+10. 내 키·주문 상태: 모의 응답이 그려짐(`.feat-row` 수, 상태 칩 글자).
+11. 동작 줄이기: `#demoPlay.disabled`, `.rv`에 `.armed` 없음, 구조도 `.pk` 안 보임.
+12. `nav.top-nav a[aria-current="page"]`가 현재 페이지(`buy`·`my`).
+
+---
+
+## 9. 수용 기준
+
+모두 기계로 판정한다. [P] PANEL, [S] PUBLIC, [B] 둘 다.
+
+1. [B] `cd /home/user/kakaotalk-macro && npm run check` → `panel check ok`, 종료 코드 0(8.1 포함).
+2. [B] `node --check public/panel.js && node --check public/app.js` 종료 코드 0.
+3. [P] `behavior.mjs` → `behavior: ALL PASS`; `profile.mjs` → `profile tab: ALL PASS`; `inbox.mjs` → `inbox: ALL PASS`; `smoke.mjs` 통과; 각각 JS 오류 없음.
+4. [P] `v5-panel.mjs` → `v5-panel: ALL PASS`.
+5. [S] `v5-site.mjs` → `v5-site: ALL PASS`.
+6. [B] `curl -s localhost:$PORT/ /buy /my /order /panel`의 HTML에 `fonts.googleapis.com/css2?family=Geist`와 `content="#09090b"`가 있다. `/style.css?v=5`·`/panel.css?v=13`·`/panel.js?v=16`·`/app.js?v=5`가 200.
+7. [B] `grep -nE '#[0-9a-fA-F]{3,8}\b|rgba?\(' public/style.css public/panel.css`의 결과가 `:root` 블록 줄뿐(8.1 `declColors`와 같은 판정).
+8. [B] `grep -nP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' public/*.html public/*.js` 결과 없음.
+9. [B] `grep -nE '\b(alert|confirm|prompt)\(' public/app.js public/panel.js`에 브라우저 대화상자 호출이 없다(`confirmLoop(` 같은 이름은 제외).
+10. [B] `grep -n 'gradient' public/style.css public/panel.css` 결과가 저장 바 배경(`.save::before`)과 시연 창 아래 가림(`mask-image`), 범위 막대 채움(`.range`)뿐이고, `background-clip: text`·`text-shadow`·`filter: drop-shadow`·`--acc-` 없음.
+11. [P] 1440×900·390×844 스크린샷(`shots-v5-panel/`)이 부록 A의 프로토타입 스크린샷과 구조가 같다(검토자 육안: 사이드바·저장 바·행 문법·빈 상태).
+12. [B] 문구: 1.4 이름표 외 이름(`들낙 방지`, `욕설 가리기`, `경쟁사 저격`, `설정 › 계정`) 없음; `~해`·`~야`·`~줘`·`!`로 끝나는 UI 문자열 없음(검토자 대조).
+13. [P] `GET /panel/api/logs`는 기록 화면 4개(개요·입장·퇴장·프로필·올킥)가 보일 때만 10초 간격으로 나간다(다른 화면 30초 동안 0회 — `v5-panel.mjs` 요청 기록).
+14. [P] 저장 본문: 올킥 `{guard: {enabled, rooms, secs, count}}`, 금지어 `{cover: {enabled, rooms, words: [...], links}}`, 그 밖 V4와 같음(`v5-panel.mjs` 7·10·12·13).
+
+---
+
+## 10. 구현 분담
+
+두 담당은 서로 묻지 않고 동시에 진행한다. 겹치는 것은 2장 공유 블록 하나뿐이며, 둘 다 이 문서에서 그대로 복사한다.
+
+### 10-a PUBLIC — `public/index.html`, `buy.html`, `my.html`, `order.html`, `style.css`, `app.js`
+
+1. `style.css` 새로 쓰기: 2.1 토큰 → 2.2 기초 블록 → 프로토타입 `/* ========== SITE ========== */` 블록 → `/* ========== PUBLIC … */` 블록(`.pub ` 접두사 삭제) → `responsive: SITE`·`responsive: PUBLIC` 블록 → 5.6 동작 줄이기 블록. 콘솔 전용 CSS는 넣지 않는다. `.lic.warn` 등 콘솔 규칙 불필요.
+2. 네 HTML `<head>`(3.0), 헤더·바닥글·스프라이트·건너뛰기 링크 공통화. 홈 섹션(3.1), 구매·내 키·주문 상태(3.2~3.4) — 기존 id·`data-manual`·`name` 속성 전부 유지.
+3. `app.js` 3.6 변경 + 홈 초기화 함수들(5.2·5.3 사이트 항목).
+4. 검사: `v5-site.mjs` 작성·통과, 9장 [S]·[B] 항목.
+5. 손대지 않는 것: `panel.*`, `lib/`, `routes/`, `sender/`.
+
+### 10-b PANEL — `public/panel.html`, `panel.css`, `panel.js`, `lib/panel-check.js`(UI 부분), scratchpad 테스트
+
+1. `panel.css` 새로 쓰기: 2.1 토큰 → 2.2 기초 블록 → 프로토타입 `/* ========== CONSOLE ========== */`부터 `/* login */`까지 → `responsive: CONSOLE` 블록 → 5.6 블록. 4.13 대응표대로 클래스 이름 바꿈(`.cv` → `.kkt-row`, `.msg` → `.kkt-line`, `.bub` → `.kkt-bubble`, `.ib.is-room` → `#inbox[data-view="room"] .ib` 등) + `.lic.warn`.
+2. `panel.html` 4.1~4.12 마크업.
+3. `panel.js`:
+   - 유지: `api()`, `say()`, `reasonText()`, 받은함 블록 전부(UI_V4 5장), 등록 흐름(`showPass`·`hidePass`·`confirmLoop`·`add-form`·`force`·`cancel-code`), 설정 저장 `submit` 핸들러들, `fillChecks`/`checkedRooms`/`roomRow`/`fillRooms`, 이미지 처리, `renderTriggers`(마크업만 4.12로).
+   - 삭제: `showTab`, `setTabsEnabled`, `updateTabSummaries`, `fillAcctSelect`, 레일의 `rail-add`·`rail-settings` 핸들러, `window.confirm` 호출(해제), V4 `#detail`·`.row-actions` 관련.
+   - 추가: 라우터(`route()`, 4.1·4.14·5.1), 셸(계정 전환기 4.3, 서랍, 팔레트, G 단축키, Ctrl/⌘S), 저장 바·변경 추적(4.14), 토스트 `notify()`, 개요(4.4), 기록 폴링·표(4.8), 올킥 화면과 저장(`guard`), 금지어 칩과 저장(`cover.words`·`links`), 등록 마법사 단계·링(4.6), 인라인 해제 확인, 갠톡 응답 토큰·미리 보기, 매크로 예상 발송·방별 간격 칸.
+   - 부팅: `GET /panel/api/me` 성공 → 현재 계정 = `localStorage['kb.acct']`(try/catch)이 목록에 있으면 그것, 없으면 첫 `live` 계정, 없으면 첫 계정 → `openAccount(id)` → `loadInbox(true)` + `scheduleInbox()` → `route()`. 계정 0개면 `#account-add`. 401 → `#login`.
+   - 현재 계정을 바꿀 때마다 `localStorage['kb.acct']` 저장(실패 무시).
+4. `lib/panel-check.js` 8.1(UI 부분만), scratchpad 테스트 8.2 수정 + `v5-panel.mjs` 작성.
+5. 손대지 않는 것: `routes/`, `lib/panel-config.js`, `sender/`, 공개 페이지 파일. 백엔드의 커밋 안 된 변경은 그대로 둔다.
+
+---
+
+## 부록 A. 스크린샷 목록
+
+`/tmp/claude-0/-home-user-kakaotalk-macro/8c77ca9b-6258-53a2-bfae-00e7470f9ad7/scratchpad/v5-final/shots/` — `d-` 1440×900, `m-` 390×844(`d-00`은 홈 전체 길이).
+
+| 번호 | 화면·상태 |
+|---|---|
+| 00 | 홈 전체(d만) |
+| 01 / 02 / 03 | 홈 첫 화면(시연 시작 전 완성 장면) / 답장 장면 / 올킥 알림 장면 |
+| 04 / 05 / 06 / 07 | 기능 탐색기 / 동작 방식 / 가격 / 질문 |
+| 08 / 08b | 구매 / 구매 검증 오류 |
+| 09 | 내 키 조회 결과 |
+| 10 / 10b | 주문 상태 입금 대기 / 발급 완료 |
+| 11 | 콘솔 로그인 |
+| 12 / 12b | 개요 / 개요 스위치 즉시 저장 + 되돌리기 토스트 |
+| 13 / 13b | 받은함 / 대화 열림 |
+| 14 / 14b | 계정 / 해제 인라인 확인 |
+| 15 / 15b / 15c / 15d | 계정 추가 1단계 / 2단계 확인 번호·링 / 3단계 완료 / 재등록 + 다른 기기 끊기(d만) |
+| 16 / 16b | 매크로 / 방별 간격 수정 + 저장 바 |
+| 17 / 17b / 17c | 입장·퇴장 로그 / 행 펼침 / 폴링 새 행 강조(d만) |
+| 18 | 프로필 로그 |
+| 19 / 19b | 올킥 방지 / 미리 보기(기준 이상) |
+| 20 | 금지어 검열 |
+| 21 / 21b | 갠톡 응답 꺼짐 / 켜짐 |
+| 22 / 22b | 저격 규칙 / 떠나기 확인 저장 바 |
+| 23 / 23b | 팔레트 / 팔레트로 설정 이동 |
+| 24 | 계정 전환 메뉴(d) / 서랍 열림(m) |
+| 25 | 동작 줄이기 올킥 화면(d만) |
+
+## 부록 B. API 요약 (이 문서가 쓰는 것)
+
+- `GET /panel/api/me` → `{ok, mask, expires_at, sender_up, sender_reason, accounts: [{device_id, email, linked, needs_register, connected, reason}]}`
+- `GET /panel/api/account?device_id` → `{ok, account: {device_id, email, linked, needs_register, connected, reason, macro: {enabled, message, rooms, baseMin, randomMin, roomCooldownMin}, visit: {enabled, rooms}, cover: {enabled, rooms, words, links}, profile: {enabled, rooms}, guard: {enabled, rooms, secs, count}, autoreply: {enabled, message, cooldown_hours}, triggers: [{id, name, pattern, mode, reply, enabled, cooldown_sec, once, rooms, target}], images: [...], rooms: {open: [{key, name, members?}], normal: []}}}`
+- `POST /panel/api/settings` `{device_id, images_unchanged | images, <key>: {...}}` → `{ok, account}`. `guard`: `rooms` 없으면 `[]`, `secs`·`count` 없으면 저장값 유지, 범위 5~300 / 3~30. `cover`: `words` 배열(또는 쉼표·줄바꿈 문자열), 30자 넘는 단어는 버림, 최대 200개, 대소문자 무시 중복 제거; `links` 기본 `true`; 둘 다 보내지 않으면 저장값 유지. 오류 409(`needs_register`) / 502 / 503.
+- `GET /panel/api/logs?device_id` → `{ok, visit, profile, guard}`
+  - `visit[]` `{chat_id, room, name, user_id('' = 이름만), link, joins: [ms], leaves: [ms], changes: [{at, name(이전), link(이전 또는 '')}]}` — 최근 활동순 ≤300, 안쪽 배열은 오래된 것부터.
+  - `profile[]` `{chat_id, room, name(현재), user_id, at(마지막 확인), changes: [{at, name(이전)}]}` — 변경 1회 이상만, 최근 변경순 ≤300.
+  - `guard[]` `{at, text: "「방」에서 짧은 시간에 강퇴가 N건 있었습니다. …"}` — 최신순 ≤20.
+  - 오류: 401 `다시 로그인해 주세요.`, 404 `없는 계정입니다.`, 503 `{error, sender_up: false}`, 502 `기록을 가져오지 못했습니다.`
+- `GET /panel/api/inbox`, `GET /panel/api/chat`, `POST /panel/api/chat/send`, `POST /panel/api/register/begin|confirm|cancel`, `POST /panel/api/unlink`, `POST /panel/api/rooms`, `POST /panel/api/login|logout` — UI_V4.md 6장·기존 그대로. 등록 `begin` 응답 `{state, passcode, remaining_seconds, pending_id, status, text, can_force, device_id}`, 계정 8개 초과 400 `계정은 8개까지 등록할 수 있습니다.`
+
+## 부록 C. 서버가 방에 보내는 안내 (미리 보기 문구의 근거)
+
+- 입장: `[입장안내]\n이름 : @{이름}\n옾링 : {오픈프로필 링크}\n입장로그\n- YYYY-MM-DD HH:MM` (+ 이름이 바뀐 적이 있으면 프로필 변경 줄). 퇴장은 `[퇴장안내]`와 퇴장 시각.
+- 프로필 변경: `[프로필 변경 감지]\n이름 : @{현재}\n이전 : {이전}\n변경 : YYYY-MM-DD HH:MM` (+ 2회 이상이면 `누적 : N회`).
+- 올킥: 방에 아무것도 보내지 않는다. 기록만 남긴다.
+- 금지어 검열: 이 계정이 부방장 이상인 방에서 글을 가린다. 띄어쓰기·기호·대소문자를 바꿔 쓴 변형도 잡는다. 사람을 내보내지 않는다.
+- 매크로 방별 간격: 방에 간격(1분 이상)을 정하면 그 간격으로 고정(랜덤 없음), 아니면 기본 간격 + 0~랜덤 간격.
+- 저격 규칙: 최대 30개, 이름 40자, 감지할 말 200자, 답장 500자. 새 규칙은 포함·같음만(기존 앞글자·정규식 유지). 감지할 방을 비우면 저장 시점의 모든 오픈채팅방. 답할 방 `''` = 감지된 그 방.
