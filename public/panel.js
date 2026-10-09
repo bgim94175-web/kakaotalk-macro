@@ -521,7 +521,8 @@
     return isNaN(n) ? null : n;
   }
   function imageSig() {
-    return imagesDirty ? images.map(function (x) { return x.name + ':' + x.b64.length; }).concat(savedImages ? ['saved:' + savedImages] : []) : 'same';
+    // 기준값과 같은 모양(배열)으로 센다. 저장된 이미지를 빼기만 해도 'saved:N' 이 사라져 변경 1건이 된다.
+    return images.map(function (x) { return x.name + ':' + x.b64.length; }).concat(savedImages ? ['saved:' + savedImages] : []);
   }
   function formState(r) {
     if (r === 'macro') {
@@ -607,7 +608,10 @@
     void saveEl.offsetWidth;
     saveEl.classList.add('shake');
   }
+  var leaveBack = null;   // 머무르기·Esc 뒤에 포커스를 돌려줄 곳(떠나기 안내가 뜰 때 있던 자리)
   function askLeave(t) {
+    var ae = document.activeElement;
+    if (ae && ae !== document.body && !ae.closest('.when-leave')) leaveBack = ae;
     leaveTarget = t;
     saveEl.classList.add('show', 'leave');
     paintSave();
@@ -630,10 +634,17 @@
     if (!account) return;
     var pending = leaveTarget && leaveTarget.saving ? leaveTarget : null;
     var sent = JSON.stringify(formState(r));
+    var dev = body.device_id;     // 응답이 늦게 와 그 사이 다른 계정으로 바꿨으면 지금 화면에 덮어쓰지 않는다
     saveBusy(true);
     say(errId, '');
     try {
       var res = await api('/panel/api/settings', body);
+      if (dev !== curId) {
+        var was = (res && res.account) || accOf(dev) || meAcc(dev);
+        notify('저장했습니다.', (was && was.email ? was.email + ' · ' : '') + routeTitle(r));
+        if (after) after();
+        return;
+      }
       account = res.account;
       leaveTarget = null;
       saveEl.classList.remove('leave');
@@ -651,6 +662,11 @@
       if (pending) runLeave(pending);
     } catch (e) {
       if (e && (e.status === 401 || e.status === 403)) { showLogin(); return; }
+      if (dev !== curId) {
+        var old = accOf(dev) || meAcc(dev);
+        notify('설정을 저장하지 못했습니다.', (old && old.email ? old.email + ' · ' : '') + routeTitle(r), { kind: 'crit' });
+        return;
+      }
       say(errId, e.message);
       if (leaveTarget) leaveTarget.saving = false;
       saveEl.classList.remove('leave');
@@ -662,6 +678,10 @@
   }
   function revertRoute(text) {
     var y = window.scrollY;
+    if (FEAT_ROUTES.indexOf(route) >= 0) {
+      say(route + '-error', '');
+      if (route === 'macro') say('room-error', '');
+    }
     fillDetail();
     window.scrollTo(0, y);
     if (text) notify(text);
@@ -1481,6 +1501,7 @@
     form.dataset.reauth = '';
     $('email').readOnly = false;
     setStep(3);
+    $('add-done-title').focus({ preventScroll: true });   // 완료 카드 제목으로 포커스를 옮겨 결과를 바로 읽게 한다
   }
   function hidePassQuiet() {
     passcode.hidden = true;
@@ -3052,7 +3073,13 @@
     var i = items.indexOf(document.activeElement);
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
     if (e.key === 'Escape') { e.stopPropagation(); openMenu(false); $('acctBtn').focus(); }
-    if (e.key === 'Tab') openMenu(false);
+    if (e.key === 'Tab') {
+      // 닫히는 메뉴 안으로 포커스가 넘어가 body 로 떨어지지 않게 직접 옮긴다
+      e.preventDefault();
+      openMenu(false);
+      var nx = e.shiftKey ? null : $('openPal');
+      (nx && nx.getClientRects().length ? nx : $('acctBtn')).focus();
+    }
   });
   document.addEventListener('click', function (e) { if (!e.target.closest('.acct-wrap')) openMenu(false); });
   $('kbdHint').textContent = isMac ? '⌘ K' : 'Ctrl K';
@@ -3081,6 +3108,12 @@
     pendingFocus = null;
     saveEl.classList.remove('leave');
     paintSave();
+    // 떠나기 버튼이 숨으면서 포커스가 body 로 떨어지지 않게, 안내가 뜨기 전 자리(없거나 안 보이면 저장 버튼)로 돌린다
+    var back = leaveBack;
+    leaveBack = null;
+    var ok = back && back.isConnected && back.getClientRects().length > 0 && !back.closest('.closed, [inert], [hidden], [aria-hidden="true"]');
+    if (ok) back.focus({ preventScroll: true });
+    if (!ok || document.activeElement !== back) saveBtn.focus({ preventScroll: true });
   });
   $('leaveDrop').addEventListener('click', function () {
     var t = leaveTarget;
@@ -3237,9 +3270,14 @@
     var wd = t.closest('[data-wdel]');
     if (wd) {
       var chipEl = wd.parentNode;
-      var wi = Number(wd.dataset.wdel);
+      if (chipEl.classList.contains('bye')) return;   // 사라지는 중인 칩을 또 누르면 무시(다음 단어가 지워지지 않게)
+      var word = coverWords[Number(wd.dataset.wdel)];
       chipEl.classList.add('bye');
-      setTimeout(function () { coverWords.splice(wi, 1); renderCoverChips(); markDirty(); $('cover-word-in').focus(); }, reducedMotion() ? 0 : 200);
+      setTimeout(function () {
+        var k = coverWords.indexOf(word);       // 번호가 아니라 값으로 지운다(먼저 지운 칩 때문에 번호가 밀려도 안전)
+        if (k >= 0) coverWords.splice(k, 1);
+        renderCoverChips(); markDirty(); $('cover-word-in').focus();
+      }, reducedMotion() ? 0 : 200);
       return;
     }
     if (t.id === 'cover-words') { $('cover-word-in').focus(); return; }
@@ -3458,8 +3496,10 @@
     var buttons = qsa('[data-load-rooms]');
     buttons.forEach(function (b) { b.classList.add('busy'); b.disabled = true; });
     var prevKeys = roomChoices().map(function (r) { return r.key; });
+    var dev = account.device_id;    // 응답 전에 계정을 바꿨으면 그 결과를 지금 계정 화면에 넣지 않는다
     try {
-      var res = await api('/panel/api/rooms', { device_id: account.device_id });
+      var res = await api('/panel/api/rooms', { device_id: dev });
+      if (dev !== curId) return;
       if (res.account) account = res.account;
       else if (res.rooms) account.rooms = res.rooms;
       var added = refillRoomLists(prevKeys);
@@ -3469,6 +3509,7 @@
     } catch (e) {
       if (e && (e.status === 401 || e.status === 403)) { showLogin(); return; }
       var msg = e && e.status ? e.message : '대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+      if (dev !== curId) return;
       say('room-error', msg);
       notify('대화방을 불러오지 못했습니다.', msg, { kind: 'crit' });
     } finally {

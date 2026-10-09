@@ -71,6 +71,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 .btn.sm { height: 28px; padding: 0 10px; font-size: var(--t-12); border-radius: var(--r-1); gap: 6px; }
 .btn.wide { width: 100%; }
 .btn[disabled], .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+/* 8개를 채운 '계정 추가'는 흐리게 두되 눌리게 해서 한도 안내 토스트를 보여 준다(4.6) */
+.btn[id="acc-add"][aria-disabled="true"], .btn[id="ov-add"][aria-disabled="true"] { pointer-events: auto; cursor: not-allowed; }
 .btn .spin { display: none; }
 .btn.busy .spin { display: inline-block; }
 .btn.busy .lbl-idle { opacity: .6; }
@@ -165,6 +167,7 @@ input:checked + .sw::after, [data-on="true"] > .sw::after { transform: translate
 .menu-cap { padding: 6px 8px 4px; color: var(--fg-3); font-size: var(--t-11); }
 .menu-i { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 8px; border-radius: var(--r-1); text-align: left; font-size: var(--t-13); transition: background var(--d1); }
 .menu-i:hover, .menu-i:focus-visible { background: var(--bg-3); outline: none; }
+.menu-i:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; }
 .menu-i .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-i .st { color: var(--fg-3); font-size: var(--t-11); white-space: nowrap; }
 .menu-i .st.crit { color: var(--crit); }
@@ -828,6 +831,7 @@ form.stack > .errt:empty { display: none; }
 @media (max-width: 760px) {
   .btn { min-height: 40px; }
   .btn.sm { min-height: 32px; }
+  .login-foot a { display: inline-flex; align-items: center; min-height: 32px; }
   .num { height: 40px; }
   .num button { width: 40px; }
   .inp { height: 42px; }

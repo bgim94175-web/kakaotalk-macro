@@ -317,6 +317,7 @@ b, strong { font-weight: 600; }
 .faq-q[aria-expanded="true"] svg { transform: rotate(45deg); color: var(--fg); }
 .faq-a { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--d3) var(--ease); }
 .faq-a > div { min-height: 0; overflow: hidden; }
+.faq-i:not(.open) .faq-a > div { visibility: hidden; transition: visibility 0s var(--d3); }
 .faq-a p { color: var(--fg-2); padding: 0 48px 22px 0; max-width: 760px; line-height: 1.75; }
 .faq-a p + p { margin-top: -10px; }
 .faq-a b { color: var(--fg); font-weight: 500; }
@@ -496,7 +497,7 @@ legend.lb + * { clear: both; }
 .prod .bul li::before { content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 1px; background: var(--fg-4); }
 .prod .prices { grid-area: prices; display: grid; gap: 2px; align-self: center; }
 .prod .pr { display: flex; justify-content: space-between; gap: 12px; padding: 4px 10px; border-radius: var(--r-1); color: var(--fg-3); font-size: var(--t-12); transition: background var(--d2), color var(--d2); }
-.prod .pr .pv { font-family: var(--f-mono); font-size: var(--t-13); }
+.prod .pr .pv { font-family: var(--f-mono); font-size: var(--t-13); white-space: nowrap; }
 .prod .pr[data-on="1"] { background: var(--bg-3); color: var(--fg); }
 .prods .prod > .chk { grid-area: chk; position: absolute; inset: 0; border: 0; background: transparent; padding: 22px; min-height: 0; align-items: flex-start; border-radius: 0; }
 .prods .prod > .chk:hover { background: transparent; }
@@ -544,7 +545,7 @@ legend.lb + * { clear: both; }
 .wait .dots { display: inline-flex; gap: 3px; }
 .wait .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-3); animation: tdot 1.2s infinite var(--ease); }
 .wait .dots i:nth-child(2) { animation-delay: .15s; } .wait .dots i:nth-child(3) { animation-delay: .3s; }
-.wait .el { font-family: var(--f-mono); font-size: var(--t-12); color: var(--fg-3); }
+.wait .el { font-family: var(--f-sans); font-variant-numeric: tabular-nums; font-size: var(--t-12); color: var(--fg-3); }
 /* my: feature rows with remaining bar */
 .feat-row { padding: 16px 0; border-top: 1px solid var(--line); display: grid; gap: 10px; }
 .feat-row .r1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -689,6 +690,12 @@ legend.lb + * { clear: both; }
   .kv .r { grid-template-columns: 96px minmax(0, 1fr); }
   .lookup { grid-template-columns: minmax(0, 1fr); }
   .fld input[type="text"], .fld textarea { font-size: 16px; }
+}
+/* 360px 대: 1년(6자리) 금액이 한 줄에 들어가게 칸 여백과 글자를 줄인다 */
+@media (max-width: 380px) {
+  .prod .prices { gap: 2px; }
+  .prod .pr { padding: 6px 4px; }
+  .prod .pr .pv { font-size: var(--t-12); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1021,7 +1021,7 @@
     }
 
     playBtn.addEventListener('click', function () {
-      D.user = true; D.auto = false;
+      D.user = D.playing; D.auto = false;   /* 사용자가 멈춘 경우만 '직접 멈춤' — 재생을 누른 뒤엔 화면에 돌아오면 다시 재생 */
       if (!D.playing && (!D.started || D.t >= END)) jump(0);
       setPlay(!D.playing);
     });
