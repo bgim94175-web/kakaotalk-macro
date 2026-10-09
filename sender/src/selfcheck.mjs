@@ -3,6 +3,7 @@ import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from './room-kind.mjs'
 import { Hub, Slot } from './runner.mjs'
 import { open, seal } from './store.mjs'
+import * as passbox from './secretbox.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
 import {
@@ -45,6 +46,26 @@ try {
   throw new Error('tampered seal was accepted')
 } catch (e) {
   if (e && e.message === 'tampered seal was accepted') throw e
+}
+
+// 방 참여코드 봉인 (docs/ACCOUNTS_V1.md 8장 6번·9.0). 부모 lib/secretbox.js 가 봉인한 값을 여기서 연다.
+// 아래 벡터는 lib/purchase-check.js 와 같은 문자열이어야 한다.
+{
+  const prevSecret = process.env.CONFIG_SECRET
+  process.env.CONFIG_SECRET = '0123456789abcdef0123456789abcdef'
+  const VECTOR = 'v1.AAECAwQFBgcICQoLlAj1igkIAeTZFvTsl-bF0uEUVlk'
+  const got = passbox.sealWithIv('0000', '000102030405060708090a0b')
+  if (got !== VECTOR) throw new Error('secretbox: fixed test vector changed: ' + got)
+  if (passbox.open(VECTOR) !== '0000') throw new Error('secretbox: vector does not open')
+  const a = passbox.seal('0000')
+  if (a === passbox.seal('0000') || passbox.open(a) !== '0000') throw new Error('secretbox: roundtrip')
+  const raw = Buffer.from(VECTOR.slice(3), 'base64url')
+  raw[raw.length - 1] ^= 1
+  if (passbox.open('v1.' + raw.toString('base64url')) !== null) throw new Error('secretbox: tampered blob was accepted')
+  process.env.CONFIG_SECRET = 'another-secret-value-0123456789'
+  if (passbox.open(VECTOR) !== null) throw new Error('secretbox: other CONFIG_SECRET opened the blob')
+  if (prevSecret === undefined) delete process.env.CONFIG_SECRET
+  else process.env.CONFIG_SECRET = prevSecret
 }
 
 if (!linkable('고려', '여름')) throw new Error('word link 고려->여름')
@@ -798,5 +819,559 @@ chatHub.accounts.set('empty', emptySlot)
 await chatHub.thread('empty', '8')
 await chatHub.thread('empty', '8')
 if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 (' + emptyReads + '회)')
+
+// ════════════════════════════════════════════════════════════════════════════
+// 방 설치형 봇(K bot 계정) — docs/ACCOUNTS_V1.md 7.7 의 사례. DB·HTTP 없이 돈다.
+// 1~15 는 순수 함수, 16~24 는 9.4 의 가짜 연결(FakeKakaoClient)과 메모리 저장소로 실제 botpool 경로를 탄다.
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const RF = await import('./roomfeat.mjs')
+  const F = await import('./features.mjs')
+  const Q = await import('./quiz.mjs')
+  const { BotPool } = await import('./botpool.mjs')
+  const FK = await import('./fake.mjs')
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
+  async function waitFor(fn, ms, what) {
+    const end = Date.now() + (ms || 5000)
+    for (;;) {
+      const v = await fn()
+      if (v) return v
+      if (Date.now() > end) throw new Error('timed out: ' + (what || 'condition'))
+      await sleep(20)
+    }
+  }
+  function view(over) {
+    const v = Object.assign({
+      install_id: 1, chat_id: '555', link_id: '9001', link_name: '동네모임', products: { roombot: true, minigame: false },
+      perm: 4, state: 'active', runtime: {}, ring: [],
+    }, over || {})
+    v.cfg = RF.normRoomConfig(v.config || {})
+    return v
+  }
+  const T = 1_700_000_000_000
+  const host = { selfId: '1000', permOf: (id) => (id === '1' ? 1 : id === '4' ? 4 : null) }
+
+  // #1 같은 id 의 입장·퇴장 5번(logId 1~5, 0·5·10·15·20초) → 입장 3·퇴장 2 (60초 중복 회귀)
+  {
+    const v = view({ config: { visit: { enabled: true } } })
+    const rec = RF.adapterRecord(v)
+    const kinds = ['join', 'leave', 'join', 'leave', 'join']
+    kinds.forEach((kind, i) => {
+      F.guardOnChat(rec, { kind, chatId: '555', authorId: '7', authorName: '홍길동', logId: String(i + 1), at: T + i * 5000, now: T + i * 5000 })
+    })
+    const row = F.logsView(rec).visit[0]
+    if (!row || row.joins.length !== 3 || row.leaves.length !== 2) throw new Error('7.7#1 visit counts ' + JSON.stringify(row && [row.joins.length, row.leaves.length]))
+  }
+  // #2 같은 logId 재생 → 무시. logId 없이 500ms 안 2번 → 1번, 10초 간격 → 2번
+  {
+    const v = view({ config: { visit: { enabled: true } } })
+    const rec = RF.adapterRecord(v)
+    const a = F.guardOnChat(rec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍', logId: '50', at: T, now: T })
+    const b = F.guardOnChat(rec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍', logId: '50', at: T, now: T + 1000 })
+    if (a.sends.length !== 1 || b.sends.length !== 0) throw new Error('7.7#2 logId replay')
+    const c = F.guardOnChat(rec, { kind: 'leave', chatId: '555', authorId: '8', authorName: '김', at: T, now: T })
+    const d = F.guardOnChat(rec, { kind: 'leave', chatId: '555', authorId: '8', authorName: '김', at: T + 500, now: T + 500 })
+    const e = F.guardOnChat(rec, { kind: 'leave', chatId: '555', authorId: '8', authorName: '김', at: T + 10500, now: T + 10500 })
+    if (c.sends.length !== 1 || d.sends.length !== 0 || e.sends.length !== 1) throw new Error('7.7#2 5 second rule')
+    const st = {}
+    if (RF.visitDedup(st, '555', { kind: 'join', userId: '7', logId: '9' }, T)) throw new Error('7.7#2 dedup first')
+    if (!RF.visitDedup(st, '555', { kind: 'join', userId: '7', logId: '9' }, T)) throw new Error('7.7#2 dedup replay')
+  }
+  // #3 N=3, M=10: 세 번째 입장에서 멘션 1개 안내, 같은 창의 네 번째는 없음. kick → 강퇴 1개. 제외·방장 → 없음. 이름만 → 경고만
+  {
+    const cfg = RF.normRoomConfig({ churn: { enabled: true, joins: 3, windowMin: 10, action: 'warn' }, exempt: [{ user_id: '77', name: '제외' }] })
+    const st = {}
+    const ev = (i, extra) => Object.assign({ kind: 'join', userId: '7', name: '홍길동', at: T + i * 60000 }, extra || {})
+    if (RF.churnCheck(st, cfg, ev(0), host, T) || RF.churnCheck(st, cfg, ev(1), host, T)) throw new Error('7.7#3 early')
+    const plan = RF.churnCheck(st, cfg, ev(2), host, T)
+    if (!plan || plan.count !== 3 || plan.action !== 'warn') throw new Error('7.7#3 third join')
+    const n = RF.churnNotice(plan, 'warn')
+    if (n.text.split('@').length !== 2 || !n.mention || n.mention.userId !== '7') throw new Error('7.7#3 one mention')
+    if (n.text !== '[들낙 감지]\n이름 : @홍길동\n입장 : 10분 동안 3회\n조치 : 경고') throw new Error('7.7#3 notice layout ' + n.text)
+    if (F.visitMentionExtra(n.text, n.mention).split('user_id').length !== 2) throw new Error('7.7#3 mention extra')
+    if (RF.churnCheck(st, cfg, ev(3), host, T)) throw new Error('7.7#3 fourth in same window')
+    const kcfg = RF.normRoomConfig({ churn: { enabled: true, joins: 3, windowMin: 10, action: 'kick' } })
+    const ks = {}
+    let kp = null
+    for (let i = 0; i < 3; i++) kp = RF.churnCheck(ks, kcfg, ev(i), host, T)
+    if (!kp || kp.action !== 'kick' || kp.userId !== '7') throw new Error('7.7#3 kick plan')
+    if (RF.churnNotice(kp, 'kicked').text.indexOf('조치 : 내보냄') < 0) throw new Error('7.7#3 kicked line')
+    const xs = {}
+    for (let i = 0; i < 4; i++) {
+      if (RF.churnCheck(xs, cfg, ev(i, { userId: '77' }), host, T)) throw new Error('7.7#3 exempt')
+      if (RF.churnCheck(xs, cfg, ev(i, { userId: '1' }), host, T)) throw new Error('7.7#3 host')
+    }
+    const ns = {}
+    let np = null
+    for (let i = 0; i < 3; i++) np = RF.churnCheck(ns, kcfg, ev(i, { userId: '' }), host, T)
+    if (!np || np.action !== 'warn' || !np.idUnknown) throw new Error('7.7#3 name only warns')
+    if (RF.churnNotice(np, 'warn').mention) throw new Error('7.7#3 name only has no mention')
+  }
+  // #4 시각은 ev.at 기준(뒤늦게 채운 묶음이 하나로 뭉치지 않음)
+  {
+    const cfg = RF.normRoomConfig({ churn: { enabled: true, joins: 3, windowMin: 10 } })
+    const st = {}
+    let p = null
+    for (let i = 0; i < 3; i++) p = RF.churnCheck(st, cfg, { kind: 'join', userId: '9', name: 'a', at: T + i * 6 * 60000 }, host, T + 3600000)
+    if (p) throw new Error('7.7#4 backfilled joins spread over 12 minutes are not one burst')
+    const v = view({ config: { visit: { enabled: true } } })
+    const rec = RF.adapterRecord(v)
+    for (let i = 0; i < 3; i++) F.guardOnChat(rec, { kind: 'join', chatId: '555', authorId: '9', authorName: 'a', at: T + i * 60000, now: T + 999999 })
+    const row = F.logsView(rec).visit[0]
+    if (row.joins.length !== 3 || row.joins[0] !== T || row.joins[2] !== T + 120000) throw new Error('7.7#4 visit times are ev.at')
+  }
+  // #5 id 있는 퇴장 → 강퇴. id 없음 → kick_fail. 제외 → 없음. 실패 → bans, 그 id 재입장 → 강퇴. 피드 6 → 없음
+  {
+    const cfg = RF.normRoomConfig({ leaveKick: { enabled: true }, exempt: [{ user_id: '77', name: 'x' }] })
+    const k = RF.leaveKickPlan(cfg, { kind: 'leave', userId: '7', name: '홍' }, host)
+    if (!k || k.type !== 'kick' || k.userId !== '7') throw new Error('7.7#5 kick plan')
+    const f = RF.leaveKickPlan(cfg, { kind: 'leave', userId: '', name: '홍' }, host)
+    if (!f || f.type !== 'kick_fail' || f.note !== 'id 없음') throw new Error('7.7#5 no id')
+    if (RF.leaveKickPlan(cfg, { kind: 'leave', userId: '77', name: 'x' }, host)) throw new Error('7.7#5 exempt')
+    if (RF.leaveKickPlan(cfg, { kind: 'leave', userId: '4', name: 'x' }, host)) throw new Error('7.7#5 deputy')
+    if (RF.leaveKickPlan(cfg, { kind: 'join', userId: '7', name: '홍' }, host)) throw new Error('7.7#5 join is not a leave')
+    const st = {}
+    RF.noteBan(st, '7', '홍', T)
+    if (!RF.bannedNow(st, '7', T + 1000) || RF.bannedNow(st, '7', T + 31 * 86400000)) throw new Error('7.7#5 bans 30 days')
+    const kicked = F.visitEventsFromMessage({ message_type: 0, message: '{"feedType":6,"members":[{"userId":7,"nickName":"홍"}]}' })
+    if (kicked.length !== 0) throw new Error('7.7#5 kick feed is not a leave')
+  }
+  // #6 사진 변경 → 프로필 사진 안내 1개. 상태 null → 없음. 첫 관찰 → 없음
+  {
+    const rt = {}
+    const pcfg = { name: true, photo: true, status: true }
+    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/1.jpg', status: null }, T).length) throw new Error('7.7#6 first')
+    const ph = RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/2.jpg', status: null }, T + 1000)
+    if (ph.length !== 1 || ph[0].text.indexOf('항목 : 프로필 사진') < 0 || ph[0].mention.userId !== '7') throw new Error('7.7#6 photo')
+    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/2.jpg', status: null }, T + 2000).length) throw new Error('7.7#6 status null')
+    RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '안녕' }, T)
+    const stc = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '바이' }, T + 1)
+    if (stc.length !== 1 || stc[0].text.indexOf('항목 : 상태 메시지') < 0 || stc[0].text.indexOf('이전 : 안녕') < 0) throw new Error('7.7#6 status')
+    if (RF.photoSig('https://x.kakao.com/p/1.jpg?t=9', '') !== '/p/1.jpg') throw new Error('7.7#6 photo signature is the path without the query')
+    const rows = F.logsView({ rooms: [{ key: 'r', chat_id: '555', name: '방' }], runtime: rt }).profile
+    if (!rows.some((r) => r.changes.some((c) => c.kind === 'photo'))) throw new Error('7.7#5 profile log has kind')
+  }
+  // #7 조회: 방장 → 기록 문구, staff 에서 일반 → 없음, 멘션 id 우선, 동명이인 → 같은 이름 문구
+  {
+    const rt = {}
+    const cfg = RF.normRoomConfig({ profile: { enabled: true, lookup: 'staff' } })
+    const pc = cfg.profile
+    RF.profileObserve(rt, '555', pc, { userId: '7', name: '홍길동' }, T)
+    RF.profileObserve(rt, '555', pc, { userId: '7', name: '길동이' }, T + 60000)
+    RF.profileObserve(rt, '555', pc, { userId: '8', name: '같은이름' }, T)
+    RF.profileObserve(rt, '555', pc, { userId: '9', name: '같은이름' }, T)
+    const ok = RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '길동이', mentions: [] }, host, T + 120000)
+    if (!ok || ok.indexOf('[프로필 기록]') !== 0 || ok.indexOf('이전 이름 : 홍길동') < 0) throw new Error('7.7#7 host lookup ' + ok)
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '50', arg: '길동이', mentions: [] }, host, T) !== null) throw new Error('7.7#7 staff only')
+    const byMention = RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '같은이름', mentions: ['7'] }, host, T)
+    if (byMention.indexOf('이름 : 길동이') < 0) throw new Error('7.7#7 mention wins')
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '같은이름', mentions: [] }, host, T) !== '같은 이름이 2명입니다. @멘션으로 지정하십시오.') {
+      throw new Error('7.7#7 same name')
+    }
+  }
+  // #8 홍보: 71 위반, 26(인용에만 링크) 아님, 1+https:// 위반, 2 는 media 켰을 때만. 방장·제외 아님. 1/3·2/3 가림, 3/3 강퇴. resetHours 뒤 1부터
+  {
+    const cfg = RF.normRoomConfig({ promo: { enabled: true, kickAt: 3, resetHours: 24 }, exempt: [{ user_id: '77', name: '' }] })
+    const pv = (ev) => RF.promoViolation(cfg, Object.assign({ userId: '7', name: '홍' }, ev), host)
+    if (pv({ type: 71, text: '' }) !== 'card') throw new Error('7.7#8 card')
+    if (pv({ type: 26, text: '네', attachment: '{"src_message":"https://x.com"}' })) throw new Error('7.7#8 reply quote')
+    if (pv({ type: 1, text: '여기 https://x.com' }) !== 'link') throw new Error('7.7#8 link')
+    if (pv({ type: 2, text: '' })) throw new Error('7.7#8 media off')
+    const mcfg = RF.normRoomConfig({ promo: { enabled: true, media: true } })
+    if (RF.promoViolation(mcfg, { userId: '7', type: 2, text: '' }, host) !== 'media') throw new Error('7.7#8 media on')
+    if (RF.promoViolation(cfg, { userId: '1', type: 1, text: 'https://x.com' }, host)) throw new Error('7.7#8 host')
+    if (RF.promoViolation(cfg, { userId: '77', type: 1, text: 'https://x.com' }, host)) throw new Error('7.7#8 exempt')
+    const st = {}
+    const e = { userId: '7', name: '홍', type: 1, text: 'https://x.com' }
+    const p1 = RF.promoCheck(st, cfg, e, host, T)
+    const p2 = RF.promoCheck(st, cfg, e, host, T + 20000)
+    const p3 = RF.promoCheck(st, cfg, e, host, T + 40000)
+    if (p1.n !== 1 || p1.kick || !p1.hide || p2.n !== 2 || p2.kick || p3.n !== 3 || !p3.kick) throw new Error('7.7#8 1/3 2/3 3/3')
+    if (RF.promoNotice(p1, { hidden: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 1/3회\n조치 : 글 가림') throw new Error('7.7#8 notice')
+    if (RF.promoNotice(p3, { hidden: true, kicked: true }).text.indexOf('조치 : 내보냄') < 0) throw new Error('7.7#8 kicked notice')
+    RF.promoCheck(st, cfg, e, host, T + 50000)
+    const later = RF.promoCheck(st, cfg, e, host, T + 50000 + 25 * 3600000)
+    if (later.n !== 1) throw new Error('7.7#8 reset after resetHours')
+  }
+  // #9 홍보 링크 켬 → 금지어 검열은 링크를 놔두고 욕설은 가림
+  {
+    const v = view({ config: { promo: { enabled: true, links: true }, cover: { enabled: true, links: true } } })
+    const rec = RF.adapterRecord(v)
+    if (rec.config.cover.links !== false) throw new Error('7.7#9 cover links off while promo links on')
+    if (F.coverPlan(rec, { chatId: '555', text: '여기 https://x.com', logId: '91', messageType: 1, mine: false, staff: false })) throw new Error('7.7#9 link left to promo')
+    if (!F.coverPlan(rec, { chatId: '555', text: '씨발', logId: '92', messageType: 1, mine: false })) throw new Error('7.7#9 profanity still covered')
+  }
+  // #10 링 350개 → 최근 300. !가리기 5 → 방장 아닌 최근 5개(명령 글 제외). 멘션 → 그 사람. 999 → 300, 0·글자 → 사용법
+  {
+    const ring = []
+    for (let i = 1; i <= 350; i++) RF.ringPush(ring, { logId: String(1000 + i), type: 1, authorId: i % 10 === 0 ? '1' : String(100 + (i % 3)), name: 'n', at: i })
+    if (ring.length !== 300 || ring[0].logId !== '1051') throw new Error('7.7#10 ring keeps the newest 300')
+    RF.ringPush(ring, { logId: '2000', type: 1, authorId: '101', name: 'n', at: 9999, cmd: true })
+    const plan = RF.hidePlan(ring, { last: 5 }, host)
+    if (plan.length !== 5 || plan.some((x) => x.logId === '2000') || plan.some((x) => ring.find((m) => m.logId === x.logId).authorId === '1')) {
+      throw new Error('7.7#10 last 5')
+    }
+    const who = RF.hidePlan(ring, { userId: '102' }, host)
+    if (!who.length || who.some((x) => ring.find((m) => m.logId === x.logId).authorId !== '102')) throw new Error('7.7#10 one person')
+    const c1 = RF.parseHideCommand('!가리기 5', '!', [])
+    const c2 = RF.parseHideCommand('!가리기 @홍', '!', ['7'])
+    const c3 = RF.parseHideCommand('!가리기 999', '!', [])
+    if (c1.last !== 5 || c2.userId !== '7' || c3.last !== 300) throw new Error('7.7#10 parse')
+    if (!RF.parseHideCommand('!가리기 0', '!', []).usage || !RF.parseHideCommand('!가리기 많이', '!', []).usage) throw new Error('7.7#10 usage')
+    if (RF.parseHideCommand('!가리기싫다', '!', []) !== null || RF.parseHideCommand('/가리기 3', '!', []) !== null) throw new Error('7.7#10 not a command')
+    if (RF.hideUsage('!') !== '「!가리기 30」 형식으로 입력하십시오. (1~300)') throw new Error('7.7#10 usage text')
+  }
+  // #11 금지어 300개 통과·301번째 거절, 300개로 일치 동작
+  {
+    const words = Array.from({ length: 301 }, (_, i) => '금지' + i)
+    if (RF.checkRoomConfig({ cover: { words: words.slice(0, 300) } }).ok !== true) throw new Error('7.7#11 300 pass')
+    const bad = RF.checkRoomConfig({ cover: { words } })
+    if (bad.ok || bad.error !== '금지어는 300개까지 등록할 수 있습니다.') throw new Error('7.7#11 301 rejected')
+    const cfg = RF.normRoomConfig({ cover: { enabled: true, words } })
+    if (cfg.cover.words.length !== 300) throw new Error('7.7#11 sender clamps to 300')
+    const rec = RF.adapterRecord(view({ config: { cover: { enabled: true, words: words.slice(0, 300) } } }))
+    if (!F.coverPlan(rec, { chatId: '555', text: '이건 금지299 입니다', logId: '93', messageType: 1, mine: false })) throw new Error('7.7#11 300th word matches')
+  }
+  // #12
+  if (RF.locoOk({ statusCode: 0, body: { status: -203 } }) !== false || RF.locoOk({ statusCode: 0, body: {} }) !== true || RF.locoOk({ statusCode: -1, body: {} })) {
+    throw new Error('7.7#12 locoOk')
+  }
+  // #13 미니게임: 방 A 하루 한도가 방 B 를 막지 않음. 끈 게임 → 사용 중지 문구. 이름 빈 두 사람 점수 분리
+  {
+    const mk = (cfg) => {
+      const v = view({ products: { roombot: false, minigame: true }, config: cfg })
+      const rec = RF.adapterRecord(v)
+      rec.config.minigame.cooldownMs = 0
+      return { v, rec }
+    }
+    const A = mk({ games: { dailyLimit: 1 } })
+    const B = mk({ games: { dailyLimit: 1 } })
+    const say = (x, text, id, name) => F.onInbound(x.rec, { chatId: '555', text, authorName: name == null ? '홍' : name, authorId: id || '7', mine: false })
+    if (say(A, '!주사위').length !== 1 || say(A, '!주사위').length !== 0) throw new Error('7.7#13 room A daily limit')
+    if (say(B, '!주사위').length !== 1) throw new Error('7.7#13 room B is not blocked by room A')
+    const off = mk({ games: { dice: false } })
+    const o = say(off, '!주사위')
+    if (o.length !== 1 || o[0].text !== '「주사위」는 사용 중지 상태입니다.') throw new Error('7.7#13 disabled game')
+    const S = mk({})
+    for (const id of ['301', '302']) {
+      say(S, '!퀴즈', id, '')
+      const g = S.v.runtime.games.r
+      say(S, Q.answer(g.quiz), id, '')
+    }
+    const board = S.v.runtime.scores.r
+    if (board['301'] !== 2 || board['302'] !== 2 || Object.keys(board).length !== 2) throw new Error('7.7#13 scores by author id ' + JSON.stringify(board))
+    if (RF.rankingOf(S.v.runtime).length !== 2) throw new Error('7.7#13 ranking keeps two nameless people')
+  }
+  // #14 격리: 방 A 어댑터의 logsView 에 방 B 기록 없음
+  {
+    const a = view({ install_id: 1, chat_id: '601', config: { visit: { enabled: true } } })
+    const b = view({ install_id: 2, chat_id: '602', config: { visit: { enabled: true } } })
+    F.guardOnChat(RF.adapterRecord(b), { kind: 'join', chatId: '602', authorId: '5', authorName: 'b', now: T })
+    F.guardOnChat(RF.adapterRecord(a), { kind: 'join', chatId: '602', authorId: '6', authorName: 'x', now: T })
+    if (F.logsView(RF.adapterRecord(a)).visit.length !== 0 || F.logsView(RF.adapterRecord(b)).visit.length !== 1) throw new Error('7.7#14 isolation')
+  }
+  // #15 v2 권리: macro_until 지난 고객 기록 → 매크로 없음. legacy_room_until 0 → visitRoom null
+  {
+    const key = parseRoomKey('0\u0001공지').key
+    const rec2 = {
+      features: { v: 2, macro_until: Date.now() - 1000, legacy_room_until: 0 },
+      config: {
+        accounts: [],
+        macro: { enabled: true, message: '안녕', rooms: [key], baseMin: 1, minMessages: 0 },
+        triggers: [{ id: 't1', enabled: true, pattern: '가격', mode: 'contains', reply: '안내', rooms: [] }],
+        visit: { enabled: true, rooms: [key] },
+      },
+      rooms: [{ key, chat_id: '12345', name: '공지', kind: 'group' }],
+      runtime: {},
+    }
+    if (onInbound(rec2, { chatId: '12345', text: '가격', authorName: '김', mine: false }).length !== 0) throw new Error('7.7#15 expired macro')
+    if (macroRoomsDue(rec2, Date.now()).length !== 0) throw new Error('7.7#15 expired macro loop')
+    if (F.visitNeedsProfile(rec2, '12345')) throw new Error('7.7#15 legacy room features off')
+    rec2.features.macro_until = Date.now() + 60000
+    rec2.features.legacy_room_until = Date.now() + 60000
+    if (onInbound(rec2, { chatId: '12345', text: '가격', authorName: '김', mine: false }).length !== 1) throw new Error('7.7#15 live macro')
+    if (!F.visitNeedsProfile(rec2, '12345')) throw new Error('7.7#15 legacy grace')
+  }
+
+  // ── 16~24: 가짜 연결(9.4) + 메모리 저장소 ────────────────────────────────
+  const prevSecret = process.env.CONFIG_SECRET
+  const prevJoin = process.env.FAKE_JOIN_MS
+  process.env.CONFIG_SECRET = 'selfcheck-secret-0123456789abcdef'
+  process.env.FAKE_JOIN_MS = '0'
+  const passbox2 = await import('./secretbox.mjs')
+  const fs = FK.resetFakeServer()
+  const store = new FK.MemStore()
+  const pool = new BotPool({
+    store,
+    newClient: () => new FK.FakeKakaoClient(fs),
+    opts: {
+      joinGapMs: 0, permPollMs: 150, activeCheckMs: 600000, pushDelayMs: 120, tickMs: 30, hideGapMs: 0,
+      rateWaits: [60000, 120000, 240000], ipWaits: [300000, 600000, 900000], reconnectGapMs: 5, transientWaitMs: 60000,
+    },
+  })
+  async function addBot(n) {
+    const id = 'bot.' + String(n).padStart(16, '0')
+    const uid = FK.fakeUserId(id)
+    fs.user(uid).bot = true
+    await pool.attach(id, { device_id: id, credentials: { access_token: 'fake-' + n, user_id: uid, device_uuid: 'fake-du-' + n, device_type: 'tablet' }, features: { v: 2, bot: true }, config: {}, rooms: [], runtime: {} })
+    return { id, uid, slot: pool.slotOf(id) }
+  }
+  const botA = await addBot(1)
+  const botB = await addBot(2)
+  if (!botA.slot.live() || botA.slot.nickname !== FK.fakeNick(botA.uid)) throw new Error('fake bot connected with its own nickname')
+  const url = (code) => 'https://open.kakao.com/o/' + code
+  const rowOf = (id) => store.installs.get(id)
+  function install(code, over) {
+    return store.addInstall(Object.assign({ link_url: url(code), bot_device_id: botA.id, roombot: true, minigame: false, state: 'queued' }, over || {})).id
+  }
+  const sentIn = (id) => fs.sentIn(rowOf(id).chat_id).map((x) => x.text)
+  const packets = (method, filter) => fs.packets.filter((p) => p.method === method && (!filter || filter(p)))
+
+  // #16 입장 오류 매핑(실제 sendPacket 경로)
+  const iGone = install('gonex1')
+  const iRate = install('ratex1')
+  const iBan = install('banx1')
+  fs.room('banx1').bans.push(botA.uid)
+  const iAnon = install('noanonx1')
+  const iPassWrong = install('passx1', { passcode_ct: passbox2.seal('1234') })
+  const iPassNone = install('passx2')
+  const iPassOk = install('passx3', { passcode_ct: passbox2.seal('0000'), roombot: false, minigame: true })
+  const iDm = install('dmx1')
+  await pool.reconcile(null)
+  await waitFor(() => [iGone, iBan, iAnon, iPassWrong, iPassNone, iDm].every((id) => rowOf(id).state === 'error') && rowOf(iPassOk).state === 'active' && rowOf(iRate).error_detail === 'rate_limited', 8000, '7.7#16 joins')
+  const codeOf = (id) => rowOf(id).error_code
+  if (codeOf(iGone) !== 'link_gone') throw new Error('7.7#16 -324 → link_gone, got ' + codeOf(iGone))
+  if (rowOf(iRate).state !== 'joining' || rowOf(iRate).error_detail !== 'rate_limited' || !(rowOf(iRate).next_try_at > Date.now() + 50000)) throw new Error('7.7#16 -312 → joining + rate_limited')
+  if (codeOf(iBan) !== 'kicked') throw new Error('7.7#16 -815 → kicked')
+  if (codeOf(iAnon) !== 'profile_blocked') throw new Error('7.7#16 ptp 2 failure → profile_blocked, got ' + codeOf(iAnon))
+  if (!packets('JOINLINK', (p) => p.ptp === 2).length) throw new Error('7.7#16 noprof room joins with ptp 2')
+  if (codeOf(iPassWrong) !== 'passcode_wrong') throw new Error('7.7#16 passcode failure → passcode_wrong')
+  if (codeOf(iPassNone) !== 'passcode_needed') throw new Error('7.7#16 passcode_needed')
+  if (codeOf(iDm) !== 'not_group') throw new Error('7.7#16 lt 1 → not_group')
+  if (!rowOf(iPassOk).link_id || rowOf(iPassOk).link_name !== '테스트방 passx3') throw new Error('7.7#16 join stores link_id and name')
+  // -444: 행은 rate_limited + 전역 join_paused_until, 봇은 bot_down 아님
+  const iIp = install('ipblockx1')
+  const iAfterIp = install('normalafterip')
+  await pool.reconcile(null)
+  await waitFor(() => rowOf(iIp).error_detail === 'rate_limited', 5000, '7.7#16 -444')
+  if (!(pool.joinPausedUntil > Date.now() + 200000) || botA.slot.dead || store.bots.get(botA.id).state !== 'connected') throw new Error('7.7#16 -444 pauses all joins, bot stays up')
+  await sleep(100)
+  if (rowOf(iAfterIp).error_detail !== 'rate_limited' || Number(rowOf(iAfterIp).next_try_at) !== pool.joinPausedUntil) throw new Error('7.7#16 global pause holds other joins')
+  if (pool.botStatus().join_paused_until !== pool.joinPausedUntil) throw new Error('7.7#16 status shows the pause')
+  pool.joinPausedUntil = 0
+  store.installs.get(iAfterIp).next_try_at = null
+  store.installs.get(iAfterIp).state = 'queued'
+  await pool.reconcile(null)
+  await waitFor(() => rowOf(iAfterIp).state === 'waiting_host', 5000, 'join after pause')
+
+  // #18 기본 설정: 미니게임만 있는 설치 → 가짜 입장 직후 !도움 → 게임 목록 답 1개
+  {
+    const iMini = install('minix1', { roombot: false, minigame: true, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iMini).state === 'active', 5000, '7.7#18 mini join')
+    const chat = rowOf(iMini).chat_id
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '501', name: '손님', text: '!도움' })
+    await waitFor(() => sentIn(iMini).length >= 2, 5000, '7.7#18 reply')
+    const sent = sentIn(iMini)
+    if (sent[0].indexOf('미니게임봇이 입장했습니다') < 0) throw new Error('7.7#18 join notice first')
+    if (sent.filter((t) => t.startsWith('!끝말잇기')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
+    // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
+    const before = packets('REWRITE').length
+    fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '502', name: '새손님', text: 'https://spam.example.com' })
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '503', name: '방장', text: '!가리기 5' })
+    await sleep(1100)
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '501', name: '손님', text: '!주사위' })
+    await waitFor(() => sentIn(iMini).some((t) => t.indexOf('면 주사위 결과') >= 0), 5000, '7.7#13 dice in minigame-only room')
+    if (packets('REWRITE').length !== before) throw new Error('7.7#13 minigame-only room does not hide')
+    if (sentIn(iMini).some((t) => t.indexOf('[입장안내]') >= 0 || t.indexOf('[홍보 금지]') >= 0 || t.indexOf('[가리기]') >= 0)) throw new Error('7.7#13 minigame-only room is quiet')
+    // #17 미니게임만 산 방(perm 4, active)에서 hide·unkick·people → no_roombot
+    fs.setPerm(chat, botA.uid, 4)
+    await sleep(200)
+    for (const r of [await pool.hide(iMini, { last: 3 }), await pool.unkick(iMini, '502'), await pool.people(iMini)]) {
+      if (r.ok || r.error !== 'no_roombot') throw new Error('7.7#17 no_roombot ' + JSON.stringify(r))
+    }
+  }
+
+  // #19 권한 읽기·#20 푸시
+  {
+    const iP = iAfterIp
+    const chat = rowOf(iP).chat_id
+    const v = botA.slot.byInstall.get(iP)
+    // #17 방 관리봇 방이 waiting_host 면 not_active
+    if ((await pool.hide(iP, { last: 3 })).error !== 'not_active' || (await pool.people(iP)).error !== 'not_active') throw new Error('7.7#17 not_active')
+    // #20 SYNCMEMT·피드 11 → 3초(시험 120ms) 뒤 권한 읽기 1회
+    const before = packets('CHATONROOM', (p) => p.chat === chat).length
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iP).state === 'active', 3000, '7.7#20 promotion')
+    await sleep(100)
+    const reads = packets('CHATONROOM', (p) => p.chat === chat).length - before
+    if (reads !== 1) throw new Error('7.7#20 one perm read after the push, got ' + reads)
+    await waitFor(() => sentIn(iP).some((t) => t.indexOf('부방장 지정을 확인했습니다') >= 0), 3000, 'promotion notice')
+    if (!store.logs.some((l) => l.install_id === iP && l.kind === 'perm' && l.detail.granted === true)) throw new Error('7.7#20 perm log')
+    // #19 olu 없음 + MEMBER mt 2 → waiting_host
+    fs.room(fs.byChat(chat).code).dropOlu = true
+    fs.byChat(chat).members[botA.uid].mt = 2
+    v.nextCheckAt = Date.now()
+    await waitFor(() => rowOf(iP).state === 'waiting_host', 3000, '7.7#19 MEMBER fallback')
+    if (!store.logs.some((l) => l.install_id === iP && l.kind === 'perm' && l.detail.granted === false)) throw new Error('7.7#19 demotion log')
+    // 둘 다 없음 → 상태 유지
+    fs.byChat(chat).dropMember = true
+    fs.byChat(chat).members[botA.uid].mt = 4
+    const permAt = rowOf(iP).perm_at
+    v.nextCheckAt = Date.now()
+    await sleep(300)
+    if (rowOf(iP).state !== 'waiting_host' || rowOf(iP).perm_at !== permAt) throw new Error('7.7#19 no answer keeps the state')
+    fs.byChat(chat).dropMember = false
+    fs.byChat(chat).dropOlu = false
+    v.nextCheckAt = Date.now()
+    await waitFor(() => rowOf(iP).state === 'active', 3000, '7.7#19 olu.lmt 4 → active')
+    // #17 unkick 대상이 bans·kick 기록에 없으면 not_kicked
+    if ((await pool.unkick(iP, '999')).error !== 'not_kicked') throw new Error('7.7#17 not_kicked')
+    // #24 방 A 강퇴 11번째(1시간 안) → skip
+    for (let i = 0; i < 10; i++) {
+      const r = await botA.slot.kick(v, String(7000 + i), 'k' + i, 'manual')
+      if (!r.ok) throw new Error('7.7#24 kick ' + i + ' ' + JSON.stringify(r))
+    }
+    const eleventh = await botA.slot.kick(v, '7010', 'k10', 'manual')
+    if (eleventh.ok || !eleventh.skipped || !store.logs.some((l) => l.install_id === iP && l.kind === 'skip' && l.detail.what === 'kick')) throw new Error('7.7#24 kick room limit')
+    // unkick: K bot 이 내보낸 사람만, KLDELITEM
+    const un = await pool.unkick(iP, '7003')
+    if (!un.ok || !packets('KLDELITEM').length || fs.byChat(chat).kicked.includes('7003')) throw new Error('7.7#17 unkick')
+    // LINKKICKED → error/kicked(배타권 해제)
+    fs.event(chat, botA.uid, { kind: 'kicked' })
+    await waitFor(() => rowOf(iP).state === 'error', 3000, '7.7#20 LINKKICKED')
+    if (rowOf(iP).error_code !== 'kicked') throw new Error('7.7#20 kicked')
+    if (!packets('KICKLEAVE').length) throw new Error('7.7#20 KICKLEAVE')
+    // LNKDELETED → error/room_deleted
+    const iDel = install('delx1', { roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iDel).state === 'active', 3000, 'del join')
+    fs.event(rowOf(iDel).chat_id, botA.uid, { kind: 'deleted' })
+    await waitFor(() => rowOf(iDel).error_code === 'room_deleted', 3000, '7.7#20 LNKDELETED')
+    // INFOLINK 에 링크가 없으면(푸시를 놓친 경우) 두 번 연속일 때 room_deleted(5.4)
+    const iDel2 = install('delx2', { roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iDel2).state === 'active', 3000, 'del2 join')
+    fs.room('delx2').deleted = true
+    const v2 = botA.slot.byInstall.get(iDel2)
+    v2.checkFull = true
+    v2.nextCheckAt = Date.now()
+    await waitFor(() => v2.linkMiss === 1, 3000, 'first INFOLINK miss')
+    if (rowOf(iDel2).state !== 'active') throw new Error('5.4 one INFOLINK miss does not leave the room')
+    v2.nextCheckAt = Date.now()
+    await waitFor(() => rowOf(iDel2).error_code === 'room_deleted', 3000, '5.4 INFOLINK twice → room_deleted')
+  }
+
+  // #21 나가기 대기열
+  {
+    const r1 = fs.room('leavex1')
+    r1.members[botA.uid] = { mt: 2, nick: 'a' }
+    r1.members[botB.uid] = { mt: 2, nick: 'b' }
+    const iMoved = install('leavex1', { bot_device_id: 'bot.ffffffffffffffff', state: 'active', link_id: r1.li, chat_id: r1.chatId })
+    store.leaves.push({ id: 1, install_id: iMoved, bot_device_id: botA.id, chat_id: r1.chatId, link_id: r1.li, why: 'move', created_at: Date.now(), done_at: null, result: null })
+    store.leaves.push({ id: 2, install_id: iMoved, bot_device_id: botB.id, chat_id: null, link_id: r1.li, why: 'move', created_at: Date.now(), done_at: null, result: null })
+    // 지금 봇이 같은 link_id 를 맡고 있으면 kept
+    const r2 = fs.room('keepx1')
+    r2.members[botA.uid] = { mt: 2, nick: 'a' }
+    install('keepx1', { state: 'active', link_id: r2.li, chat_id: r2.chatId, roombot: false, minigame: true })
+    store.leaves.push({ id: 3, install_id: 999, bot_device_id: botA.id, chat_id: r2.chatId, link_id: r2.li, why: 'rebind', created_at: Date.now(), done_at: null, result: null })
+    // 나가기가 입장보다 먼저
+    const iNew = install('orderx1', { roombot: false, minigame: true })
+    const mark = fs.packets.length
+    await pool.reconcile(null)
+    await waitFor(() => store.leaves.every((l) => l.done_at) && rowOf(iNew).state === 'active', 5000, '7.7#21 leaves')
+    const L1 = store.leaves.find((l) => l.id === 1)
+    const L2 = store.leaves.find((l) => l.id === 2)
+    const L3 = store.leaves.find((l) => l.id === 3)
+    if (L1.result !== 'left' || L2.result !== 'left' || r1.members[botA.uid] || r1.members[botB.uid]) throw new Error('7.7#21 both old bots left')
+    if (L3.result !== 'kept' || !r2.members[botA.uid]) throw new Error('7.7#21 kept')
+    const seq = fs.packets.slice(mark).filter((p) => p.user === botA.uid && (p.method === 'LEAVE' || p.method === 'JOININFO')).map((p) => p.method)
+    if (seq[0] !== 'LEAVE' || seq.indexOf('JOININFO') < seq.lastIndexOf('LEAVE')) throw new Error('7.7#21 leave before join ' + seq.join(','))
+    if (packets('LEAVE', (p) => p.chat === r2.chatId).length) throw new Error('7.7#21 kept room is not left')
+  }
+
+  // #22 다시 접속 금지: JOINLINK 알 수 없는 status → close·새 로그인 없이 getChats 확인만. 이미 그 li 의 방이면 JOINLINK 없음
+  {
+    const loginsBefore = fs.logins[botA.uid]
+    const client = botA.slot.client
+    const iWeird = install('weirdx1', { roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iWeird).state === 'error', 5000, '7.7#22 weird')
+    if (rowOf(iWeird).error_code !== 'kakao_error' || rowOf(iWeird).error_detail !== '카카오 상태 -9999') throw new Error('7.7#22 unknown status → kakao_error')
+    if (fs.logins[botA.uid] !== loginsBefore || botA.slot.client !== client || client.closeCount) throw new Error('7.7#22 no reconnect after a join failure')
+    const rIn = fs.room('alreadyx1')
+    rIn.members[botA.uid] = { mt: 4, nick: 'a' }
+    const iIn = install('alreadyx1', { link_id: rIn.li })
+    const jl = packets('JOINLINK').length
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iIn).state === 'active', 5000, '7.7#22 already in room')
+    if (packets('JOINLINK').length !== jl || packets('JOININFO', (p) => false).length) throw new Error('7.7#22 no JOINLINK when already in the room')
+    // 응답 유실(lost): 다시 접속하지 않고 방 목록에서 찾아 성공 처리
+    const iLost = install('lostx1', { roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iLost).state === 'active', 5000, '7.7#22 lost response')
+    if (fs.logins[botA.uid] !== loginsBefore) throw new Error('7.7#22 lost response does not log in again')
+  }
+
+  // #23 예산: 시간 예산 20 을 다 쓰면 21번째 입장은 rate_limited + next_try_at = 예산 복귀 시각. 조회 예산이 없으면 budget
+  {
+    const s = botB.slot
+    const now = Date.now()
+    for (let i = 0; i < 20; i++) s.joinH.add(now - 1000 + i)
+    const iBudget = install('budgetx1', { bot_device_id: botB.id })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iBudget).error_detail === 'rate_limited', 5000, '7.7#23 budget')
+    if (Number(rowOf(iBudget).next_try_at) !== now - 1000 + 3600000) throw new Error('7.7#23 next_try_at = budget return ' + rowOf(iBudget).next_try_at)
+    if (packets('JOININFO', (p) => p.user === botB.uid).length) throw new Error('7.7#23 no packet without budget')
+    for (const b of [botA.slot, botB.slot]) for (let i = 0; i < 10; i++) b.resolveM.add(Date.now())
+    if ((await pool.resolve(url('anyx1'))).error !== 'budget') throw new Error('7.7#23 resolve budget')
+    botA.slot.resolveM.list = []
+    const ok = await pool.resolve(url('passx9'))
+    if (!ok.ok || !ok.needs_passcode || ok.profile_only || ok.name !== '테스트방 passx9' || !/^\d+$/.test(ok.link_id)) throw new Error('7.7#23 resolve ' + JSON.stringify(ok))
+    if ((await pool.resolve(url('gonex9'))).error !== 'not_found' || (await pool.resolve(url('dmx9'))).error !== 'not_group') throw new Error('7.7#23 resolve errors')
+  }
+
+  // #24 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다
+  {
+    const pc = new RF.Pacer()
+    let t = T
+    for (let i = 0; i < 100; i++) if (i < 30) pc.push('A', { text: 'a' + i }, t)
+    pc.push('B', { text: 'b' }, t)
+    const order = []
+    for (let i = 0; i < 7; i++) {
+      const n = pc.next(t)
+      if (n) order.push(n.key)
+      t += 100
+    }
+    if (order.indexOf('B') < 0 || order.indexOf('B') > 5) throw new Error('7.7#24 B goes out within A\'s first six ' + order.join(''))
+    if (order.filter((k) => k === 'A').length > 6) throw new Error('7.7#24 room A limit 6/min')
+    const full = new RF.Pacer()
+    for (let i = 0; i < 30; i++) full.push('A', { text: 'x' }, T)
+    if (full.push('A', { text: 'x' }, T) !== false) throw new Error('7.7#24 a full queue skips')
+  }
+
+  // #20 KICKOUT: 사유 -2 → markDead 없음(다시 붙음), 사유 0 → bot_down
+  {
+    const s = botB.slot
+    const iB = install('kickoutx1', { bot_device_id: botB.id, roombot: false, minigame: true })
+    s.joinH.list = []
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iB).state === 'active', 5000, 'kickout room join')
+    const logins = fs.logins[botB.uid]
+    fs.event(rowOf(iB).chat_id, botB.uid, { kind: 'kickout', reason: -2 })
+    await waitFor(() => fs.logins[botB.uid] > logins && s.live(), 25000, '7.7#20 reconnect after -2')
+    if (s.dead || rowOf(iB).state !== 'active') throw new Error('7.7#20 reason -2 is a reconnect')
+    fs.event(rowOf(iB).chat_id, botB.uid, { kind: 'kickout', reason: 0 })
+    await waitFor(() => s.dead, 3000, '7.7#20 reason 0')
+    if (rowOf(iB).error_code !== 'bot_down' || store.bots.get(botB.id).state !== 'needs_register') throw new Error('7.7#20 reason 0 → bot_down')
+  }
+
+  await pool.stop()
+  if (prevSecret === undefined) delete process.env.CONFIG_SECRET
+  else process.env.CONFIG_SECRET = prevSecret
+  if (prevJoin === undefined) delete process.env.FAKE_JOIN_MS
+  else process.env.FAKE_JOIN_MS = prevJoin
+}
 
 process.stdout.write('sender selfcheck ok\n')

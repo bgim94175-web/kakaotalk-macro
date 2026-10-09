@@ -345,6 +345,18 @@ function extractTitle(body) {
         }
     }`,
   )
+  // KICKOUT 본문의 reason 을 세션 이벤트에 싣는다(docs/ACCOUNTS_V1.md 5.2). runner·botpool 은 reason 이
+  // 0(LOGIN_ANOTHER)·1(ACCOUNT_DELETED)·없음일 때만 세션을 끝내고, -2(CHANGE_SERVER) 와 그 밖은 다시 붙는다.
+  // reason 이 숫자가 아니면 예전 문장을 그대로 둔다(없음 = 종료).
+  client = replaceOnce(
+    'kickout reason',
+    client,
+    `        if (packet.method === 'KICKOUT') {
+            this.emitSessionEvent({ type: 'kicked', reason: 'Session kicked — another device logged in' });`,
+    `        if (packet.method === 'KICKOUT') {
+            const kickReason = packet.body && typeof packet.body.reason === 'number' ? packet.body.reason : null;
+            this.emitSessionEvent({ type: 'kicked', reason: kickReason === null ? 'Session kicked — another device logged in' : kickReason, message: 'Session kicked' });`,
+  )
   writeFileSync(clientPath, client)
 }
 

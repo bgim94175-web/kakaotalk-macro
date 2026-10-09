@@ -1,7 +1,11 @@
+import { timingSafeEqual } from 'node:crypto'
+
 import express from 'express'
 
+import { fakeOn, fakeServer } from './fake.mjs'
 import { guardNotices, logsView } from './features.mjs'
 import { beginLogin, cancelLogin, confirmLogin } from './register.mjs'
+import { isBotId } from './roomfeat.mjs'
 import { Hub } from './runner.mjs'
 import { assertKey, loadRecord } from './store.mjs'
 
@@ -14,13 +18,33 @@ const app = express()
 app.disable('x-powered-by')
 app.use(express.json({ limit: '20mb' }))
 
+// 부모만 부른다(127.0.0.1, lib/sender-child.js call). 비교는 timingSafeEqual, 길이가 다르면 바로 거절(3.6·8.5).
+function tokenOk(got) {
+  const want = Buffer.from(senderToken(), 'utf8')
+  const have = Buffer.from(String(got || ''), 'utf8')
+  if (!want.length || have.length !== want.length) return false
+  return timingSafeEqual(have, want)
+}
+
 function auth(req, res, next) {
-  const got = req.get('x-sender-token') || ''
-  if (got !== senderToken()) {
+  if (!tokenOk(req.get('x-sender-token'))) {
     res.status(401).json({ ok: false, error: 'unauthorized' })
     return
   }
   next()
+}
+
+// 고객용 경로는 봇 기록(bot.)에 404 — 고객 방 노출 방지 이중 장치, 봇 기록의 features 를 덮지 않게(3.6)
+function botAbsent(res, id) {
+  if (!isBotId(id)) return false
+  res.status(404).json({ ok: false, error: 'not_found' })
+  return true
+}
+
+function installIdOf(raw) {
+  const s = raw == null ? '' : String(raw).trim()
+  if (!/^[1-9][0-9]{0,15}$/.test(s)) return null
+  return Number(s)
 }
 
 function deviceId(raw) {
@@ -70,6 +94,7 @@ app.post('/v1/session', async (req, res) => {
   if (hasPassword(req.body)) return res.status(400).json({ ok: false, error: 'password_not_stored' })
   const id = deviceId(req.body && req.body.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   try {
     const st = await hub.upsert(id, req.body || {})
     res.json({ ok: true, ...st })
@@ -82,6 +107,7 @@ app.post('/v1/config', async (req, res) => {
   if (hasPassword(req.body)) return res.status(400).json({ ok: false, error: 'password_not_stored' })
   const id = deviceId(req.body && req.body.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   try {
     const st = await hub.updateConfig(id, req.body || {})
     res.json({ ok: true, ...st })
@@ -105,6 +131,7 @@ function publicStatus(live, rec) {
 app.get('/v1/snapshot', async (req, res) => {
   const id = deviceId(req.query.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   const rec = await loadRecord(id)
   const live = hub.status(id)
   const st = publicStatus(live, rec)
@@ -123,6 +150,7 @@ app.get('/v1/snapshot', async (req, res) => {
 app.get('/v1/logs', async (req, res) => {
   const id = deviceId(req.query.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   try {
     const live = hub.accounts.get(id)
     const rec = live && live.record ? live.record : await loadRecord(id)
@@ -180,6 +208,7 @@ app.post('/v1/unlink', async (req, res) => {
 app.get('/v1/chats', async (req, res) => {
   const id = deviceId(req.query.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   try {
     const chats = await hub.chats(id)
     res.json({ ok: true, chats })
@@ -198,6 +227,7 @@ app.get('/v1/recent', async (req, res) => {
   if (!id || !/^[1-9][0-9]*$/.test(chatId)) {
     return res.status(400).json({ ok: false, error: 'bad_request' })
   }
+  if (botAbsent(res, id)) return
   try {
     const messages = await hub.recent(id, chatId)
     res.json({ ok: true, messages })
@@ -213,6 +243,7 @@ app.get('/v1/recent', async (req, res) => {
 app.get('/v1/inbox', async (req, res) => {
   const id = deviceId(req.query.device_id)
   if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  if (botAbsent(res, id)) return
   try {
     const chats = await hub.inbox(id)
     res.json({ ok: true, chats })
@@ -231,6 +262,7 @@ app.get('/v1/thread', async (req, res) => {
   if (!id || !/^[1-9][0-9]*$/.test(chatId)) {
     return res.status(400).json({ ok: false, error: 'bad_request' })
   }
+  if (botAbsent(res, id)) return
   try {
     const messages = await hub.thread(id, chatId)
     res.json({ ok: true, messages })
@@ -250,6 +282,7 @@ app.post('/v1/send', async (req, res) => {
   if (!id || !/^[1-9][0-9]*$/.test(chatId) || !text) {
     return res.status(400).json({ ok: false, error: 'bad_request' })
   }
+  if (botAbsent(res, id)) return
   try {
     const r = await hub.sendText(id, chatId, text)
     res.json({ ok: true, ...r })
@@ -265,6 +298,7 @@ app.post('/v1/send-images', async (req, res) => {
   if (!id || !/^[1-9][0-9]*$/.test(chatId) || images.length < 1 || images.length > 5) {
     return res.status(400).json({ ok: false, error: 'bad_request' })
   }
+  if (botAbsent(res, id)) return
   const bufs = []
   for (const item of images) {
     const b64 = typeof item === 'string' ? item : item && item.b64
@@ -282,6 +316,150 @@ app.post('/v1/send-images', async (req, res) => {
     res.status(e.status || 500).json({ ok: false, error: e.message || 'failed', needs_register: !!e.needs_register })
   }
 })
+
+// ── 권리(5.1·3.6) ──────────────────────────────────────────────────────────
+app.post('/v1/grants', async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const grants = b.grants && typeof b.grants === 'object' && !Array.isArray(b.grants) ? b.grants : null
+  if (!grants) return res.status(400).json({ ok: false, error: 'bad_request' })
+  try {
+    const out = await hub.applyGrants(grants, { full: b.full === true, asOf: Number(b.as_of) || 0 })
+    res.json({ ok: true, applied: out.applied, stopped: out.stopped })
+  } catch (e) {
+    process.stderr.write(`[sender] grants failed: ${e && e.message ? e.message : e}\n`)
+    res.status(500).json({ ok: false, error: 'failed' })
+  }
+})
+
+// ── K bot 계정(3.6) ────────────────────────────────────────────────────────
+function botRoute(fn) {
+  return async (req, res) => {
+    try {
+      const out = await fn(req, res)
+      if (out && !res.headersSent) res.json(out)
+    } catch (e) {
+      process.stderr.write(`[sender] ${req.method} ${req.path} failed: ${e && e.message ? e.message : e}\n`)
+      if (!res.headersSent) res.status(500).json({ ok: false, error: 'failed' })
+    }
+  }
+}
+
+function needInstall(res, raw) {
+  const id = installIdOf(raw)
+  if (!id) res.status(400).json({ ok: false, error: 'bad_install' })
+  return id
+}
+
+app.post('/v1/bot/resolve', botRoute(async (req, res) => {
+  const url = req.body && typeof req.body.url === 'string' ? req.body.url.trim() : ''
+  if (!/^https:\/\/open\.kakao\.com\/o\/[A-Za-z0-9]+$/.test(url)) {
+    res.status(400).json({ ok: false, error: 'bad_url' })
+    return null
+  }
+  return hub.pool.resolve(url)
+}))
+
+app.post('/v1/bot/sync', botRoute(async (req) => {
+  const raw = req.body && req.body.install_id
+  const id = raw == null || raw === '' ? null : installIdOf(raw)
+  await hub.pool.reconcile(id)
+  return { ok: true }
+}))
+
+app.get('/v1/bot/status', botRoute(async () => hub.pool.botStatus()))
+
+app.get('/v1/bot/room', botRoute(async (req, res) => {
+  const id = needInstall(res, req.query.install_id)
+  return id ? hub.pool.room(id) : null
+}))
+
+app.get('/v1/bot/logs', botRoute(async (req, res) => {
+  const id = needInstall(res, req.query.install_id)
+  return id ? hub.pool.logs(id) : null
+}))
+
+app.get('/v1/bot/people', botRoute(async (req, res) => {
+  const id = needInstall(res, req.query.install_id)
+  return id ? hub.pool.people(id) : null
+}))
+
+app.post('/v1/bot/hide', botRoute(async (req, res) => {
+  const id = needInstall(res, req.body && req.body.install_id)
+  return id ? hub.pool.hide(id, req.body) : null
+}))
+
+app.get('/v1/bot/hide', botRoute(async (req) => hub.pool.hideStatus(req.query.job, req.query.install_id)))
+
+app.post('/v1/bot/unkick', botRoute(async (req, res) => {
+  const id = needInstall(res, req.body && req.body.install_id)
+  return id ? hub.pool.unkick(id, req.body && req.body.user_id) : null
+}))
+
+app.post('/v1/bot/games-reset', botRoute(async (req, res) => {
+  const id = needInstall(res, req.body && req.body.install_id)
+  return id ? hub.pool.gamesReset(id) : null
+}))
+
+// ── 가짜 모드 전용(9.4). SENDER_FAKE=1 일 때만 등록한다(8.5) ───────────────────
+if (fakeOn()) {
+  process.stderr.write('[sender] SENDER_FAKE=1 — fake Kakao connection, never use in production\n')
+  async function fakeTarget(installId) {
+    const got = await hub.pool.viewOrRow(installId)
+    if (!got) return null
+    const botId = got.slot ? got.slot.id : (got.row && got.row.bot_device_id)
+    const slot = botId ? hub.pool.slotOf(botId) : null
+    const chatId = got.view.chat_id || (got.row && got.row.chat_id) || ''
+    return { chatId, botUser: slot ? slot.userId : '', slot }
+  }
+
+  app.post('/v1/fake/perm', botRoute(async (req, res) => {
+    const id = needInstall(res, req.body && req.body.install_id)
+    if (!id) return null
+    const t = await fakeTarget(id)
+    if (!t || !t.chatId || !t.botUser) return { ok: false, error: 'not_joined' }
+    return fakeServer().setPerm(t.chatId, t.botUser, Number(req.body.perm) || 0, !!req.body.drop_olu)
+  }))
+
+  app.post('/v1/fake/event', botRoute(async (req, res) => {
+    const b = req.body || {}
+    const id = needInstall(res, b.install_id)
+    if (!id) return null
+    const t = await fakeTarget(id)
+    if (!t || !t.botUser) return { ok: false, error: 'not_joined' }
+    if (!t.chatId && b.kind !== 'kickout') return { ok: false, error: 'not_joined' }
+    return fakeServer().event(t.chatId, t.botUser, b)
+  }))
+
+  // 시험 확인용: 그 방에 봇이 보낸 글, 최근 패킷
+  app.get('/v1/fake/sent', botRoute(async (req, res) => {
+    const id = needInstall(res, req.query.install_id)
+    if (!id) return null
+    const t = await fakeTarget(id)
+    return { ok: true, sent: t && t.chatId ? fakeServer().sentIn(t.chatId) : [] }
+  }))
+
+  app.get('/v1/fake/packets', botRoute(async () => ({ ok: true, packets: fakeServer().packets.slice(-500) })))
+
+  app.get('/v1/fake/room', botRoute(async (req, res) => {
+    const id = needInstall(res, req.query.install_id)
+    if (!id) return null
+    const t = await fakeTarget(id)
+    const r = t && t.chatId ? fakeServer().roomByChat(t.chatId) : null
+    return { ok: true, room: r ? { code: r.code, li: r.li, chat_id: r.chatId, members: r.members, kicked: r.kicked, bans: r.bans, hidden: r.hidden.length } : null }
+  }))
+}
+
+// 멈출 때 방별 실행 상태(room_state)를 한 번 더 저장한다(5.7)
+let closing = false
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    if (closing) return
+    closing = true
+    const t = setTimeout(() => process.exit(0), 3000)
+    if (t.unref) t.unref()
+    hub.pool.flush().catch(() => {}).finally(() => process.exit(0))
+  })
+}
 
 process.on('uncaughtException', (e) => {
   process.stderr.write(`[sender] uncaughtException ${e && e.stack ? e.stack : e}\n`)
