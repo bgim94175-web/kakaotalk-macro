@@ -160,6 +160,7 @@ function viewAccount(row, snap) {
     visit: cfg.presentVisit(config.visit),
     cover: cfg.presentCover(config.cover),
     profile: cfg.presentProfile(config.profile),
+    guard: cfg.presentGuard(config.guard),
     autoreply: cfg.presentReply(config.autoreply),
     triggers: cfg.presentTriggers(config.triggers),
     images: Array.isArray(snap.images) ? snap.images : [],
@@ -601,6 +602,36 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
     res.json({ ok: true, log_id: r.json.log_id || '' });
   } catch (e) {
     if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
+    throw e;
+  }
+}));
+
+// ── 기록 ──────────────────────────────────────────────────────────────────
+// 입장·퇴장 기록, 프로필 변경 기록, 올킥 방지 알림. 기능을 켠 방만 남는다.
+// sender 가 저장된 기록에서 바로 읽으므로 카카오 연결이 끊겨 있어도 보인다.
+function logList(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+router.get('/panel/api/logs', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  if (!sender.up()) return senderDown(res);
+  const deviceId = String(req.query.device_id || '');
+  if (!ownsDevice(s.key, deviceId)) return res.status(404).json({ ok: false, error: '없는 계정입니다.' });
+  try {
+    const r = await senderCall('GET', '/v1/logs?device_id=' + encodeURIComponent(deviceId), null, 20000);
+    if (r.status === 404) return res.json({ ok: true, visit: [], profile: [], guard: [] });
+    if (!r.json.ok) return res.status(502).json({ ok: false, error: '기록을 가져오지 못했습니다.' });
+    res.json({
+      ok: true,
+      visit: logList(r.json.visit),
+      profile: logList(r.json.profile),
+      guard: logList(r.json.guard),
+    });
+  } catch (e) {
+    if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
+    if (e && e.code === 'bad_response') return res.status(502).json({ ok: false, error: '기록을 가져오지 못했습니다.' });
     throw e;
   }
 }));

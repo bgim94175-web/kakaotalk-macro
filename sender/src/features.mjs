@@ -1252,19 +1252,62 @@ function coverRoom(record, ev) {
   return { chatId: String(room.chat_id), logId, type }
 }
 
+// 고객이 넣은 금지어. 띄어쓰기·기호·대소문자 우회는 늘 잡는다(가벼운 접기).
+// 욕설용 접기(foldSwear)는 반복 글자를 줄이고 글자 사이 '이'를 빼므로, 단어가 그 접기로 모양이
+// 바뀌지 않을 때만 쓴다. 그래야 '토토'가 '토'로 줄어 '토요일'을 가리거나, '이벤트'가 '무료이벤트'에서
+// 빠지는 일이 없다.
+function lightFold(text) {
+  return String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+function coverWords(cfg) {
+  const list = cfg && Array.isArray(cfg.words) ? cfg.words : []
+  const out = []
+  for (const w of list) {
+    if (typeof w !== 'string' && typeof w !== 'number') continue
+    const light = lightFold(w)
+    if (!light) continue
+    const folded = foldSwear(w)
+    out.push({ light, folded: folded === light ? folded : '' })
+  }
+  return out
+}
+
+function coverCfg(record) {
+  return (record && record.config && record.config.cover) || null
+}
+
+/** True when the message has one of the customer's own banned words. */
+export function hasCoverWord(cfg, text) {
+  const words = coverWords(cfg)
+  if (!words.length) return false
+  const light = lightFold(text)
+  if (!light) return false
+  const folded = foldSwear(text)
+  return words.some((w) => light.includes(w.light) || (!!w.folded && folded.includes(w.folded)))
+}
+
+function coverLinksOn(cfg) {
+  return !!cfg && cfg.links !== false
+}
+
 /** True when a link cover still needs the author's open-chat permission. */
 export function coverNeedsAuthor(record, ev) {
   if (!coverRoom(record, ev)) return false
-  if (isProfanity(ev.text)) return false
+  const cfg = coverCfg(record)
+  if (!coverLinksOn(cfg)) return false
+  if (isProfanity(ev.text) || hasCoverWord(cfg, ev.text)) return false
   return hasCoverLink(ev.text)
 }
 
-/** A staff cover for one profane or linked open-chat message. Null when this message stays. */
+/** A staff cover for one profane, banned-word or linked open-chat message. Null when this message stays. */
 export function coverPlan(record, ev) {
   const plan = coverRoom(record, ev)
   if (!plan) return null
+  const cfg = coverCfg(record)
   if (isProfanity(ev.text)) return plan
-  if (hasCoverLink(ev.text) && ev.staff === false) return plan
+  if (hasCoverWord(cfg, ev.text)) return plan
+  if (coverLinksOn(cfg) && hasCoverLink(ev.text) && ev.staff === false) return plan
   return null
 }
 
@@ -1867,6 +1910,171 @@ export function guardFinishHalt(record, chatId, allowed, now, roomName, count) {
     : `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈출 권한이 없습니다.`
   pushNotice(g, now, text)
   return text
+}
+
+// ── 기록 화면 (관리 화면의 입장·퇴장 / 프로필 / 올킥 방지 기록) ─────────────
+// 저장된 record 를 읽기만 한다. runtime 을 고치지 않는다.
+const LOG_MAX = 300
+
+function logTimes(list) {
+  const out = []
+  const seen = new Set()
+  for (const t of Array.isArray(list) ? list : []) {
+    const n = Number(t)
+    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  return out.sort((a, b) => a - b)
+}
+
+function logChanges(list, withLink) {
+  const out = []
+  const seen = new Set()
+  for (const c of Array.isArray(list) ? list : []) {
+    if (!c || typeof c !== 'object') continue
+    const at = Number(c.at)
+    if (!Number.isFinite(at) || at <= 0) continue
+    const name = String(c.name || '')
+    const link = String(c.link || '')
+    const sig = at + SEP + name + SEP + (withLink ? link : '')
+    if (seen.has(sig)) continue
+    seen.add(sig)
+    out.push(withLink ? { at, name, link } : { at, name })
+  }
+  return out.sort((a, b) => a.at - b.at)
+}
+
+function logRoomName(record, chatId) {
+  const rooms = record && Array.isArray(record.rooms) ? record.rooms : []
+  const room = roomByChat(rooms, chatId)
+  if (!room) return ''
+  const name = room.name || room.title || parseRoomKey(room.key).name
+  return name == null ? '' : String(name).trim()
+}
+
+function logChatOf(key) {
+  const s = String(key || '')
+  const i = s.indexOf(SEP)
+  const chatId = i < 0 ? '' : s.slice(0, i)
+  return realId(chatId) ? chatId : ''
+}
+
+function logLatest(row) {
+  let t = 0
+  for (const n of row.joins) t = Math.max(t, n)
+  for (const n of row.leaves) t = Math.max(t, n)
+  for (const c of row.changes) t = Math.max(t, c.at)
+  return t
+}
+
+function visitLogRows(record) {
+  const v = record && record.runtime && record.runtime.visit
+  const people = v && v.people && typeof v.people === 'object' && !Array.isArray(v.people) ? v.people : {}
+  // rememberPerson 은 한 사람을 chat|id 와 chat|n:이름 두 키에 같이 둔다.
+  // 같은 방에서 아이디가 같으면 한 사람, 아이디가 없으면 이름이 같은 사람과 합친다.
+  const groups = new Map()
+  const nameOnly = []
+  for (const key of Object.keys(people)) {
+    const row = people[key]
+    if (!row || typeof row !== 'object') continue
+    const chatId = logChatOf(key)
+    if (!chatId) continue
+    const userId = /^[1-9][0-9]*$/.test(String(row.userId || '')) ? String(row.userId) : ''
+    const part = {
+      name: String(row.name || '').trim(),
+      link: String(row.link || ''),
+      joins: logTimes(row.joins),
+      leaves: logTimes(row.leaves),
+      changes: logChanges(row.changes, true),
+    }
+    part.touch = logLatest(part)
+    if (!userId) {
+      nameOnly.push({ chatId, part })
+      continue
+    }
+    const gk = chatId + SEP + userId
+    if (!groups.has(gk)) groups.set(gk, { chatId, userId, parts: [] })
+    groups.get(gk).parts.push(part)
+  }
+  for (const { chatId, part } of nameOnly) {
+    let home = null
+    for (const g of groups.values()) {
+      if (g.chatId !== chatId) continue
+      if (g.parts.some((p) => p.name && p.name === part.name)) {
+        home = g
+        break
+      }
+    }
+    if (!home) {
+      const gk = chatId + SEP + 'n:' + part.name
+      if (!groups.has(gk)) groups.set(gk, { chatId, userId: '', parts: [] })
+      home = groups.get(gk)
+    }
+    home.parts.push(part)
+  }
+  const out = []
+  for (const g of groups.values()) {
+    const parts = g.parts.slice().sort((a, b) => b.touch - a.touch)
+    const latest = parts[0]
+    const name = latest.name || (parts.find((p) => p.name) || {}).name || ''
+    const link = latest.link || (parts.find((p) => p.link) || {}).link || ''
+    const row = {
+      chat_id: g.chatId,
+      room: logRoomName(record, g.chatId),
+      name,
+      user_id: g.userId,
+      link,
+      joins: logTimes(parts.flatMap((p) => p.joins)),
+      leaves: logTimes(parts.flatMap((p) => p.leaves)),
+      changes: logChanges(parts.flatMap((p) => p.changes), true),
+    }
+    if (!row.name && !row.user_id) continue
+    out.push(row)
+  }
+  out.sort((a, b) => logLatest(b) - logLatest(a))
+  return out.slice(0, LOG_MAX)
+}
+
+function profileLogRows(record) {
+  const p = record && record.runtime && record.runtime.profile
+  const people = p && p.people && typeof p.people === 'object' && !Array.isArray(p.people) ? p.people : {}
+  const out = []
+  for (const key of Object.keys(people)) {
+    const row = people[key]
+    if (!row || typeof row !== 'object') continue
+    const chatId = logChatOf(key)
+    if (!chatId) continue
+    const changes = logChanges(row.changes, false)
+    if (!changes.length) continue
+    const userId = /^[1-9][0-9]*$/.test(String(row.userId || '')) ? String(row.userId) : ''
+    out.push({
+      chat_id: chatId,
+      room: logRoomName(record, chatId),
+      name: String(row.name || '').trim(),
+      user_id: userId,
+      at: Number(row.at) || changes[changes.length - 1].at,
+      changes,
+    })
+  }
+  const lastChange = (r) => r.changes[r.changes.length - 1].at
+  out.sort((a, b) => lastChange(b) - lastChange(a))
+  return out.slice(0, LOG_MAX)
+}
+
+/**
+ * What the panel's log page shows, read from a stored record.
+ * visit: join/leave rows, one per person per room, newest activity first.
+ * profile: rename rows with at least one change, newest change first.
+ * guard: anti-mass-kick notices, newest first.
+ * Times inside a row (joins, leaves, changes) stay oldest first.
+ */
+export function logsView(record) {
+  return {
+    visit: visitLogRows(record),
+    profile: profileLogRows(record),
+    guard: guardNotices(record).slice().reverse(),
+  }
 }
 
 /** Owner or manager of an open chat. This account never sends a kick. */

@@ -1,6 +1,6 @@
 import express from 'express'
 
-import { guardNotices } from './features.mjs'
+import { guardNotices, logsView } from './features.mjs'
 import { beginLogin, cancelLogin, confirmLogin } from './register.mjs'
 import { Hub } from './runner.mjs'
 import { assertKey, loadRecord } from './store.mjs'
@@ -116,6 +116,21 @@ app.get('/v1/snapshot', async (req, res) => {
     features: rec && rec.features ? rec.features : {},
     images: rec && Array.isArray(rec.images) ? rec.images : [],
   })
+})
+
+// 관리 화면의 기록 화면. 저장된 기록에서 읽으므로 카카오에 연결되지 않아도 된다.
+// 붙어 있는 계정은 메모리의 record 가 가장 새것이라 그것을 먼저 쓴다.
+app.get('/v1/logs', async (req, res) => {
+  const id = deviceId(req.query.device_id)
+  if (!id) return res.status(400).json({ ok: false, error: 'bad_device' })
+  try {
+    const live = hub.accounts.get(id)
+    const rec = live && live.record ? live.record : await loadRecord(id)
+    if (!rec) return res.status(404).json({ ok: false, error: 'absent' })
+    res.json({ ok: true, ...logsView(rec) })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : 'failed' })
+  }
 })
 
 app.post('/v1/register/begin', async (req, res) => {
