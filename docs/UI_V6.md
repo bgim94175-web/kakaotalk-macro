@@ -1001,3 +1001,342 @@ for (const [i, ev] of events.entries()) {
 - 관리자 API의 헤더 인증은 그대로라 배포 직후에도 스크립트가 동작한다.
 
 ---
+
+## 4. 웹 관리자 `/admin`
+
+관리자 앱(`android/admin`)의 키·주문·입금·기록·설정 탭과 통계를 웹 한 페이지로 옮긴다. 디자인은 V5 콘솔 셸(사이드바·상단 바·`.sec`·`.srow`·`.tbl`·토스트)과 같은 언어다. 파일: `public/admin.html` `public/admin.css` `public/admin.js`(C 담당). 서버 쪽 경로·인증은 A 담당.
+
+### 4.1 주소와 서버 연결 (A)
+
+- 페이지: `GET /admin`(그리고 `/admin/`, `/admin.html`) → `public/admin.html`. 자산: `/admin.css?v=1`, `/admin.js?v=1`(정적 파일, `no-cache`).
+- `server.js`에서 **정적 파일 미들웨어보다 앞에** 등록한다(정적 파일이 CSP 없이 `admin.html`을 내보내지 않게):
+
+```js
+const ADMIN_CSP = "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; " +
+  "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+function adminPage(req, res, next) {
+  const f = path.join(PUBLIC_DIR, 'admin.html');
+  if (!fs.existsSync(f)) return next();
+  res.set({ 'Cache-Control': 'no-store', 'Content-Security-Policy': ADMIN_CSP, 'X-Frame-Options': 'DENY',
+            'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+  res.sendFile(f);
+}
+app.get(['/admin', '/admin.html'], adminPage);   // express.static 보다 위
+```
+
+- 라우터 순서상 `GET /admin`은 `routes/admin.js`의 `router.use('/admin', guard)`에 닿지 않는다(페이지 경로가 먼저 응답). API는 지금처럼 `/admin/*`.
+- 레이트리밋(`lib/ratelimit.js kindOf`): `GET /admin`(정규화 뒤 정확히)은 `page` 종류(분당 120, 관리자 IP 차단 검사 없음). `/admin.html`은 대상 아님. `/admin/*`은 지금처럼 `admin`.
+- CSP 때문에 C가 지킬 것: 인라인 `<script>` 없음, `style="…"` 속성 없음(스프라이트 `svg`는 `class="sprite"`로 숨김), `on…=` 속성 없음. JS에서 `el.style.transform = …` 같은 CSSOM 설정은 허용된다. 외부 리소스는 Google Fonts CSS 하나.
+
+### 4.2 브라우저 인증 (A + C)
+
+**쿠키 세션** — 새 `lib/admin-session.js`(A):
+
+| 항목 | 값 |
+|---|---|
+| 쿠키 | `kadm` · `Path=/admin` · `HttpOnly` · `SameSite=Strict` · https면 `Secure` · `Max-Age` = 남은 시간 |
+| 토큰 | `base64url(JSON {v:1, iat, exp, n})` + `.` + `base64url(HMAC-SHA256(secret, body))`, `n` = 무작위 8바이트 hex |
+| 비밀값 | `sha256('kbot-admin-session-v1\n' + ADMIN_PASSWORD + '\n' + (ADMIN_SESSION_SECRET || ''))`. 비밀번호를 바꾸면 모든 세션이 끊긴다. 콘솔 쿠키(`CONFIG_SECRET`, `Path=/panel`)와 다른 키·다른 경로 |
+| 유효 시간 | 12시간. 남은 시간이 절반 아래면 요청 때 새로 발급(같은 `iat`). 로그인 뒤 72시간이 지나면 다시 로그인 |
+| 검증 | `timingSafeEqual`, `exp > now`, `now − iat < 72h` |
+
+**새 경로**(`routes/admin.js`에서 `router.use('/admin', guard)`보다 **위에** 등록):
+
+```
+POST /admin/login  { password }
+  비밀번호 미설정·기본값 → 503 (guard 와 같은 본문)
+  IP 차단 중 → 429 { ok:false, error:'too_many_attempts', detail:'비밀번호 입력 실패 횟수를 초과했습니다. N분 후 다시 시도하십시오' } + Retry-After
+  틀림 → rl.noteAdminFail + audit bad_admin_pw('관리자 비밀번호 틀림 POST /admin/login / 연속 N회[→ M분 차단]')
+         → 차단에 걸리면 429(위와 같음), 아니면 401 { ok:false, error:'unauthorized', detail:'비밀번호가 일치하지 않습니다.' }
+  맞음 → rl.clearAdminFails + 쿠키 발급 + audit admin_login('웹 관리자 로그인') → { ok:true, exp }
+POST /admin/logout → 쿠키 삭제 → { ok:true }
+GET  /admin/session (guard 통과) → { ok:true, via:'cookie'|'header', exp|null }
+```
+
+**`guard` 변경**:
+1. 비밀번호 미설정 503, IP 차단 429 — 그대로.
+2. `x-admin-password` 헤더가 있으면 지금 경로 그대로(틀리면 실패 횟수·audit·401/429).
+3. 헤더가 없으면 쿠키: 없음·깨짐·만료 → 401 `{ ok:false, error:'unauthorized', reason:'session', detail:'다시 로그인하십시오.' }`(**실패 횟수를 세지 않는다** — 만료된 쿠키가 IP를 잠그지 않게. 쿠키는 HMAC이라 추측할 수 없다).
+4. 쿠키로 들어온 요청은 모두 헤더 `x-kbot-admin: 1`이 있어야 하고, `Origin` 헤더가 있으면 그 호스트가 `x-forwarded-host || host`와 같아야 한다. 아니면 403 `{ ok:false, error:'bad_origin', detail:'허용되지 않은 요청입니다.' }`. (교차 사이트 요청은 사용자 정의 헤더를 붙이려면 사전 요청이 필요하고, 서버는 CORS를 허용하지 않는다.)
+5. 통과하면 갱신 규칙대로 쿠키 재발급, 서버 로그 `[admin] METHOD PATH ip=… via=cookie|header`.
+
+**헤더 비밀번호를 남기는 이유(D13)**: `DEPLOY.md`의 `curl` 점검과 운영 스크립트가 쓰고, 헤더는 교차 사이트에서 붙일 수 없어 CSRF 걱정이 없으며, 같은 실패 차단을 받는다. 브라우저 코드(`admin.js`)는 이 헤더를 절대 쓰지 않고 비밀번호를 어디에도 저장하지 않는다(`localStorage`·`sessionStorage`·변수 보관 금지 — 로그인 요청 직후 입력칸을 비운다).
+
+**화면 흐름(C)**: 부팅 → `GET /admin/session` → 200이면 앱, 401이면 로그인, 503이면 사용 불가 화면, 429면 대기 화면. 모든 `fetch`는 `credentials: 'same-origin'`, 헤더 `x-kbot-admin: 1`, POST는 `content-type: application/json`. 작업 중 401이 오면 지금 화면을 그대로 둔 채 로그인 카드를 덮어 띄우고, 로그인하면 그 요청을 다시 보내지 않고 화면만 새로 읽는다.
+
+### 4.3 API 대응표
+
+모든 응답은 JSON. 업무 오류는 지금처럼 HTTP 200 `{ ok:false, error }`(스크립트 호환), 인증·과다 요청은 401/403/429/503 `{ error, detail }`. 화면은 `detail || error || '처리하지 못했습니다.'`를 보여 주고, 코드값(`unauthorized` `server_error` `bad_origin` `admin_disabled` `too_many_attempts`)이 그대로 오면 아래 문장으로 바꾼다: `다시 로그인하십시오.` / `서버 오류입니다. 잠시 뒤 다시 시도하십시오.` / `허용되지 않은 요청입니다.` / `서버에 관리자 비밀번호가 설정되지 않았습니다.` / `비밀번호 입력 실패 횟수를 초과했습니다.`
+
+| 화면 동작 | 경로 | 변경(A) |
+|---|---|---|
+| 로그인·로그아웃·세션 | `POST /admin/login` `POST /admin/logout` `GET /admin/session` | A1~A3 새 경로(4.2) |
+| 개요 지표, 사이드바 배지 | `GET /admin/stats` | A17 `sender_up` `sender_reason` `accounts_total`(panel_accounts 수) `alerts_24h`(24시간 안 `ALERT_KINDS` 기록 수) 추가 |
+| 주문 목록·검색·탭 | `GET /admin/orders?status=&q=&limit=&offset=` | A13 `q`(주문번호·구매자·입금자·연락처 부분 일치, 숫자면 금액 일치도), `offset`, 응답 `total`. `%` `_` 이스케이프 |
+| 주문 승인·복구 승인 | `POST /admin/order-approve {id, key?}` | 그대로. 이후 `sweep.key(key)` |
+| 주문 취소 | `POST /admin/order-cancel {id, memo?}` | A8 `auto_canceled = FALSE`로도 바꾼다(사람이 취소한 주문은 되살아나지 않게). 0행이면 `{ok:false, error:'이미 완료되었거나 없는 주문입니다.'}` |
+| 주문 메모 수정 | `POST /admin/order-memo {id, memo}` | A7 새. 메모를 바꿔 쓴다(500자, 빈 값은 NULL). audit `admin` `주문 메모 수정 {id}`. → `{ok, id, memo}` |
+| 입금 목록 | `GET /admin/deposits?status=&limit=` | 그대로(`hook_enabled` `auto_approve` `needs_attention` 포함) |
+| 입금 수동 매칭 | `POST /admin/deposit-match {deposit_id, order_id}` | A9 응답에 `issued` `amount_diff`(입금액 − 주문액, 입금액을 못 읽었으면 null). 이미 다른 주문에 매칭된 입금이면 `{ok:false, error:'이미 다른 주문에 매칭된 입금입니다: {주문}'}`. 이후 `sweep.key` |
+| 입금 무시 | `POST /admin/deposit-ignore {deposit_id}` | A11 audit `admin` `입금 무시 {id}`. 0행이면 `없는 입금 기록입니다.` |
+| 입금 무시 되돌리기 | `POST /admin/deposit-restore {deposit_id}` | A10 새. `ignored` → `unmatched`만. 아니면 `무시한 입금만 되돌릴 수 있습니다.` audit `admin` |
+| 키 목록·검색·필터 | `GET /admin/list?q=&status=&feature=&limit=&offset=` | A14 `status` ∈ `active`(회수·차단 아님 + 켜진 기능 있음) · `expiring`(active이고 가장 늦은 만료 ≤ 7일) · `expired`(시작된 기능만 있고 모두 끝남) · `unused`(모든 기능 미개시) · `stopped`(회수 또는 차단). `feature` = 그 기능 행이 있음. `q`의 `%` `_` 이스케이프. 행마다 `accounts_n`(카카오 계정 수) |
+| 키 상세 | `GET /admin/license?key=` | A5 `config` 삭제, `accounts: [{device_id, email, created_at, linked, needs_register, connected, reason}]`(sender가 켜져 있으면 `/v1/snapshot` 상태, 아니면 `reason:'sender_down'`), `sender: {up, reason}`, `legacy_app: {device_name, activated_at, reset_count} | null`(`device_id`가 있을 때만) |
+| 키 정보 수정 | `POST /admin/license-update {key, note?, owner_name?, owner_contact?}` | A6 새. 보낸 칸만 바꾼다. 앞뒤 공백 제거, 500/60/120자, 빈 값은 NULL. audit `admin` `키 정보 수정 (메모·소유자·연락처 중 바뀐 것)`. → `{ok, license}` |
+| 새 키 발급 | `POST /admin/create {features, plan, days?, count?, note?, owner_name?, owner_contact?}` | A12 audit `admin` `키 발급 {n}개 / 기능=… / 플랜=…` |
+| 기능 추가·연장 | `POST /admin/grant {key, features, plan, days?}` | A12 audit `admin`. 이후 `sweep.key`. 3.4 규칙으로 콘솔 키에도 바로 시작 |
+| 기능 하나 회수 | `POST /admin/revoke-feature {key, feature}` | A12 audit `admin` `기능 회수 {feature}`. 0행이면 `{ok:false, error:'그 기능이 없는 키입니다.'}`. 이후 `sweep.key` |
+| 키 회수·복구 | `POST /admin/revoke {key, revoked}` | 0행 오류 `등록되지 않은 키입니다`. 이후 `sweep.key` |
+| 키 차단·해제 | `POST /admin/block {key, reason|null}` | 같음 |
+| 키 영구 삭제 | `POST /admin/delete {key}` | A19 같은 트랜잭션에서 `panel_pending`·`panel_accounts`(그 키) 삭제. 커밋 뒤 sender가 켜져 있으면 지운 계정마다 `POST /v1/unlink`(실패는 로그만). audit 문구 `관리자 키 삭제 (카카오 계정 {n}개 해제)`. → `{ok, key, accounts_removed}` |
+| 기록 | `GET /admin/audit?key=&kind=&ip=&before_id=&limit=` | A15 `ip`(정확히), `before_id`(그 id보다 작은 것), 응답 `next_before_id`(가득 찼으면 마지막 행 id, 아니면 null) |
+| 설정 상태 | `GET /admin/settings` | A16 새 읽기 전용: `{ok, hook_enabled, auto_approve, bank, contact, pending_ttl_hours, sender:{up, reason}, limits: rl.limits(), admin_session_hours: 12, sweep_minutes}` |
+| — | `/admin/sigs` `/admin/sig-add` `/admin/sig-del` `/admin/reset-device` | A18 **삭제**(앱 전용) |
+
+A20: `sweep.key(key)`를 부르는 곳 = grant, revoke-feature, revoke, block, order-approve, deposit-match(응답을 기다리지 않음).
+
+### 4.4 DOM 계약 (C)
+
+**골격** `public/admin.html`:
+
+```html
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>관리자 · K bot</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- UI_V5 2.3 글꼴 링크 3줄 -->
+<link rel="stylesheet" href="/admin.css?v=1">
+</head>
+<body>
+<svg class="sprite" aria-hidden="true"><defs>…콘솔 스프라이트에서 필요한 symbol만…</defs></svg>
+<a class="skip" href="#view">본문으로 건너뛰기</a>
+
+<div id="gate" class="login" hidden>
+  <div class="login-card">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">K</span>K bot</span>
+    <div><h1>K bot 관리자</h1>
+      <p class="lead">서버 환경변수 ADMIN_PASSWORD 값으로 들어갑니다. 비밀번호는 이 브라우저에 저장하지 않습니다.</p></div>
+    <form id="login-form" novalidate>
+      <div class="fld"><label for="pw">관리자 비밀번호</label>
+        <input class="inp" id="pw" type="password" autocomplete="current-password" required>
+        <span class="errt" id="login-error" role="alert"></span></div>
+      <button type="submit" class="btn primary lg wide" id="loginBtn"><span class="spin"></span><span class="lbl-idle">들어가기</span></button>
+    </form>
+    <p class="hint" id="login-wait" hidden></p>
+    <div class="banner" id="login-disabled" role="alert" hidden></div>
+    <p class="login-foot">서버가 잠들어 있으면 첫 요청에 20초 이상 걸릴 수 있습니다.</p>
+  </div>
+</div>
+
+<div id="app" data-route="" hidden>
+  <aside class="side" id="side" aria-label="관리자 메뉴">
+    <div class="side-brand"><span class="brand-mark" aria-hidden="true">K</span><b>K bot 관리자</b></div>
+    <nav class="side-nav" id="nav" aria-label="화면">
+      <span class="nav-ind" id="navInd"></span>
+      <a class="nav-a" href="#overview" data-r="overview">[i-overview]개요</a>
+      <a class="nav-a" href="#orders" data-r="orders">[i-order]주문<span class="r"><b class="badge-n" id="navOrders" hidden></b></span></a>
+      <a class="nav-a" href="#deposits" data-r="deposits">[i-bank]입금<span class="r"><b class="badge-n" id="navDeposits" hidden></b></span></a>
+      <a class="nav-a" href="#keys" data-r="keys">[i-key]키</a>
+      <a class="nav-a" href="#audit" data-r="audit">[i-log]기록<span class="r"><b class="badge-n crit" id="navAlerts" hidden></b></span></a>
+      <a class="nav-a" href="#settings" data-r="settings">[i-gear]설정</a>
+    </nav>
+    <div class="side-foot">
+      <p class="mono" id="sessLeft"></p>
+      <div class="links"><a href="/">[i-home]사이트</a><a href="/panel">[i-overview]콘솔</a><button type="button" id="logout">[i-logout]나가기</button></div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <div class="mainc">
+    <header class="topbar">
+      <button type="button" class="menu-btn" id="menuBtn" aria-label="메뉴 열기" aria-expanded="false" aria-controls="side">[i-menu]</button>
+      <div class="crumbs"><span class="c-acct">관리자</span><span class="sl" aria-hidden="true">/</span><b id="crPage"></b></div>
+      <div class="top-r"><span class="sync" id="sync"><i class="dot live"></i><span class="txt">발송 서버 정상</span></span>
+        <button type="button" class="btn sm ghost" id="refresh" aria-label="새로고침">[i-refresh]</button></div>
+    </header>
+    <main class="view" id="view" tabindex="-1" aria-label="K bot 관리자">
+      <section class="page" data-route="overview" id="page-overview" aria-labelledby="ov-title" hidden>…</section>
+      <section class="page" data-route="orders" id="page-orders" aria-labelledby="ord-title" hidden>…</section>
+      <section class="page" data-route="deposits" id="page-deposits" aria-labelledby="dep-title" hidden>…</section>
+      <section class="page" data-route="keys" id="page-keys" aria-labelledby="key-title" hidden>…</section>
+      <section class="page" data-route="audit" id="page-audit" aria-labelledby="aud-title" hidden>…</section>
+      <section class="page" data-route="settings" id="page-settings" aria-labelledby="set-title" hidden>…</section>
+    </main>
+  </div>
+</div>
+
+<div class="sheet-wrap closed" id="sheetWrap" aria-hidden="true">
+  <div class="scrim" data-sheet-close></div>
+  <aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-h"><h2 id="sheetTitle"></h2><button type="button" class="btn sm ghost" data-sheet-close aria-label="닫기">[i-x]</button></div>
+    <div class="sheet-b" id="sheetBody"></div>
+  </aside>
+</div>
+<div class="dlg-wrap closed" id="dlgWrap" aria-hidden="true">
+  <div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgTitle" aria-describedby="dlgBody">
+    <h2 id="dlgTitle"></h2><div id="dlgBody"></div>
+    <div class="fld" id="dlgTypeWrap" hidden><label for="dlgType" id="dlgTypeLb"></label><input class="inp mono" id="dlgType" autocomplete="off"></div>
+    <div class="acts"><button type="button" class="btn" id="dlgNo">취소</button><button type="button" class="btn primary" id="dlgYes"></button></div>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="/admin.js?v=1"></script>
+</body>
+</html>
+```
+
+- 아이콘 스프라이트: 콘솔의 `i-overview i-key i-search i-plus i-x i-check i-copy i-menu i-refresh i-down i-right i-home i-logout i-alert i-trash` + 새 `i-order`(영수증) `i-bank`(지폐) `i-log`(목록) `i-gear`(톱니).
+- `admin.css`: 첫 규칙은 UI_V5 2.1 `:root` 토큰 블록을 **글자 하나 다르지 않게**(`/* K bot tokens v5 */` 주석 포함). 이어서 2.2 기초 블록, 그다음 `panel.css`의 셸·`.sec` `.srow` `.tbl` `.toolbar` `.seg` `.chips` `.confirm-in` `.metric(s)` `.toast` `.banner` `.empty` `.tag` `.badge-n` `.dot` 규칙을 복사하고 아래 새 규칙을 더한다. 색은 토큰만(`#hex` `rgba(` 금지 — `:root` 블록 제외).
+- 해시 라우트: `#overview`(기본) `#orders` `#deposits` `#keys` `#audit` `#settings`. 쿼리 비슷한 꼬리 허용: `#orders?status=paid`, `#keys?q=KAKA-…`, `#audit?key=…`, `#audit?ip=…`. 화면 전환은 UI_V5 5.1(WAAPI 교차 전환), 사이드바 표시 `.nav-ind`, 폰 서랍(≤960px)도 V5와 같다. 화면 이름은 `#crPage`와 `document.title`(`{화면} · 관리자 · K bot`, 기본 화면은 `관리자 · K bot`).
+- 사이드바 배지: `#navOrders` = `stats.pending_orders`(pending + paid), `#navDeposits` = `stats.deposits_attention`, `#navAlerts` = `stats.alerts_24h`(배경 `--crit`). 0이면 `hidden`. 늘면 `bump`.
+- `#sessLeft`: `세션 {HH:MM}까지`(`/admin/session`의 `exp`). 헤더 인증일 때는 비움.
+- `#sync`: `stats.sender_up` → `● 발송 서버 정상` / `● 발송 중지`(warn, `title` = `sender_reason`).
+
+#### 4.4.1 개요 `#overview`
+
+```html
+<div class="col">
+ <div class="ph"><div><h1 id="ov-title" tabindex="-1">개요</h1><p>처리할 주문과 입금, 키 현황입니다. 30초마다 갱신합니다.</p></div>
+   <div class="ph-r"><button type="button" class="btn primary" data-act="issue">[i-plus]새 키 발급</button></div></div>
+ <div class="grp" id="ov-attn" hidden><h2 class="grp-t">확인 필요<span id="ov-attn-n"></span></h2><section class="sec" id="ov-attn-list"></section></div>
+ <div class="metrics" role="list" id="ov-metrics"></div>
+ <div class="ov-grid">
+   <div class="grp"><h2 class="grp-t">최근 주문</h2><section class="sec clip"><ul class="feed" id="ov-orders"></ul>
+     <div class="sec-f"><span class="poll" data-poll>…30초마다 갱신…</span><a class="btn sm" href="#orders">전체 주문</a></div></section></div>
+   <div class="grp"><h2 class="grp-t">기능별 사용 중</h2><section class="sec" id="ov-feats"></section></div>
+ </div>
+</div>
+```
+
+- 지표 타일(`div.metric[role=listitem][data-go]`, 누르면 그 화면·필터로): `대기 주문`(`pending_orders` → `#orders?status=pending`), `발급 대기`(`paid_orders` → `#orders?status=paid`, 0보다 크면 `.warn`), `확인 필요 입금`(`deposits_attention` → `#deposits?status=attn`, 0보다 크면 `.crit`), `사용 중 키`(`active` → `#keys?status=active`), `7일 안 만료`(`expiring_7d` → `#keys?status=expiring`), `카카오 계정`(`accounts_total`), `회수·차단`(`revoked + blocked` → `#keys?status=stopped`), `전체 키`(`total`).
+- `#ov-attn-list` 행(V5 개요 확인 필요와 같은 모양): 발급 대기 주문마다(최대 5) `● 주문 {id} 입금 확인됨 · 발급 대기` + `승인` 버튼(4.4.2 승인 흐름), 확인 필요 입금마다(최대 5) `● {금액}원 · {입금자} · {미매칭|모호}` + `매칭` 버튼, `sender_up`이 false면 `● 발송 서버 중지` + `sender_reason`, `alerts_24h > 0`이면 `● 경고 기록 {n}건 (24시간)` + `기록` 링크(`#audit`).
+- `#ov-orders`: 최근 주문 6건 `li` > `time` + 상태 칩 + `span.mono` 주문번호 + 금액 + 입금자. 누르면 `#orders`에서 그 행 펼침.
+- `#ov-feats`: 기능 3개 줄 `{상품 이름}` + 막대(`by_feature[f] / active`) + `{n}개`.
+
+#### 4.4.2 주문 `#orders`
+
+```html
+<div class="col">
+ <div class="ph"><div><h1 id="ord-title" tabindex="-1">주문</h1><p id="ord-bank">입금 계좌 · …</p></div></div>
+ <section class="sec clip">
+  <div class="toolbar">
+    <div class="seg" id="ord-status" role="group" aria-label="주문 상태"><span class="seg-ind"></span>
+      <button type="button" data-s="pending" aria-pressed="true">입금 대기</button><button type="button" data-s="paid" aria-pressed="false">발급 대기</button>
+      <button type="button" data-s="done" aria-pressed="false">완료</button><button type="button" data-s="canceled" aria-pressed="false">취소</button>
+      <button type="button" data-s="" aria-pressed="false">전체</button></div>
+    <input class="inp" id="ord-q" type="search" placeholder="주문번호 · 입금자 · 연락처 · 금액" aria-label="주문 검색" autocomplete="off">
+    <span class="grow"></span><span class="poll" data-poll>…</span>
+  </div>
+  <p class="errt pad" id="ord-error" role="alert"></p>
+  <div class="tbl-wrap"><table class="tbl stack" id="ord-tbl"><thead><tr>
+    <th>주문</th><th>상태</th><th>기능 · 기간</th><th style="text-align:right">금액</th><th>입금자 · 구매자</th><th>접수</th><th class="chev-c"><span class="sr">펼치기</span></th>
+  </tr></thead><tbody></tbody></table></div>
+  <div class="sec-f"><span id="ord-cnt"></span><button type="button" class="btn sm" id="ord-more" hidden>더 보기</button></div>
+ </section>
+</div>
+```
+
+> `style="text-align:right"`은 CSP에 걸린다. 실제 파일에서는 `th.r` 클래스로 쓴다(이 문서의 마크업 조각 모두 같은 규칙).
+
+- 행 `tr.rowx[data-id][tabindex=0][aria-expanded]`: 주문번호(`.mono`, 옆 복사 버튼) / 상태 칩(`입금 대기` warn · `발급 대기` warn 굵게 · `완료` live · `취소` · `자동 취소`(`auto_canceled`)) / 기능 칩 + `1개월` 등 / 금액(`.mono`, `amount ≠ base_amount`면 아래 `확인용 {n}원 포함`, `needs_review`면 `확인 필요` crit 태그) / `입금자 X` + `구매자 Y · 연락처`(`--fg-3`) / `MM.DD HH:MM` / 펼침.
+- 펼침 줄 `tr.detail`: `dl`(주문번호, 접수, 처리 시각, 기존 키 연장 대상 `target_key`, 발급 키(복사), 메모, 이전 주문의 안드로이드 확인 `예`일 때만 `안드로이드 확인 · 예 (이전 주문)`) + 동작 줄:
+  - 상태 `pending`·`paid`: `승인`. 상태 `canceled` && `auto_canceled`: `복구 승인`(설명 `미입금으로 자동 취소된 주문입니다. 승인하면 주문이 되살아나고 키가 발급되거나 연장됩니다.`).
+  - 상태가 `done`·`canceled`가 아니면: `취소`.
+  - 모든 상태: `메모 수정`, `주문 페이지`(`/order/{id}` 새 창 아님, 같은 창에서 열지 않고 복사만 — `주문 링크 복사`).
+- **승인 흐름**(펼침 줄 안 인라인 패널 `.act-panel`): `기존 키 (비우면 신규 발급)` 입력(`target_key`가 있으면 채움, 대문자 정규화) + 설명(입력 있으면 `이 키에 기능을 추가합니다. 사용 중인 기능은 남은 기간에 더해집니다.`, 없으면 `새 키를 발급하고 주문을 완료합니다.`) + `승인` primary / `취소`. → `POST /admin/order-approve`. 성공 시 패널이 결과 카드로 바뀐다: `승인했습니다 · {신규 발급|기존 키 연장}` + 큰 모노 키 + `키 복사` + `주문 링크 복사` + 안내 `구매자는 주문 상태 화면에서도 키를 확인할 수 있습니다.` 이미 처리됨(`already`)이면 `이미 완료된 주문입니다.` + 키.
+- **취소 흐름**: 인라인 패널 — 사유 `textarea`(500자) + 빠른 칩 `입금 없음` `중복 주문` `환불` + `취소 처리` danger. 확인 대화상자 없이 이 패널 버튼이 확인이다. → `POST /admin/order-cancel {id, memo}`. 토스트 `주문을 취소했습니다.` + 주문번호.
+- **메모 수정**: 메모 `dd`가 `textarea`로 바뀌고 `저장`·`취소`. → `POST /admin/order-memo`. 
+- 탭 머리 글자에 개수를 붙이지 않는다(API에 상태별 개수가 없다). `#ord-cnt` = `{보이는 수} / 전체 {total}건`.
+- 검색: 입력 300ms 뒤 `q`로 다시 읽음(탭 유지). `더 보기` = `offset` + 50.
+
+#### 4.4.3 입금 `#deposits`
+
+- 머리 아래 상태 알약 2개 `span.pill#dep-hook`(`웹훅 켜짐` live / `웹훅 꺼짐 · DEPOSIT_TOKEN 미설정` warn), `span.pill#dep-auto`(`자동 승인 켜짐` / `자동 승인 꺼짐 · 입금이 확인되면 발급 대기로 바뀝니다`) + `a` `설정 보기`(`#settings`).
+- 탭 `div.seg#dep-status`: `확인 필요`(`attn` = 화면에서 `unmatched`+`ambiguous`; API는 `status` 없이 읽고 거른다) · `매칭됨`(`matched`) · `무시`(`ignored`) · `전체`.
+- 표 `#dep-tbl`: 금액(`.mono`, 없으면 `금액 못 읽음`) / 상태 칩(`미매칭` warn · `모호` crit · `매칭됨` live · `무시`) / 받은 시각 / 입금자 / 출처 / 매칭 주문(누르면 `#orders?q={id}`) / 펼침(원문 `pre.raw` — 텍스트로만, 줄바꿈 유지).
+- 동작: `미매칭`·`모호` → `매칭`(시트, 아래), `무시`. `무시` → 즉시 `POST /admin/deposit-ignore` → 행이 `무시`로 바뀌고 토스트 `무시했습니다.` + 작업 버튼 `되돌리기`(6초, → `POST /admin/deposit-restore`). `무시` 행에는 `되돌리기` 버튼이 늘 있다.
+- **매칭 시트** `#sheet`(제목 `입금 매칭`): 왼쪽(폰은 위) 입금 카드(금액, 시각, 입금자, 원문), 오른쪽 후보 주문 목록 = `GET /admin/orders?status=pending` + `?status=paid` + 최근 `canceled` 중 `auto_canceled`(7일 안) 합친 것, `|입금액 − 주문액|` 작은 순, 같으면 최근 순. 금액이 같은 주문은 `.exact`(왼쪽 `--live` 선 + `금액 일치` 태그). 후보를 고르면 아래 확인 줄: `입금 {a}원을 주문 {id}({b}원)에 매칭하고 승인합니다. 키가 발급되거나 연장되고 주문이 완료됩니다.` + `매칭 + 승인`. 금액이 다르면 문장 앞에 `● 금액이 다릅니다 · 입금 {a}원 / 주문 {b}원.`(crit)이 붙고 버튼이 `금액이 달라도 매칭`으로 바뀐다. → `POST /admin/deposit-match`. 성공하면 시트 안 결과 카드(승인 결과와 같은 모양, `issued`로 `신규 발급`/`기존 키 연장`).
+
+#### 4.4.4 키 `#keys`
+
+```html
+<div class="ph"><div><h1 id="key-title" tabindex="-1">키</h1><p>라이선스 키와 기능별 기간, 콘솔에 등록된 카카오 계정입니다.</p></div>
+  <div class="ph-r"><button type="button" class="btn primary" data-act="issue">[i-plus]새 키 발급</button></div></div>
+<section class="sec clip">
+ <div class="toolbar">
+   <input class="inp" id="key-q" type="search" placeholder="키 · 소유자 · 연락처 · 메모" aria-label="키 검색" autocomplete="off">
+   <div class="seg" id="key-status" role="group" aria-label="키 상태"><span class="seg-ind"></span>
+     <button data-s="" aria-pressed="true">전체</button><button data-s="active">사용 중</button><button data-s="expiring">7일 안 만료</button>
+     <button data-s="expired">만료</button><button data-s="unused">미사용</button><button data-s="stopped">회수·차단</button></div>
+   <div class="sel"><select id="key-feature" aria-label="기능"><option value="">모든 기능</option><option value="macro">자동발송 매크로</option><option value="roombot">대화방 관리봇</option><option value="minigame">미니게임봇</option></select>[i-down]</div>
+ </div>
+ <div class="tbl-wrap"><table class="tbl stack" id="key-tbl"><thead><tr><th>키</th><th>상태</th><th>소유자</th><th>기능</th><th>카카오 계정</th><th>콘솔 시작</th></tr></thead><tbody></tbody></table></div>
+ <div class="sec-f"><span id="key-cnt"></span><button type="button" class="btn sm" id="key-more" hidden>더 보기</button></div>
+</section>
+```
+
+- 상태 칩: `차단`(crit, `blocked_reason`) > `회수`(crit) > `미사용`(기능이 모두 미개시) > `만료`(켜진 기능 없음) > `사용 중`(live). **`device_id`로 판단하지 않는다**(콘솔만 쓰는 키가 영원히 미사용으로 보이던 문제).
+- 기능 칩: `매크로 D-23` / `관리봇 미개시` / `미니게임 만료`(7일 이하 warn, 만료 crit, 미개시 기본). 행 클릭·Enter → 키 시트.
+- **키 시트**(`#sheet`, 제목 = 키, 폭 520px, 폰 전체 화면):
+  - 머리: 키(모노 크게) + `키 복사` + 상태 칩 + 차단 사유(crit).
+  - `기능` 블록: 기능마다 행 — 이름, `{plan} · {YYYY.MM.DD}까지` 또는 `미개시 · {n}일`, 칩, 오른쪽 `회수`(작은 danger 링크 → 4.5 확인 대화상자, 입력 확인 없음, 문장 `{기능} 기능을 이 키에서 삭제합니다. 남은 기간도 함께 사라지며 되돌릴 수 없습니다.`). 아래 `기능 추가·연장` 버튼 → 블록 안 인라인 패널: 기능 체크(3개, 설명은 5.5 상품 설명) + 기간 `seg`(`1개월` `3개월` `1년` `직접 입력` + 일수 1~3,650) + **미리 보기 표**(기능마다 `지금 {현재 만료 또는 미개시} → 적용 후 {새 만료}`; 3.4 규칙을 화면에서 같은 식으로 계산: 시작된 기능 = `max(now, 만료) + 기간`, 미개시인데 키가 쓰인 적 있음 = `now + 남은 기간 + 기간`, 키가 쓰인 적 없음 = `미개시 · {합친 일수}일`) + `적용`.
+  - `정보` 블록(`dl.kvs`): 소유자·연락처·메모(각각 연필 버튼 → 그 자리 입력 → `POST /admin/license-update`), 발급, 콘솔 시작(`activated_at`), 마지막 기록.
+  - `카카오 계정` 블록: `accounts` 행 — 이메일(모노) + 상태(`접속 중` live / `연결 대기` warn / `등록 필요` crit / `발송 중지` warn) + 등록일. 없으면 `콘솔에 등록된 카카오 계정이 없습니다.`
+  - `이전 휴대폰 앱` 블록(`legacy_app`이 있을 때만, 접힌 상태 `details`): `기기 이름`, `앱 활성화`, `기기 초기화 {n}회`. 설명 `휴대폰 앱 지원 종료 전 기록입니다. 지금 동작에는 영향이 없습니다.`
+  - `최근 기록` 블록: 20행(시각·종류 칩·내용) + `이 키의 기록 전체`(`#audit?key=`).
+  - `동작` 줄(시트 아래 고정): `차단`/`차단 해제`, `회수`/`회수 복구`, `키 삭제`(danger).
+    - 차단: 인라인 패널 — 사유 입력(필수, 500자) + 칩 `키 공유 의심` `환불 완료` `결제 취소` + `차단` danger. 문장 `이 키를 차단합니다. 콘솔에 바로 들어올 수 없고, 10분 안에 이 키의 모든 발송과 응답이 멈춥니다.`
+    - 회수: 확인 대화상자 `키 회수` / `이 키의 사용을 중지합니다. 콘솔에 바로 들어올 수 없고, 10분 안에 이 키의 모든 발송과 응답이 멈춥니다. 나중에 복구할 수 있습니다.` / `회수`. 복구는 확인 없이 바로(토스트에 `되돌리기`).
+    - 삭제: 확인 대화상자, 입력 확인 — 라벨 `키 마지막 4자리를 입력하십시오`, 맞아야 `영구 삭제` 버튼이 켜진다. 문장 `이 키를 영구 삭제합니다. 기능, 기간, 콘솔에 등록된 카카오 계정 {n}개가 모두 삭제되며 되돌릴 수 없습니다.`
+- **새 키 발급 시트**(`data-act="issue"`, 제목 `새 키 발급`): 기능 카드 3장(체크, 이름 + 설명), 기간 `seg`(+ 직접 입력 일수), `수량`(1~100, 기본 1), `소유자 이름`, `연락처`, `메모`(모두 선택), `발급`. 검사: 기능 0개 `기능을 1개 이상 선택하십시오.` / 일수 범위 `일수를 1~3,650 범위로 입력하십시오.` / 수량 `1회 최대 100개까지 발급합니다.` 결과: `{n}개 발급했습니다.` + 키 목록(모노, 줄마다 `복사`) + `전체 복사`(줄바꿈으로 이음) + `텍스트로 받기`(`Blob` → `kbot-keys-{YYYYMMDD-HHMM}.txt` 내려받기) + `닫기`. 닫으면 목록 다시 읽기.
+
+#### 4.4.5 기록 `#audit`
+
+- 도구 줄: 종류 칩 줄 `div.kchips#aud-kinds[role=group]`(첫 칩 `전체`, 이어서 `ALERT_KINDS`를 앞에 crit 점과 함께, 그다음 나머지. `aria-pressed`) + `input#aud-key`(`키로 좁히기`) + `input#aud-ip`(`IP로 좁히기`) + `조회`.
+- 종류 이름표: `activate` 사용 시작 · `expired` 기간 만료 · `revoked` 회수·차단·삭제 · `order` 주문 · `bad_deposit_token` 입금 코드 오류 · `bad_admin_pw` 관리자 비밀번호 실패 · `admin` 관리자 작업 · `admin_login` 관리자 로그인 · `mismatch` 기기 불일치(이전 앱) · `takeover` 동시 사용(이전 앱) · `bad_sig` 앱 위조(이전 앱) · `tamper` 앱 변조(이전 앱) · `reset` 기기 초기화(이전 앱). 서버가 모르는 종류를 주면 원래 값 그대로.
+- 표 `#aud-tbl`: 시각(`MM.DD HH:MM:SS` 모노) / 종류 칩(경고 종류 crit) / 키(누르면 키 시트) / 내용 / IP(누르면 IP 필터). 경고 종류 행은 `--crit-bg` 바탕.
+- `더 보기` = `before_id`. 처음 100행.
+
+#### 4.4.6 설정 `#settings`
+
+읽기 전용 카드 4개(`section.sec` + `.srow` 값은 오른쪽 모노):
+1. `입금 자동 확인`: 웹훅(`켜짐`/`꺼짐 · DEPOSIT_TOKEN 미설정`), 자동 승인(`켜짐`/`꺼짐`), 미입금 자동 취소(`{n}시간`). 설명 `은행 알림을 받은 휴대폰 자동화 앱이 /api/deposit-hook 으로 보냅니다. 설정은 docs/AUTO_DEPOSIT.md를 따릅니다.`
+2. `구매 안내`: 입금 계좌(`BANK_INFO`), 관리자 연락처(`CONTACT_INFO`).
+3. `발송 서버`: 상태, 사유, 등록된 카카오 계정 수, 기능 상태 맞춤 주기 `{n}분`.
+4. `관리자 세션`: 이 브라우저 세션 만료 시각, 유지 시간 `12시간`, `나가기` 버튼. 레이트리밋 표(종류 · 분당 한도).
+- 카드 바닥줄 공통: `값은 Render 환경변수에서 바꿉니다. 바꾼 뒤 다시 배포해야 적용됩니다.`
+
+### 4.5 확인 패턴
+
+- 브라우저 `alert` `confirm` `prompt` 금지.
+- **인라인 패널**(기본): 행·블록 안에서 펼쳐지는 작은 폼(승인, 취소, 차단, 메모, 기능 추가). 펼침은 V5 `grid-template-rows 0fr→1fr`, 열면 첫 입력에 포커스, `Esc`·`취소`로 닫고 연 버튼에 포커스 복귀.
+- **확인 대화상자** `#dlg`(되돌릴 수 없는 일: 기능 회수, 키 회수, 키 삭제): `role=alertdialog`, 바깥 클릭으로 닫히지 않음, `Esc` = 취소, 처음 포커스는 `취소`(위험한 버튼에 먼저 가지 않음), 탭 순환을 대화상자 안에 가둠, 닫으면 연 요소로 포커스 복귀. 위험 버튼은 `btn danger solid`. 입력 확인이 있으면 맞을 때까지 `disabled`.
+- **되돌리기 토스트**: 되돌릴 수 있는 일(입금 무시, 회수 복구, 차단 해제)은 확인 없이 하고 토스트에 `되돌리기`(6초).
+- 동작 중 버튼은 `.busy` + `disabled`. 두 번 눌러도 요청은 한 번.
+
+### 4.6 폴링·모션·모바일·안전
+
+- 폴링: `stats`는 앱이 보이는 동안 30초마다(사이드바 배지·`#sync`). `#overview` `#orders` `#deposits`는 보이는 동안 20초마다 그 목록. `#keys` `#audit` `#settings`는 들어올 때와 `새로고침`만. `document.hidden`이면 건너뛰고, 다시 보이면 바로 1회. 늦은 응답(요청 순번이 바뀜)은 버린다. 서명이 같으면 다시 그리지 않고, 새 행만 `.fresh`(V5 5.4). 펼친 행·입력 중 검색어·스크롤을 유지한다.
+- 20초 안에 응답이 없으면 그 화면 오류 줄에 `서버가 20초 안에 응답하지 않았습니다. 서버가 잠들어 있으면 첫 요청이 늦습니다. 다시 시도하십시오.` (`AbortController`).
+- 모션: V5 5장 그대로(화면 교차 전환, 행 펼침, 토스트, 배지 `bump`, 세그먼트 표시). 시트는 오른쪽에서 `translateX(100%) → none` `--d3`, 배경 `--scrim` 페이드. 대화상자는 `scale(.97) → none` + 페이드 `--d2`. 동작 줄이기면 모두 즉시.
+- 모바일(≤760px): 표는 V5 `.tbl.stack` 카드 목록, 시트·대화상자는 전체 화면, 도구 줄은 줄바꿈, 버튼·입력 높이 ≥ 44px(사이드바·칩) / ≥ 32px(그 밖). 390px에서 가로 넘침 없음.
+- 안전: 주문(구매자·입금자·연락처·메모), 입금 원문, 기록 내용, 기기 이름, IP는 모두 공격자가 넣을 수 있는 글자다. **`textContent`로만 넣는다**(`innerHTML`에 서버 값을 넣지 않음. 고정 마크업 조각만 `innerHTML` 허용). 링크 `href`도 서버 값으로 만들지 않는다(주문 링크는 `/order/` + `encodeURIComponent(id)`).
+- 복사: `navigator.clipboard.writeText`, 실패하면 숨긴 `textarea` 선택 + `document.execCommand('copy')`, 그것도 실패하면 토스트 `복사하지 못했습니다.` + `직접 선택하여 복사하십시오.` 성공 토스트 `복사했습니다.` + 무엇(`키` `주문번호` 등).
+
+### 4.7 관리자 화면 문구 모음
+
+| 위치 | 문구 |
+|---|---|
+| 503 사용 불가 화면(`#login-disabled`) | `서버에 관리자 비밀번호가 설정되지 않아 관리자 화면을 열 수 없습니다. Render 환경변수 ADMIN_PASSWORD를 설정한 뒤 다시 배포하십시오.` |
+| 429 대기(`#login-wait`) | `비밀번호 입력 실패 횟수를 초과했습니다. {mm:ss} 후 다시 시도하십시오.`(1초마다 줄어듦, 그동안 `#loginBtn` `disabled`) |
+| 401 비밀번호 틀림 | `비밀번호가 일치하지 않습니다.` |
+| 빈 비밀번호 | `비밀번호를 입력하십시오.` |
+| 빈 목록 | 주문 `해당 조건의 주문이 없습니다.` · 입금 `입금 기록이 없습니다. 자동화 앱이 /api/deposit-hook 으로 알림을 보내면 이곳에 표시됩니다.` · 키 `조건에 맞는 키가 없습니다.` · 기록 `해당 조건의 기록이 없습니다.` |
+| 로그아웃 | 토스트 없이 로그인 화면, 입력칸 포커스 |
+
+---

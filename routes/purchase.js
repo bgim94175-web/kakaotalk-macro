@@ -41,6 +41,12 @@ function tsEqual(a, b) {
   try { return crypto.timingSafeEqual(x, y); } catch (e) { return false; }
 }
 
+// 주문/키가 모든 기능을 담고 있나 (= K bot)
+function allFeatures(list) {
+  const have = features.normList(list);
+  return have.length === features.ALL.length;
+}
+
 // KAKA-ABCD-EFGH-IJKL → KAKA-****-****-IJKL (남의 키를 엿보지 못하게)
 function maskKey(k) {
   if (!k) return null;
@@ -51,7 +57,7 @@ function maskKey(k) {
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/price — 가격표 (lib/pricing.js 단일 소스)
-// ?features=macro,roombot&plan=month 를 주면 quote 도 같이 계산해준다
+// 판매 상품은 K bot 하나다 → product 가 정본. ?plan= (또는 ?features=) 를 주면 quote 도 같이 계산한다
 // ─────────────────────────────────────────────────────────────
 // 자동 입금확인이 켜져 있나. 웹 문구가 "자동으로 발급돼" / "관리자가 확인 후 발급" 으로 갈린다 —
 // 꺼둔 채로 "1~2분 안에 자동 발급" 이라고 약속하면 입금한 구매자가 오지 않는 키를 기다린다.
@@ -68,35 +74,36 @@ router.get('/api/price', wrap(async (req, res) => {
   const out = Object.assign({ ok: true }, body);
   out.purchase_base = features.purchaseBase(req);
   out.auto_approve = autoApproveOn() && depositHookOn();
-  const wantFeats = features.normList(req.query.features);
-  if (wantFeats.length && req.query.plan) {
-    out.quote = pricing.quote(wantFeats, String(req.query.plan));
+  if (req.query.plan || req.query.features || req.query.product) {
+    out.quote = pricing.quote(null, req.query.plan ? String(req.query.plan) : '', req.query.product);
   }
   res.json(out);
 }));
 
+// 주문 거절 문구 — 예전 화면(기능·기간 선택)이 보낸 값도 사람이 읽을 수 있게 돌려준다
+const ORDER_REASON = {
+  bad_plan: '판매 상품이 변경되었습니다. 현재는 K bot 30일 상품만 구매할 수 있습니다. 구매 페이지를 새로고침한 후 다시 신청하십시오',
+  bad_product: '판매하지 않는 상품입니다. 구매 페이지를 새로고침한 후 다시 신청하십시오',
+};
+
 // ─────────────────────────────────────────────────────────────
 // POST /api/order — 주문 접수 (무통장)
-// 금액 뒷자리(1~99원)로 주문을 특정하므로 반드시 "정확한 금액"을 입금해야 한다
+// 금액 뒷자리(1~99원)로 주문을 특정하므로 반드시 "정확한 금액"을 입금해야 한다.
+// 상품은 항상 K bot(모든 기능 · 30일)이다. 보낸 features 는 무시하고, plan 은 없거나 month 일 때만 받는다
+// (예전 화면이 quarter/year 를 보내면 30일 주문으로 바꿔치지 않고 거절한다 — 화면엔 3개월로 보이니까).
 // ─────────────────────────────────────────────────────────────
 router.post('/api/order', wrap(async (req, res) => {
   const b = req.body || {};
-  const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, reason: 'bad_feature', error: '기능을 1개 이상 선택하십시오' });
-
-  const plan = String(b.plan || '').trim();
-  const q = pricing.quote(feats, plan);
-  if (!q.ok) {
-    return res.json({ ok: false, reason: q.reason,
-      error: q.reason === 'bad_plan' ? '결제 기간을 선택하십시오 (1개월/3개월/1년)' : '기능을 1개 이상 선택하십시오' });
-  }
+  const q = pricing.quote(b.features, b.plan, b.product);
+  if (!q.ok) return res.json({ ok: false, reason: q.reason, error: ORDER_REASON[q.reason] || ORDER_REASON.bad_product });
+  const feats = q.features;
+  const plan = q.plan;
 
   const depositor = cut(b.depositor, 60);
   if (!depositor) return res.json({ ok: false, reason: 'no_depositor', error: '입금자명을 입력하십시오' });
 
-  // 아이폰 확인 체크박스 — 값이 false 라도 주문을 거부하지 않는다.
-  // 웹 UI 가 이미 막고 있고, 서버가 막으면 나중에 다른 경로(앱 딥링크·관리자 대행)로
-  // 주문받을 때 걸린다. 기록만 남겨서 환불 분쟁 때 증거로 쓴다.
+  // 예전 화면의 안드로이드 확인 체크 값. 지금 웹은 보내지 않는다(콘솔은 기기를 가리지 않는다).
+  // 예전 화면이 보내면 주문 행에 그대로 남긴다 — 값이 없다고 주문을 거부하지 않는다.
   const androidOk = truthy(b.android_ok);
 
   const targetKeyRaw = keys.normKey(b.target_key);
@@ -124,9 +131,8 @@ router.post('/api/order', wrap(async (req, res) => {
   });
 
   await audit.record(req, 'order', { key: targetKey || null,
-    detail: '주문 접수 ' + made.id + ' / 기능=' + feats.join(',') + ' / 플랜=' + plan +
-            ' / ' + made.amount + '원 / 입금자=' + depositor +
-            ' / 안드로이드확인=' + (androidOk ? '예' : '아니오') });
+    detail: '주문 접수 ' + made.id + ' / 상품=' + q.product_label + ' (' + feats.join(',') + ') / 플랜=' + plan +
+            ' / ' + made.amount + '원 / 입금자=' + depositor });
 
   res.json({
     ok: true,
@@ -138,9 +144,13 @@ router.post('/api/order', wrap(async (req, res) => {
     suffix: made.suffix,
     needs_review: made.needs_review,
     android_ok: androidOk,
+    product: q.product,
+    product_label: q.product_label,
     features: feats,
+    feature_labels: q.feature_labels,
     plan: plan,
     plan_label: q.plan_label,
+    days: q.days,
     subtotal: q.subtotal,
     discount: q.discount,
     bundle: q.bundle,
@@ -174,8 +184,12 @@ router.get('/api/order/:id', wrap(async (req, res) => {
     base_amount: o.base_amount,
     features: o.features,
     feature_labels: o.features.map((f) => features.label(f)),
+    // 모든 기능을 담은 주문 = K bot. 예전 기능별 주문은 product 가 null 이고 features 로 보여준다
+    product: allFeatures(o.features) ? pricing.PRODUCT.id : null,
+    product_label: allFeatures(o.features) ? pricing.PRODUCT.label : null,
     plan: o.plan,
     plan_label: keys.planLabel(o.plan),
+    days: keys.durationMs(o.plan, null) ? Math.round(keys.durationMs(o.plan, null) / keys.DAY) : null,
     created_at: o.created_at,
     handled_at: o.handled_at,
     needs_review: o.needs_review,
@@ -235,6 +249,9 @@ router.post('/api/lookup', wrap(async (req, res) => {
     expires_at: features.maxExpiry(featMap),
     features: featMap,      // /verify 와 같은 형태
     feature_list: list,     // 화면에 바로 뿌리기 좋은 형태
+    // 모든 기능의 권한 행이 있으면 K bot 키다 (기간은 기능별 feature_list 를 본다)
+    product: allFeatures(ents.map((e) => e.feature)) ? pricing.PRODUCT.id : null,
+    product_label: allFeatures(ents.map((e) => e.feature)) ? pricing.PRODUCT.label : null,
     purchase: features.purchaseBase(req) + '/buy?key=' + encodeURIComponent(key),
   });
 }));
