@@ -44,7 +44,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 전송 주소:
 ```
-https://kakaotalk-macro.onrender.com/api/deposit-hook?t=<DEPOSIT_TOKEN>
+https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=<DEPOSIT_TOKEN>
 ```
 
 ---
@@ -61,7 +61,7 @@ https://kakaotalk-macro.onrender.com/api/deposit-hook?t=<DEPOSIT_TOKEN>
    - 포함할 텍스트: `입금`
 5. **액션** → `연결` → `HTTP 요청`
    - 방식: **POST**
-   - URL: `https://kakaotalk-macro.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
+   - URL: `https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
    - Content-Type: `application/json`
    - 본문:
      ```json
@@ -97,12 +97,17 @@ Pushbullet API 를 폴링해야 하므로 속도와 복잡도에서 불리합니
    - 또는 **메시지에 포함**: `입금`
    - **즉시 실행** 선택 + **실행 전에 묻기 끄기** → [묻지 않음] 확인
 3. 동작 추가 → **URL의 콘텐츠 가져오기**
-   - URL: `https://kakaotalk-macro.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
+   - URL: `https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
    - [화살표 펼치기] → 방식: **POST**
    - 본문: **JSON**
      - 키 `text` (텍스트) → 값에 **단축어 입력**(= 수신 메시지 내용) 변수 삽입
      - 키 `source` (텍스트) → 값 `shortcuts`
-4. 저장 → 본인 계좌로 소액 입금하여 테스트
+   - 값에 변수가 비어 들어오면 변수를 눌러 **내용**을 선택하십시오(메시지 자체가 아니라 본문 글자를 보냅니다)
+4. (설정하는 동안만) 다음 동작으로 **결과 보기** 를 추가하면 서버 응답(`matched` · `unmatched` · `ignored` …)이 화면에 표시됩니다. 확인이 끝나면 삭제하십시오
+5. 저장 → 다른 계좌에서 소액을 입금하여 테스트
+
+> **이 단축어는 다른 사람에게 공유하지 마십시오.** URL 에 `DEPOSIT_TOKEN` 이 들어 있어, 받은 사람이 입금 알림을 위조할 수 있습니다.
+> iOS 가 은행 번호를 「알 수 없는 발신자」로 분류하지 않도록 은행 발신번호를 연락처에 저장해 두십시오.
 
 > 아이폰은 문자 서비스에 의존하므로, 문자가 지연되거나 수신되지 않으면 자동 확인이 동작하지 않습니다.
 > **상시 운영하는 안드로이드 기기가 훨씬 안정적**이므로, 본격적으로 판매할 경우 구형 안드로이드 기기를 권장합니다.
