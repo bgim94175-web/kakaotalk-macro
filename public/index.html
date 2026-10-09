@@ -5,201 +5,387 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>K bot</title>
 <meta name="description" content="카카오톡 자동발송 매크로 · 대화방 관리봇 · 미니게임봇. 기능별 개별 결제, 3종 동시 구매 시 15% 할인.">
-<meta name="theme-color" content="#eef1f4">
-<meta name="color-scheme" content="light">
-<meta property="og:title" content="카톡 매크로 · 봇">
-<meta property="og:description" content="자동발송 매크로 · 대화방 관리봇 · 미니게임봇. 필요한 기능만 선택하여 결제.">
+<meta property="og:title" content="K bot">
+<meta property="og:description" content="여러 카카오 계정을 하나의 콘솔에서 운영합니다. 기능별 개별 결제, 3종 동시 구매 시 묶음 할인.">
+<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/style.css?v=4">
-<script src="/app.js" defer></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/style.css?v=5">
+<script src="/app.js?v=5" defer></script>
 </head>
 <body data-page="home">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-overview" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></g></symbol>
+    <symbol id="i-inbox" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 9.5h3l1 1.8h3l1-1.8h3M2.5 9.5 4 3.5h8l1.5 6V13h-11z"/></symbol>
+    <symbol id="i-accounts" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="6" cy="5.5" r="2.4"/><path d="M1.8 13.5c.6-2.2 2.2-3.4 4.2-3.4s3.6 1.2 4.2 3.4"/><circle cx="11.6" cy="6" r="1.9"/><path d="M12.2 10.2c1.3.3 2.1 1.4 2.3 3.1"/></g></symbol>
+    <symbol id="i-macro" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a4.6 4.6 0 0 1 8.2-2.6l1.3 1.3"/><path d="M12.5 2.6v3.1H9.4"/><path d="M13 9a4.6 4.6 0 0 1-8.2 2.6l-1.3-1.3"/><path d="M3.5 13.4v-3.1h3.1"/></g></symbol>
+    <symbol id="i-visit" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h3.5v11H9.5"/><path d="M2.5 8h7"/><path d="M7 5.5 9.5 8 7 10.5"/></g></symbol>
+    <symbol id="i-profile" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.8" y="3" width="12.4" height="10" rx="1.6"/><circle cx="6" cy="7.2" r="1.5"/><path d="M3.9 11c.4-.9 1.1-1.4 2.1-1.4s1.7.5 2.1 1.4"/><path d="M10 6.5h2.4M10 9h2.4"/></g></symbol>
+    <symbol id="i-guard" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5 2v4c0 3-2.2 5.1-5 6.4-2.8-1.3-5-3.4-5-6.4v-4z"/><path d="M8 5.4v3.2"/><path d="M8 10.9v.1"/></g></symbol>
+    <symbol id="i-cover" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 8s2.2-4.4 6-4.4S14 8 14 8s-2.2 4.4-6 4.4S2 8 2 8z"/><circle cx="8" cy="8" r="1.8"/><path d="M2.6 2.6l10.8 10.8"/></g></symbol>
+    <symbol id="i-reply" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 3.2h11v7.6H7.6L4.6 13.3v-2.5H2.5z"/></symbol>
+    <symbol id="i-snipe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></g></symbol>
+    <symbol id="i-updown" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M5 6l3-3 3 3M5 10l3 3 3-3"/></symbol>
+    <symbol id="i-right" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M6 3.5 10.5 8 6 12.5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M4 6l4 4 4-4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3.5 8.5l3 3 6-7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7"/></g></symbol>
+    <symbol id="i-menu" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><g fill="currentColor"><rect x="4.5" y="3.5" width="2.2" height="9" rx=".6"/><rect x="9.3" y="3.5" width="2.2" height="9" rx=".6"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path fill="currentColor" d="M5 3.4v9.2c0 .4.4.6.7.4l7.1-4.6c.3-.2.3-.6 0-.8L5.7 3c-.3-.2-.7 0-.7.4z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.6v3.1H9.9"/></g></symbol>
+    <symbol id="i-arrow" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8h10M9 4l4 4-4 4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M6.5 2.5h-3v11h3M10 5l3 3-3 3M13 8H6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2 14.3 13.3H1.7z"/><path d="M8 6.6v3"/><path d="M8 11.4v.1"/></g></symbol>
+    <symbol id="i-send" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" d="M2.5 7.8 13.5 2.5l-4 11-1.9-4.3z"/></symbol>
+    <symbol id="i-image" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.3" y="3" width="11.4" height="10" rx="1.5"/><circle cx="6" cy="6.6" r="1"/><path d="M2.5 11.2 6 8.4l3 2.4 1.9-1.4 2.6 2"/></g></symbol>
+    <symbol id="i-home" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 7.2 8 2.6l5.5 4.6v6.3h-3.7V9.8H6.2v3.7H2.5z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9"/></symbol>
+    <symbol id="i-unlink" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.6 9.4 5 11a2.1 2.1 0 0 1-3-3l1.6-1.6"/><path d="M9.4 6.6 11 5a2.1 2.1 0 0 1 3 3l-1.6 1.6"/><path d="M2.5 2.5l11 11"/></g></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="10.5" r="3"/><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.6 1.6M10 6l1.2 1.2"/></g></symbol>
+  </defs>
+</svg>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
 
-<header class="top">
-  <div class="wrap bar">
-    <a class="brand" href="/">
-      <img src="/favicon.svg" alt="" width="26" height="26">
-      <span>K bot</span>
-    </a>
+<header class="lnav" id="lnav">
+  <div class="wrap lnav-in">
+    <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true">K</span>K bot</a>
+    <nav class="lnav-links" aria-label="페이지 안 이동">
+      <a href="/#features">기능</a><a href="/#how">동작 방식</a><a href="/#products">가격</a><a href="/#faq">질문</a>
+    </nav>
     <nav class="top-nav" aria-label="주요 메뉴">
-      <a href="/buy" data-nav="buy">구매</a>
-      <a href="/my" data-nav="my">내 키</a>
-      <a href="/panel" data-nav="panel">관리</a>
+      <a class="btn ghost hide-s" href="/my" data-nav="my">내 키</a>
+      <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
+      <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
     </nav>
   </div>
 </header>
 
-<main id="main">
-  <!-- 히어로 -->
+<main id="main" tabindex="-1">
   <section class="wrap hero">
-    <p class="eyebrow">카카오톡 자동화</p>
-    <h1>필요한 기능만<br>선택하여 사용하는<br>카카오톡 자동화</h1>
-    <p class="lead">자동발송 매크로 · 대화방 관리봇 · 미니게임봇을 기능별로 개별 결제합니다.
-      활성화된 기능만 앱에서 사용 가능하며, 만료일도 기능별로 별도 적용됩니다.</p>
-    <div class="hero-cta">
-      <a class="btn primary" href="#products">가격 보기</a>
-      <a class="btn" href="/my">내 키 조회</a>
+    <p class="kicker"><span>라이선스 키 1개</span><span class="sep" aria-hidden="true"></span><span>카카오 계정 최대 8개</span></p>
+    <h1>여러 카카오 계정을<br><span class="dim">하나의 콘솔에서</span> 운영합니다</h1>
+    <p class="lead">갠톡 응답, 홍보 발송, 입장·퇴장 기록, 금지어 검열, 올킥 감지를 계정마다 설정합니다. 등록이 끝난 계정은 휴대폰 없이 서버에서 동작합니다.</p>
+    <div class="cta-row">
+      <a class="btn primary lg" href="/panel">콘솔 열기 <svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-arrow"></use></svg></a>
+      <a class="btn lg" href="#products">가격 보기</a>
+      <span class="hero-note" data-manual="무통장 입금 · 입금 확인 후 관리자가 키를 발급합니다">무통장 입금 · 입금 후 통상 1~2분 내 키가 자동 발급됩니다</span>
     </div>
-    <p class="hero-note" data-manual="키 1개 = 기기 1대 · 무통장 입금 · 입금 확인 후 관리자가 키를 발급합니다">키 1개 = 기기 1대 · 무통장 입금 · 입금 후 통상 1~2분 내 키가 자동 발급됩니다</p>
   </section>
 
-  <!-- 상품 -->
-  <section class="wrap" id="products">
-    <div class="sec-head">
-      <p class="eyebrow">상품</p>
-      <h2>기능 3종 · 개별 결제</h2>
-      <p class="sub small" style="margin:6px 0 0">기능을 선택하면 하단에 결제 금액이 계산됩니다. 3종 동시 선택 시 묶음 할인이 적용됩니다.</p>
+  <section class="wrap-wide stage" aria-labelledby="demoCap">
+    <h2 class="sr" id="demoCap">콘솔 시연</h2>
+    <div class="win" id="demo">
+      <div class="win-bar">
+        <span class="wd" aria-hidden="true"></span><span class="wd" aria-hidden="true"></span><span class="wd" aria-hidden="true"></span>
+        <span class="win-title" aria-hidden="true">K bot 콘솔 · 받은함</span>
+        <span class="demo-tag">콘솔 시연</span>
+      </div>
+      <div class="win-body" aria-hidden="true">
+        <aside class="d-side">
+          <div class="d-acct"><span class="sq inv">A</span><span class="grow mono">a@kakao.com</span><svg class="d-ud" width="14" height="14"><use href="#i-updown"/></svg></div>
+          <ul class="d-nav">
+            <li><svg width="14" height="14"><use href="#i-overview"/></svg>개요</li>
+            <li class="on"><svg width="14" height="14"><use href="#i-inbox"/></svg>받은함<b class="badge-n" id="dBadge">2</b></li>
+            <li><svg width="14" height="14"><use href="#i-visit"/></svg>입장·퇴장 로그</li>
+            <li><svg width="14" height="14"><use href="#i-profile"/></svg>프로필 로그</li>
+            <li><svg width="14" height="14"><use href="#i-guard"/></svg>올킥 방지</li>
+            <li><svg width="14" height="14"><use href="#i-cover"/></svg>금지어 검열</li>
+            <li><svg width="14" height="14"><use href="#i-reply"/></svg>갠톡 응답</li>
+          </ul>
+          <div>
+            <p class="d-cap">계정 3개</p>
+            <div class="d-acc-row"><i class="dot live"></i><span class="mono">a@kakao.com</span></div>
+            <div class="d-acc-row"><i class="dot live"></i><span class="mono">b@kakao.com</span></div>
+            <div class="d-acc-row"><i class="dot warn"></i><span class="mono">c@kakao.com</span></div>
+          </div>
+        </aside>
+        <div class="d-list">
+          <div class="d-list-h">전체 대화<span>계정 3개</span></div>
+          <div class="dcol" id="dNew"><div>
+            <div class="d-row sel" id="dNewRow"><span class="av">민</span><div class="cv-m"><div class="nm">민지 <span class="chip-acct">a@</span></div><div class="pv" id="dPv">나: 현재 1만 로벅스 기준 13,500원입니다. 거래방 공지 확인 부탁드립니다.</div></div><div class="tm mono"><span>21:14</span></div></div>
+          </div></div>
+          <div class="d-row"><span class="av">준</span><div class="cv-m"><div class="nm">준호 <span class="chip-acct">b@</span></div><div class="pv">계정 거래 아직 가능한가요?</div></div><div class="tm mono"><span>21:09</span><b class="badge-n">2</b></div></div>
+          <div class="d-row"><span class="av">하</span><div class="cv-m"><div class="nm">하늘_판매 <span class="chip-acct">a@</span></div><div class="pv">입금했습니다. 확인 부탁드립니다.</div></div><div class="tm mono"><span>20:58</span></div></div>
+          <div class="d-row"><span class="av">서</span><div class="cv-m"><div class="nm">서연 <span class="chip-acct">a@</span></div><div class="pv">감사합니다. 다음에 또 거래하겠습니다.</div></div><div class="tm mono"><span>20:31</span></div></div>
+          <div class="d-row"><span class="av">코</span><div class="cv-m"><div class="nm">코인왕 <span class="chip-acct">b@</span></div><div class="pv">피파 코인 500만 재고 있나요</div></div><div class="tm mono"><span>19:47</span></div></div>
+        </div>
+        <div class="d-main">
+          <div class="d-thread">
+            <div class="d-head dx" id="dHead"><span class="av av-s">민</span><b>민지</b><span class="sub"><span class="chip-acct">a@kakao.com</span> 계정으로 답장</span><span class="sub st"><i class="dot live"></i>접속 중</span></div>
+            <div class="d-empty dx is-off" id="dEmpty">대화를 선택하면 내용이 표시됩니다.</div>
+            <div class="d-msgs">
+              <span class="bub-meta day dx" id="dInMeta">2026년 10월 9일</span>
+              <div class="bub dx" id="dIn">안녕하세요, 로벅스 1만 개 시세 문의드립니다.</div>
+              <span class="bub-meta mono dx" id="dInT">21:14</span>
+              <div class="bub me dx" id="dOut">현재 1만 로벅스 기준 13,500원입니다. 거래방 공지 확인 부탁드립니다.</div>
+              <span class="bub-meta me dx" id="dOutT"><span class="mono">21:16</span> · a@ · 전송됨</span>
+            </div>
+            <div class="d-comp"><span class="txt" id="dType"></span><span class="caret" id="dCaret"></span><span class="d-send" id="dSend">전송</span></div>
+          </div>
+          <div class="d-panel">
+            <div class="d-tabs"><span class="on">활동 기록</span><span>입장·퇴장</span><span>프로필</span><span>올킥</span><span class="poll">10초마다 갱신</span></div>
+            <div class="d-log">
+              <div class="dcol" id="lgKick"><div><div class="lgr"><time class="mono">21:15:40</time><span class="ty crit">올킥</span><span class="tx">강퇴 8건 감지</span><span class="rm">로벅스 거래방</span></div></div></div>
+              <div class="dcol" id="lgProf"><div><div class="lgr"><time class="mono">21:15:02</time><span class="ty">프로필</span><span class="tx"><span class="old">하늘</span><span class="arr">→</span>하늘_판매</span><span class="rm">로벅스 거래방</span></div></div></div>
+              <div class="dcol" id="lgLeave"><div><div class="lgr"><time class="mono">21:14:31</time><span class="ty">퇴장</span><span class="tx">별빛상점</span><span class="rm">로벅스 거래방</span></div></div></div>
+              <div class="dcol" id="lgJoin"><div><div class="lgr"><time class="mono">21:14:08</time><span class="ty">입장</span><span class="tx">하늘 <span class="mono lg-link">open.kakao.com/o/sH7k2Lb</span></span><span class="rm">로벅스 거래방</span></div></div></div>
+              <div class="lgr"><time class="mono">21:02:11</time><span class="ty">입장</span><span class="tx">코인왕</span><span class="rm">피파 코인 거래소</span></div>
+              <div class="lgr"><time class="mono">20:51:40</time><span class="ty">입장</span><span class="tx">별빛상점</span><span class="rm">로벅스 거래방</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="d-alert" id="dAlert" aria-hidden="true"><i class="dot crit pulse"></i><div><b>올킥 감지</b><span>로벅스 거래방 · 30초 안에 강퇴 8건</span><div class="d-kicks go" id="dKicks"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><time class="mono">21:15:40</time></div>
     </div>
-
-    <div id="planSeg" style="margin-bottom:14px"></div>
-    <div id="prods" class="grid g2"></div>
-
-    <!-- 아이폰 미지원 — 구매 버튼 바로 위. 환불 분쟁 방지용이니 절대 지우지 마라 -->
-    <div class="note alert" style="margin-top:14px" id="iosWarn">
-      <span class="ic" aria-hidden="true">!</span>
-      <span>이 앱은 <b>안드로이드 전용</b>입니다. 아이폰에서는 다른 앱이 카카오톡 알림을 읽고 답장하는 것이 불가능하여(iOS 제약)
-        기술적으로 동작하지 않습니다. 구매 전 반드시 사용 기기를 확인하십시오.</span>
-    </div>
-
-    <div id="sum" class="sum"></div>
-  </section>
-
-  <!-- 쓰는 순서 -->
-  <section class="wrap">
-    <div class="sec-head">
-      <p class="eyebrow">시작하기</p>
-      <h2>4단계면 끝</h2>
-    </div>
-    <div class="card">
-      <ol class="steps">
-        <li><b>기능 선택 후 구매 신청</b> — 주문번호와 입금 계좌가 즉시 표시됩니다. 표시된 금액을 정확히 입금하십시오.</li>
-        <li data-manual="&lt;b&gt;키 발급&lt;/b&gt; — 관리자가 입금을 확인한 후 키를 발급합니다. 주문 상태 페이지는 자동 갱신되므로 페이지를 열어 두십시오."><b>키 발급</b> — 입금 금액이 일치하면 통상 1~2분 내 자동 발급됩니다. 주문 상태 페이지는 자동 갱신되므로 페이지를 열어 두십시오.</li>
-        <li><b>앱에 키 입력</b> — 앱에서 키를 입력하면 활성화됩니다. 활성화 시점에 기기 1대로 고정됩니다.</li>
-        <li><b>권한 허용 및 설정</b> — 알림 접근 권한을 허용하면 발송이 시작됩니다. 이미지 발송에는 접근성 권한이 추가로 필요합니다.</li>
+    <div class="chapters">
+      <ol class="chap-list" aria-label="시연 단계">
+          <li><button type="button" class="chap" data-ch="0"><span class="bar"><i></i></span><span class="ct">갠톡 수신</span><span class="cd">모든 계정의 1:1 대화가 계정 표시와 함께 받은함에 모입니다.</span></button></li>
+          <li><button type="button" class="chap" data-ch="1"><span class="bar"><i></i></span><span class="ct">답장 발송</span><span class="cd">대화를 받은 계정이 그대로 답장합니다. 계정을 고르지 않습니다.</span></button></li>
+          <li><button type="button" class="chap" data-ch="2"><span class="bar"><i></i></span><span class="ct">입장·퇴장 기록</span><span class="cd">이름, 오픈프로필 링크, 시각을 기록하고 방에 안내를 보냅니다.</span></button></li>
+          <li><button type="button" class="chap" data-ch="3"><span class="bar"><i></i></span><span class="ct">프로필 변경</span><span class="cd">닉네임 변경을 감지하여 이전 이름과 함께 기록합니다.</span></button></li>
+          <li><button type="button" class="chap on" data-ch="4" aria-current="step"><span class="bar"><i></i></span><span class="ct">올킥 감지</span><span class="cd">짧은 시간에 강퇴가 몰리면 감지하여 기록합니다.</span></button></li>
       </ol>
+      <button type="button" class="playbtn" id="demoPlay" aria-label="시연 재생"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-play"></use></svg></button>
     </div>
   </section>
 
-  <!-- 설치 안내 -->
-  <section class="wrap" id="install">
-    <div class="sec-head">
-      <p class="eyebrow">다운로드 · 설치</p>
-      <h2>앱 설치 안내</h2>
+  <section class="wrap lsec" id="features" aria-labelledby="featuresH">
+    <div class="lsec-h rv">
+      <div><p class="eyebrow">기능</p><h2 id="featuresH">운영에 필요한 기능을<br>계정마다 따로 설정합니다</h2></div>
+      <p class="desc">설정은 계정 단위로 저장되며, 기능마다 적용할 오픈채팅방을 고릅니다. 받은함만은 모든 계정의 대화를 한 목록으로 보여 줍니다.</p>
     </div>
-    <div class="card">
-      <ol class="steps">
-        <li><b>APK 다운로드</b> — 구매 승인 후 관리자가 설치 파일 링크를 전달합니다. 플레이스토어에는 등록되어 있지 않습니다.</li>
-        <li><b>출처를 알 수 없는 앱 허용</b> — 설정 → 앱 → 특별한 접근 → 알 수 없는 앱 설치 에서 브라우저 또는 파일 앱에 권한을 허용하십시오.</li>
-        <li><b>알림 접근 권한</b> — 설정 → 알림 → 알림 접근 허용 에서 앱을 활성화하십시오. 카카오톡 알림을 읽고 답장하는 데 사용됩니다.</li>
-        <li><b>접근성 권한(이미지 발송용)</b> — 이미지 첨부 기능 사용 시 접근성 서비스를 활성화하십시오. 텍스트 발송만 사용하는 경우에는 불필요합니다.</li>
-        <li><b>배터리 최적화 예외</b> — 백그라운드 종료를 방지하기 위해 배터리 최적화 예외로 등록하십시오.</li>
-      </ol>
-      <div style="height:14px"></div>
-      <div class="note dim">
-        <span class="ic" aria-hidden="true">i</span>
-        <span>앱 업데이트 후 구 버전은 서버에서 차단될 수 있습니다. 이 경우 신규 APK 로 재설치하십시오.
-          키와 설정은 그대로 유지됩니다.</span>
+    <div class="fx rv" id="fx">
+      <div class="fx-list" id="fxList" role="tablist" aria-label="기능 목록">
+        <span class="fx-ind" id="fxInd" aria-hidden="true"></span>
+          <button type="button" class="fx-item" role="tab" id="fxt0" aria-selected="true" tabindex="0" aria-controls="fxPane" data-fx="0" data-crumb="전체 계정 / 받은함"><b>통합 받은함</b><span><i>모든 계정의 갠톡을 한 목록에서 읽고, 받은 계정으로 그대로 답합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt1" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="1" data-crumb="a@kakao.com / 매크로"><b>매크로</b><span><i>선택한 방에 메시지와 이미지를 방마다 정한 간격으로 발송합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt2" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="2" data-crumb="a@kakao.com / 입장·퇴장 로그"><b>입장·퇴장 로그</b><span><i>누가 언제 들어오고 나갔는지 이름, 링크, 시각으로 남기고 방에 안내합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt3" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="3" data-crumb="a@kakao.com / 프로필 로그"><b>프로필 로그</b><span><i>닉네임을 바꾸면 이전 이름과 바뀐 시각을 기록합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt4" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="4" data-crumb="a@kakao.com / 올킥 방지"><b>올킥 방지</b><span><i>짧은 시간에 강퇴가 몰리면 올킥으로 감지하여 기록합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt5" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="5" data-crumb="a@kakao.com / 금지어 검열"><b>금지어 검열</b><span><i>기본 욕설, 추가 금지어, 링크가 들어간 글을 가립니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt6" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="6" data-crumb="a@kakao.com / 갠톡 응답"><b>갠톡 응답</b><span><i>1:1 대화에 등록한 문구로 자동 응답합니다.</i></span></button>
+          <button type="button" class="fx-item" role="tab" id="fxt7" aria-selected="false" tabindex="-1" aria-controls="fxPane" data-fx="7" data-crumb="a@kakao.com / 저격 규칙"><b>저격 규칙</b><span><i>지정한 말이 올라오면 정해진 답장을 보냅니다.</i></span></button>
+      </div>
+      <div class="fx-view">
+        <div class="fx-view-h"><span id="fxCrumb">전체 계정 / 받은함</span><span class="demo-tag">예시 화면</span></div>
+        <div class="fx-pane" id="fxPane" role="tabpanel" aria-labelledby="fxt0">
+            <div class="fx-c" data-fx-k="inbox"><div class="sec clip"><div class="cv"><span class="av">민</span><span class="cv-m"><span class="nm"><span>민지</span><span class="chip-acct">a@</span></span><span class="pv">안녕하세요, 로벅스 1만 개 시세 문의드립니다.</span></span><span class="tm"><span>21:14</span><b class="badge-n">1</b></span></div><div class="cv"><span class="av">준</span><span class="cv-m"><span class="nm"><span>준호</span><span class="chip-acct">b@</span></span><span class="pv">계정 거래 아직 가능한가요?</span></span><span class="tm"><span>21:09</span><b class="badge-n">2</b></span></div><div class="cv"><span class="av">하</span><span class="cv-m"><span class="nm"><span>하늘_판매</span><span class="chip-acct">a@</span></span><span class="pv">입금했습니다. 확인 부탁드립니다.</span></span><span class="tm"><span>20:58</span></span></div><div class="cv"><span class="av">서</span><span class="cv-m"><span class="nm"><span>서연</span><span class="chip-acct">a@</span></span><span class="pv">감사합니다. 다음에 또 거래하겠습니다.</span></span><span class="tm"><span>20:31</span></span></div></div><p class="fx-note"><span class="chip-acct">a@</span>표시는 대화를 받은 계정입니다. 답장도 그 계정으로 발송됩니다.</p></div>
+            <div class="fx-c" data-fx-k="macro" hidden><div class="sec"><div class="srow"><div class="srow-l"><span class="lb">매크로 발송</span><p>선택한 방에 메시지를 보냅니다.</p></div><div class="srow-r"><span class="swl" data-on="true" aria-hidden="true"><span class="sw"></span></span></div></div><div class="srow"><div class="srow-l"><span class="lb">기본 간격</span><p>방마다 발송과 발송 사이의 기본 시간</p></div><div class="srow-r"><span class="mono">30분</span></div></div><div class="srow"><div class="srow-l"><span class="lb">랜덤 간격</span><p>기본 간격에 무작위로 더합니다</p></div><div class="srow-r"><span class="mono">+0~10분</span></div></div><div class="srow stack"><div class="srow-l"><span class="lb">보낼 방</span></div><div class="rooms"><span class="room on"><span class="ck on"><svg width="10" height="10" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="nm">로벅스 거래방</span><span class="mem">214명</span></span><span class="room on"><span class="ck on"><svg width="10" height="10" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="nm">로블록스 아이템 시세</span><span class="mem">88명</span></span><span class="room"><span class="ck"><svg width="10" height="10" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="nm">피파 코인 거래소</span><span class="mem">152명</span></span><span class="room"><span class="ck"><svg width="10" height="10" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="nm">메이플 메소 직거래</span><span class="mem">61명</span></span></div></div></div></div>
+            <div class="fx-c" data-fx-k="visit" hidden><div class="sec clip"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름 · 방</th><th>최근 입장</th><th>최근 퇴장</th></tr></thead><tbody><tr><td><div class="who-c"><span class="nm">하늘_판매</span><span class="rm">로벅스 거래방</span></div></td><td><span class="t">21:14</span></td><td><span class="muted">—</span></td></tr><tr><td><div class="who-c"><span class="nm">별빛상점</span><span class="rm">로벅스 거래방</span></div></td><td><span class="t">20:51</span></td><td><span class="t">21:14</span></td></tr><tr><td><div class="who-c"><span class="nm">코인왕</span><span class="rm">피파 코인 거래소</span></div></td><td><span class="t">21:02</span></td><td><span class="t">20:12</span></td></tr><tr><td><div class="who-c"><span class="nm">초코우유</span><span class="rm">로벅스 거래방</span></div></td><td><span class="t">18:22</span></td><td><span class="t">18:23</span></td></tr><tr><td><div class="who-c"><span class="nm">피파고수</span><span class="rm">피파 코인 거래소</span></div></td><td><span class="t">17:55</span></td><td><span class="muted">—</span></td></tr></tbody></table></div></div></div>
+            <div class="fx-c" data-fx-k="profile" hidden><div class="sec clip"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>현재 이름</th><th>최근 변경</th><th>변경 이력</th></tr></thead><tbody><tr><td class="nm">하늘_판매</td><td><span class="t">21:15</span></td><td><span class="chain"><span class="old">하늘</span><span class="arr">→</span>하늘_판매</span></td></tr><tr><td class="nm">거래왕</td><td><span class="t">20:40</span></td><td><span class="chain"><span class="old">김철수</span><span class="arr">→</span><span class="old">철수상점</span><span class="arr">→</span>거래왕</span></td></tr><tr><td class="nm">로벅스 도매</td><td><span class="t">19:12</span></td><td><span class="chain"><span class="old">민준</span><span class="arr">→</span>로벅스 도매</span></td></tr><tr><td class="nm">로벅스왕</td><td><span class="t">13:39</span></td><td><span class="chain"><span class="old">익명의 거래자</span><span class="arr">→</span>로벅스왕</span></td></tr></tbody></table></div></div></div>
+            <div class="fx-c" data-fx-k="guard" hidden><div class="sec"><p class="sentence"><b>30초</b> 안에 <b>5건</b> 이상 강퇴되면 올킥으로 감지합니다.</p><ul class="alerts"><li><i class="dot crit pulse"></i><time>2026-10-09 21:15</time><span class="tx">「로벅스 거래방」에서 짧은 시간에 강퇴가 5건 있었습니다. 이 계정은 이후 강퇴하지 않습니다.</span></li><li><i class="dot crit"></i><time>2026-10-07 02:13</time><span class="tx">「로벅스 거래방」에서 짧은 시간에 강퇴가 7건 있었습니다. 이 계정은 강퇴를 멈출 권한이 없습니다.</span></li><li><i class="dot crit"></i><time>2026-10-03 23:58</time><span class="tx">「로벅스 거래방」에서 짧은 시간에 강퇴가 6건 있었습니다. 이 계정은 이후 강퇴하지 않습니다.</span></li></ul></div></div>
+            <div class="fx-c" data-fx-k="cover" hidden><div class="sec"><div class="srow stack"><div class="srow-l"><span class="lb">추가 금지어</span><p>서버에 내장된 기본 욕설 목록과 함께 적용됩니다.</p></div><div class="chips"><span class="wchip">사기꾼</span><span class="wchip">먹튀</span><span class="wchip">선입금 유도</span><span class="wchip">개인 거래 유도</span><span class="wchip">디코 연락</span></div></div><div class="srow"><div class="srow-l"><span class="lb">링크 가리기</span><p>방장과 부방장이 올린 링크는 가리지 않습니다.</p></div><div class="srow-r"><span class="swl" data-on="true" aria-hidden="true"><span class="sw"></span></span></div></div></div></div>
+            <div class="fx-c" data-fx-k="reply" hidden><div class="sec"><div class="srow stack"><div class="preview-chat"><div class="bub">안녕하세요, 거래 문의드립니다.</div><div class="bub me">민지님, 문의 감사합니다.&#10;21:16 기준 상담 대기 중입니다. 순서대로 답변드리겠습니다.</div><span class="bub-meta me">자동 응답 · a@</span></div></div><div class="srow"><div class="srow-l"><span class="lb">쿨타임</span><p>같은 사람에게 다시 응답하기까지</p></div><div class="srow-r"><span class="mono">6시간</span></div></div></div></div>
+            <div class="fx-c" data-fx-k="snipe" hidden><div class="sec"><div class="rule"><div class="rule-h"><div class="t"><b>경쟁 매장 홍보 대응</b><div class="meta"><code>싸게 팝니다</code><span>포함</span><span>·</span><span class="tnum">쿨타임 300초</span></div></div><span class="swl" data-on="true" aria-hidden="true"><span class="sw"></span></span></div></div><div class="rule"><div class="rule-h"><div class="t"><b>시세 문의</b><div class="meta"><code>시세</code><span>앞글자</span><span>·</span><span class="tnum">쿨타임 120초</span></div></div><span class="swl" data-on="true" aria-hidden="true"><span class="sw"></span></span></div></div><div class="rule off"><div class="rule-h"><div class="t"><b>외부 링크 유도</b><div class="meta"><code>(discord|디코)\.gg</code><span>정규식(고급)</span><span>·</span><span class="tnum">쿨타임 600초</span></div></div><span class="swl" data-on="false" aria-hidden="true"><span class="sw"></span></span></div></div></div></div>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- FAQ -->
-  <section class="wrap">
-    <div class="sec-head">
-      <p class="eyebrow">자주 묻는 질문</p>
-      <h2>질문</h2>
+  <section class="wrap lsec" id="how" aria-labelledby="howH">
+    <div class="lsec-h rv">
+      <div><p class="eyebrow">동작 방식</p><h2 id="howH">휴대폰은 계정을<br>등록할 때만 필요합니다</h2></div>
+      <p class="desc">카카오 계정을 등록하면 K bot 서버가 접속을 유지하고, 계정마다 켠 기능을 실행합니다. 콘솔은 PC와 휴대폰 브라우저에서 엽니다.</p>
     </div>
+    <div class="how rv" id="howBox">
+      <figure class="how-fig" aria-labelledby="howFigCap">
+        <svg class="h" viewBox="0 0 1000 300" aria-hidden="true">
+          <text class="cap" x="0" y="14">카카오 계정</text><text class="cap" x="370" y="14">K bot 서버</text><text class="cap" x="742" y="14">결과</text>
+          <path id="hw1" class="wire" d="M200 64 C290 64 290 150 370 150"/>
+          <path id="hw2" class="wire" d="M200 150 L370 150"/>
+          <path id="hw3" class="wire dash" d="M200 236 C290 236 290 150 370 150"/>
+          <path id="hw4" class="wire" d="M630 150 C690 150 680 90 742 90"/>
+          <path id="hw5" class="wire" d="M630 150 C690 150 680 220 742 220"/>
+          <g><rect class="n-box" x="0.5" y="38.5" width="199" height="52" rx="8"/><circle class="st-live" cx="20" cy="64" r="3.5"/><text class="n-m" x="34" y="68">a@kakao.com</text><text class="n-s" x="150" y="68">접속 중</text></g>
+          <g><rect class="n-box" x="0.5" y="124.5" width="199" height="52" rx="8"/><circle class="st-live" cx="20" cy="150" r="3.5"/><text class="n-m" x="34" y="154">b@kakao.com</text><text class="n-s" x="150" y="154">접속 중</text></g>
+          <g><rect class="n-box" x="0.5" y="210.5" width="199" height="52" rx="8"/><circle class="st-crit" cx="20" cy="236" r="3.5"/><text class="n-m" x="34" y="240">c@kakao.com</text><text class="n-s" x="140" y="240">등록 필요</text></g>
+          <g><rect class="n-box core" x="370.5" y="70.5" width="259" height="159" rx="10"/><text class="n-t" x="392" y="102">계정별 접속 유지</text><text class="n-s" x="392" y="124">매크로 발송 · 갠톡 응답 · 저격 규칙</text><text class="n-s" x="392" y="146">입장·퇴장 기록 · 프로필 기록</text><text class="n-s" x="392" y="168">금지어 검열 · 올킥 감지</text><text class="n-s" x="392" y="206">설정은 계정마다 따로 저장</text></g>
+          <g><rect class="n-box" x="742.5" y="50.5" width="257" height="80" rx="8"/><text class="n-t" x="762" y="82">오픈채팅방</text><text class="n-s" x="762" y="106">홍보 발송 · 입장·퇴장 안내 · 글 가림</text></g>
+          <g><rect class="n-box" x="742.5" y="180.5" width="257" height="80" rx="8"/><text class="n-t" x="762" y="212">콘솔</text><text class="n-s" x="762" y="236">받은함 · 기록 · 올킥 감지 알림</text></g>
+          <g class="pkts">
+              <circle class="pk" r="3"><animateMotion dur="2.6s" repeatCount="indefinite" begin="-0.4s"><mpath href="#hw1"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.6s" repeatCount="indefinite" begin="-1.7s"><mpath href="#hw1"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.6s" repeatCount="indefinite" begin="-1.1s"><mpath href="#hw2"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.6s" repeatCount="indefinite" begin="-2.4s"><mpath href="#hw2"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.2s" repeatCount="indefinite" begin="-0.5s"><mpath href="#hw4"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.2s" repeatCount="indefinite" begin="-1.6s"><mpath href="#hw4"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.2s" repeatCount="indefinite" begin="-1.0s"><mpath href="#hw5"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="2.2s" repeatCount="indefinite" begin="-2.1s"><mpath href="#hw5"/></animateMotion></circle>
+          </g>
+        </svg>
+        <svg class="v" viewBox="0 0 340 560" aria-hidden="true">
+          <text class="cap" x="0" y="14">카카오 계정</text>
+          <g><rect class="n-box" x="0.5" y="26.5" width="339" height="40" rx="8"/><circle class="st-live" cx="18" cy="46" r="3.5"/><text class="n-m" x="32" y="50">a@kakao.com</text><text class="n-s" x="282" y="50">접속 중</text></g>
+          <g><rect class="n-box" x="0.5" y="74.5" width="339" height="40" rx="8"/><circle class="st-live" cx="18" cy="94" r="3.5"/><text class="n-m" x="32" y="98">b@kakao.com</text><text class="n-s" x="282" y="98">접속 중</text></g>
+          <g><rect class="n-box" x="0.5" y="122.5" width="339" height="40" rx="8"/><circle class="st-crit" cx="18" cy="142" r="3.5"/><text class="n-m" x="32" y="146">c@kakao.com</text><text class="n-s" x="272" y="146">등록 필요</text></g>
+          <path id="hv1" class="wire" d="M170 163 L170 214"/>
+          <text class="cap" x="0" y="206">K bot 서버</text>
+          <g><rect class="n-box core" x="0.5" y="214.5" width="339" height="124" rx="10"/><text class="n-t" x="18" y="244">계정별 접속 유지</text><text class="n-s" x="18" y="268">매크로 발송 · 갠톡 응답 · 저격 규칙</text><text class="n-s" x="18" y="290">입장·퇴장 기록 · 금지어 검열 · 올킥 감지</text><text class="n-s" x="18" y="320">설정은 계정마다 따로 저장</text></g>
+          <path id="hv2" class="wire" d="M90 339 L90 404"/>
+          <path id="hv3" class="wire" d="M250 339 L250 404"/>
+          <text class="cap" x="0" y="396">결과</text>
+          <g><rect class="n-box" x="0.5" y="404.5" width="164" height="96" rx="8"/><text class="n-t" x="16" y="432">오픈채팅방</text><text class="n-s" x="16" y="456">홍보 발송</text><text class="n-s" x="16" y="476">입장·퇴장 안내 · 글 가림</text></g>
+          <g><rect class="n-box" x="175.5" y="404.5" width="164" height="96" rx="8"/><text class="n-t" x="191" y="432">콘솔</text><text class="n-s" x="191" y="456">받은함 · 기록</text><text class="n-s" x="191" y="476">올킥 감지 알림</text></g>
+          <g class="pkts">
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-0.2s"><mpath href="#hv1"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-1.0s"><mpath href="#hv1"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-0.6s"><mpath href="#hv2"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-1.4s"><mpath href="#hv2"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-1.1s"><mpath href="#hv3"/></animateMotion></circle>
+              <circle class="pk" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" begin="-0.3s"><mpath href="#hv3"/></animateMotion></circle>
+          </g>
+        </svg>
+        <figcaption class="sr" id="howFigCap">카카오 계정 세 개가 K bot 서버에 연결되어 있고, 서버가 오픈채팅방에 발송과 안내를 하고 콘솔에 받은함과 기록을 보냅니다. 등록이 필요한 계정은 다시 등록하기 전까지 동작하지 않습니다.</figcaption>
+      </figure>
+      <ol class="how-steps">
+        <li><b>구매 신청</b><p>기능과 기간을 고르고 표시된 금액을 입금합니다. <span data-manual="관리자가 입금을 확인한 후 키를 발급합니다.">금액이 일치하면 통상 1~2분 내 키가 발급됩니다.</span></p><span class="who">구매 페이지</span></li>
+        <li><b>계정 등록</b><p>콘솔에 카카오 계정을 입력하고, 휴대폰 카카오톡에 표시된 입력란에 번호를 입력합니다.</p><span class="who">콘솔 · 휴대폰</span></li>
+        <li><b>기능 켜기</b><p>계정마다 매크로, 입장·퇴장 로그, 금지어 검열 등을 켜고 적용할 방을 고릅니다.</p><span class="who">콘솔</span></li>
+      </ol>
+    </div>
+  </section>
 
-    <details class="faq">
-      <summary>아이폰에서 사용할 수 있습니까?</summary>
-      <div class="body"><p>사용할 수 없습니다. <b>안드로이드 전용</b>입니다. 이 앱은 카카오톡 알림을 읽고 해당 알림에 답장하는 방식으로 동작하며,
-        iOS 는 다른 앱의 알림을 읽거나 대신 답장하는 동작을 전면 차단하므로 우회 방법이 없습니다.
-        아이폰만 사용하는 경우 구매하지 마십시오. 이 사유로는 환불이 불가합니다.</p></div>
-    </details>
+  <section class="wrap lsec" id="products" aria-labelledby="productsH">
+    <div class="lsec-h rv">
+      <div><p class="eyebrow">가격</p><h2 id="productsH">필요한 기능만 결제합니다</h2></div>
+      <p class="desc">기능별로 결제하며 만료일도 기능별로 적용됩니다. 3종을 함께 선택하면 묶음 할인이 적용됩니다.</p>
+    </div>
+    <div class="pricing-top">
+      <div id="planSeg"></div>
+    </div>
+    <div class="pricing-body">
+      <div id="prods" class="prods" aria-busy="true"></div>
+      <aside class="pricing-side" aria-label="선택 합계">
+        <div id="sum" class="sum"></div>
+        <!-- 아이폰 미지원 — 구매 버튼 바로 옆. 환불 분쟁 방지용이니 지우지 않는다 -->
+        <div class="note alert" id="iosWarn">
+        <span class="ic" aria-hidden="true">!</span>
+        <span>이 앱은 <b>안드로이드 전용</b>입니다. 아이폰에서는 다른 앱이 카카오톡 알림을 읽고 답장하는 것이 불가능하여(iOS 제약) 기술적으로 동작하지 않습니다. 구매 전 반드시 사용 기기를 확인하십시오.</span>
+        </div>
+      </aside>
+    </div>
+  </section>
 
-    <details class="faq">
-      <summary>결제 후 즉시 사용할 수 있습니까?</summary>
-      <div class="body"><p>대부분 즉시 사용 가능합니다. 주문 시 안내된 <b>정확한 금액</b>(뒷자리까지)을 입금하면
-        해당 금액으로 주문이 조회되어 <span data-manual="관리자 확인 후">통상 1~2분 내 자동으로</span> 키가 발급됩니다.
-        주문 상태 페이지를 열어 두면 발급 시점에 키가 자동으로 표시됩니다. 수동 새로고침은 필요하지 않습니다.
-        입금 금액이 다르거나 동일 금액의 대기 주문이 중복되는 경우 자동 확인이 불가하여 관리자가 수동으로 처리합니다.
-        이 경우 수 시간이 소요될 수 있습니다. 발급된 키를 앱에 입력한 시점부터 사용 기간이 시작됩니다.</p></div>
-    </details>
+  <section class="wrap lsec" id="install" aria-labelledby="installH">
+    <div class="lsec-h rv">
+      <div><p class="eyebrow">안드로이드 앱</p><h2 id="installH">앱 설치 안내</h2></div>
+      <p class="desc">휴대폰 앱 기능을 사용하는 경우에만 필요합니다. 콘솔은 설치 없이 브라우저에서 사용합니다.</p>
+    </div>
+    <div class="ins rv">
+      <div class="ins-row"><b>APK 다운로드</b><p>구매 승인 후 관리자가 설치 파일 링크를 전달합니다. 플레이스토어에는 등록되어 있지 않습니다.</p></div>
+      <div class="ins-row"><b>출처를 알 수 없는 앱 허용</b><p>설정 → 앱 → 특별한 접근 → 알 수 없는 앱 설치에서 브라우저 또는 파일 앱에 권한을 허용하십시오.</p></div>
+      <div class="ins-row"><b>알림 접근 권한</b><p>설정 → 알림 → 알림 접근 허용에서 앱을 활성화하십시오. 카카오톡 알림을 읽고 답장하는 데 사용됩니다.</p></div>
+      <div class="ins-row"><b>접근성 권한 · 이미지 발송용</b><p>이미지 첨부 기능 사용 시 접근성 서비스를 활성화하십시오. 텍스트 발송만 사용하는 경우에는 불필요합니다.</p></div>
+      <div class="ins-row"><b>배터리 최적화 예외</b><p>백그라운드 종료를 방지하기 위해 배터리 최적화 예외로 등록하십시오.</p></div>
+      <div class="ins-row foot-row"><b>앱 업데이트 후</b><p>구 버전은 서버에서 차단될 수 있습니다. 이 경우 신규 APK로 재설치하십시오. 키와 설정은 그대로 유지됩니다.</p></div>
+    </div>
+  </section>
 
-    <details class="faq">
-      <summary>키 1개로 휴대폰 2대에서 사용할 수 있습니까?</summary>
-      <div class="body"><p>사용할 수 없습니다. <b>키 1개는 기기 1대</b>에만 등록됩니다. 최초 활성화한 기기에 고정되며,
-        다른 기기에서 동일 키를 입력하면 거부됩니다. 동일 키로 동시 접속을 시도하면 기존 기기가 잠금 처리됩니다.</p>
-        <p>휴대폰 교체 또는 초기화 시 관리자에게 <b>기기 초기화</b>를 요청하십시오.
-          초기화 완료 후 새 기기에서 재활성화할 수 있습니다.</p></div>
-    </details>
+  <section class="wrap lsec" id="faq" aria-labelledby="faqH">
+    <div class="lsec-h rv">
+      <div><p class="eyebrow">자주 묻는 질문</p><h2 id="faqH">질문</h2></div>
+      <div class="faq-side">
+        <p class="desc">그 밖의 문의는 구매 신청 시 남긴 연락처로 안내합니다.</p>
+        <div class="seg" id="faqSeg" role="group" aria-label="질문 분류"><span class="seg-ind"></span><button type="button" data-c="" aria-pressed="true">전체</button><button type="button" data-c="console" aria-pressed="false">콘솔</button><button type="button" data-c="buy" aria-pressed="false">구매·결제</button><button type="button" data-c="app" aria-pressed="false">휴대폰 앱</button></div>
+      </div>
+    </div>
+    <div class="faq rv" id="faqList">
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq0" aria-expanded="false" aria-controls="fa0">아이폰에서 사용할 수 있습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa0" role="region" aria-labelledby="fq0"><div><p>휴대폰 앱은 사용할 수 없습니다. <b>안드로이드 전용</b>입니다. 이 앱은 카카오톡 알림을 읽고 해당 알림에 답장하는 방식으로 동작하며, iOS는 다른 앱의 알림을 읽거나 대신 답장하는 동작을 전면 차단하므로 우회 방법이 없습니다. 아이폰만 사용하는 경우 구매하지 마십시오. 이 사유로는 환불이 불가합니다.</p><p>웹 콘솔은 PC와 휴대폰 브라우저에서 열 수 있습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="buy">
+          <button type="button" class="faq-q" id="fq1" aria-expanded="false" aria-controls="fa1">결제 후 즉시 사용할 수 있습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa1" role="region" aria-labelledby="fq1"><div><p>대부분 즉시 사용 가능합니다. 주문 시 안내된 <b>정확한 금액</b>(뒷자리까지)을 입금하면 해당 금액으로 주문이 조회되어 <span data-manual="관리자 확인 후">통상 1~2분 내 자동으로</span> 키가 발급됩니다. 주문 상태 페이지를 열어 두면 발급 시점에 키가 자동으로 표시됩니다. 입금 금액이 다르거나 동일 금액의 대기 주문이 중복되는 경우 관리자가 수동으로 처리하며, 수 시간이 소요될 수 있습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq2" aria-expanded="false" aria-controls="fa2">키 1개로 카카오 계정을 몇 개까지 등록합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa2" role="region" aria-labelledby="fq2"><div><p>콘솔에는 최대 8개까지 등록합니다. 설정과 기록은 계정마다 따로 저장되고, 받은함은 모든 계정의 1:1 대화를 한 목록으로 보여 줍니다. 답장은 그 대화를 받은 계정으로 발송됩니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq3" aria-expanded="false" aria-controls="fa3">휴대폰을 꺼도 동작합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa3" role="region" aria-labelledby="fq3"><div><p>등록이 끝난 계정의 발송과 기록은 서버가 수행하므로 휴대폰을 꺼도 동작합니다. 휴대폰은 계정을 등록할 때 카카오톡에 번호를 입력하는 데만 필요합니다. 서버가 멈춘 동안에는 보내지 않으며, 항상 켜져 있다고 보장하지 않습니다. 서버가 다시 시작되면 저장된 계정으로 이어서 접속합니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq4" aria-expanded="false" aria-controls="fa4">입장·퇴장 로그를 켜면 방에 무엇이 올라갑니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa4" role="region" aria-labelledby="fq4"><div><p>선택한 방에 누군가 들어오거나 나가면 <b>[입장안내]</b> 또는 <b>[퇴장안내]</b>를 보냅니다. 그 사람을 한 번 멘션하고, 오픈프로필 링크와 시각을 적습니다. 프로필 로그를 켜면 닉네임을 바꾼 사람에 대해 <b>[프로필 변경 감지]</b> 안내를 보냅니다. 기록은 두 기능을 켠 방에서만 남습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq5" aria-expanded="false" aria-controls="fa5">올킥 방지는 강퇴를 막습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa5" role="region" aria-labelledby="fq5"><div><p>막지 않습니다. 정해진 시간 안에 정해진 수 이상 강퇴가 일어나면 올킥으로 감지하여 기록합니다. 감지 시간(5~300초)과 강퇴 수(3~30건)는 계정마다 설정합니다. 강퇴된 사람을 다시 초대하지 않습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq6" aria-expanded="false" aria-controls="fa6">금지어 검열은 어떤 조건에서 동작합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa6" role="region" aria-labelledby="fq6"><div><p>이 계정이 해당 방의 부방장 이상일 때 동작합니다. 기본 욕설 목록과 직접 추가한 단어(최대 200개, 단어당 30자), 선택 시 링크가 들어간 글을 가립니다. 방장과 부방장이 올린 링크는 가리지 않으며, 사람을 내보내지 않습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="console">
+          <button type="button" class="faq-q" id="fq7" aria-expanded="false" aria-controls="fa7">카카오 비밀번호를 저장합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa7" role="region" aria-labelledby="fq7"><div><p>저장하지 않습니다. 계정을 등록할 때 로그인 확인에만 사용합니다. 로그인이 끊기면 콘솔에서 다시 등록해야 합니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq8" aria-expanded="false" aria-controls="fa8">키 1개로 휴대폰 2대에서 사용할 수 있습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa8" role="region" aria-labelledby="fq8"><div><p>사용할 수 없습니다. <b>키 1개는 기기 1대</b>에만 등록됩니다. 최초 활성화한 기기에 고정되며, 다른 기기에서 동일 키를 입력하면 거부됩니다. 동일 키로 동시 접속을 시도하면 기존 기기가 잠금 처리됩니다.</p><p>휴대폰 교체 또는 초기화 시 관리자에게 <b>기기 초기화</b>를 요청하십시오. 초기화 완료 후 새 기기에서 재활성화할 수 있습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="buy">
+          <button type="button" class="faq-q" id="fq9" aria-expanded="false" aria-controls="fa9">기능을 개별로 구매할 수 있습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa9" role="region" aria-labelledby="fq9"><div><p>가능합니다. 3종 모두 개별 결제이며, 만료일도 기능별로 별도 적용됩니다. 매크로만 구매하여 사용하거나, 이후 봇 기능만 추가할 수 있습니다. 3종 동시 구매 시 묶음 할인이 적용됩니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="buy">
+          <button type="button" class="faq-q" id="fq10" aria-expanded="false" aria-controls="fa10">사용 기간은 어떻게 연장합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa10" role="region" aria-labelledby="fq10"><div><p>구매 신청 시 <b>기존 키</b> 항목에 사용 중인 키를 입력하십시오. 신규 키 발급 대신 해당 키의 남은 기간에 합산되며, 기기 고정도 그대로 유지됩니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq11" aria-expanded="false" aria-controls="fa11">이미지는 최대 몇 장까지 발송됩니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa11" role="region" aria-labelledby="fq11"><div><p>1회 최대 5장입니다. 휴대폰 앱은 카카오톡 알림 답장으로 이미지를 전송할 수 없으므로, 공유 화면을 실행한 후 접근성 서비스가 화면을 조작하는 방식으로 전송합니다. 따라서 앱의 이미지 발송에는 접근성 권한이 필요합니다. 텍스트 발송은 접근성 권한 없이 동작합니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq12" aria-expanded="false" aria-controls="fa12">오픈프로필 개인톡 자동응답은 어떤 기능입니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa12" role="region" aria-labelledby="fq12"><div><p>오픈프로필로 1:1 메시지가 수신되면 사전 등록된 문구를 자동 발송합니다. 문구는 직접 작성하며 <b>{이름}</b> <b>{시간}</b> 등을 넣으면 실제 값으로 바뀝니다. 동일 상대에게 다시 응답하지 않는 쿨타임을 설정할 수 있습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq13" aria-expanded="false" aria-controls="fa13">메시지 추적은 어떻게 동작합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa13" role="region" aria-labelledby="fq13"><div><p>감지 문구와 응답 문구를 한 쌍으로 등록하면, 대화방에서 해당 문구가 수신되는 즉시 응답을 발송합니다. 주기 발송과 독립적으로 동작합니다. 특정 대화방에서만 감지하거나, 감지한 방이 아닌 다른 방으로 발송하도록 설정할 수 있습니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq14" aria-expanded="false" aria-controls="fa14">대화방 관리봇이 강제퇴장을 수행합니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa14" role="region" aria-labelledby="fq14"><div><p>수행할 수 없습니다. 카카오톡은 외부 앱의 멤버 강제퇴장을 허용하지 않습니다. 금지어 및 도배가 감지되면 <b>경고 메시지 발송 + 관리자 호출</b>로 처리합니다. 강제퇴장은 관리자가 직접 처리해야 합니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="app">
+          <button type="button" class="faq-q" id="fq15" aria-expanded="false" aria-controls="fa15">발송이 실패할 수 있습니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa15" role="region" aria-labelledby="fq15"><div><p>휴대폰 앱은 카카오톡 알림에 답장하는 방식으로 발송합니다. 따라서 <b>최근 알림이 수신된 대화방</b>에만 발송이 가능하며, 알림을 삭제했거나 대화방을 나간 경우 해당 방으로는 발송되지 않습니다. 카카오톡 업데이트로 이 방식이 차단될 수 있습니다. 발송 실패 시 앱 내 로그에 사유가 기록됩니다.</p></div></div>
+        </div>
+        <div class="faq-i" data-cat="buy">
+          <button type="button" class="faq-q" id="fq16" aria-expanded="false" aria-controls="fa16">취소 및 환불 규정은 어떻게 됩니까?<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          <div class="faq-a" id="fa16" role="region" aria-labelledby="fq16"><div><p>키 발급 전에는 주문번호를 전달하여 취소를 요청할 수 있습니다. 발급 후에는 키가 기기에 고정되므로 취소가 제한됩니다. 관리자에게 상황을 전달하여 협의하십시오.</p><p>안드로이드 전용임을 상단에 명시하고 있으므로, <b>아이폰 사용자의 착오 구매</b>는 환불 대상이 아닙니다. 구매 전 반드시 사용 기기를 확인하십시오.</p></div></div>
+        </div>
+    </div>
+  </section>
 
-    <details class="faq">
-      <summary>기능을 개별로 구매할 수 있습니까?</summary>
-      <div class="body"><p>가능합니다. 3종 모두 개별 결제이며, 만료일도 기능별로 별도 적용됩니다.
-        매크로만 구매하여 사용하거나, 이후 봇 기능만 추가할 수 있습니다. 3종 동시 구매 시 묶음 할인이 적용됩니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>사용 기간은 어떻게 연장합니까?</summary>
-      <div class="body"><p>구매 신청 시 <b>기존 키</b> 항목에 사용 중인 키를 입력하십시오.
-        신규 키 발급 대신 해당 키의 남은 기간에 합산되며, 기기 고정도 그대로 유지됩니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>이미지는 최대 몇 장까지 발송됩니까?</summary>
-      <div class="body"><p>1회 최대 5장입니다. 카카오톡은 알림 답장으로 이미지를 전송할 수 없으므로,
-        공유 화면을 실행한 후 접근성 서비스가 화면을 조작하는 방식으로 전송합니다. 따라서 이미지 발송에는 접근성 권한이 필요합니다.
-        텍스트 발송은 접근성 권한 없이 동작합니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>오픈프로필 개인톡 자동응답은 어떤 기능입니까?</summary>
-      <div class="body"><p>오픈프로필로 1:1 메시지가 수신되면 사전 등록된 문구를 자동 발송합니다.
-        문구는 직접 작성하며 <b>{이름}</b> <b>{시간}</b> 등을 넣으면 실제 값으로 바뀝니다.
-        동일 상대에게 다시 응답하지 않는 쿨타임, 하루 최대 응답 수, 운영시간을 설정할 수 있습니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>메시지 추적은 어떻게 동작합니까?</summary>
-      <div class="body"><p>감지 문구와 응답 문구를 한 쌍으로 등록하면, 모든 대화방에서 해당 문구가 수신되는 즉시 응답을 발송합니다.
-        주기 발송과 독립적으로 동작합니다. 특정 대화방에서만 감지하거나, 감지한 방이 아닌 다른 방으로 발송하도록 설정할 수 있습니다
-        (대상 대화방에 최근 알림이 수신되어 있어야 합니다).</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>대화방 관리봇이 강제퇴장을 수행합니까?</summary>
-      <div class="body"><p>수행할 수 없습니다. 카카오톡은 외부 앱의 멤버 강제퇴장을 허용하지 않습니다.
-        금지어 및 도배가 감지되면 <b>경고 메시지 발송 + 관리자 호출</b>로 처리합니다. 강제퇴장은 관리자가 직접 처리해야 합니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>발송이 실패할 수 있습니까?</summary>
-      <div class="body"><p>이 앱은 카카오톡 알림에 답장하는 방식으로 발송합니다. 따라서 <b>최근 알림이 수신된 대화방</b>에만 발송이 가능하며,
-        알림을 삭제했거나 대화방을 나간 경우 해당 방으로는 발송되지 않습니다. 카카오톡 업데이트로 이 방식이 차단될 수 있습니다.
-        발송 실패 시 앱 내 로그에 사유가 기록됩니다.</p></div>
-    </details>
-
-    <details class="faq">
-      <summary>취소 및 환불 규정은 어떻게 됩니까?</summary>
-      <div class="body"><p>키 발급 전에는 주문번호를 전달하여 취소를 요청할 수 있습니다.
-        발급 후에는 키가 기기에 고정되므로 취소가 제한됩니다. 관리자에게 상황을 전달하여 협의하십시오.</p>
-        <p>안드로이드 전용임을 상단에 명시하고 있으므로, <b>아이폰 사용자의 착오 구매</b>는 환불 대상이 아닙니다.
-          구매 전 반드시 사용 기기를 확인하십시오.</p></div>
-    </details>
+  <section class="wrap lcta rv" aria-labelledby="ctaH">
+    <div class="lcta-in">
+      <h2 id="ctaH">키 하나로<br>계정 여러 개를 운영합니다</h2>
+      <div class="acts"><a class="btn primary lg" href="/panel">콘솔 열기 <svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-arrow"></use></svg></a><a class="btn lg" href="/buy">구매 신청</a></div>
+    </div>
   </section>
 </main>
 
-<footer class="bot">
-  <div class="wrap">
-    <div class="links">
-      <a href="/buy">구매 신청</a>
-      <a href="/my">내 키 조회</a>
-      <a href="#products">가격</a>
+<footer class="foot">
+  <div class="wrap row">
+    <div class="about">
+      <span class="brand"><span class="brand-mark" aria-hidden="true">K</span>K bot</span>
+        <span id="bankLine" data-manual="입금은 무통장 계좌이체 · 관리자 확인 후 키가 발급됩니다">입금은 무통장 계좌이체 · 금액 일치 시 자동으로 확인됩니다</span>
+      <span>카카오톡은 (주)카카오의 상표이며, K bot은 (주)카카오와 관련이 없습니다.</span>
     </div>
-    <p style="margin:0" id="bankLine" data-manual="입금은 무통장 계좌이체 · 관리자 확인 후 키가 발급됩니다">입금은 무통장 계좌이체 · 금액 일치 시 자동으로 확인됩니다</p>
-    <p style="margin:6px 0 0">카카오톡은 (주)카카오의 상표이며, 이 앱은 (주)카카오와 관련이 없습니다.</p>
+    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/my">내 키 조회</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a></nav>
   </div>
 </footer>
 </body>

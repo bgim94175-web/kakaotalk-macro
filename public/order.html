@@ -5,70 +5,105 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>주문 상태 · K bot</title>
 <meta name="description" content="주문번호로 입금 대기 및 발급 상태를 확인합니다.">
-<meta name="theme-color" content="#eef1f4">
-<meta name="color-scheme" content="light">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/style.css?v=4">
-<script src="/app.js" defer></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/style.css?v=5">
+<script src="/app.js?v=5" defer></script>
 </head>
 <body data-page="order">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-overview" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></g></symbol>
+    <symbol id="i-inbox" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 9.5h3l1 1.8h3l1-1.8h3M2.5 9.5 4 3.5h8l1.5 6V13h-11z"/></symbol>
+    <symbol id="i-accounts" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="6" cy="5.5" r="2.4"/><path d="M1.8 13.5c.6-2.2 2.2-3.4 4.2-3.4s3.6 1.2 4.2 3.4"/><circle cx="11.6" cy="6" r="1.9"/><path d="M12.2 10.2c1.3.3 2.1 1.4 2.3 3.1"/></g></symbol>
+    <symbol id="i-macro" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a4.6 4.6 0 0 1 8.2-2.6l1.3 1.3"/><path d="M12.5 2.6v3.1H9.4"/><path d="M13 9a4.6 4.6 0 0 1-8.2 2.6l-1.3-1.3"/><path d="M3.5 13.4v-3.1h3.1"/></g></symbol>
+    <symbol id="i-visit" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h3.5v11H9.5"/><path d="M2.5 8h7"/><path d="M7 5.5 9.5 8 7 10.5"/></g></symbol>
+    <symbol id="i-profile" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.8" y="3" width="12.4" height="10" rx="1.6"/><circle cx="6" cy="7.2" r="1.5"/><path d="M3.9 11c.4-.9 1.1-1.4 2.1-1.4s1.7.5 2.1 1.4"/><path d="M10 6.5h2.4M10 9h2.4"/></g></symbol>
+    <symbol id="i-guard" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5 2v4c0 3-2.2 5.1-5 6.4-2.8-1.3-5-3.4-5-6.4v-4z"/><path d="M8 5.4v3.2"/><path d="M8 10.9v.1"/></g></symbol>
+    <symbol id="i-cover" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 8s2.2-4.4 6-4.4S14 8 14 8s-2.2 4.4-6 4.4S2 8 2 8z"/><circle cx="8" cy="8" r="1.8"/><path d="M2.6 2.6l10.8 10.8"/></g></symbol>
+    <symbol id="i-reply" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 3.2h11v7.6H7.6L4.6 13.3v-2.5H2.5z"/></symbol>
+    <symbol id="i-snipe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></g></symbol>
+    <symbol id="i-updown" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M5 6l3-3 3 3M5 10l3 3 3-3"/></symbol>
+    <symbol id="i-right" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M6 3.5 10.5 8 6 12.5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M4 6l4 4 4-4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3.5 8.5l3 3 6-7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7"/></g></symbol>
+    <symbol id="i-menu" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><g fill="currentColor"><rect x="4.5" y="3.5" width="2.2" height="9" rx=".6"/><rect x="9.3" y="3.5" width="2.2" height="9" rx=".6"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path fill="currentColor" d="M5 3.4v9.2c0 .4.4.6.7.4l7.1-4.6c.3-.2.3-.6 0-.8L5.7 3c-.3-.2-.7 0-.7.4z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.6v3.1H9.9"/></g></symbol>
+    <symbol id="i-arrow" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8h10M9 4l4 4-4 4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M6.5 2.5h-3v11h3M10 5l3 3-3 3M13 8H6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2 14.3 13.3H1.7z"/><path d="M8 6.6v3"/><path d="M8 11.4v.1"/></g></symbol>
+    <symbol id="i-send" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" d="M2.5 7.8 13.5 2.5l-4 11-1.9-4.3z"/></symbol>
+    <symbol id="i-image" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.3" y="3" width="11.4" height="10" rx="1.5"/><circle cx="6" cy="6.6" r="1"/><path d="M2.5 11.2 6 8.4l3 2.4 1.9-1.4 2.6 2"/></g></symbol>
+    <symbol id="i-home" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 7.2 8 2.6l5.5 4.6v6.3h-3.7V9.8H6.2v3.7H2.5z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9"/></symbol>
+    <symbol id="i-unlink" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.6 9.4 5 11a2.1 2.1 0 0 1-3-3l1.6-1.6"/><path d="M9.4 6.6 11 5a2.1 2.1 0 0 1 3 3l-1.6 1.6"/><path d="M2.5 2.5l11 11"/></g></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="10.5" r="3"/><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.6 1.6M10 6l1.2 1.2"/></g></symbol>
+  </defs>
+</svg>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
 
-<header class="top">
-  <div class="wrap bar">
-    <a class="brand" href="/">
-      <img src="/favicon.svg" alt="" width="26" height="26">
-      <span>K bot</span>
-    </a>
+<header class="lnav" id="lnav">
+  <div class="wrap lnav-in">
+    <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true">K</span>K bot</a>
+    <nav class="lnav-links" aria-label="페이지 안 이동">
+      <a href="/#features">기능</a><a href="/#how">동작 방식</a><a href="/#products">가격</a><a href="/#faq">질문</a>
+    </nav>
     <nav class="top-nav" aria-label="주요 메뉴">
-      <a href="/buy" data-nav="buy">구매</a>
-      <a href="/my" data-nav="my">내 키</a>
-      <a href="/panel" data-nav="panel">관리</a>
+      <a class="btn ghost hide-s" href="/my" data-nav="my">내 키</a>
+      <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
+      <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
     </nav>
   </div>
 </header>
 
-<main id="main">
-  <section class="wrap" style="padding-top:26px">
-    <p class="eyebrow">주문 상태</p>
-    <h1 style="font-size:clamp(23px,6vw,31px)">주문 진행 상황</h1>
-    <p class="lead">입금 후 이 화면은 자동으로 갱신됩니다. 발급된 키가 이 화면에 표시됩니다.
-      수동 새로고침은 필요하지 않으므로 이 탭을 열어 두십시오.</p>
-
-    <div id="result" aria-live="polite"></div>
-
-    <!-- 주문번호가 없거나 못 찾았을 때만 보임 -->
-    <div id="findWrap" hidden style="margin-top:12px">
-      <form id="findForm" class="card" novalidate>
-        <div class="fld">
-          <label for="oid">주문번호</label>
-          <input type="text" id="oid" name="oid" placeholder="ORD-260927-A3K9QZ"
-                 autocomplete="off" spellcheck="false" maxlength="64"
-                 autocapitalize="characters" aria-describedby="oid-hint">
-          <p class="hint" id="oid-hint">구매 신청 직후 화면 또는 복사해 둔 주문번호를 입력하십시오.</p>
+<main id="main" tabindex="-1">
+  <div class="wrap pub-page">
+    <div class="pub-head">
+      <p class="eyebrow">주문 상태</p>
+      <h1>주문 진행 상황</h1>
+      <p class="lead">입금 후 이 화면은 자동으로 갱신됩니다. 발급된 키가 이 화면에 표시됩니다. 수동 새로고침은 필요하지 않으므로 이 탭을 열어 두십시오.</p>
+    </div>
+    <div class="pub-grid">
+      <div class="pub-main">
+        <div id="result" aria-live="polite"></div>
+      </div>
+      <aside>
+        <!-- 주문번호가 없거나 못 찾았을 때만 보임 -->
+        <div id="findWrap" hidden>
+          <form id="findForm" class="card" novalidate>
+            <div class="fld">
+              <label for="oid">주문번호</label>
+              <input type="text" id="oid" name="oid" class="keyin" placeholder="ORD-260927-A3K9QZ" autocomplete="off" spellcheck="false" maxlength="64" autocapitalize="characters" aria-describedby="oid-hint">
+              <p class="hint" id="oid-hint">구매 신청 직후 화면 또는 복사해 둔 주문번호를 입력하십시오.</p>
+            </div>
+            <button type="submit" class="btn primary wide find-btn">조회</button>
+          </form>
         </div>
-        <div style="height:12px"></div>
-        <button type="submit" class="btn primary wide">조회</button>
-      </form>
+        <div class="note dim"><span class="ic" aria-hidden="true">i</span><span><span data-manual="입금 확인 후 &lt;b&gt;관리자가 키를 발급&lt;/b&gt;합니다. 안내된 금액을 뒷자리까지 정확히 입금하십시오.">입금 확인은 <b>금액 매칭으로 자동 처리</b>됩니다. 안내된 금액을 뒷자리까지 정확히 입금하면 통상 1~2분 내 키가 발급됩니다.</span> 입금 금액이 다르거나 30분 경과 후에도 상태가 변경되지 않으면 주문번호와 입금자명을 첨부하여 관리자에게 문의하십시오.</span></div>
+      </aside>
     </div>
-
-    <div class="note dim" style="margin-top:12px">
-      <span class="ic" aria-hidden="true">i</span>
-      <span><span data-manual="입금 확인 후 &lt;b&gt;관리자가 키를 발급&lt;/b&gt;합니다. 안내된 금액을 뒷자리까지 정확히 입금하십시오.">입금 확인은 <b>금액 매칭으로 자동 처리</b>됩니다. 안내된 금액을 뒷자리까지 정확히 입금하면 통상 1~2분 내 키가 발급됩니다.</span>
-        입금 금액이 다르거나 30분 경과 후에도 상태가 변경되지 않으면 주문번호와 입금자명을 첨부하여 관리자에게 문의하십시오.</span>
-    </div>
-  </section>
+  </div>
 </main>
 
-<footer class="bot">
-  <div class="wrap">
-    <div class="links">
-      <a href="/">처음으로</a>
-      <a href="/buy">구매 신청</a>
-      <a href="/my">내 키 조회</a>
+<footer class="foot">
+  <div class="wrap row">
+    <div class="about">
+      <span class="brand"><span class="brand-mark" aria-hidden="true">K</span>K bot</span>
+      <span>카카오톡은 (주)카카오의 상표이며, K bot은 (주)카카오와 관련이 없습니다.</span>
     </div>
-    <p style="margin:0">발급된 키를 앱에 입력하면 즉시 활성화됩니다 · 키 1개 = 기기 1대</p>
+    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/my">내 키 조회</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a></nav>
   </div>
 </footer>
 </body>
