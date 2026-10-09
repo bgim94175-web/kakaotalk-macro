@@ -212,8 +212,8 @@ configs (key TEXT PRIMARY KEY, blob TEXT, rev BIGINT, updated_at BIGINT)  -- 앱
 
 | 경로 | 내용 |
 |---|---|
-| `/` | 랜딩. 3개 상품 카드(가격/기능/추천), FAQ, 다운로드 안내 |
-| `/buy?feature=&key=` | 구매 신청 폼: 기능 다중선택, 플랜 선택, 실시간 금액계산, 입금자명/연락처, 기존 키 입력(연장) |
+| `/` | 랜딩. K bot 상품 카드 1장(가격/포함 기능/구매 신청), FAQ |
+| `/buy?key=` | 구매 신청 폼: K bot 상품(고정), 입금자명/연락처, 기존 키 입력(연장). 예전 `?feature=` `?plan=` 은 무시한다 |
 | `POST /api/order` | 주문 접수 → `{ok, id, amount, account}` (무통장 계좌 안내) |
 | `/order/:id` | 주문 상태 조회 페이지 |
 | `/my` | 키 조회: 키 입력 → 기능별 남은 기간 표시 (`POST /api/lookup` — 키 소유 증명 없이 민감정보 노출 금지: 기능/만료일/기기등록여부만) |
@@ -221,11 +221,15 @@ configs (key TEXT PRIMARY KEY, blob TEXT, rev BIGINT, updated_at BIGINT)  -- 앱
 
 가격표 (서버 `lib/pricing.js` 단일 소스, 원):
 ```
-macro:    month 15000 / quarter 39000 / year 129000
-roombot:  month 12000 / quarter 31000 / year 105000
-minigame: month 12000 / quarter 31000 / year 105000
-3종 묶음 할인: 총액의 15% 할인 (features 3개 동시 구매 시)
+K bot (id kbot): 모든 기능(macro, roombot, minigame) · 30일(plan month) · 30000
+판매 상품은 이것 하나다. 기능별 단가·장기 플랜·묶음 할인 없음.
+같은 키로 다시 구매하면 모든 기능이 30일씩 연장된다.
+POST /api/order 는 보낸 features 를 무시하고 항상 K bot 주문을 만든다. plan 이 month 가 아니면 bad_plan 으로 거절.
+keys.PLANS 의 quarter/year 는 예전 주문 승인·예전 키 표시용으로만 남는다 (keys.SALE_PLANS = ['month']).
 ```
+사용 기간: 새 키는 발급 시점이 아니라 **콘솔(/panel) 첫 로그인**(또는 앱 최초 활성화) 시점부터 30일이 흐른다
+(`routes/panel.js` startPeriod). 이미 쓰기 시작한 키를 연장하면 승인 즉시 각 기능의 남은 기간에 30일이 더해진다
+(`lib/keys.js` grant). 아직 로그인하지 않은 키를 연장하면 기간만 합산되고 첫 로그인 때 함께 시작된다.
 계좌 안내는 환경변수 `BANK_INFO`(예: `카카오뱅크 3333-00-0000000 김부성`). 없으면 "관리자에게 문의" 표시.
 
 웹 디자인 톤: **앱과 동일** — 딥 네이비/차콜 배경, 민트-블루 액센트, 큰 라운드(18~22px), 얇은 흰색 8% 보더,
