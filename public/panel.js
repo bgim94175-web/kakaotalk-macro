@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   // docs/UI_V5.md — 콘솔. 화면은 panel.html 의 정적 section.page[data-route] 11개이고, 이 파일은 값을 채우고 라우팅한다.
-  // 받은함 동작은 docs/UI_V4.md 5장 그대로(상태·폴링·재렌더 회피·늦은 응답·전송·닫기).
+  // 주요 알림 동작은 docs/UI_V4.md 5장 그대로(상태·폴링·재렌더 회피·늦은 응답·전송·닫기).
   var me = null;
   var account = null;
   var curId = '';                 // 지금 설정·기록을 보는 계정
@@ -13,8 +13,8 @@
   var coverWords = [];
   var pendingId = '';
   var regDevice = '';
-  var confirming = false;
-  var stopConfirm = false;
+  // 확인 번호 폴링 세대. 취소·숨기기·새 시작마다 올려서, 잠자던 옛 루프가 깨어나도 이어 가지 못하게 한다.
+  var confirmGen = 0;
 
   function $(id) { return document.getElementById(id); }
   function qs(sel, root) { return (root || document).querySelector(sel); }
@@ -173,7 +173,7 @@
   // ── 화면 이름표 (1.4) ──────────────────────────────────────
   var ROUTES = {
     overview: { t: '개요', acct: true, g: 'o', icon: 'overview' },
-    inbox: { t: '받은함', g: 'i', icon: 'inbox' },
+    inbox: { t: '주요 알림', g: 'i', icon: 'inbox' },
     accounts: { t: '계정', g: 'a', icon: 'accounts' },
     'account-add': { t: '계정 추가', nav: 'accounts' },
     macro: { t: '매크로', acct: true, feat: 'macro', sw: 'macro-on', g: 'm', icon: 'macro' },
@@ -433,6 +433,7 @@
     if (h === route) return;
     if (dirtyN > 0 && route) {
       history.replaceState(null, '', '#' + route);
+      pendingFocus = null;
       askLeave({ route: h });
       return;
     }
@@ -451,7 +452,7 @@
     palClose(true);
     drawer(false);
     openMenu(false);
-    // 받은함을 보고 있지 않으면 열어 둔 방을 계속 읽을 이유가 없다
+    // 주요 알림을 보고 있지 않으면 열어 둔 방을 계속 읽을 이유가 없다
     if (h !== 'inbox' && chat.roomTimer) { clearInterval(chat.roomTimer); chat.roomTimer = null; }
     if (h === 'inbox' && prev !== 'inbox' && chat.openId && !chat.roomTimer) {
       loadThread(true);
@@ -520,7 +521,8 @@
     return isNaN(n) ? null : n;
   }
   function imageSig() {
-    return imagesDirty ? images.map(function (x) { return x.name + ':' + x.b64.length; }).concat(savedImages ? ['saved:' + savedImages] : []) : 'same';
+    // 기준값과 같은 모양(배열)으로 센다. 저장된 이미지를 빼기만 해도 'saved:N' 이 사라져 변경 1건이 된다.
+    return images.map(function (x) { return x.name + ':' + x.b64.length; }).concat(savedImages ? ['saved:' + savedImages] : []);
   }
   function formState(r) {
     if (r === 'macro') {
@@ -606,7 +608,10 @@
     void saveEl.offsetWidth;
     saveEl.classList.add('shake');
   }
+  var leaveBack = null;   // 머무르기·Esc 뒤에 포커스를 돌려줄 곳(떠나기 안내가 뜰 때 있던 자리)
   function askLeave(t) {
+    var ae = document.activeElement;
+    if (ae && ae !== document.body && !ae.closest('.when-leave')) leaveBack = ae;
     leaveTarget = t;
     saveEl.classList.add('show', 'leave');
     paintSave();
@@ -616,7 +621,7 @@
   }
   function runLeave(t) {
     if (!t) return;
-    if (t.route) { location.hash = '#' + t.route; return; }
+    if (t.route) { goRoute(t); return; }
     if (t.acct) { switchAccount(t.acct, t.opts); return; }
     if (t.logout) { doLogout(); return; }
     if (t.fn) t.fn();
@@ -628,19 +633,40 @@
   async function saveSettings(r, errId, body, after) {
     if (!account) return;
     var pending = leaveTarget && leaveTarget.saving ? leaveTarget : null;
+    var sent = JSON.stringify(formState(r));
+    var dev = body.device_id;     // 응답이 늦게 와 그 사이 다른 계정으로 바꿨으면 지금 화면에 덮어쓰지 않는다
     saveBusy(true);
     say(errId, '');
     try {
       var res = await api('/panel/api/settings', body);
+      if (dev !== curId) {
+        var was = (res && res.account) || accOf(dev) || meAcc(dev);
+        notify('저장했습니다.', (was && was.email ? was.email + ' · ' : '') + routeTitle(r));
+        if (after) after();
+        return;
+      }
       account = res.account;
       leaveTarget = null;
       saveEl.classList.remove('leave');
-      fillDetail();
+      if (JSON.stringify(formState(r)) === sent) fillDetail();
+      else {
+        // 저장하는 동안 더 고친 칸이 있다(4.14 "응답 뒤 다시 비교"). 그 화면 폼은 다시 채우지 않고,
+        // 보낸 값을 새 기준으로 삼아 남은 변경만 저장 바에 센다.
+        baseline[r] = sent;
+        markDirty();
+        updateSide();
+        if (route === 'overview') renderOverview(false);
+      }
       notify('저장했습니다.', account.email + ' · ' + routeTitle(r));
       if (after) after();
       if (pending) runLeave(pending);
     } catch (e) {
       if (e && (e.status === 401 || e.status === 403)) { showLogin(); return; }
+      if (dev !== curId) {
+        var old = accOf(dev) || meAcc(dev);
+        notify('설정을 저장하지 못했습니다.', (old && old.email ? old.email + ' · ' : '') + routeTitle(r), { kind: 'crit' });
+        return;
+      }
       say(errId, e.message);
       if (leaveTarget) leaveTarget.saving = false;
       saveEl.classList.remove('leave');
@@ -652,6 +678,10 @@
   }
   function revertRoute(text) {
     var y = window.scrollY;
+    if (FEAT_ROUTES.indexOf(route) >= 0) {
+      say(route + '-error', '');
+      if (route === 'macro') say('room-error', '');
+    }
     fillDetail();
     window.scrollTo(0, y);
     if (text) notify(text);
@@ -1354,7 +1384,7 @@
     else $('email').focus();
   }
 
-  // 받은함 `등록`, 계정 표 `재등록`, 개요 `재등록`, 배너 `재등록`이 모두 여기로 온다
+  // 주요 알림 `등록`, 계정 표 `재등록`, 개요 `재등록`, 배너 `재등록`이 모두 여기로 온다
   function startReauth(deviceId, email) {
     var info = { id: deviceId, email: email || ((meAcc(deviceId) || {}).email) || '' };
     if (route === 'account-add') { enterAdd(info); focusAddField(); return; }
@@ -1383,7 +1413,7 @@
       cr.classList.toggle('low', left <= 30);
       if (left === 0) {
         stopRing();
-        stopConfirm = true;
+        confirmGen += 1;
         var row = $('code-wait-row');
         row.innerHTML = '<i class="dot warn"></i><span class="grow">번호가 만료되었습니다. 다시 시도하십시오.</span><button type="button" class="btn primary" id="code-retry">다시 시도</button>';
         $('code-retry').addEventListener('click', function () { hidePass(); focusAddField(); });
@@ -1394,7 +1424,8 @@
   function showPass(view) {
     var hasCode = !!view.passcode;
     var row = $('code-wait-row');
-    if (!$('code-wait')) row.innerHTML = WAIT_HTML;
+    // 옛 루프가 남긴 '아직 확인되지 않았습니다' 문구나 만료 줄을 기본 기다림 줄로 되돌린다
+    row.innerHTML = WAIT_HTML;
     bindCancel();
     passcode.hidden = false;
     if (addStep !== 2) setStep(2);
@@ -1438,7 +1469,7 @@
   function hidePass() {
     passcode.hidden = true;
     pendingId = '';
-    stopConfirm = true;
+    confirmGen += 1;
     stopRing();
     say('code-error', '');
     $('code').textContent = '';
@@ -1470,11 +1501,12 @@
     form.dataset.reauth = '';
     $('email').readOnly = false;
     setStep(3);
+    $('add-done-title').focus({ preventScroll: true });   // 완료 카드 제목으로 포커스를 옮겨 결과를 바로 읽게 한다
   }
   function hidePassQuiet() {
     passcode.hidden = true;
     pendingId = '';
-    stopConfirm = true;
+    confirmGen += 1;
     stopRing();
     say('code-error', '');
   }
@@ -1484,48 +1516,43 @@
   }
 
   async function confirmLoop() {
-    if (confirming) return;
-    confirming = true;
-    stopConfirm = false;
-    try {
-      while (!stopConfirm && pendingId) {
-        var view = null;
-        try {
-          view = await api('/panel/api/register/confirm', { pending_id: pendingId });
-        } catch (e) {
-          if (stopConfirm) return;
-          if (e && (e.status === 401 || e.status === 403)) {
-            say('code-error', e.message || '다시 로그인해 주세요.');
-            return;
-          }
-          $('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
-          say('code-error', '연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.');
-          await sleep(2000);
-          continue;
-        }
-        if (stopConfirm) return;
-        if (view.state === 'ok') {
-          await showDone(view);
+    var gen = ++confirmGen;
+    var live = function () { return gen === confirmGen && !!pendingId; };
+    while (live()) {
+      var view = null;
+      try {
+        view = await api('/panel/api/register/confirm', { pending_id: pendingId });
+      } catch (e) {
+        if (!live()) return;
+        if (e && (e.status === 401 || e.status === 403)) {
+          say('code-error', e.message || '다시 로그인해 주세요.');
           return;
         }
-        if (view.state === 'waiting') {
-          $('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
-          say('code-error', '');
-          await sleep(2000);
-          continue;
-        }
-        showPass(view);
-        $('code-wait').textContent = '';
+        $('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
+        say('code-error', '연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.');
+        await sleep(2000);
+        continue;
+      }
+      if (!live()) return;
+      if (view.state === 'ok') {
+        await showDone(view);
         return;
       }
-    } finally {
-      confirming = false;
+      if (view.state === 'waiting') {
+        $('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
+        say('code-error', '');
+        await sleep(2000);
+        continue;
+      }
+      showPass(view);
+      $('code-wait').textContent = '';
+      return;
     }
   }
 
   function addBusy(btn, on) { btn.classList.toggle('busy', on); btn.disabled = on; }
 
-  // ── 받은함 (docs/UI_V4.md 5장) ────────────────────────────
+  // ── 주요 알림 (docs/UI_V4.md 5장) ────────────────────────────
   // 목록은 /panel/api/inbox 를 9초마다, 열린 대화는 3초마다 읽는다.
   // 답장은 그 대화를 받은 계정이 보낸다 — 전송 device_id 는 열린 행의 data-device 에서만 온다.
   var ui = { filter: '', query: '', unreadOnly: false };                 // '' = 전체
@@ -2814,7 +2841,7 @@
   // ── 팔레트 (4.3) ──────────────────────────────────────────
   var PAL = [
     { g: '이동', t: '개요', icon: 'overview', go: 'overview', k: 'G O' },
-    { g: '이동', t: '받은함', icon: 'inbox', go: 'inbox', k: 'G I' },
+    { g: '이동', t: '주요 알림', kw: '받은함 갠톡 1:1 대화', icon: 'inbox', go: 'inbox', k: 'G I' },
     { g: '이동', t: '계정', icon: 'accounts', go: 'accounts', k: 'G A' },
     { g: '이동', t: '매크로', icon: 'macro', go: 'macro', k: 'G M' },
     { g: '이동', t: '입장·퇴장 로그', icon: 'visit', go: 'visit', k: 'G V' },
@@ -2851,7 +2878,7 @@
   }
   function palRender() {
     var q = $('palIn').value.trim().toLowerCase();
-    palItems = palData().filter(function (it) { return !q || (it.t + ' ' + (it.sub || '') + ' ' + it.g).toLowerCase().indexOf(q) >= 0; });
+    palItems = palData().filter(function (it) { return !q || (it.t + ' ' + (it.sub || '') + ' ' + it.g + ' ' + (it.kw || '')).toLowerCase().indexOf(q) >= 0; });
     if (!q) palItems = palItems.filter(function (it) { return it.g !== '설정' || it.top; });
     palIdx = clamp(palIdx, 0, Math.max(0, palItems.length - 1));
     var g = '';
@@ -2877,7 +2904,10 @@
     palIdx = 0;
     palRender();
     $('palIn').focus();                      // 바로 옮겨야 이어서 친 글자가 이전 입력칸으로 새지 않는다
-    setTimeout(function () { if (document.activeElement !== $('palIn')) $('palIn').focus(); }, 10);
+    setTimeout(function () {
+      // 빨리 Enter 를 눌러 이미 닫혔으면 이동한 곳의 포커스를 빼앗지 않는다
+      if (!$('palWrap').classList.contains('closed') && document.activeElement !== $('palIn')) $('palIn').focus();
+    }, 10);
   }
   function palClose(noReturn) {
     var w = $('palWrap');
@@ -2891,22 +2921,33 @@
     if (!it) return;
     palClose(true);
     if (it.href) { location.href = it.href; return; }
-    if (it.acct) { switchAccount(it.acct); return; }
+    if (it.acct) {
+      var back = palReturn && palReturn !== document.body && document.contains(palReturn) ? palReturn : $('acctBtn');
+      back.focus({ preventScroll: true });
+      switchAccount(it.acct);
+      return;
+    }
     if (it.go === route) {
       if (it.focus) focusSetting(it.focus);
       if (it.then) $(it.then).click();
       return;
     }
-    if (it.focus) pendingFocus = it.focus;
-    if (it.then) {
-      var then = it.then;
-      setTimeout(function () { if (route === it.go) $(then).click(); }, reducedMotion() ? 0 : 320);
+    goRoute({ route: it.go, focus: it.focus, then: it.then });
+  }
+  // 이동 + (선택) 그 화면의 설정으로 포커스·후속 클릭. 떠나기 확인이 걸리면 이 대상이 그대로 남았다가 버리기·저장 뒤에 실행된다.
+  function goRoute(t) {
+    if (dirtyN > 0 && route && t.route !== route) { pendingFocus = null; askLeave(t); return; }
+    pendingFocus = t.focus || null;
+    if (t.then) {
+      var then = t.then;
+      setTimeout(function () { if (route === t.route) $(then).click(); }, reducedMotion() ? 0 : 320);
     }
-    location.hash = '#' + it.go;
+    location.hash = '#' + t.route;
   }
   function focusSetting(id) {
     var target = $(id);
-    if (!target) return;
+    // 다른(숨은) 화면의 칸이면 무시한다 — 남은 포커스 요청이 엉뚱한 화면에서 경고를 내지 않게
+    if (!target || !curPage || !curPage.contains(target)) return;
     var row = target.closest('.srow') || target;
     var dp = row.closest('.dep[data-open="false"]');
     if (dp) {
@@ -2992,6 +3033,8 @@
   });
   window.addEventListener('resize', function () {
     if (app.hidden) return;
+    // 서랍을 연 채 960px 위로 넓어지면 서랍 버튼·덮개가 사라지므로 닫아서 본문 inert 를 푼다
+    if (app.classList.contains('nav-open') && !window.matchMedia('(max-width: 960px)').matches) drawer(false);
     navInd(true);
     segInd($('visit-type'), true);
   });
@@ -3017,7 +3060,12 @@
   $('acctBtn').addEventListener('click', function (e) { e.stopPropagation(); openMenu($('acctMenu').classList.contains('closed')); });
   $('acctMenu').addEventListener('click', function (e) {
     var s = e.target.closest('[data-switch]');
-    if (s) { switchAccount(s.dataset.switch); return; }
+    if (s) {
+      openMenu(false);
+      $('acctBtn').focus({ preventScroll: true });   // 메뉴가 다시 그려져도 포커스가 body 로 떨어지지 않게
+      switchAccount(s.dataset.switch);
+      return;
+    }
     if (e.target.closest('a')) openMenu(false);
   });
   $('acctMenu').addEventListener('keydown', function (e) {
@@ -3025,7 +3073,13 @@
     var i = items.indexOf(document.activeElement);
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
     if (e.key === 'Escape') { e.stopPropagation(); openMenu(false); $('acctBtn').focus(); }
-    if (e.key === 'Tab') openMenu(false);
+    if (e.key === 'Tab') {
+      // 닫히는 메뉴 안으로 포커스가 넘어가 body 로 떨어지지 않게 직접 옮긴다
+      e.preventDefault();
+      openMenu(false);
+      var nx = e.shiftKey ? null : $('openPal');
+      (nx && nx.getClientRects().length ? nx : $('acctBtn')).focus();
+    }
   });
   document.addEventListener('click', function (e) { if (!e.target.closest('.acct-wrap')) openMenu(false); });
   $('kbdHint').textContent = isMac ? '⌘ K' : 'Ctrl K';
@@ -3051,8 +3105,15 @@
   $('saveRevert').addEventListener('click', function () { revertRoute('변경사항을 되돌렸습니다.'); });
   $('leaveStay').addEventListener('click', function () {
     leaveTarget = null;
+    pendingFocus = null;
     saveEl.classList.remove('leave');
     paintSave();
+    // 떠나기 버튼이 숨으면서 포커스가 body 로 떨어지지 않게, 안내가 뜨기 전 자리(없거나 안 보이면 저장 버튼)로 돌린다
+    var back = leaveBack;
+    leaveBack = null;
+    var ok = back && back.isConnected && back.getClientRects().length > 0 && !back.closest('.closed, [inert], [hidden], [aria-hidden="true"]');
+    if (ok) back.focus({ preventScroll: true });
+    if (!ok || document.activeElement !== back) saveBtn.focus({ preventScroll: true });
   });
   $('leaveDrop').addEventListener('click', function () {
     var t = leaveTarget;
@@ -3094,7 +3155,7 @@
   $('openPal').addEventListener('click', palOpen);
   $('topSearch').addEventListener('click', palOpen);
 
-  // 전역 단축키: Ctrl/⌘K 팔레트, Ctrl/⌘S 저장, G 다음 글자 이동, Esc 닫기, 받은함 / 검색·Alt+↑↓
+  // 전역 단축키: Ctrl/⌘K 팔레트, Ctrl/⌘S 저장, G 다음 글자 이동, Esc 닫기, 주요 알림 / 검색·Alt+↑↓
   var gArmed = 0;
   document.addEventListener('keydown', function (ev) {
     if (!me || app.hidden) return;
@@ -3209,9 +3270,14 @@
     var wd = t.closest('[data-wdel]');
     if (wd) {
       var chipEl = wd.parentNode;
-      var wi = Number(wd.dataset.wdel);
+      if (chipEl.classList.contains('bye')) return;   // 사라지는 중인 칩을 또 누르면 무시(다음 단어가 지워지지 않게)
+      var word = coverWords[Number(wd.dataset.wdel)];
       chipEl.classList.add('bye');
-      setTimeout(function () { coverWords.splice(wi, 1); renderCoverChips(); markDirty(); $('cover-word-in').focus(); }, reducedMotion() ? 0 : 200);
+      setTimeout(function () {
+        var k = coverWords.indexOf(word);       // 번호가 아니라 값으로 지운다(먼저 지운 칩 때문에 번호가 밀려도 안전)
+        if (k >= 0) coverWords.splice(k, 1);
+        renderCoverChips(); markDirty(); $('cover-word-in').focus();
+      }, reducedMotion() ? 0 : 200);
       return;
     }
     if (t.id === 'cover-words') { $('cover-word-in').focus(); return; }
@@ -3430,8 +3496,10 @@
     var buttons = qsa('[data-load-rooms]');
     buttons.forEach(function (b) { b.classList.add('busy'); b.disabled = true; });
     var prevKeys = roomChoices().map(function (r) { return r.key; });
+    var dev = account.device_id;    // 응답 전에 계정을 바꿨으면 그 결과를 지금 계정 화면에 넣지 않는다
     try {
-      var res = await api('/panel/api/rooms', { device_id: account.device_id });
+      var res = await api('/panel/api/rooms', { device_id: dev });
+      if (dev !== curId) return;
       if (res.account) account = res.account;
       else if (res.rooms) account.rooms = res.rooms;
       var added = refillRoomLists(prevKeys);
@@ -3441,6 +3509,7 @@
     } catch (e) {
       if (e && (e.status === 401 || e.status === 403)) { showLogin(); return; }
       var msg = e && e.status ? e.message : '대화방 목록을 가져오지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+      if (dev !== curId) return;
       say('room-error', msg);
       notify('대화방을 불러오지 못했습니다.', msg, { kind: 'crit' });
     } finally {
@@ -3561,7 +3630,7 @@
     if (!b || b.dataset.bound) return;
     b.dataset.bound = '1';
     b.addEventListener('click', async function () {
-      stopConfirm = true;
+      confirmGen += 1;
       var id = pendingId;
       hidePass();
       focusAddField();
@@ -3651,7 +3720,7 @@
     focusAddField();
   });
 
-  // ── 받은함 리스너 ─────────────────────────────────────────
+  // ── 주요 알림 리스너 ─────────────────────────────────────────
   if (railEl) {
     railEl.addEventListener('click', function (ev) {
       var b = ev.target.closest ? ev.target.closest('.fchip') : null;
@@ -3745,7 +3814,7 @@
   });
   window.addEventListener('popstate', function (ev) {
     if (ev.state && ev.state.kview === 'room') return;
-    // 해시 이동도 popstate 를 낸다. 받은함 안에서 뒤로 간 경우(대화 → 목록)만 닫는다. 다른 화면에서 돌아올 때는 열린 대화를 둔다.
+    // 해시 이동도 popstate 를 낸다. 주요 알림 안에서 뒤로 간 경우(대화 → 목록)만 닫는다. 다른 화면에서 돌아올 때는 열린 대화를 둔다.
     if (route === 'inbox' && inboxEl.dataset.view === 'room' && location.hash === '#inbox') closeConversation();
   });
   // 탭을 숨기면 폴링을 쉬므로, 다시 보이면 기다리지 말고 바로 읽는다. 오래 숨겼으면 계정 상태(/me)도 다시 본다.

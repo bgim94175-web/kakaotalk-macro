@@ -200,6 +200,17 @@
     if (v === null) return '-';
     return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '원';
   }
+  /* 모노 글꼴 칸에 넣는 금액: 숫자는 모노, '원'은 산세리프 span (docs/UI_V5.md 2.1·7 — 모노에 한글 금지). 글자는 won() 과 같다. */
+  function wonKids(n, pre) {
+    var t = won(n);
+    if (t.slice(-1) !== '원') return [(pre || '') + t];
+    return [(pre || '') + t.slice(0, -1), el('span', { cls: 'sans', text: '원' })];
+  }
+  function setWon(node, n, empty) {
+    clear(node);
+    if (num(n) === null) { node.textContent = empty; return; }
+    wonKids(n).forEach(function (k) { node.appendChild(typeof k === 'string' ? document.createTextNode(k) : k); });
+  }
 
   /* 초 단위 타임스탬프로 와도 ms로 맞춘다 */
   function ts(v) {
@@ -370,7 +381,7 @@
         '. 금액이 일치하지 않으면 자동 확인이 불가합니다.';
     return el('div', { cls: 'big hi' }, [
       el('div', { cls: 'k', text: '입금 금액' }),
-      el('div', { cls: 'v xl mono', text: won(v) }),
+      el('div', { cls: 'v xl mono' }, wonKids(v)),
       el('div', { cls: 'tiny warnline', text: msg }),
       suffix !== null
         ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(v - suffix) + ' + 주문 확인용 ' + suffix + '원' })
@@ -610,7 +621,7 @@
         });
         var lab = el('label', { for: 'plan-' + p.id }, [
           input,
-          el('span', null, [ (PRICE && PRICE.planLabel[p.id]) || p.name, el('em', { text: planDays(p.id) + '일' }) ])
+          el('span', null, [ (PRICE && PRICE.planLabel[p.id]) || p.name, el('em', null, [String(planDays(p.id)), el('span', { cls: 'sans', text: '일' })]) ])
         ]);
         box.appendChild(lab);
       });
@@ -724,14 +735,14 @@
         if (self.boxes[id]) self.boxes[id].checked = on;
         card.classList.toggle('sel', on);
         var u = unitPrice(id, self.plan);
-        if (self.amts[id]) self.amts[id].textContent = u === null ? '' : won(u);
+        if (self.amts[id]) setWon(self.amts[id], u, '');
         /* 랜딩 카드: 현재 플랜 가격 강조 + 가격 채우기 */
         $$('.pr', card).forEach(function (row) {
           var p = row.getAttribute('data-plan');
           row.setAttribute('data-on', p === self.plan ? '1' : '0');
           var v = unitPrice(id, p);
           var pv = $('.pv', row);
-          if (pv) pv.textContent = v === null ? '—' : won(v);
+          if (pv) setWon(pv, v, '—');
         });
       });
 
@@ -754,20 +765,19 @@
           : self.ids.map(featName).join(' · ');
         self.sumLines.appendChild(el('div', { cls: 'ln' }, [
           el('span', { text: who + ' · ' + planName(self.plan) }),
-          el('span', { cls: 'v mono', text: won(c.subtotal) })
+          el('span', { cls: 'v mono' }, wonKids(c.subtotal))
         ]));
         if (c.bundled) {
           self.sumLines.appendChild(el('div', { cls: 'ln off' }, [
             el('span', { text: FEATURES.length + '종 묶음 할인 ' + Math.round(c.rate * 100) + '%' }),
-            el('span', { cls: 'v mono', text: '-' + won(c.discount) })
+            el('span', { cls: 'v mono' }, wonKids(c.discount, '-'))
           ]));
         }
         self.sumLines.appendChild(el('div', { cls: 'ln total' }, [
           el('span', { text: '결제 금액' }),
           el('span', { cls: 'v mono' }, [
-            c.bundled ? el('s', { cls: 'was', text: won(c.subtotal) }) : null,
-            document.createTextNode(won(c.total))
-          ])
+            c.bundled ? el('s', { cls: 'was' }, wonKids(c.subtotal)) : null
+          ].concat(wonKids(c.total)))
         ]));
       }
 
@@ -1011,7 +1021,7 @@
     }
 
     playBtn.addEventListener('click', function () {
-      D.user = true; D.auto = false;
+      D.user = D.playing; D.auto = false;   /* 사용자가 멈춘 경우만 '직접 멈춤' — 재생을 누른 뒤엔 화면에 돌아오면 다시 재생 */
       if (!D.playing && (!D.started || D.t >= END)) jump(0);
       setPlay(!D.playing);
     });
@@ -1945,7 +1955,7 @@
             el('dd', { text: o.features.length ? o.features.map(featName).join(' · ') : '-' })]),
           el('div', { cls: 'r' }, [el('dt', { text: '기간' }),
             el('dd', { text: o.plan ? (o.planLabel || planName(o.plan)) + ' (' + planDays(o.plan) + '일)' : '-' })]),
-          !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono', text: won(o.amount) })]) : null,
+          !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono' }, wonKids(o.amount))]) : null,
           o.depositor ? el('div', { cls: 'r' }, [el('dt', { text: '입금자명' }), el('dd', { text: o.depositor })]) : null,
           o.target ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: o.target })]) : null,
           o.memo ? el('div', { cls: 'r' }, [el('dt', { text: '메모' }), el('dd', { text: o.memo })]) : null,

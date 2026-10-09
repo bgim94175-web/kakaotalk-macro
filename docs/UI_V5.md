@@ -4,7 +4,7 @@
 - 참조 프로토타입: `docs/UI_V5.prototype.html` — 단일 파일. 브라우저로 열면 공개 사이트(`#home` `#buy` `#my` `#order`)와 콘솔(`#login` `#overview` … `#snipe`)을 해시 라우트로 모두 볼 수 있다. 예시 데이터로 동작한다.
 - 프로토타입 원본: `/tmp/claude-0/-home-user-kakaotalk-macro/8c77ca9b-6258-53a2-bfae-00e7470f9ad7/scratchpad/v5-final/` — `parts/a.html`(CSS), `parts/b.html`(마크업·SVG 스프라이트), `parts/c1.js`~`c4.js`(동작), `build.sh`(합치기), `verify.mjs`(모션·동작 검사), `smoke.mjs`(전 화면 오류·가로 넘침 검사), `shots.mjs`(스크린샷).
 - 스크린샷: 같은 폴더 `shots/` — `d-*.png` 1440×900, `m-*.png` 390×844. 번호표는 부록 A.
-- 범위: 화면 구조, 디자인 토큰, 모션, DOM 계약, 테스트 변경. **UI_V4.md 5장(받은함 상태·폴링·재렌더 회피·늦은 응답·전송·닫기)과 6장(API)은 그대로 유효하다.** 이 문서는 그중 바뀌는 부분만 적는다.
+- 범위: 화면 구조, 디자인 토큰, 모션, DOM 계약, 테스트 변경. **UI_V4.md 5장(주요 알림 상태·폴링·재렌더 회피·늦은 응답·전송·닫기)과 6장(API)은 그대로 유효하다.** 이 문서는 그중 바뀌는 부분만 적는다.
 - 우선순위: 이 문서 > 프로토타입 > UI_V4.md. 프로토타입은 한 파일에 사이트와 콘솔을 함께 넣느라 일부 id·접두사가 실제 파일과 다르다. 실제 이름은 3.8(공개)·4.13(콘솔) 대응표를 따른다.
 - 문구는 `docs/TONE.md`(합니다체·명사형, 버튼 2~5자, 오류 = 현상 + 조치)와 이 문서 1.4의 이름표를 따른다.
 
@@ -23,7 +23,7 @@
 | 모션 그래픽 | 홈 히어로 시연(18.2초 루프, 장 5개), 동작 방식 구조도(데이터 흐름 점), 기능 탐색기 전환. 5장. |
 | 누르면 무엇이 나타나는 애니메이션 | 원인-결과 모션: 스위치를 켜면 바로 아래 옵션이 펼쳐지고, 고친 것이 생기면 저장 바가 올라오고, 고른 항목으로 표시가 미끄러진다. 5장. |
 | K bot 기능을 쉽게 | 사이드바 하나에 모든 기능, 계정 전환기, 기능별 화면 첫 줄 = 메인 스위치, 개요에서 즉시 켜고 끄기, Ctrl/⌘K 팔레트. |
-| 패널 | `/panel` 콘솔: 개요, 받은함, 계정, 계정 추가, 기능 7개 화면. 4장. |
+| 패널 | `/panel` 콘솔: 개요, 주요 알림, 계정, 계정 추가, 기능 7개 화면. 4장. |
 | 카카오 계정 추가 화면 | `#account-add` 3단계 등록 마법사(계정 입력 → 카카오톡에 번호 입력 → 완료), 재등록·다른 기기 끊기 포함. 4.6. |
 | 매크로 / 입장·퇴장 로그 / 프로필 로그 / 올킥 방지 / 금지어 검열 / 갠톡 응답 | 각 기능 화면 4.7~4.12. 기존 저격 규칙도 유지(4.12). |
 
@@ -34,11 +34,11 @@
 3. **헤어라인과 면 밝기로 구획.** 그림자는 떠 있는 것(계정 메뉴, 팔레트, 토스트, 저장 바, 시연 창)에만.
 4. **설정 행 문법.** 왼쪽 라벨 + 설명, 오른쪽 컨트롤(`.srow`). 기능 화면의 첫 행은 그 기능의 메인 스위치. 꺼져 있으면 옵션을 접고 점선 안내(`.off-note`)와 `켜기` 버튼만 보인다.
 5. **저장은 화면 아래 저장 바 하나.** "변경사항 N건 · 계정 · 화면"을 적는다. 저장하지 않고 떠나면 같은 바가 "저장하지 않은 변경사항이 있습니다."로 바뀌어 묻는다. 브라우저 `confirm()` 금지.
-6. **키보드.** Ctrl/⌘K 팔레트, Ctrl/⌘S 저장, G 다음 글자로 화면 이동, Esc 닫기. 받은함 `/` 검색, Alt+↑↓ 대화 이동(UI_V4 5.11 유지).
+6. **키보드.** Ctrl/⌘K 팔레트, Ctrl/⌘S 저장, G 다음 글자로 화면 이동, Esc 닫기. 주요 알림 `/` 검색, Alt+↑↓ 대화 이동(UI_V4 5.11 유지).
 7. **모노 글꼴은 라틴 문자 값에만.** 이메일, 기기 id, 링크, 시각, 숫자. 한글은 언제나 산세리프(Geist → IBM Plex Sans KR).
 8. **정직한 문구.** 서버가 실제로 하는 일만 적고, 못 하는 일은 적는다. 예: 올킥 방지는 감지·기록만 한다(강퇴를 막거나 다시 초대하지 않음). 금지어 검열은 이 계정이 부방장 이상일 때 글을 가리기만 한다. 입장·퇴장 로그와 프로필 로그는 방에 안내를 보낸다(4.8 안내 형식). 예시 데이터는 홈 시연 창 안에서만 쓰고 "콘솔 시연"이라고 밝힌다.
 9. **모션은 원인을 따라간다.** 누른 곳에서 결과가 나타난다. 150~380ms, 이징 하나(`--ease`). 폴링으로 다시 그릴 때는 움직이지 않는다(5.5).
-10. **폰에서도 전부 쓴다.** 390px 기준 가로 스크롤 없음. 폰(≤760px)에서 받은함 칩·검색·안 읽음·새로고침·뒤로·전송, 사이드바 항목, 계정 메뉴·팔레트 항목, 스위치는 44px 이상(UI_V4 33항 유지), 그 밖 컨트롤 32px 이상.
+10. **폰에서도 전부 쓴다.** 390px 기준 가로 스크롤 없음. 폰(≤760px)에서 주요 알림 칩·검색·안 읽음·새로고침·뒤로·전송, 사이드바 항목, 계정 메뉴·팔레트 항목, 스위치는 44px 이상(UI_V4 33항 유지), 그 밖 컨트롤 32px 이상.
 
 ### 1.3 금지 목록 (하나라도 보이면 반려)
 
@@ -59,7 +59,7 @@
 | route | 화면 이름 | 한 줄 설명(개요 표·팔레트) | `account` 키 | 단축키 |
 |---|---|---|---|---|
 | `overview` | 개요 | — | — | G O |
-| `inbox` | 받은함 | — | — | G I |
+| `inbox` | 주요 알림 | — | — | G I |
 | `accounts` | 계정 | — | — | G A |
 | `account-add` | 계정 추가 (재등록이면 계정 재등록) | — | — | — |
 | `macro` | 매크로 | 홍보 메시지 주기 발송 | `macro` (+`images`) | G M |
@@ -73,6 +73,7 @@
 - 상태 라벨 5종(UI_V4 45항 그대로): `접속 중` / `연결 대기` / `등록 필요` / `응답 없음` / `발송 중지`.
 - 기능 상태 라벨: `켜짐` / `꺼짐`.
 - `/panel` 전체를 "콘솔"이라 부른다. 사이트 헤더 버튼은 `콘솔 열기`.
+- `inbox` 화면의 사용자에게 보이는 이름은 모두 `주요 알림`이다(사이드바, 제목, 경로 표시, 팔레트, 개요 버튼, 완료 화면 링크, 공개 사이트 소개). 예전 이름 `받은함`은 화면에 쓰지 않고, 팔레트 검색어(`kw`)로만 남겨 그 말로 입력해도 이 화면을 찾는다. 코드 식별자·id·해시(`#inbox`)·CSS 클래스·API 경로(`/panel/api/inbox`)는 바꾸지 않는다. 기능은 같다(모든 계정의 오픈프로필 1:1 대화를 읽고 답장).
 - 폐기되는 V4 이름: `들낙 방지` → 입장·퇴장 로그, `욕설 가리기` → 금지어 검열, `프로필 변경 감지`(화면 이름) → 프로필 로그(스위치 라벨로는 `프로필 변경 감지` 유지), `갠톡 자동응답` → 갠톡 응답(스위치 라벨 `자동 응답`), `경쟁사 저격` → 저격 규칙, `설정 › 계정` → 계정 화면.
 
 ---
@@ -143,7 +144,7 @@
 
 | 토큰 | 쓰임 | 대비(본문 위) |
 |---|---|---|
-| `--bg` | 페이지 바탕, 사이드바, 받은함 목록 | — |
+| `--bg` | 페이지 바탕, 사이드바, 주요 알림 목록 | — |
 | `--bg-1` | 카드(`.sec`), 입력창, 시연 창, 대화 창 바탕 | — |
 | `--bg-2` | 떠 있는 면: 메뉴, 팔레트, 토스트, 받은 말풍선 | — |
 | `--bg-3` | hover, 선택된 행, 사이드바 현재 위치 표시(`.nav-ind`) | — |
@@ -162,7 +163,7 @@
 ### 2.5 간격·레이아웃
 
 - 4px 격자: 4·6·8·10·12·14·16·18·20·24·28·32·40·48·56·72·88·128px.
-- 콘솔: 사이드바 `--side-w` 248px, 상단 바 `--top-h` 52px(폰 56px), 본문 열 `--col-w` 1040px 가운데 정렬, 페이지 안쪽 여백 `40px 28px 168px`(폰 `28px 16px 200px`; 아래 여백은 저장 바 자리). 받은함만 열 제한 없이 화면을 꽉 채운다(`.page.full`, 여백 0).
+- 콘솔: 사이드바 `--side-w` 248px, 상단 바 `--top-h` 52px(폰 56px), 본문 열 `--col-w` 1040px 가운데 정렬, 페이지 안쪽 여백 `40px 28px 168px`(폰 `28px 16px 200px`; 아래 여백은 저장 바 자리). 주요 알림만 열 제한 없이 화면을 꽉 채운다(`.page.full`, 여백 0).
 - 사이트: `.wrap` 1120px, `.wrap-wide` 1240px, 좌우 여백 24px(폰 16px). 섹션 간격 128px(폰 88px), 섹션 앵커 `scroll-margin-top: 60px`.
 
 ---
@@ -229,12 +230,12 @@
 
 **시연 창** `section.wrap-wide.stage[aria-labelledby="demoCap"]` > `h2.sr#demoCap 콘솔 시연` + `.win#demo` + `.chapters`. 시연 창 안의 모든 이름·숫자는 예시다. 창 머리줄 오른쪽에 `span.demo-tag` `콘솔 시연`.
 
-- 창 구조(`.win-body` 3열 `200px 296px 1fr`, 높이 520px: 사이드 · 대화 목록 · 대화 / ≤1100px 사이드 숨김 / ≤760px 대화만, 높이 540px): 프로토타입 마크업을 그대로 쓴다. 움직이는 요소 id: `dBadge`(사이드 받은함 배지), `dNew`·`dNewRow`·`dPv`(새 대화 행·미리보기), `dHead`(대화 머리: 이름 + `a@kakao.com 계정으로 답장`), `dEmpty`, `dInMeta`·`dIn`·`dInT`(받은 말), `dOut`·`dOutT`(보낸 말 + `21:16 · a@ · 전송됨`), `dType`·`dCaret`·`dSend`(입력·전송 버튼), 오른쪽 아래 기록 패널 `lgJoin`·`lgLeave`·`lgProf`·`lgKick`, 오른쪽 위 알림 `dAlert`(올킥 감지)와 그 안 `dKicks`(강퇴 막대 8개).
+- 창 구조(`.win-body` 3열 `200px 296px 1fr`, 높이 520px: 사이드 · 대화 목록 · 대화 / ≤1100px 사이드 숨김 / ≤760px 대화만, 높이 540px): 프로토타입 마크업을 그대로 쓴다. 움직이는 요소 id: `dBadge`(사이드 주요 알림 배지), `dNew`·`dNewRow`·`dPv`(새 대화 행·미리보기), `dHead`(대화 머리: 이름 + `a@kakao.com 계정으로 답장`), `dEmpty`, `dInMeta`·`dIn`·`dInT`(받은 말), `dOut`·`dOutT`(보낸 말 + `21:16 · a@ · 전송됨`), `dType`·`dCaret`·`dSend`(입력·전송 버튼), 오른쪽 아래 기록 패널 `lgJoin`·`lgLeave`·`lgProf`·`lgKick`, 오른쪽 위 알림 `dAlert`(올킥 감지)와 그 안 `dKicks`(강퇴 막대 8개).
 - 장 표시 `.chapters` > `ol.chap-list` > `button.chap[data-ch="0..4"]` (각 `.bar > i` 진행 막대, `.ct` 제목, `.cd` 설명) + 재생/일시정지 `button.playbtn#demoPlay`(44×44px 아이콘 버튼, `aria-label="시연 일시정지"`/`"시연 재생"`).
 
 | `data-ch` | `.ct` | `.cd` |
 |---|---|---|
-| 0 | 갠톡 수신 | 모든 계정의 1:1 대화가 계정 표시와 함께 받은함에 모입니다. |
+| 0 | 갠톡 수신 | 모든 계정의 1:1 대화가 계정 표시와 함께 주요 알림에 모입니다. |
 | 1 | 답장 발송 | 대화를 받은 계정이 그대로 답장합니다. 계정을 고르지 않습니다. |
 | 2 | 입장·퇴장 기록 | 이름, 오픈프로필 링크, 시각을 기록하고 방에 안내를 보냅니다. |
 | 3 | 프로필 변경 | 닉네임 변경을 감지하여 이전 이름과 함께 기록합니다. |
@@ -244,7 +245,7 @@
 
 **기능** `section#features.lsec` — 머리(`.lsec-h`: 왼쪽 `p.eyebrow 기능` + `h2 운영에 필요한 기능을 계정마다 따로 설정합니다`, 오른쪽 `p.desc`), 본문 `.fx`(탐색기, 2열 `340px 1fr`, ≤1100px `280px 1fr`):
 
-- 왼쪽 `div.fx-list#fxList[role="tablist"][aria-label="기능 목록"]` > `span.fx-ind#fxInd`(선택 표시 면) + `button.fx-item#fxt{0..7}[role="tab"][aria-selected][aria-controls="fxPane"][tabindex]` 8개(통합 받은함·매크로·입장·퇴장 로그·프로필 로그·올킥 방지·금지어 검열·갠톡 응답·저격 규칙). 각 버튼은 `b` 이름 + `span > i` 한 줄 설명(선택된 것만 펼쳐짐, 프로토타입 `FX` 배열 문구 그대로).
+- 왼쪽 `div.fx-list#fxList[role="tablist"][aria-label="기능 목록"]` > `span.fx-ind#fxInd`(선택 표시 면) + `button.fx-item#fxt{0..7}[role="tab"][aria-selected][aria-controls="fxPane"][tabindex]` 8개(주요 알림·매크로·입장·퇴장 로그·프로필 로그·올킥 방지·금지어 검열·갠톡 응답·저격 규칙). 각 버튼은 `b` 이름 + `span > i` 한 줄 설명(선택된 것만 펼쳐짐, 프로토타입 `FX` 배열 문구 그대로).
 - 오른쪽 `div.fx-view` > `div.fx-view-h`(`span#fxCrumb` 경로 `a@kakao.com / 매크로` + `span.demo-tag` `예시 화면`) + `div.fx-pane#fxPane[role="tabpanel"][aria-labelledby="fxt{i}"]` — 그 기능 콘솔 화면의 축소판(설정 행, 방 칩, 기록 표 몇 줄). 프로토타입 `fxHtml(k)`를 app.js로 옮기거나 같은 마크업을 정적으로 둔다(PUBLIC 판단). 축소판의 스위치·칩은 장식이다(`aria-hidden="true"`, `pointer-events: none`).
 - 탭 전환: 클릭·←↑→↓·Home·End. 전환 모션 5.3.
 - 폰: 목록이 가로 스크롤 줄(`.fx-item span` 숨김), `.fx-ind` 숨김, 선택 탭은 `--bg-3` 바탕.
@@ -311,7 +312,7 @@ app.js의 클래스·id·`data-*`는 모두 유지한다(`.card` `.prod` `.head`
 
 ### 3.7 공개 사이트 문구 원칙
 
-- 판매 문구는 기존 index.html의 사실(안드로이드 전용, 키 1개 = 기기 1대, 무통장 입금, 자동 발급/관리자 확인 `data-manual`)을 그대로 유지한다. 새로 더하는 것은 콘솔 소개(받은함, 계정 8개, 휴대폰 없이 서버 동작)뿐이며, 서버가 항상 켜져 있다고 약속하지 않는다(질문 `휴대폰을 꺼도 동작합니까?` 답에 `항상 켜져 있다고 보장하지 않습니다` 포함).
+- 판매 문구는 기존 index.html의 사실(안드로이드 전용, 키 1개 = 기기 1대, 무통장 입금, 자동 발급/관리자 확인 `data-manual`)을 그대로 유지한다. 새로 더하는 것은 콘솔 소개(주요 알림, 계정 8개, 휴대폰 없이 서버 동작)뿐이며, 서버가 항상 켜져 있다고 약속하지 않는다(질문 `휴대폰을 꺼도 동작합니까?` 답에 `항상 켜져 있다고 보장하지 않습니다` 포함).
 - 금액·할인·기간은 언제나 `/api/price` 값. 프로토타입의 15,000원 등은 예시다.
 
 ### 3.8 프로토타입 → 실제 파일 대응표 (공개)
@@ -340,7 +341,7 @@ app.js의 클래스·id·`data-*`는 모두 유지한다(`.card` `.prod` `.head`
 │ [A] a@kakao.com  접속 중   ▾       │ ≡  a@kakao.com / 매크로      ● 발송 서버 정상 │ ← 상단 바 52px (glass)
 │ [ 이동 및 검색        Ctrl K ]     ├──────────────────────────────────────────────┤
 │ 개요                         G O   │                                              │
-│ 받은함                    G I  3   │   ┌────────── 본문 열 1040px ──────────┐     │
+│ 주요 알림                 G I  3   │   ┌────────── 본문 열 1040px ──────────┐     │
 │ 계정                      G A 3/8  │   │ h1 매크로                          │     │
 │ K bot 설정        a@kakao.com      │   │ 설명                                │     │
 │ 매크로                  G M  ●     │   │ ┌ 매크로 발송 ───────────── [■□] ┐ │     │
@@ -356,8 +357,8 @@ app.js의 클래스·id·`data-*`는 모두 유지한다(`.card` `.prod` `.head`
 └────────────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-- 사이드바 위: 계정 전환기. 그 아래 팔레트 버튼. 메뉴는 두 묶음: 전체(개요·받은함·계정)와 `K bot 설정`(현재 계정의 기능 7개, 묶음 머리에 현재 계정 이메일). 기능 항목 오른쪽 점 `.fs`: 켜짐 `--live` 채움 / 꺼짐 `--line-3` 테두리만.
-- 받은함 화면은 본문 열 제한 없이 상단 바 아래 전체를 쓴다(목록 360px + 대화).
+- 사이드바 위: 계정 전환기. 그 아래 팔레트 버튼. 메뉴는 두 묶음: 전체(개요·주요 알림·계정)와 `K bot 설정`(현재 계정의 기능 7개, 묶음 머리에 현재 계정 이메일). 기능 항목 오른쪽 점 `.fs`: 켜짐 `--live` 채움 / 꺼짐 `--line-3` 테두리만.
+- 주요 알림 화면은 본문 열 제한 없이 상단 바 아래 전체를 쓴다(목록 360px + 대화).
 - ≤960px: 사이드바는 왼쪽에서 밀려 나오는 서랍(`#menuBtn`), 상단 바 56px.
 - 스크린샷: `d-12-overview`, `d-13*`, `d-16*`, `m-24-nav-open`.
 
@@ -465,7 +466,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 <nav class="side-nav" id="nav" aria-label="화면">
   <span class="nav-ind" id="navInd"></span>
   <a class="nav-a" href="#overview" data-r="overview">[i-overview]개요<span class="r"><span class="kb" aria-hidden="true">G O</span></span></a>
-  <a class="nav-a" href="#inbox" data-r="inbox">[i-inbox]받은함<span class="r"><span class="kb" aria-hidden="true">G I</span><b class="badge-n" id="navUnread" hidden></b></span></a>
+  <a class="nav-a" href="#inbox" data-r="inbox">[i-inbox]주요 알림<span class="r"><span class="kb" aria-hidden="true">G I</span><b class="badge-n" id="navUnread" hidden></b></span></a>
   <a class="nav-a" href="#accounts" data-r="accounts">[i-accounts]계정<span class="r"><span class="kb" aria-hidden="true">G A</span><span class="cnt mono" id="navAcctN"></span></span></a>
   <p class="nav-cap"><span>K bot 설정</span><span class="mono" id="navCapAcct"></span></p>
   <a class="nav-a" href="#macro" data-r="macro">[i-macro]매크로<span class="r"><span class="kb" aria-hidden="true">G M</span><span class="dirty">수정됨</span><i class="fs" data-fs="macro"></i></span></a>
@@ -506,7 +507,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 </div>
 ```
 
-- `#crAcct`: 계정별 화면(개요, 기능 7개)은 현재 계정 이메일(`.mono`), 받은함·계정·계정 추가는 `전체 계정`. `#crPage` = 1.4 화면 이름.
+- `#crAcct`: 계정별 화면(개요, 기능 7개)은 현재 계정 이메일(`.mono`), 주요 알림·계정·계정 추가는 `전체 계정`. `#crPage` = 1.4 화면 이름.
 - `#sync`: `inboxSt.senderUp`이면 `● 발송 서버 정상`(live), 아니면 `● 발송 중지`(warn). 폰에서는 숨김.
 - `#menuBtn`, `#topSearch`는 ≤960px에서만 보인다.
 - `#runstate`(V4 4.7 그대로): `sender_up:false`면 보이고 `.down`, `.strip-text` = `sender_reason` 또는 `발송 작업이 멈춰 있습니다. 작업이 다시 시작되면 저장된 계정으로 이어서 접속합니다.`
@@ -548,6 +549,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 ```
 
 - 항목 묶음(`p.pal-cap[role=presentation]` 머리): `이동`(화면 10개, 오른쪽 `kbd` `G O` 등), `설정`(아래 표), `작업`(`계정 추가` → `#account-add`, `저격 규칙 추가` → `#snipe` 후 `#add-trigger` 클릭, `사이트로 이동` → `/`), `계정 전환`(계정마다 1개, 보조 글자 상태 라벨).
+- `이동` 묶음의 `주요 알림` 항목은 검색어 `kw: '받은함 갠톡 1:1 대화'`를 함께 가진다(거르기 문자열에 더한다).
 - 항목 `button.pal-i[role=option][id="pi{n}"][aria-selected][tabindex=-1]` > 아이콘 + `span.grow`(`em` `{위치} / ` + 이름) + `span.hint`(현재 화면이면 `현재 화면`, 현재 계정이면 `선택됨`, 아니면 단축키 `kbd`). 입력하면 `이름 + 위치 + 묶음` 문자열에 부분 일치(소문자 비교)로 거른다. **빈 입력일 때는 `설정` 묶음 중 표의 ★ 항목만** 보인다. `#palIn[aria-activedescendant]` 갱신, 선택 항목 `.act`. 결과 없음 → `p.pal-empty` `일치하는 화면이나 설정이 없습니다.`
 - 설정 항목(이동 후 그 행으로 스크롤 + 행 깜빡임 `.flash` + 행 안 첫 컨트롤 포커스. 그 기능이 꺼져 있어 행이 접혀 있으면 메인 스위치 행으로 대신 가고 토스트 warn `{화면 이름}{이/가} 꺼져 있습니다.` / `켜면 이 설정이 표시됩니다. 스위치로 이동했습니다.`):
 
@@ -579,7 +581,7 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
  <div class="col">
   <div class="ph"><div><h1 id="ov-title" tabindex="-1">개요</h1>
       <p><span class="mono" data-acct-email></span> 계정의 기능 상태와 최근 기록입니다. 스위치는 누르는 즉시 저장됩니다.</p></div>
-    <div class="ph-r"><a class="btn" href="#inbox">[i-inbox]받은함 <b class="badge-n" id="ov-unread" hidden></b></a>
+    <div class="ph-r"><a class="btn" href="#inbox">[i-inbox]주요 알림 <b class="badge-n" id="ov-unread" hidden></b></a>
       <a class="btn primary" href="#account-add" id="ov-add">[i-plus]계정 추가</a></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <div class="grp" id="ov-attn" hidden><h2 class="grp-t">확인 필요<span id="ov-attn-n"></span></h2>
@@ -638,17 +640,17 @@ V4 id 유지: `#login`, `#login-form`, `#key`, `#login-error`. 스크린샷 `d-1
 - 기록 읽기: 개요에 들어올 때와 그 뒤 10초마다 `GET /panel/api/logs?device_id=`(4.8 폴링 규칙 공유). 새로 생긴 피드 항목만 `.fresh`(5.4).
 - 처음 들어올 때만 지표 숫자·스파크·피드에 진입 모션(5.3). 폴링·계정 전환 재계산은 움직이지 않는다(5.5).
 
-### 4.5 받은함 `#inbox` — UI_V4 동작 그대로, 모양만 V5
+### 4.5 주요 알림 `#inbox` — UI_V4 동작 그대로, 모양만 V5
 
 **동작은 UI_V4 5장 전부를 그대로 쓴다**(상태 객체, 9초/3초 폴링, `applyInbox`, 재렌더 회피 서명, 늦은 응답 버리기, 안 읽음, `selectRail`, `openConversation`, `sendChat`(`device_id: chat.deviceId`), `closeConversation`, 초안 삭제, 409/503 처리, 키보드, visibilitychange). 바뀌는 것만 적는다. 스크린샷 `d-13-inbox`, `d-13b-inbox-open`, `m-13*`.
 
 변경점:
 
 1. **레일 → 필터 칩.** V4 왼쪽 72px 계정 레일은 없어지고, 목록 머리의 칩 줄이 같은 일을 한다. 계정 추가·설정 버튼은 사이드바가 대신한다. id는 V4를 유지한다(테스트·코드 재사용).
-2. **모드 → 라우트.** `#console[data-mode]`는 없다. 받은함은 `#app[data-route="inbox"]`. `data-view="list|room"`은 `#inbox`에 단다(폰 대화 열림).
+2. **모드 → 라우트.** `#console[data-mode]`는 없다. 주요 알림은 `#app[data-route="inbox"]`. `data-view="list|room"`은 `#inbox`에 단다(폰 대화 열림).
 3. **설정 탭 → 사이드바.** `#settings`, `#settings-acct`, `#tabs`, `.tab`, `.tval`, `#detail`, `#detail-where`, `.row-actions`, `#rail-add`, `#rail-settings`는 없다. `#thread-settings`(대화 머리 `설정`)는 그 대화 계정으로 전환한 뒤 `#macro`로 간다.
 4. 폰 뒤로 가기: `history.pushState({ kview: 'room' }, '', '#inbox')`. `popstate`에서 `ev.state && ev.state.kview === 'room'`이면 무시, `#inbox[data-view="room"]`이고 `location.hash === '#inbox'`이면 `closeConversation()`.
-5. 받은함은 본문 열 제한 없음(`.page.full`), 높이 `calc(100dvh - var(--top-h))`. 목록 360px, 대화 나머지. 폰은 한 번에 하나(목록 ↔ 대화 미끄러짐, 5.3).
+5. 주요 알림은 본문 열 제한 없음(`.page.full`), 높이 `calc(100dvh - var(--top-h))`. 목록 360px, 대화 나머지. 폰은 한 번에 하나(목록 ↔ 대화 미끄러짐, 5.3).
 
 DOM:
 
@@ -783,7 +785,7 @@ JS가 그리는 부분(V4 함수 이름 유지):
         <h3 id="add-done-title">등록 완료</h3>
         <p><span class="mono" id="add-done-email"></span> 계정이 <span id="add-done-msg">등록되었습니다. 기능은 모두 꺼진 상태로 시작합니다.</span></p>
         <dl class="kvs"><dt>계정</dt><dd class="mono" id="add-done-acct"></dd><dt>기기 ID</dt><dd class="mono" id="add-done-dev"></dd><dt>등록 시각</dt><dd class="mono" id="add-done-at"></dd><dt>상태</dt><dd id="add-done-state"></dd></dl>
-        <div class="acts"><button type="button" class="btn primary" id="add-open">설정 열기</button><a class="btn" href="#inbox">받은함</a><button type="button" class="btn ghost" id="add-more">다른 계정 추가</button></div>
+        <div class="acts"><button type="button" class="btn primary" id="add-open">설정 열기</button><a class="btn" href="#inbox">주요 알림</a><button type="button" class="btn ghost" id="add-more">다른 계정 추가</button></div>
       </div>
     </div>
    </div>
@@ -806,8 +808,8 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 - **기다림 줄** `#code-wait`: 기본 `카카오톡 확인을 기다리는 중입니다 · 2초마다 확인`. `confirmLoop()`의 `waiting`·연결 끊김 문구(V4: `아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.`, `#code-error` `연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.`)는 그대로 쓴다.
 - **실패·다른 기기 끊기**: `register/begin` 응답이 `ok`도 `confirm_on_phone`도 아니면 1단계에 머문다. `#add-error` = `view.text`. `view.can_force`이면 `#force-box`를 보이고 `#force`로 포커스(프로토타입 `d-15d`). `#force` → `.busy` 후 `forced: true`로 다시 begin(V4 핸들러) → `confirm_on_phone`이면 2단계. 2단계에서 생기는 오류(`expired` 등)만 `#code-error`에 쓴다(V4 `showPass`의 오류 분기는 1단계 표시로 옮긴다).
 - **입력 검증**(서버 요청 전): 비어 있으면 `카카오계정이 비어 있습니다. 이메일 또는 전화번호를 입력하십시오.` / `비밀번호가 비어 있습니다. 비밀번호를 입력하십시오.`(`#email-error`·`#password-error`, 입력 `.err`).
-- **재등록 모드** `startReauth(deviceId, email)`(받은함 `등록`, 계정 표 `재등록`, 개요 확인 필요 `재등록`, 배너 `재등록`): `location.hash = '#account-add'` 후 `add-form.dataset.reauth = '1'`, `regDevice = deviceId`, `#email.value = email` + `readonly`, `#add-title` `계정 재등록`, `#add-desc` `{email} 계정을 다시 등록합니다. 기존 설정과 기록은 그대로 유지됩니다.`, `#password` 포커스(≥720px). 다른 경로로 `#account-add`에 들어오면 재등록 모드를 지운다.
-- **완료**: `refreshMe()` 뒤 3단계 표시. 재등록이면 `#add-done-title` `재등록 완료`, `#add-done-msg` `다시 연결되었습니다. 기존 설정과 기록이 그대로 적용됩니다.`, `#add-more` 숨김. `dl.kvs`: 계정 이메일 · `device_id` · 지금 시각 `YYYY.MM.DD HH:MM` · `접속 중`. V4처럼 곧바로 받은함으로 보내지 않는다. `#add-open` → 그 계정으로 전환 후 `#macro`. `#add-more` → 폼 비우고 1단계.
+- **재등록 모드** `startReauth(deviceId, email)`(주요 알림 `등록`, 계정 표 `재등록`, 개요 확인 필요 `재등록`, 배너 `재등록`): `location.hash = '#account-add'` 후 `add-form.dataset.reauth = '1'`, `regDevice = deviceId`, `#email.value = email` + `readonly`, `#add-title` `계정 재등록`, `#add-desc` `{email} 계정을 다시 등록합니다. 기존 설정과 기록은 그대로 유지됩니다.`, `#password` 포커스(≥720px). 다른 경로로 `#account-add`에 들어오면 재등록 모드를 지운다.
+- **완료**: `refreshMe()` 뒤 3단계 표시. 재등록이면 `#add-done-title` `재등록 완료`, `#add-done-msg` `다시 연결되었습니다. 기존 설정과 기록이 그대로 적용됩니다.`, `#add-more` 숨김. `dl.kvs`: 계정 이메일 · `device_id` · 지금 시각 `YYYY.MM.DD HH:MM` · `접속 중`. V4처럼 곧바로 주요 알림으로 보내지 않는다. `#add-open` → 그 계정으로 전환 후 `#macro`. `#add-more` → 폼 비우고 1단계.
 - 8개가 차 있으면 1단계 대신 `p.empty` `계정은 8개까지 등록할 수 있습니다. 사용하지 않는 계정을 해제한 뒤 다시 시도하십시오.` + `계정` 링크.
 
 ### 4.7 매크로 `#macro`
@@ -1002,7 +1004,7 @@ V4 흐름을 그대로 쓴다(`add-form` submit → `POST /panel/api/register/be
 스크린샷 `d-21-reply`, `d-21b-reply-on`, `m-21*`. 저장 V4 `reply-form` 그대로(`autoreply: {enabled, message, cooldown_hours}`).
 
 - 제목 `갠톡 응답`, 설명 `오픈프로필 1:1 대화(갠톡)에 등록한 문구로 자동 응답합니다. 매크로의 보낼 방과는 따로 동작합니다.`
-- 메인 스위치 `input#reply-on` `자동 응답` — `켜면 새 1:1 대화에 응답 메시지를 보냅니다. 받은함에서 직접 답장하는 것은 영향받지 않습니다.`
+- 메인 스위치 `input#reply-on` `자동 응답` — `켜면 새 1:1 대화에 응답 메시지를 보냅니다. 주요 알림에서 직접 답장하는 것은 영향받지 않습니다.`
 - `응답 메시지` — `아래 표시를 넣으면 보낼 때 실제 값으로 바뀝니다.` 위에 `div.tokens[role=group][aria-label="표시 넣기"]` > `button.tok[data-tok]` `{이름}` `{시간}` `{날짜}`(누르면 커서 자리에 넣고 입력창 포커스, 넣은 글자 위치 유지), 아래 `textarea#reply-message[maxlength=2000][rows=3][placeholder="예: {이름}님, 문의 감사합니다."]`.
 - `쿨타임` — `같은 사람에게 다시 응답하기까지의 시간입니다. 0이면 매번 응답합니다. 0~168시간.` `.num` `input#reply-hours`(0~168, 단위 `시간`).
 - `미리 보기` — `민지 님이 21:16에 메시지를 보낸 경우입니다.` `div.preview-chat` > 받은 말풍선 `안녕하세요, 거래 문의드립니다.` + 내 말풍선 `#reply-preview`(토큰을 `민지` `21:16` `10월 9일`로 바꾼 문장, 비어 있으면 `응답 메시지를 입력하십시오.`) + `span.bub-meta.me` `자동 응답 · {email @ 앞}`. 입력할 때마다 갱신.
@@ -1183,7 +1185,7 @@ function swapPage(next, animate) {           // next: section.page
 | 예상 발송 | 간격·방 변경(120ms 지연) | 눈금이 다시 섬 | `.mviz-strip i` `kickIn` delay `var(--i) × 8ms` |
 | 배지 | 안 읽음 증가 | 배지 커졌다 돌아옴 | `.badge-n.bump` `bump` 380ms |
 | 행 깜빡임 | 팔레트로 설정 이동 | 그 행이 잠깐 밝아짐 | `.srow.flash::after` `hlFade` 1600ms |
-| 받은함 폰 | 대화 열기/뒤로 | 대화가 오른쪽에서 덮고, 목록은 왼쪽으로 24% 밀리며 흐려짐 | `#inbox[data-view="room"]`: `.ib-th translateX(100%)→none`, `.ib-list translateX(-24%) + opacity 0` `--d3` |
+| 주요 알림 폰 | 대화 열기/뒤로 | 대화가 오른쪽에서 덮고, 목록은 왼쪽으로 24% 밀리며 흐려짐 | `#inbox[data-view="room"]`: `.ib-th translateX(100%)→none`, `.ib-list translateX(-24%) + opacity 0` `--d3` |
 | 사이트 진입 | 스크롤 | 화면 아래 블록이 24px 아래에서 제자리로 | `.rv.armed { transform: translateY(24px) }` → `IntersectionObserver`(rootMargin `0px 0px -6% 0px`, threshold .06)가 `.armed` 제거, `transition: transform --d3`. **투명도는 바꾸지 않는다.** 처음부터 화면 안에 있는 블록은 `.armed`를 붙이지 않는다 |
 | 기능 상태 점 | 저장으로 켜짐/꺼짐 | 점 색이 바뀜 | `.fs` `background`·`border-color` `--d2` |
 
@@ -1191,7 +1193,7 @@ function swapPage(next, animate) {           // next: section.page
 
 | 대상 | 키프레임 | 지연 |
 |---|---|---|
-| 받은함 행 `.kkt-row.in` | `rowIn` `--d3` both | `var(--i) × 28ms` |
+| 주요 알림 행 `.kkt-row.in` | `rowIn` `--d3` both | `var(--i) × 28ms` |
 | 기록 표 행 `tr.rowx.in` | `rowIn` | `min(i, 14) × 30ms` |
 | 개요 피드 `li.in` | `rowIn` | `i × 40ms` |
 | 올킥 목록 `li.in` | `rowIn` | `i × 50ms` |
@@ -1200,14 +1202,14 @@ function swapPage(next, animate) {           // next: section.page
 
 ### 5.4 새로 들어온 것 표시 (폴링 결과)
 
-- 받은함: 안 읽음이 는 행만 `.bump`(`::after` `--hl-2` `hlFade` 900ms). 행 자리는 바뀌어도 다른 행은 움직이지 않는다.
+- 주요 알림: 안 읽음이 는 행만 `.bump`(`::after` `--hl-2` `hlFade` 900ms). 행 자리는 바뀌어도 다른 행은 움직이지 않는다.
 - 기록 표·개요 피드·올킥 목록: 새 행만 `.fresh`(`td::before`/`li::before` `--hl-2` `hlFade` 2400ms). `rowIn` 없이 제자리에 나타난다.
 - 새 메시지(열린 대화): 새 `log_id` 말만 `.enter`(`msgIn`). 이미 그려진 말은 그대로(V4 `renderedIds`).
 - `#navUnread` 증가: `bump`.
 
 ### 5.5 움직이면 안 되는 것 (폴링·자동 갱신 재렌더)
 
-1. 서명이 같으면 DOM을 건드리지 않는다(UI_V4 5.4 받은함, 4.8 기록). 다르더라도 **`.in`(진입 모션) 클래스를 다시 붙이지 않는다** — 진입은 화면 첫 로드·계정 전환·사용자가 바꾼 필터(받은함 필터·안 읽음, 기록 종류·방)에서만.
+1. 서명이 같으면 DOM을 건드리지 않는다(UI_V4 5.4 주요 알림, 4.8 기록). 다르더라도 **`.in`(진입 모션) 클래스를 다시 붙이지 않는다** — 진입은 화면 첫 로드·계정 전환·사용자가 바꾼 필터(주요 알림 필터·안 읽음, 기록 종류·방)에서만.
 2. 폴링으로 다시 그린 목록의 스크롤 위치·포커스·펼친 행(`aria-expanded`)·입력 중인 검색어를 유지한다(다시 그리기 전 기억 → 뒤에 복원).
 3. 지표 숫자·스파크는 값만 바꾼다(막대 `kickIn` 재생 금지).
 4. 사이드바 표시, 저장 바, 토스트는 폴링으로 나타나거나 움직이지 않는다(`#navUnread` `bump`만 예외).
@@ -1246,7 +1248,7 @@ JS: `reducedMotion()`이면 WAAPI 전환·`smooth` 스크롤·시연·구조도�
 
 - 페이지 여백 `28px 16px 200px`, 제목 22px, 설정 행 1열(`.srow` 라벨 위·컨트롤 아래, `.inline`은 2열 유지), 점선 안내 여백 16px.
 - 개요 지표 2×2, 기능 표는 요약을 이름 아래 한 줄로(`.fr`·대화방 열 숨김), 계정·피드 1열.
-- 받은함: 한 번에 하나(목록 ↔ 대화, 5.3). 칩·검색·안 읽음·새로고침·뒤로·전송 44px. 첫 대화 행 윗변이 260px 안(확인 필요 안내가 있어도).
+- 주요 알림: 한 번에 하나(목록 ↔ 대화, 5.3). 칩·검색·안 읽음·새로고침·뒤로·전송 44px. 첫 대화 행 윗변이 260px 안(확인 필요 안내가 있어도).
 - 표는 카드(`.tbl.stack`): 머리줄 숨김, 각 칸 `data-l` 이름 표시, 오른쪽 위에 횟수.
 - 방 칩 → 44px 목록. 매크로 방 목록은 `14px 1fr 112px`(인원 숨김, 간격 칸 68px).
 - 입력 글자 16px(iOS 확대 방지), 입력 높이 42~44px, `.btn` 최소 40px, `.btn.sm` 32px.
@@ -1260,7 +1262,7 @@ JS: `reducedMotion()`이면 WAAPI 전환·`smooth` 스크롤·시연·구조도�
 
 ## 7. 접근성
 
-- 언어 `lang="ko"`, 화면마다 `h1` 하나(`tabindex="-1"`, 전환 뒤 포커스). 받은함은 `h1.sr#chat-title`.
+- 언어 `lang="ko"`, 화면마다 `h1` 하나(`tabindex="-1"`, 전환 뒤 포커스). 주요 알림은 `h1.sr#chat-title`.
 - 건너뛰기 링크: 사이트 `#main`, 콘솔 `#view`(JS로 포커스만 옮기고 해시는 바꾸지 않는다 — 열린 대화를 닫지 않음).
 - 사이드바 `nav[aria-label="화면"]`, 현재 `aria-current="page"`, 기능 상태 `aria-description`(`켜짐`/`꺼짐`)와 `title`. 단축키 글자 `.kb`는 `aria-hidden`.
 - 스위치는 진짜 `input[type=checkbox][role=switch]` + `aria-label`. 방 칩은 `label > input[type=checkbox]`. 세그먼트·필터 칩은 `button[aria-pressed]`. 탐색기는 `tablist/tab/tabpanel` + 화살표 키. 펼침 행은 `aria-expanded` + Enter/Space.
@@ -1320,7 +1322,7 @@ assert(html.indexOf('class="jumps"') < 0, 'no anchor jump list');
   assert(html.indexOf('<form id="' + f + '"') >= 0, f + ' exists');
 });
 
-// 받은함·셸·등록 마크업
+// 주요 알림·셸·등록 마크업
 ['id="inbox"', 'id="kkt"', 'id="rail"', 'id="rail-all"', 'id="rail-accounts"', 'id="chat-rooms"', 'id="chat-search"',
  'id="chat-unread"', 'id="chat-unread-n"', 'id="chat-notice"', 'id="chat-error"', 'id="chat-title"', 'id="chat-reload"',
  'id="chat-back"', 'id="chat-peer"', 'id="chat-head-sub"', 'id="thread-state"', 'id="thread-settings"', 'id="chat-log"',
@@ -1387,7 +1389,7 @@ assert(!/--acc-[0-7]/.test(panelCss), 'per-account colors are gone');
 
 | V4 | V5 |
 |---|---|
-| `pg.goto(base)` 뒤 받은함 기대 | `pg.goto(base + '#inbox')` (V5 기본 화면은 개요) |
+| `pg.goto(base)` 뒤 주요 알림 기대 | `pg.goto(base + '#inbox')` (V5 기본 화면은 개요) |
 | `#rail-settings` 클릭 | `.nav-a[data-r="macro"]` 클릭(서랍 상태면 먼저 `#menuBtn`) 또는 `goto(base + '#macro')` |
 | `.tab[data-tab="chat"]` / `"account"` / 그 밖 `X` | `.nav-a[data-r="inbox"]` / `"accounts"` / `X`(reply·snipe 등 같은 이름) |
 | `aria-current` `'true'`(탭) | `'page'` |
@@ -1408,7 +1410,7 @@ assert(!/--acc-[0-7]/.test(panelCss), 'per-account colors are gone');
 ```js
 // 7) 화면: 한 번에 한 화면만 보인다
 ok(await pg.evaluate(() => !document.querySelector('section[data-route="inbox"]').hidden
-  && document.querySelector('section[data-route="macro"]').hidden), '받은함에서는 받은함만 보여야 한다')
+  && document.querySelector('section[data-route="macro"]').hidden), '주요 알림에서는 주요 알림만 보여야 한다')
 await pg.click('.nav-a[data-r="macro"]')
 await pg.waitForSelector('.nav-a[data-r="macro"][aria-current="page"]')
 await pg.waitForTimeout(450)                                    // 교차 전환이 끝날 때까지
@@ -1438,7 +1440,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 | 13 | 계정 0개, `goto(base)`: `#app[data-route="account-add"]`, `#email`에 포커스(≥720), 사이드바 기능 항목 7개 `aria-disabled="true"`(눌러도 `#account-add`), `#rail-all.disabled === false`; `goto('#inbox')` → `.kkt-empty-title` `등록된 계정 없음` + `계정 등록` 클릭 → `#account-add`, `#email` 포커스 |
 | 14 | 그대로 |
 | 15 | 부팅 때 `GET /panel/api/account?device_id=` 정확히 1회(현재 계정). `.nav-a[data-r="macro"]` 클릭 → 추가 `/account` 요청 없음, `#app[data-route="macro"]`, `[aria-current="page"]`, `section[data-route="macro"]` 보임, `#acctEmail` = 이메일, `document.activeElement === #macro-title` |
-| 16 | `.nav-a[data-r="inbox"]` 클릭 → 받은함 복귀, 열려 있던 대화가 있으면 `GET /panel/api/chat` 즉시 1회 |
+| 16 | `.nav-a[data-r="inbox"]` 클릭 → 주요 알림 복귀, 열려 있던 대화가 있으면 `GET /panel/api/chat` 즉시 1회 |
 | 17 | 그대로(`.rail-acct` 3개, C `data-state="needs_register"`, `#rail-all .rail-badge` = 합) |
 | 18 | 그대로 + `등록` 클릭 → `#app[data-route="account-add"]`, `#add-form.dataset.reauth === '1'`, `#email.value === C`, `#email.readOnly`, `#add-title` = `계정 재등록` |
 | 19 | `aria-current` → `aria-pressed`, 나머지 그대로 |
@@ -1450,7 +1452,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 | 27 | `document.title` 그대로, 탭 요약 → `#navUnread.textContent === String(N)` |
 | 32 | 등록 완료 → `#add-done` 보임, `#add-steps .stp[data-s="3"].cur`, `#acctEmail` = 새 이메일, `.rail-acct[data-device=새 id]` 존재 |
 | 33 | 360×740: 가로 넘침 없음; `#rail` 가로 줄(`offsetWidth > offsetHeight`); `.fchip`, `.kkt-row`, `#chat-reload`, `#chat-search`, `#chat-unread`, `#chat-send`, `#chat-back`, `#menuBtn` 높이 ≥ 44; 행 클릭 → `#inbox[data-view="room"]`, `.kkt-list` 화면 밖(`getBoundingClientRect().right <= 0` 또는 `visibility hidden`), `#chat-back` 보임; `#chat-back` → `list`; `history.back()` 같음; 건너뛰기 링크 클릭은 대화를 닫지 않음 |
-| 34 | 폰 `#macro`: 받은함 섹션 숨김(`#rail` 안 보임); `#menuBtn` → 서랍 → `.nav-a[data-r="inbox"]` 높이 ≥ 44 → 클릭으로 받은함 복귀, 서랍 닫힘 |
+| 34 | 폰 `#macro`: 주요 알림 섹션 숨김(`#rail` 안 보임); `#menuBtn` → 서랍 → `.nav-a[data-r="inbox"]` 높이 ≥ 44 → 클릭으로 주요 알림 복귀, 서랍 닫힘 |
 | 35 | 1280×900: `#side.offsetWidth === 248`, `.ib-list.offsetWidth === 360`. 940×820: `getComputedStyle(#side).visibility === 'hidden'`(서랍 닫힘), `.ib-list.offsetWidth === 360`, `#menuBtn` 보임 |
 | 36 | `body` 배경 `rgb(9, 9, 11)`, `.kkt-line.me .kkt-bubble` 배경 `rgb(244, 244, 245)`, `.kkt-at` 색 `rgb(139, 139, 148)`, `.kkt-badge` 배경 `rgb(244, 244, 245)`, `.nav-a[aria-current="page"]` 색 `rgb(237, 237, 239)` |
 | 37 | 그대로 |
@@ -1458,7 +1460,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 
 **`smoke.mjs`**: 76~90행 단언을 위 표대로(`#console` → `#app`/`#inbox`, `.tab .tval` → `#navUnread`). 그 밖 그대로.
 
-**`shots.mjs`**: 받은함·설정 촬영 경로를 V5 라우트로(`openSettings` = `goto('#macro')`). 결과는 `scratchpad/shots-v5-panel/`에 프로토타입과 같은 이름(`d-12-overview.png` …)으로 저장해 프로토타입 스크린샷과 나란히 비교한다.
+**`shots.mjs`**: 주요 알림·설정 촬영 경로를 V5 라우트로(`openSettings` = `goto('#macro')`). 결과는 `scratchpad/shots-v5-panel/`에 프로토타입과 같은 이름(`d-12-overview.png` …)으로 저장해 프로토타입 스크린샷과 나란히 비교한다.
 
 **`accept-console.mjs`**: 폐기된 DARK_V1 시안의 수용 검사다. V5에서는 실행하지 않는다(동작 항목은 `inbox.mjs`·`behavior.mjs`·`v5-panel.mjs`가 덮는다).
 
@@ -1482,7 +1484,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 14. 해제: `.acts [data-unlink]` → 확인 줄 펼침, `window.confirm` 호출 없음(`page.on('dialog')` 0회).
 15. 마법사: begin 모의 `confirm_on_phone`(passcode `4829`, remaining 300) → `#code span` 4개, `#code-ring`의 `stroke-dashoffset`이 1.5초 사이 증가, confirm 모의 `ok` → `#add-done` 보임. begin 모의 `failed` + `can_force` → `#force-box` 보임 → `#force` → 본문 `forced: true`.
 16. 동작 줄이기(`reducedMotion: 'reduce'`): 화면 전환 직후(16ms) 옛 화면 `hidden`; `.rv`/`.in` 애니메이션 없음.
-17. 폰 390×844: 모든 라우트 가로 넘침 없음; 받은함 첫 행 윗변 < 260px; 대화 열기 → `.ib-th` `transform` none, 뒤로 → 목록 복귀; 버튼·입력 높이 ≥ 32(받은함 컨트롤 ≥ 44).
+17. 폰 390×844: 모든 라우트 가로 넘침 없음; 주요 알림 첫 행 윗변 < 260px; 대화 열기 → `.ib-th` `transform` none, 뒤로 → 목록 복귀; 버튼·입력 높이 ≥ 32(주요 알림 컨트롤 ≥ 44).
 18. 오류 0: `pageerror`·`console.error` 없음, 대화상자(`dialog` 이벤트) 0회.
 
 **`scratchpad/v5-site.mjs`**(PUBLIC) — 정적 `public/` + `/api/price` 모의(3기능 × 3기간, `rate .15`, `min 3`), `/api/order`·`/api/order/:id`·`/api/lookup` 모의. 출력 `v5-site: ALL PASS`.
@@ -1540,7 +1542,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 1. `panel.css` 새로 쓰기: 2.1 토큰 → 2.2 기초 블록 → 프로토타입 `/* ========== CONSOLE ========== */`부터 `/* login */`까지 → `responsive: CONSOLE` 블록 → 5.6 블록. 4.13 대응표대로 클래스 이름 바꿈(`.cv` → `.kkt-row`, `.msg` → `.kkt-line`, `.bub` → `.kkt-bubble`, `.ib.is-room` → `#inbox[data-view="room"] .ib` 등) + `.lic.warn`.
 2. `panel.html` 4.1~4.12 마크업.
 3. `panel.js`:
-   - 유지: `api()`, `say()`, `reasonText()`, 받은함 블록 전부(UI_V4 5장), 등록 흐름(`showPass`·`hidePass`·`confirmLoop`·`add-form`·`force`·`cancel-code`), 설정 저장 `submit` 핸들러들, `fillChecks`/`checkedRooms`/`roomRow`/`fillRooms`, 이미지 처리, `renderTriggers`(마크업만 4.12로).
+   - 유지: `api()`, `say()`, `reasonText()`, 주요 알림 블록 전부(UI_V4 5장), 등록 흐름(`showPass`·`hidePass`·`confirmLoop`·`add-form`·`force`·`cancel-code`), 설정 저장 `submit` 핸들러들, `fillChecks`/`checkedRooms`/`roomRow`/`fillRooms`, 이미지 처리, `renderTriggers`(마크업만 4.12로).
    - 삭제: `showTab`, `setTabsEnabled`, `updateTabSummaries`, `fillAcctSelect`, 레일의 `rail-add`·`rail-settings` 핸들러, `window.confirm` 호출(해제), V4 `#detail`·`.row-actions` 관련.
    - 추가: 라우터(`route()`, 4.1·4.14·5.1), 셸(계정 전환기 4.3, 서랍, 팔레트, G 단축키, Ctrl/⌘S), 저장 바·변경 추적(4.14), 토스트 `notify()`, 개요(4.4), 기록 폴링·표(4.8), 올킥 화면과 저장(`guard`), 금지어 칩과 저장(`cover.words`·`links`), 등록 마법사 단계·링(4.6), 인라인 해제 확인, 갠톡 응답 토큰·미리 보기, 매크로 예상 발송·방별 간격 칸.
    - 부팅: `GET /panel/api/me` 성공 → 현재 계정 = `localStorage['kb.acct']`(try/catch)이 목록에 있으면 그것, 없으면 첫 `live` 계정, 없으면 첫 계정 → `openAccount(id)` → `loadInbox(true)` + `scheduleInbox()` → `route()`. 계정 0개면 `#account-add`. 401 → `#login`.
@@ -1564,7 +1566,7 @@ ok(await pg.evaluate(() => (document.querySelector('[data-sum="macro"]')?.textCo
 | 10 / 10b | 주문 상태 입금 대기 / 발급 완료 |
 | 11 | 콘솔 로그인 |
 | 12 / 12b | 개요 / 개요 스위치 즉시 저장 + 되돌리기 토스트 |
-| 13 / 13b | 받은함 / 대화 열림 |
+| 13 / 13b | 주요 알림 / 대화 열림 |
 | 14 / 14b | 계정 / 해제 인라인 확인 |
 | 15 / 15b / 15c / 15d | 계정 추가 1단계 / 2단계 확인 번호·링 / 3단계 완료 / 재등록 + 다른 기기 끊기(d만) |
 | 16 / 16b | 매크로 / 방별 간격 수정 + 저장 바 |
