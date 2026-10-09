@@ -157,7 +157,8 @@ b, strong { font-weight: 600; }
 .lnav.scrolled { border-bottom-color: var(--line); }
 .lnav-in { display: flex; align-items: center; gap: 28px; height: 60px; }
 .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; white-space: nowrap; }
-.brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--inv); color: var(--inv-fg); display: grid; place-items: center; font: 600 12px/1 var(--f-mono); }
+/* 대표 로고(logo.svg). 글자 대신 로고 그림을 쓴다 — 다른 로고를 만들지 않는다 */
+.brand-mark { width: 22px; height: 22px; flex: none; border-radius: 6px; background: #111 url(/logo.svg) center / cover no-repeat; box-shadow: inset 0 0 0 1px var(--line); font-size: 0; color: transparent; overflow: hidden; }
 .lnav-links { display: flex; gap: 2px; }
 .lnav-links a { height: 32px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: var(--r-1); color: var(--fg-2); font-size: var(--t-13); transition: color var(--d1), background var(--d1); }
 .lnav-links a:hover { color: var(--fg); background: var(--bg-2); }
