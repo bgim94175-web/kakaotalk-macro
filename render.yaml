@@ -18,9 +18,10 @@ services:
       - key: ADMIN_PASSWORD
         sync: false      # 필수 · 12자 이상. 비면 /manage 가 아예 안 붙는다 (503 admin_disabled)
 
-      # ── 웹 콘솔(/panel)
+      # ── 비밀 키
       - key: CONFIG_SECRET
-        sync: false      # /panel 로그인 쿠키 서명 키 (16자 이상 랜덤). 비거나 짧으면 /panel 이 503. 바꾸면 로그인이 전부 풀린다
+        sync: false      # 16자 이상 랜덤. 참여코드 봉인·Google 상태 쿠키 서명·채널톡 회원 식별 키의 원천.
+                         # 바꾸면 저장된 참여코드를 열 수 없고 채널톡 memberId 가 바뀐다 → 한 번 정하면 바꾸지 마라
 
       # ── 구매 웹사이트
       - key: BANK_INFO
@@ -28,7 +29,20 @@ services:
       - key: CONTACT_INFO
         sync: false      # 예: 카톡ID mykakaoid
       - key: PURCHASE_BASE
-        sync: false      # 비우면 서버 자기 주소(RENDER_EXTERNAL_URL)를 쓴다
+        sync: false      # 운영은 https://kmacro.cloud. 비우면 서버 자기 주소(RENDER_EXTERNAL_URL)를 쓴다.
+                         # Google 을 켜면 필수(콜백 주소 = PURCHASE_BASE/auth/google/callback)
+
+      # ── 회원 Google 연결·로그인 (둘 다 있어야 켜진다. 없으면 Google 버튼이 숨는다)
+      - key: GOOGLE_CLIENT_ID
+        sync: false      # Google Cloud 콘솔 > OAuth 클라이언트 ID (웹 애플리케이션)
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # ── 실시간 상담 (채널톡). 둘 다 비면 상담 버튼이 CONTACT_INFO 안내로 바뀌고, 그것도 없으면 숨는다
+      - key: CHANNEL_PLUGIN_KEY
+        sync: false      # 채널 데스크의 채널 설정에 있는 플러그인 키
+      - key: CHANNEL_MEMBER_SECRET
+        sync: false      # hex. 채널 데스크에서 회원 해시(Member Hash) 검증을 먼저 켠 뒤에 넣는다(DEPLOY.md 1-4)
 
       # ── 자동 입금확인 웹훅
       - key: DEPOSIT_TOKEN
@@ -44,8 +58,36 @@ services:
       #     RATE_ORDER_WRITE_PER_MIN  20    POST /api/order, /api/lookup
       #     RATE_DEPOSIT_PER_MIN      60    POST /api/deposit-hook
       #     ADMIN_RATE_LIMIT_PER_MIN  120   /admin/* 전체
-      #     RATE_PANEL_LOGIN_PER_MIN  8     POST /panel/api/login
-      #     RATE_PANEL_PER_MIN        180   /panel/api/* 나머지 (채팅 폴링)
+      #     RATE_PANEL_PER_MIN        180   /panel/api/* (채팅 폴링)
+      #     RATE_AUTH_PER_MIN         10    POST /api/auth/login·password·claim·google/unlink
+      #     RATE_SIGNUP_PER_MIN       5     POST /api/auth/signup (+ IP당 시간 20회)
+      #     RATE_OAUTH_PER_MIN        20    GET /auth/google/start·callback
+      #     RATE_PREVIEW_PER_MIN      20    POST /api/room-preview (+ 회원당 시간 60회)
+      #     RATE_MEMBER_PER_MIN       180   나머지 /api/auth/*, /api/site, /api/me, /api/my/*
+      #     RATE_PANEL_LOGIN_PER_MIN  —     쓰지 않음 (예전 키 로그인. 회원 로그인으로 바뀌었다)
+      #   회원 로그인 실패 제한
+      #     LOGIN_FAIL_MAX / LOGIN_BLOCK_MS   10 / 900000   (아이디, IP) 쌍이 15분에 10회 틀리면 15분 잠금
+      #     LOGIN_SLOW_AFTER / LOGIN_SLOW_MS  30 / 2000     아이디 단독 15분 30회 초과 → 시도마다 2초 늦춤(잠그지 않음)
+      #   회원
+      #     MEMBER_MAX_SESSIONS       3           동시 로그인 기기 수(4번째 로그인은 가장 오래 쓰지 않은 기기를 끊는다)
+      #     MEMBER_MAX_ACCOUNTS       3           회원당 카카오 계정 수
+      #     MEMBER_SESSION_TTL_MS     2592000000  로그인 유지 30일(쓰지 않은 기간 기준)
+      #     AUTH_RESET_WINDOW_MS      900000      Google 로그인 뒤 현재 비밀번호 없이 새 비밀번호를 정할 수 있는 시간
+      #     AUTH_SCRYPT_LOG_N         15          비밀번호 해시 강도(10~17)
+      #     AUTH_HASH_QUEUE_MAX       20          비밀번호 해시 대기 상한(넘으면 503 잠시 뒤 다시)
+      #     MEMBER_MAX_PENDING_ORDERS / MEMBER_MAX_PENDING_ROOMS / IP_MAX_PENDING_ORDERS   3 / 10 / 10
+      #   방 설치형 봇
+      #     ROOM_RETRY_BASE_MS        120000      고객 다시 시도 첫 간격(두 배씩, 최대 6시간, 연속 10번 뒤 관리자만)
+      #     ROOM_HOLD_WORDS           (없음)      쉼표 목록. 방 이름이 걸리면 결제 뒤 운영자 확인을 기다린다
+      #     ROOM_LOG_KEEP_DAYS        30          방 조치 기록 보존 일수
+      #     BOT_ROOM_CAP              20          새 K bot 계정의 기본 방 상한
+      #     BOT_JOIN_GAP_MS / BOT_PERM_POLL_MS / BOT_ACTIVE_CHECK_MS              45000 / 60000 / 600000
+      #     BOT_JOIN_PER_HOUR / BOT_JOIN_PER_DAY / BOT_RESOLVE_PER_MIN / BOT_RESOLVE_PER_DAY   20 / 80 / 10 / 300
+      #   Google 시험용 덮어쓰기 — 운영에서는 넣지 마라
+      #     GOOGLE_REDIRECT_URI       (PURCHASE_BASE/auth/google/callback)
+      #     GOOGLE_AUTH_URL / GOOGLE_TOKEN_URL   https 또는 http://localhost·127.0.0.1 만 받는다
+      #   시험 전용 — 운영 금지 (켜져 있으면 부팅 로그에 큰 경고)
+      #     SENDER_FAKE · FAKE_JOIN_MS · FAKE_KICK_LEFT · SENDER_TRACE_PUSH(실측용)
       #   관리자 비밀번호 추측 차단
       #     ADMIN_FAIL_PER_MIN        10    분당 이 횟수 틀리면 그 IP 차단
       #     ADMIN_BLOCK_MS            900000    차단 유지 15분
@@ -59,6 +101,7 @@ services:
       # 발송 자식. 값은 대시보드에만 넣는다. 여기 적지 않는다.
       # 세션은 Neon kakao_sessions. 발송 루프는 부모가 띄우는 자식이고, 죽으면 다시 띄운다.
       # 둘 중 하나라도 비면 발송 자식은 뜨지 않고, 구매 사이트와 /panel 화면만 열린다.
+      # 자식은 127.0.0.1 에서만 듣는다. 공개 /v1/* 는 없다(404).
       - key: SENDER_TOKEN
         sync: false      # 부모 ↔ 발송 자식 사이 내부 인증 값 (무작위 긴 값)
       - key: SENDER_KEY

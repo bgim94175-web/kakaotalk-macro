@@ -827,6 +827,94 @@ form.stack > .errt:empty { display: none; }
 .rule-form .ta { min-height: 72px; }
 .sans, .rule-h .t .meta code.sans, .kt-axis .sans, .mviz-axis .sans, .tl .side-i dd .sans { font-family: var(--f-sans); }
 
+/* ---------- ACCOUNTS V1: 회원 로그인·내 방·방 설정 (docs/ACCOUNTS_V1.md 6.9·6.10·7.4) ---------- */
+/* 상담 버튼은 <html data-support> 하나로 보이기를 정한다 — 버튼에 hidden 을 쓰지 않는다(6.10) */
+html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { display: none !important; }
+.note { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--bg-1); color: var(--fg-2); font-size: var(--t-13); line-height: 1.6; }
+.note > span { flex: 1; min-width: 200px; }
+.note .btn { flex: none; }
+.note.dim { background: transparent; color: var(--fg-3); }
+.lnk-u { color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px; transition: color var(--d1); }
+.lnk-u:hover { color: var(--fg); }
+.login-card .inp { letter-spacing: 0; }
+.login-card form .errt:empty { display: none; }
+.login-alt { display: grid; }
+.or { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; color: var(--fg-3); font-size: var(--t-12); }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
+.g-mark { flex: none; }
+.login-card .note { padding: 12px 14px; font-size: var(--t-12); }
+.login-foot { flex-wrap: wrap; align-items: center; }
+.login-foot button { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--t-12); }
+.login-foot button:hover { color: var(--fg); }
+.side-foot .links { flex-wrap: wrap; gap: 2px; }
+.side-foot .links a, .side-foot .links button { padding: 0 6px; gap: 5px; }
+#r-games-preview .bub { align-self: flex-start; }
+.nav-a .rd { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
+.nav-a .rd.crit { background: var(--crit); }
+#navCapRoomName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; font-weight: 400; }
+.state[data-state="pending"], .state[data-state="joining"], .state[data-state="waiting"] { color: var(--warn); }
+.state[data-state="pending"] .dot, .state[data-state="joining"] .dot, .state[data-state="waiting"] .dot { background: var(--warn); }
+.state[data-state="active"] .dot { background: var(--live); }
+.state[data-state="active"] { color: var(--fg-2); }
+.state[data-state="error"] .dot { background: var(--crit); }
+.stepper.s4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.gate { border: 0; background: transparent; }
+.gate > .off-note { margin: 0; }
+.metric.warn .v b { color: var(--warn); }
+.metric .v b .sans { font-family: var(--f-sans); letter-spacing: -0.02em; font-size: var(--t-24); }
+.metric .v b .of { color: var(--fg-3); font-size: var(--t-16); margin-left: 4px; }
+#visit-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ov-empty { display: grid; justify-items: center; padding-bottom: 32px; }
+.ov-empty .empty { padding-bottom: 16px; }
+.acts-c { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.acc-li .sq .ic { color: var(--fg-2); }
+.acc-li .state { justify-self: end; }
+/* 내 방 */
+#rooms-tbl td { vertical-align: middle; }
+#rooms-tbl td:first-child { max-width: 320px; }
+#rooms-tbl td:first-child b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#rooms-tbl td:first-child .mono { display: block; font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#rooms-tbl td[data-l="상품"] { line-height: 2; }
+#rooms-tbl td[data-l="K bot 계정"] .mono { font-size: var(--t-12); color: var(--fg-2); }
+#rooms-tbl td.go { width: 40px; text-align: right; color: var(--fg-3); }
+#rooms-tbl tr.rowx:hover td.go { color: var(--fg); }
+#rooms-attn .srow-r { flex-wrap: nowrap; }
+#rooms-attn .srow-l .lb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 방 상태 */
+.room-sub { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.room-sub .mono { font-size: var(--t-13); color: var(--fg-3); overflow-wrap: anywhere; }
+.banner .room-act { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.banner .pc { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-3); }
+.banner .pc .inp { width: 128px; height: 30px; }
+.banner .hint, .banner .errt { flex-basis: 100%; margin: 0; }
+.banner .hint:empty, .banner .errt:empty { display: none; }
+.sec > .wait:first-child { border-top: 0; }
+.wait .grow { color: var(--fg-2); }
+.stp.done .num-c .n { display: none; }
+/* 방 설정 폼: 부방장 대기·입금 대기 동안은 통째로 비활성 */
+.rfs { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 24px; }
+.rfs[disabled] .sec, .rfs[disabled] .grp-t { opacity: .55; }
+.rfs[disabled] .swl, .rfs[disabled] .num button, .rfs[disabled] .seg button { cursor: not-allowed; }
+.pick-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.pick-row .sel { width: min(280px, 100%); }
+#r-exempt { cursor: default; min-height: 44px; }
+.chips-none { color: var(--fg-3); font-size: var(--t-13); padding: 0 4px; }
+.srow-r .hint { white-space: nowrap; }
+.srow-r .sel { width: 220px; max-width: 100%; }
+.tbl td.c-kind { white-space: nowrap; color: var(--fg-2); }
+.tbl td .t { white-space: nowrap; }
+.tbl td.c-txt { color: var(--fg-2); }
+.tbl td.c-txt.crit { color: var(--crit); }
+.tbl td.c-rank { width: 64px; font-family: var(--f-mono); color: var(--fg-3); }
+.tbl tr.line td { vertical-align: middle; }
+/* 방 관리봇·미니게임봇이 없는 방: 화면 전체가 안내 하나(6.9 방 관리봇 화면 공통) */
+.page[data-gated="all"] .col > form, .page[data-gated="all"] .col > .grp { display: none; }
+.attn-lb .at { color: var(--fg-3); font-weight: 400; font-size: var(--t-12); }
+.srow.rowlink { cursor: pointer; transition: background var(--d1); }
+.srow.rowlink:hover { background: var(--bg-2); }
+.srow-r .del-wrap { flex-wrap: wrap; }
+.bub.notice.dim { color: var(--fg-3); }
+
 
 /* ---------- responsive: shared primitives (style.css + panel.css) ---------- */
 @media (max-width: 760px) {
@@ -987,6 +1075,33 @@ form.stack > .errt:empty { display: none; }
 @media (max-width: 760px) {
   /* 대화가 열리면 목록은 밀려나며 흐려진 뒤 숨는다(포커스·낭독 대상에서 빠진다) */
   #inbox[data-view="room"] .ib-list { visibility: hidden; transition: transform var(--d3) var(--ease), opacity var(--d3) var(--ease), visibility 0s var(--d3); }
+}
+
+@media (max-width: 760px) {
+  /* ACCOUNTS V1 — 390px 에서 부방장 지정 라벨이 잘리지 않게 2×2 */
+  .stepper.s4 { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
+  #visit-metrics { grid-template-columns: minmax(0, 1fr); }
+  #visit-metrics .metric { border-right: 0; border-bottom: 1px solid var(--line); }
+  #visit-metrics .metric:last-child { border-bottom: 0; }
+  #rooms-tbl.stack tr.rowx { grid-template-columns: minmax(0, 1fr) 24px; }
+  #rooms-tbl.stack td { grid-column: 1; max-width: none; }
+  #rooms-tbl.stack td.go { grid-column: 2; grid-row: 1 / span 4; align-self: center; width: auto; }
+  #rooms-tbl.stack td:first-child::before { display: none; }
+  #rooms-attn .srow.inline { grid-template-columns: minmax(0, 1fr); }
+  #rooms-attn .srow-r { justify-content: flex-start; flex-wrap: wrap; }
+  .tbl.stack tr.line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .tbl.stack tr.line td { padding: 0; border: 0; grid-column: 1; }
+  .tbl.stack tr.line td.c-acts { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
+  .tbl.stack tr.line td.c-cnt { grid-column: 2; grid-row: 1; }
+  .tbl.stack td.c-rank { width: auto; }
+  .tbl.stack td.c-kind { white-space: normal; }
+  .banner .room-act { width: 100%; }
+  .banner .pc { flex: 1; min-width: 0; }
+  .banner .pc .inp { width: 100%; height: 40px; }
+  .srow-r .sel { width: 100%; }
+  .srow-r .hint { white-space: normal; }
+  .pick-row .sel { width: 100%; }
+  .note { padding: 12px 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

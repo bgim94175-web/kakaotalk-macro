@@ -46,6 +46,20 @@ await new Promise((resolve) => {
   })
 })
 
+// 부모(lib/sender-child.js)가 띄운 자식이면 부모가 사라졌을 때(강제 종료 등) 스스로 끝낸다.
+// SIGTERM 으로 끝내야 index.mjs 가 방 상태를 한 번 더 저장한다.
+if (bind === '127.0.0.1') {
+  const parent = process.ppid
+  const watch = setInterval(() => {
+    if (process.ppid !== parent) {
+      clearInterval(watch)
+      process.stderr.write('[sender] parent process is gone, stopping\n')
+      process.kill(process.pid, 'SIGTERM')
+    }
+  }, 2000)
+  watch.unref()
+}
+
 try {
   const { patchKakaoLibrary } = await import('./patch-kakao.mjs')
   patchKakaoLibrary()

@@ -32,12 +32,48 @@ import {
   visitMemberId,
   visitNeedsProfile,
 } from './features.mjs'
+import { BotPool } from './botpool.mjs'
+import { FakeKakaoClient, fakeOn } from './fake.mjs'
 import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
-import { listIds, loadRecord, saveRecord } from './store.mjs'
+import { isBotId, locoOk } from './roomfeat.mjs'
+import { dbStore, listFeatureRows, listIds, loadRecord, saveRecord, updateFeatures } from './store.mjs'
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
 
 const DEAD = new Set(['invalid_access_token', 'login_rejected', 'kicked', 'reauth'])
+
+// 가짜 모드(SENDER_FAKE=1, 9.4)는 연결 자리만 바꾼다. 나머지 코드는 진짜와 같다.
+export function newKakaoClient() {
+  return fakeOn() ? new FakeKakaoClient() : new KakaoTalkClient()
+}
+
+async function refreshBotToken(creds) {
+  return refreshKakaoOAuthToken({ accessToken: creds.access_token, refreshToken: creds.refresh_token, deviceUuid: creds.device_uuid })
+}
+
+/** KICKOUT 사유 0(다른 기기 로그인)·1(계정 삭제)·없음만 진짜 종료. -2(CHANGE_SERVER) 와 그 밖은 재접속(5.2). */
+export function kickoutDead(reason) {
+  return typeof reason !== 'number' || reason === 0 || reason === 1
+}
+
+/**
+ * 권리 v2 기록이 지금 붙어 있어도 되는가(5.1). v2 가 아니면(첫 /v1/grants 전) 예전처럼 붙는다.
+ * 봇 기록은 늘 붙는다.
+ */
+export function entitled(record, now) {
+  const f = record && record.features
+  if (!f || f.v !== 2) return true
+  if (f.bot) return true
+  const t = now == null ? Date.now() : now
+  return t < Math.max(Number(f.macro_until) || 0, Number(f.legacy_room_until) || 0)
+}
+
+const traced = new Set()
+function tracePush(id, packet) {
+  if (process.env.SENDER_TRACE_PUSH !== '1' || !packet || traced.has(packet.method)) return
+  traced.add(packet.method)
+  log(id, `push ${packet.method} keys ${Object.keys(packet.body || {}).join(',')}`)
+}
 
 function log(id, msg) {
   process.stderr.write(`[sender] ${id} ${msg}\n`)
@@ -217,8 +253,17 @@ function cmpLog(a, b) {
 }
 
 export class Hub {
-  constructor() {
+  constructor(deps) {
+    const d = deps || {}
     this.accounts = new Map()
+    this.pool = new BotPool({
+      store: d.store || Object.assign({ saveRecord }, dbStore),
+      newClient: d.newClient || newKakaoClient,
+      refreshToken: refreshBotToken,
+      opts: d.opts,
+      now: d.now,
+    })
+    this.grantTimer = null
   }
 
   async boot() {
@@ -228,14 +273,100 @@ export class Hub {
         const rec = await loadRecord(id)
         if (!rec || rec.needs_register) continue
         if (!credsOf(rec).access_token) continue
+        // 권리가 끝난 v2 고객 기록은 붙이지 않는다(D7). 기록은 그대로 둔다.
+        if (!isBotId(id) && !entitled(rec)) continue
         await this.attach(id, rec)
       } catch (e) {
         log(id, `boot skipped: ${e && e.message ? e.message : e}`)
       }
     }
+    this.startTimers()
+    this.pool.start()
+    await this.pool.reconcile(null).catch((e) => log('pool', `boot reconcile failed: ${e && e.message ? e.message : e}`))
+  }
+
+  // 60초마다 권리가 끝난 고객 슬롯을 멈춘다(기록 보존). /v1/grants 로 살아나면 다시 붙는다.
+  startTimers() {
+    if (this.grantTimer) return
+    this.grantTimer = setInterval(() => {
+      this.expireSlots().catch((e) => log('hub', `expire check failed: ${e && e.message ? e.message : e}`))
+    }, 60000)
+    if (this.grantTimer.unref) this.grantTimer.unref()
+  }
+
+  async expireSlots(now) {
+    let stopped = 0
+    for (const [id, slot] of [...this.accounts]) {
+      if (entitled(slot.record, now)) continue
+      await slot.stop()
+      if (this.accounts.get(id) === slot) this.accounts.delete(id)
+      log(id, 'rights ended, slot stopped')
+      stopped++
+    }
+    return stopped
+  }
+
+  /**
+   * /v1/grants (3.6). grants = {device_id: {v:2, macro_until, legacy_room_until}}.
+   * full 이면 목록에 없는 고객 기록 중 grants_at·reg_at 이 둘 다 as_of 보다 이른 것을 권리 없음으로 바꾸고 멈춘다.
+   */
+  async applyGrants(grants, opt) {
+    const o = opt || {}
+    const now = Date.now()
+    const asOf = Number(o.asOf) || now
+    let applied = 0
+    let stopped = 0
+    const listed = new Set()
+    for (const [id, g] of Object.entries(grants || {})) {
+      if (!/^[A-Za-z0-9._-]{8,128}$/.test(id) || isBotId(id) || !g || typeof g !== 'object') continue
+      listed.add(id)
+      const slot = this.accounts.get(id)
+      const rec = slot ? slot.record : await loadRecord(id)
+      if (!rec) continue
+      const prev = rec.features && typeof rec.features === 'object' ? rec.features : {}
+      const features = {
+        v: 2,
+        macro_until: Math.max(0, Number(g.macro_until) || 0),
+        legacy_room_until: Math.max(0, Number(g.legacy_room_until) || 0),
+        grants_at: now,
+        reg_at: Number(prev.reg_at) || 0,
+      }
+      rec.features = features
+      await updateFeatures(id, features)
+      applied++
+      if (entitled(rec, now)) {
+        if (!slot && !rec.needs_register && credsOf(rec).access_token) await this.attach(id, rec)
+      } else if (slot) {
+        await slot.stop()
+        if (this.accounts.get(id) === slot) this.accounts.delete(id)
+        stopped++
+      }
+    }
+    if (o.full) {
+      for (const row of await listFeatureRows()) {
+        const id = row.device_id
+        if (listed.has(id) || isBotId(id)) continue
+        const f = row.features && typeof row.features === 'object' ? row.features : {}
+        if (Number(f.grants_at || 0) >= asOf || Number(f.reg_at || 0) >= asOf) continue
+        const slot = this.accounts.get(id)
+        const already = f.v === 2 && !Number(f.macro_until) && !Number(f.legacy_room_until)
+        if (!already) {
+          const features = { v: 2, macro_until: 0, legacy_room_until: 0, reg_at: Number(f.reg_at) || 0 }
+          await updateFeatures(id, features)
+          if (slot) slot.record.features = features
+        }
+        if (slot) {
+          await slot.stop()
+          if (this.accounts.get(id) === slot) this.accounts.delete(id)
+          stopped++
+        } else if (!already) stopped++
+      }
+    }
+    return { applied, stopped }
   }
 
   status(id) {
+    if (isBotId(id)) return this.pool.status(id)
     const slot = this.accounts.get(id)
     if (!slot) return { linked: false, needs_register: false, reason: 'absent', connected: false }
     return {
@@ -255,18 +386,30 @@ export class Hub {
       err.status = 400
       throw err
     }
+    const bot = isBotId(id)
     const record = {
       device_id: id,
       credentials: creds,
-      config: body.config || (prev && prev.config) || {},
-      rooms: Array.isArray(body.rooms) ? body.rooms : (prev && prev.rooms) || [],
-      features: body.features || (prev && prev.features) || { macro: true, roombot: true, minigame: true },
-      images: Array.isArray(body.images) ? body.images : (prev && prev.images) || [],
-      runtime: (prev && prev.runtime) || {},
+      config: bot ? {} : (body.config || (prev && prev.config) || {}),
+      rooms: bot ? [] : (Array.isArray(body.rooms) ? body.rooms : (prev && prev.rooms) || []),
+      // 새 고객 기록의 기본 권리는 거부(5.1). 부모가 등록 직후 /v1/grants 로 실제 값을 민다.
+      features: bot ? { v: 2, bot: true } : (body.features || (prev && prev.features) || { v: 2, macro_until: 0, legacy_room_until: 0 }),
+      images: bot ? [] : (Array.isArray(body.images) ? body.images : (prev && prev.images) || []),
+      runtime: bot ? {} : ((prev && prev.runtime) || {}),
       needs_register: false,
       reason: 'ok',
     }
-    if (body.config && prev && prev.runtime) record.runtime = prev.runtime
+    if (!bot && body.config && prev && prev.runtime) record.runtime = prev.runtime
+    if (!bot && !entitled(record)) {
+      // 권리가 끝난 v2 고객 기록은 저장만 하고 붙이지 않는다
+      const slot = this.accounts.get(id)
+      if (slot) {
+        await slot.stop()
+        this.accounts.delete(id)
+      }
+      await saveRecord(id, record)
+      return this.status(id)
+    }
     await this.attach(id, record)
     return this.status(id)
   }
@@ -279,16 +422,34 @@ export class Hub {
       err.status = 404
       throw err
     }
+    if (body.features && prev.features && prev.features.v === 2) {
+      // v2 기록의 권리는 /v1/grants 만 바꾼다(3.6)
+      const err = new Error('features_not_allowed')
+      err.status = 400
+      throw err
+    }
     if (body.config) prev.config = body.config
     if (Array.isArray(body.rooms)) prev.rooms = body.rooms
     if (body.features) prev.features = body.features
     if (Array.isArray(body.images)) prev.images = body.images
     await saveRecord(id, prev)
-    if (!slot && !prev.needs_register) await this.attach(id, prev)
+    // 권리가 끝난 v2 고객 기록은 저장만 한다. 설정을 저장할 때마다 카카오에 다시 로그인하지 않게(5.1)
+    if (!slot && !prev.needs_register && entitled(prev)) await this.attach(id, prev)
     return this.status(id)
   }
 
   async unlink(id) {
+    if (isBotId(id)) {
+      await this.pool.detach(id)
+      const prev = await loadRecord(id)
+      if (prev) {
+        prev.credentials = {}
+        prev.needs_register = false
+        prev.reason = 'unlinked'
+        await saveRecord(id, prev)
+      }
+      return
+    }
     const slot = this.accounts.get(id)
     if (slot) await slot.stop()
     this.accounts.delete(id)
@@ -483,6 +644,10 @@ export class Hub {
   }
 
   async attach(id, record) {
+    if (isBotId(id)) {
+      await this.pool.attach(id, record)
+      return
+    }
     let slot = this.accounts.get(id)
     const creds = credsOf(record)
     const same = slot && credsOf(slot.record).access_token === creds.access_token
@@ -751,7 +916,7 @@ class Slot {
       if (this.client) {
         try { this.client.close() } catch {}
       }
-      const client = new KakaoTalkClient()
+      const client = newKakaoClient()
       await client.login({
         oauthToken: creds.access_token,
         userId: creds.user_id,
@@ -760,7 +925,9 @@ class Slot {
       })
       client.onSessionEvent((ev) => {
         if (ev && ev.type === 'kicked') {
-          this.markDead('kicked').catch(() => {})
+          // KICKOUT 사유가 0·1·없음일 때만 진짜 종료. -2(CHANGE_SERVER) 와 그 밖은 다시 붙는다(5.2)
+          if (kickoutDead(ev.reason)) this.markDead('kicked').catch(() => {})
+          else this.enqueue(() => this.ensure()).catch(() => {})
         }
       })
       await client.acquireSession()
@@ -771,6 +938,7 @@ class Slot {
       // The listener only emits message for method MSG. Open-chat feed lines
       // also arrive on other packets, and a throw in that handler is dropped.
       this.unpush = client.onPush((packet) => {
+        tracePush(this.id, packet)
         this.enqueue(() => this.onPacket(packet)).catch(() => {})
       })
       this.visitEntered.clear()
@@ -924,6 +1092,7 @@ class Slot {
     }
     if (this.record.needs_register) return
     const mine = author.length > 0 && author === creds.user_id
+    // 같은 입장·퇴장 판정은 logId 가 있으면 logId 로, 없으면 5초(7.2(a), 계정 단위 옛 기능에도 같은 규칙)
     const guard = guardOnChat(this.record, {
       kind,
       chatId,
@@ -933,6 +1102,8 @@ class Slot {
       profileLink,
       mine,
       now: Date.now(),
+      logId: ev.log_id ? String(ev.log_id) : '',
+      at: atMs(ev.sent_at),
     })
     await this.finishGuard(guard)
   }
@@ -1069,6 +1240,8 @@ class Slot {
         chat_id: chatId,
         member: { user_id: v.authorId },
         author_name: v.authorName,
+        log_id: id,
+        sent_at: log.sendAt,
       })
     }
     return 'visit'
@@ -1215,9 +1388,11 @@ class Slot {
           t: plan.type,
         })
       })
-      const status = response && response.statusCode
-      if (status !== 0) log(this.id, `cover failed status ${status} chat ${plan.chatId}`)
-      else log(this.id, `covered chat ${plan.chatId}`)
+      // 패킷 statusCode 가 0 이어도 본문 status 가 0 이 아니면 실패다(5.5 locoOk)
+      if (!locoOk(response)) {
+        const status = response && response.statusCode === 0 && response.body ? response.body.status : response && response.statusCode
+        log(this.id, `cover failed status ${status} chat ${plan.chatId}`)
+      } else log(this.id, `covered chat ${plan.chatId}`)
     } catch (e) {
       await this.onError(e)
     }
@@ -1242,9 +1417,22 @@ class Slot {
     }
   }
 
+  // 지연이 있는 안내는 작업 줄 밖에서 기다렸다가 줄에 넣는다(5.1). 줄 안에서 기다리면 그동안 다른 일이 멈춘다.
   async deliver(s) {
     if (this.record.needs_register) return
-    if (s.delayMs > 0) await sleep(s.delayMs)
+    if (s.delayMs > 0) {
+      const t = setTimeout(() => {
+        if (this.stopped) return
+        this.enqueue(() => this.deliverNow(s)).catch((e) => log(this.id, e && e.message ? e.message : e))
+      }, s.delayMs)
+      if (t.unref) t.unref()
+      return
+    }
+    return this.deliverNow(s)
+  }
+
+  async deliverNow(s) {
+    if (this.record.needs_register || !this.client) return
     try {
       const extra = visitMentionExtra(s.text, s.mention)
       const res = extra
@@ -1358,4 +1546,4 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export { realId, Slot }
+export { realId, Slot, credsOf }

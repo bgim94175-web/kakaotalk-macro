@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>구매 신청 · K bot</title>
-<meta name="description" content="K bot 1개월 구매 신청 시 주문번호와 입금 계좌가 즉시 안내됩니다.">
+<meta name="description" content="카카오톡 매크로 · 방 관리봇 · 미니게임봇 구매 신청. 접수하면 주문번호와 입금 계좌가 바로 표시됩니다.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#09090b">
 <meta name="color-scheme" content="dark">
@@ -13,8 +13,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=6">
-<script src="/app.js?v=6" defer></script>
+<link rel="stylesheet" href="/style.css?v=7">
+<script src="/support.js?v=1" defer></script>
+<script src="/app.js?v=7" defer></script>
 </head>
 <body data-page="buy">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -51,6 +52,12 @@
     <symbol id="i-trash" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9"/></symbol>
     <symbol id="i-unlink" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.6 9.4 5 11a2.1 2.1 0 0 1-3-3l1.6-1.6"/><path d="M9.4 6.6 11 5a2.1 2.1 0 0 1 3 3l-1.6 1.6"/><path d="M2.5 2.5l11 11"/></g></symbol>
     <symbol id="i-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="10.5" r="3"/><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.6 1.6M10 6l1.2 1.2"/></g></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9"/><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9"/></g></symbol>
+    <symbol id="i-user" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5c.7-2.4 2.6-3.8 5-3.8s4.3 1.4 5 3.8"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="3" y="7" width="10" height="6.5" rx="1.4"/><path d="M5.3 7V5.2a2.7 2.7 0 0 1 5.4 0V7"/></g></symbol>
+    <symbol id="i-help" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.8"/><path d="M6.3 6.4a1.8 1.8 0 0 1 3.5.5c0 1.2-1.8 1.5-1.8 2.6"/><path d="M8 11.4v.1"/></g></symbol>
+    <symbol id="i-game" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><g fill="currentColor"><circle cx="5.6" cy="5.6" r=".9"/><circle cx="8" cy="8" r=".9"/><circle cx="10.4" cy="10.4" r=".9"/></g></symbol>
+    <symbol id="i-receipt" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2.5h9v11l-1.5-1-1.5 1-1.5-1-1.5 1-1.5-1-1.5 1z"/><path d="M5.8 5.8h4.4M5.8 8.3h4.4"/></g></symbol>
   </defs>
 </svg>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -62,7 +69,10 @@
       <a href="/#features">기능</a><a href="/#how">동작 방식</a><a href="/#products">가격</a><a href="/#faq">질문</a>
     </nav>
     <nav class="top-nav" aria-label="주요 메뉴">
-      <a class="btn ghost hide-s" href="/my" data-nav="my">내 키</a>
+      <a class="btn ghost hide-s" href="/login" data-nav="login" data-auth="out">로그인</a>
+      <a class="btn ghost icon-s" href="/login" data-auth="out" aria-label="로그인"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
+      <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
+      <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
       <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
       <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
     </nav>
@@ -73,35 +83,72 @@
   <div class="wrap pub-page">
     <div class="pub-head">
       <p class="eyebrow">구매 신청</p>
-      <h1>입금자명을 입력하고 신청합니다</h1>
-      <p class="lead">접수 시 주문번호와 입금 계좌가 즉시 표시됩니다. <span data-manual="안내된 &lt;b&gt;정확한 금액&lt;/b&gt;을 입금하면 관리자가 확인 후 키를 발급합니다.">안내된 <b>정확한 금액</b>을 입금하면 통상 1~2분 내 키가 자동 발급됩니다.</span></p>
+      <h1>상품을 고르고 신청합니다</h1>
+      <p class="lead">접수하면 주문번호와 입금 계좌가 바로 표시됩니다. <span data-manual="안내된 &lt;b&gt;정확한 금액&lt;/b&gt;을 입금하면 관리자가 확인한 뒤 회원 계정에 적용합니다.">안내된 <b>정확한 금액</b>을 입금하면 통상 1~2분 안에 회원 계정에 적용됩니다.</span></p>
     </div>
+
+    <div id="buyBoot" class="card"><div class="state"><span class="spin" aria-hidden="true"></span>회원 정보 확인 중…</div></div>
 
     <!-- 접수 결과 (제출 성공하면 여기에 그려짐) -->
     <div id="result" hidden></div>
 
-    <form id="orderForm" novalidate autocomplete="on">
+    <!-- 로그아웃 상태: 상품 소개 + 로그인 안내 -->
+    <div id="gateWrap" class="pub-grid" hidden>
+      <div class="pub-main">
+        <div id="prods" class="prods" aria-label="상품" aria-busy="true">
+          <article class="card prod one" data-prod="macro"><div class="head"><div class="t"><h3>카카오톡 매크로</h3><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></div></div></article>
+          <article class="card prod one" data-prod="roombot"><div class="head"><div class="t"><h3>방 관리봇</h3><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+          <article class="card prod one" data-prod="minigame"><div class="head"><div class="t"><h3>미니게임봇</h3><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+        </div>
+      </div>
+      <aside>
+        <div class="card gate" id="loginGate">
+          <p class="eyebrow">회원 구매</p>
+          <p class="sub small">구매하려면 로그인하십시오. 구매한 상품은 회원 계정에 저장됩니다.</p>
+          <div class="btn-row">
+            <a class="btn primary" href="/login?next=%2Fbuy" data-next-base="/login">로그인</a>
+            <a class="btn" href="/signup?next=%2Fbuy" data-next-base="/signup">회원가입</a>
+          </div>
+        </div>
+        <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>기존 라이선스 키는 회원가입 후 내 계정에서 등록하면 남은 기간이 회원 계정으로 옮겨집니다.</span></div>
+      </aside>
+    </div>
+
+    <!-- 로그인 상태: 구매 폼 -->
+    <form id="buyForm" class="form" novalidate autocomplete="on" hidden>
       <div id="formWrap" class="pub-grid">
         <div class="form">
           <div class="fsec">
-            <div id="fld-plan">
-              <p class="lb"><span data-bind="plan">K bot 1개월</span> · 포함 기능</p>
-              <!-- 상품은 하나다 (기능 3종 전부 포함). 아래는 스크립트가 꺼진 경우의 대체 문구 — app.js 가 /api/price 로 다시 그린다 -->
-              <div id="planFeats">
-                <div class="feat-row"><div class="r1"><h3>자동발송 매크로</h3><span class="chip ok">포함</span></div><p class="tiny dim">대화방 주기 발송 · 이미지 첨부 · 갠톡 자동응답 · 저격 규칙</p></div>
-                <div class="feat-row"><div class="r1"><h3>대화방 관리봇</h3><span class="chip ok">포함</span></div><p class="tiny dim">입장·퇴장 로그 · 프로필 변경 감지 · 금지어·링크 가림 · 올킥 감지</p></div>
-                <div class="feat-row"><div class="r1"><h3>미니게임봇</h3><span class="chip ok">포함</span></div><p class="tiny dim">끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹</p></div>
+            <div class="fld" id="fld-macro" role="group" aria-labelledby="macroH">
+              <p class="lb" id="macroH">카카오톡 매크로</p>
+              <label class="chk" for="macroOn"><input type="checkbox" id="macroOn" name="macro"><span class="box" aria-hidden="true"></span><span class="t"><span class="nm">카카오톡 매크로 · <span data-bind="price-macro">20,000</span>원/1개월</span><span class="ds" data-bind="desc-macro">내 카카오 계정으로 대화방 주기 발송 · 이미지 첨부 · 갠톡 응답 · 저격 규칙</span></span></label>
+              <div class="months" id="macroMonthsRow" hidden>
+                <span class="months-l">기간</span>
+                <div class="num"><button type="button" data-step="-1" aria-label="기간 줄이기">−</button><input type="text" id="macroMonths" name="macro_months" inputmode="numeric" autocomplete="off" value="1" maxlength="2" aria-label="카카오톡 매크로 기간(개월)"><button type="button" data-step="1" aria-label="기간 늘리기">+</button><span class="unit">개월</span></div>
               </div>
-              <p class="hint">기능 3종이 모두 포함되며 따로 고르지 않습니다. 사용 기간은 발급된 키로 <b>콘솔에 처음 로그인한 시점</b>부터 시작됩니다.</p>
+              <p class="hint">구매하면 지금 만료일 뒤로 이어서 연장됩니다. 콘솔에 등록한 내 카카오 계정으로 발송합니다.</p>
+              <p class="meta-l" id="macroNow" hidden></p>
+              <p class="err" id="err-macro" role="alert" hidden></p>
             </div>
           </div>
-          <div class="fsec">
-            <div class="fld" id="fld-key">
-              <label for="key">기존 키 · 연장 시에만 입력</label>
-              <input type="text" id="key" name="key" class="keyin" inputmode="text" placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-describedby="key-hint">
-              <p class="hint" id="key-hint">사용 중인 키의 기간을 연장하는 경우 해당 키를 입력하십시오. 기능 3종이 모두 <span data-bind="days">30일</span> 연장됩니다. 신규 구매인 경우 <b>비워 두십시오</b>.</p>
-              <p class="err" id="err-key" role="alert" hidden></p>
+
+          <div class="fsec" id="rooms">
+            <div class="fld" id="fld-rooms" role="group" aria-labelledby="roomsH">
+              <p class="lb" id="roomsH">설치할 방</p>
+              <p class="hint rooms-d">방 관리봇과 미니게임봇은 K bot 계정이 오픈채팅방에 들어가 동작합니다. 방마다 한 번 구매하면 기간 제한 없이 사용합니다.</p>
+              <div class="rrows" id="roomRows"></div>
+              <div class="rooms-act"><button type="button" class="btn" id="roomAdd"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>방 추가</button><span class="hint" id="roomCap" aria-live="polite"></span></div>
+              <p class="err" id="err-rooms" role="alert" hidden></p>
             </div>
+            <div class="fld" id="fld-terms" hidden>
+              <label class="chk" for="terms"><input type="checkbox" id="terms" name="terms"><span class="box" aria-hidden="true"></span><span class="t"><span class="nm">이용 조건을 확인했습니다</span></span></label>
+              <button type="button" class="xbtn" id="termsToggle" aria-expanded="false" aria-controls="termsBody">이용 조건 보기<svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></button>
+              <div class="xpand" id="termsBody"><div><p>K bot 계정은 방장이 허락한 방에만 설치하십시오. 불법·도박·음란·스팸 목적의 방에는 설치할 수 없으며, 확인되면 예고 없이 설치를 해제하고 환불하지 않습니다. 방이 삭제되거나 방장이 K bot을 내보내면 기능을 쓸 수 없습니다.</p></div></div>
+              <p class="err" id="err-terms" role="alert" hidden></p>
+            </div>
+          </div>
+
+          <div class="fsec">
             <div class="fld" id="fld-depositor">
               <label for="depositor">입금자명 <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="depositor" name="depositor" placeholder="홍길동" autocomplete="name" maxlength="40" aria-describedby="dep-hint">
@@ -119,13 +166,15 @@
               <textarea id="memo" name="memo" maxlength="500" placeholder="요청사항 입력 (예: 저녁 시간대 연락 요청)"></textarea>
             </div>
           </div>
+          <p class="hint">기존 라이선스 키는 내 계정에서 등록합니다.</p>
           <p class="hint" id="bankHint"></p>
           <p class="err" id="submitErr" role="alert" hidden></p>
         </div>
         <aside>
           <!-- 결제 금액 + 제출 -->
-          <div id="sum" class="sum"><button type="submit" class="btn primary wide lg">주문 접수</button></div>
-          <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>수집된 정보는 키 발급과 입금 확인에만 사용됩니다. 비밀번호 또는 카드번호는 어떠한 경우에도 요구하지 않습니다. 해당 정보를 요구하는 연락은 응하지 마십시오.</span></div>
+          <div id="sum" class="sum"><button type="submit" class="btn primary wide lg" id="submitBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">주문 접수</span></button></div>
+          <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>구매 중 문제가 생기면 문의하십시오. <button type="button" class="btn sm" data-support data-support-ctx="구매 신청"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></span></div>
+          <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>수집된 정보는 입금 확인과 상품 적용에만 사용됩니다. K bot은 카드번호를 요구하지 않으며, 카카오 비밀번호는 콘솔의 카카오 계정 등록 화면에서만 입력합니다. 그 밖의 곳에서 이 정보를 요구하는 연락에는 응하지 마십시오.</span></div>
         </aside>
       </div>
     </form>
@@ -138,7 +187,7 @@
       <span class="brand"><span class="brand-mark" aria-hidden="true"></span>K bot</span>
       <span>카카오톡은 (주)카카오의 상표이며, K bot은 (주)카카오와 관련이 없습니다.</span>
     </div>
-    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/my">내 키 조회</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a></nav>
+    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/account">내 계정</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a><button type="button" data-support data-support-ctx="사이트 문의">실시간 상담</button></nav>
   </div>
 </footer>
 </body>

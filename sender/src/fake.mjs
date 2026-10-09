@@ -1,0 +1,898 @@
+// 가짜 모드(SENDER_FAKE=1, docs/ACCOUNTS_V1.md 9.4). 시험 전용 — 운영에서 켜지 않는다.
+// 결과를 직접 쓰지 않고 연결 자리(seam)만 바꾼다: FakeKakaoClient 가 agent-messenger 의 KakaoTalkClient 자리에 들어가고,
+// botpool·runner 는 진짜와 같은 코드(acquireSession().getConnection().sendPacket, onPush, onSessionEvent, getChats,
+// getProfile, getMembersByIds, sendMessage)로 부른다. 그래서 JOININFO·CHECKJOIN·JOINLINK 본문, BSON Long 감싸기,
+// lt·pv 검사, locoOk 판정, 권한 읽기, 푸시 해석이 가짜 모드에서도 실제 경로를 탄다.
+//
+// 가짜 방은 링크 코드(https://open.kakao.com/o/<코드>)로 정해진다. 코드에 든 낱말(대소문자 무시):
+//   gone   JOININFO status -324(링크 없음)
+//   dm     JOININFO ol.lt = 1(그룹 방 아님)
+//   pass   참여코드 필요(pv & 64), 참여코드는 '0000'
+//   noprof 기본 프로필 참여 막음(pv & 32 없음) — ptp:1 이면 -804
+//   noanon 기본 프로필도 닉네임 프로필도 막음 — ptp:2 도 -804
+//   full   JOINLINK -501
+//   rate   JOINLINK 처음 1번 -312
+//   ipblock JOINLINK -444
+//   weird  JOINLINK 알 수 없는 status -9999
+//   lost   JOINLINK 응답 유실(statusCode -1) — 실제로는 들어가 있다
+// 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
+import { createHash, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+
+import { Long } from 'bson'
+
+export function fakeOn() {
+  return process.env.SENDER_FAKE === '1'
+}
+
+function sha(s) {
+  return createHash('sha256').update(String(s)).digest('hex')
+}
+
+function decimalOf(hex) {
+  return BigInt('0x' + hex).toString()
+}
+
+/** 가짜 사용자 id(장치 id 마다 고정). */
+export function fakeUserId(deviceId) {
+  return decimalOf(sha('user:' + deviceId).slice(0, 12))
+}
+
+export function fakeNick(userId) {
+  return 'K bot 테스트 ' + sha('nick:' + userId).slice(0, 6)
+}
+
+function str(v) {
+  if (v == null) return ''
+  if (typeof v === 'object' && typeof v.toString === 'function') return v.toString()
+  return String(v)
+}
+
+function L(v) {
+  return Long.fromString(String(v))
+}
+
+function sec() {
+  return Math.floor(Date.now() / 1000)
+}
+
+function codeOf(url) {
+  const m = /open\.kakao\.com\/o\/([A-Za-z0-9]+)/.exec(String(url || ''))
+  return m ? m[1] : ''
+}
+
+function has(code, word) {
+  return String(code).toLowerCase().includes(word)
+}
+
+function resp(method, body, statusCode) {
+  return { packetId: 0, statusCode: statusCode == null ? 0 : statusCode, method, bodyType: 0, body: body || {} }
+}
+
+// 고객 계정이 보는 가짜 오픈채팅방 2개(/v1/chats)
+const CUSTOMER_ROOMS = [
+  { chat_id: '9100000000001', link_id: '9200000000001', name: '가짜 오픈채팅 1', members: 12 },
+  { chat_id: '9100000000002', link_id: '9200000000002', name: '가짜 오픈채팅 2', members: 30 },
+]
+
+class FakeServer {
+  constructor() {
+    this.file = String(process.env.FAKE_STATE_FILE || '').trim()
+    this.rooms = {}          // code → room
+    this.users = {}          // userId → {nick, bot}
+    this.seq = 7000000000000
+    this.clients = new Set()
+    this.packets = []        // 최근 패킷 기록(시험 확인용)
+    this.logins = {}         // userId → 새 세션 수
+    this.load()
+  }
+
+  get joinMs() {
+    const n = Number(process.env.FAKE_JOIN_MS)
+    return process.env.FAKE_JOIN_MS != null && process.env.FAKE_JOIN_MS !== '' && Number.isFinite(n) && n >= 0 ? n : 1500
+  }
+
+  get kickLeft() {
+    return process.env.FAKE_KICK_LEFT !== '0'
+  }
+
+  load() {
+    if (!this.file || !existsSync(this.file)) return
+    try {
+      const j = JSON.parse(readFileSync(this.file, 'utf8'))
+      this.rooms = j.rooms || {}
+      this.users = j.users || {}
+      this.seq = Number(j.seq) || this.seq
+    } catch {
+      /* 새로 시작 */
+    }
+  }
+
+  save() {
+    if (!this.file) return
+    try {
+      writeFileSync(this.file, JSON.stringify({ rooms: this.rooms, users: this.users, seq: this.seq }))
+    } catch {
+      /* 시험 보조 기록이다 */
+    }
+  }
+
+  nextLog() {
+    this.seq += 1
+    return String(this.seq)
+  }
+
+  room(code) {
+    if (!code) return null
+    let r = this.rooms[code]
+    if (!r) {
+      r = {
+        code,
+        li: decimalOf(sha(code).slice(0, 12)),
+        ln: '테스트방 ' + code,
+        lu: 'https://open.kakao.com/o/' + code,
+        chatId: decimalOf(sha('chat:' + code).slice(0, 13)),
+        passcode: has(code, 'pass') ? '0000' : '',
+        members: {},       // userId → {mt, nick, photo, status}
+        kicked: [],        // 카카오 내보내기 목록
+        bans: [],          // 다시 들어올 수 없는 봇(-815)
+        hidden: [],
+        msgs: [],
+        sent: [],
+        deleted: false,
+        rateHit: false,
+        dropOlu: false,
+        dropMember: false,
+      }
+      this.rooms[code] = r
+      this.save()
+    }
+    return r
+  }
+
+  byLi(li) {
+    const s = str(li)
+    return Object.values(this.rooms).find((r) => r.li === s) || null
+  }
+
+  byChat(chatId) {
+    const s = str(chatId)
+    return Object.values(this.rooms).find((r) => r.chatId === s) || null
+  }
+
+  user(userId) {
+    const id = str(userId)
+    if (!this.users[id]) {
+      this.users[id] = { nick: fakeNick(id), bot: false }
+      this.save()
+    }
+    return this.users[id]
+  }
+
+  record(client, method, body, out) {
+    const row = { at: Date.now(), user: client ? client.userId : '', method, status: out ? (out.statusCode !== 0 ? out.statusCode : (out.body && out.body.status) || 0) : null }
+    const c = body && (body.c || body.chatId)
+    if (c) row.chat = str(c)
+    if (body && body.li) row.li = str(body.li)
+    if (body && body.ptp) row.ptp = body.ptp
+    if (body && body.mid) row.mid = str(body.mid)
+    if (body && body.kid) row.kid = str(body.kid)
+    this.packets.push(row)
+    if (this.packets.length > 2000) this.packets.splice(0, this.packets.length - 2000)
+  }
+
+  isMember(r, userId) {
+    return !!(r && r.members[str(userId)])
+  }
+
+  mtOf(r, userId) {
+    const m = r && r.members[str(userId)]
+    return m ? Number(m.mt) : 0
+  }
+
+  async packet(client, method, body) {
+    const out = await this.handle(client, method, body || {})
+    this.record(client, method, body, out)
+    return out
+  }
+
+  async handle(client, method, b) {
+    const me = client.userId
+    if (method === 'JOININFO') {
+      const code = codeOf(b.lu)
+      const r = this.room(code)
+      if (!r || has(code, 'gone') || r.deleted) return resp(method, { status: -324 })
+      const pv = (r.passcode ? 64 : 0) | (has(code, 'noprof') || has(code, 'noanon') ? 0 : 32)
+      return resp(method, {
+        status: 0,
+        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : 2, pv, ml: 1500 },
+      })
+    }
+    if (method === 'CHECKJOIN') {
+      const r = this.byLi(b.li)
+      if (!r) return resp(method, { status: -324 })
+      if (r.passcode && String(b.pc) === r.passcode) return resp(method, { status: 0, tk: 't' })
+      return resp(method, { status: -802 })
+    }
+    if (method === 'JOINLINK') {
+      const r = this.byLi(b.li)
+      if (!r || r.deleted) return resp(method, { status: -324 })
+      const code = r.code
+      if (has(code, 'full')) return resp(method, { status: -501 })
+      if (has(code, 'rate') && !r.rateHit) {
+        r.rateHit = true
+        this.save()
+        return resp(method, { status: -312 })
+      }
+      if (has(code, 'ipblock')) return resp(method, { status: -444 })
+      if (has(code, 'weird')) return resp(method, { status: -9999 })
+      if (has(code, 'noprof') && b.ptp === 1) return resp(method, { status: -804 })
+      if (has(code, 'noanon')) return resp(method, { status: -804 })
+      if (r.bans.includes(me)) return resp(method, { status: -815 })
+      if (r.passcode && b.tk !== 't') return resp(method, { status: -802 })
+      if (this.joinMs) await new Promise((ok) => setTimeout(ok, this.joinMs))
+      const u = this.user(me)
+      r.members[me] = { mt: 2, nick: b.nn ? String(b.nn) : u.nick, photo: '', status: null }
+      this.save()
+      if (has(code, 'lost')) return resp(method, {}, -1)
+      return resp(method, { status: 0, chatRoom: { chatId: L(r.chatId), type: 'OM' }, olu: { lmt: 2 } })
+    }
+    if (method === 'CHATONROOM') {
+      const r = this.byChat(b.chatId)
+      if (!r || !this.isMember(r, me)) return resp(method, { status: -403 })
+      return resp(method, r.dropOlu ? { status: 0, chatId: L(r.chatId) } : { status: 0, chatId: L(r.chatId), olu: { lmt: this.mtOf(r, me) } })
+    }
+    if (method === 'MEMBER') {
+      const r = this.byChat(b.chatId)
+      if (!r) return resp(method, { status: -403 })
+      if (r.dropMember) return resp(method, { status: 0, members: [] })
+      const ids = (b.memberIds || []).map(str)
+      return resp(method, { status: 0, chatId: L(r.chatId), members: ids.filter((id) => r.members[id]).map((id) => this.memberStruct(r, id)) })
+    }
+    if (method === 'GETMEM') {
+      const r = this.byChat(b.chatId)
+      if (!r) return resp(method, { status: -403 })
+      return resp(method, { status: 0, members: Object.keys(r.members).map((id) => this.memberStruct(r, id)) })
+    }
+    if (method === 'CHATINFO') {
+      const r = this.byChat(b.chatId)
+      const cust = CUSTOMER_ROOMS.find((x) => x.chat_id === str(b.chatId))
+      if (cust) return resp(method, { status: 0, chatInfo: { chatId: L(cust.chat_id), type: 'OM', li: L(cust.link_id), a: cust.members } })
+      if (!r) return resp(method, { status: -403 })
+      return resp(method, {
+        status: 0,
+        chatInfo: {
+          chatId: L(r.chatId), type: 'OM', li: L(r.li), a: Object.keys(r.members).length, left: !this.isMember(r, me),
+          lastLogId: r.msgs.length ? L(r.msgs[r.msgs.length - 1].logId) : undefined,
+        },
+      })
+    }
+    if (method === 'INFOLINK') {
+      const ols = []
+      for (const li of b.lis || []) {
+        const s = str(li)
+        const cust = CUSTOMER_ROOMS.find((x) => x.link_id === s)
+        if (cust) {
+          ols.push({ li: L(s), ln: cust.name, lu: 'https://open.kakao.com/o/fake' + s.slice(-4) })
+          continue
+        }
+        const r = this.byLi(s)
+        if (r && !r.deleted) ols.push({ li: L(r.li), ln: r.ln, lu: r.lu })
+      }
+      return resp(method, { status: 0, ols })
+    }
+    if (method === 'KICKMEM' || method === 'KLDELITEM' || method === 'REWRITE' || method === 'KICKLEAVE') {
+      const r = this.byChat(b.c) || this.byLi(b.li)
+      if (!r) return resp(method, { status: -403 })
+      if (!(this.mtOf(r, me) & 5)) return resp(method, { status: -203 })
+      if (method === 'KICKMEM') {
+        const id = str(b.mid)
+        if (!r.members[id] && !this.kickLeft) return resp(method, { status: -500 })
+        delete r.members[id]
+        if (!r.kicked.includes(id)) r.kicked.push(id)
+      } else if (method === 'KLDELITEM') {
+        const id = str(b.kid)
+        if (!r.kicked.includes(id)) return resp(method, { status: -500 })
+        r.kicked = r.kicked.filter((x) => x !== id)
+      } else if (method === 'REWRITE') {
+        r.hidden.push(str(b.logId))
+        if (r.hidden.length > 2000) r.hidden.splice(0, r.hidden.length - 2000)
+      }
+      this.save()
+      return resp(method, { status: 0 })
+    }
+    if (method === 'LEAVE') {
+      const r = this.byChat(b.chatId)
+      if (r) {
+        delete r.members[me]
+        this.save()
+      }
+      return resp(method, { status: 0 })
+    }
+    if (method === 'WRITE') {
+      return resp(method, this.write(me, b.chatId, b.msg, b.extra))
+    }
+    return resp(method, { status: 0 })
+  }
+
+  memberStruct(r, id) {
+    const m = r.members[id]
+    return {
+      userId: L(id),
+      nickName: m.nick,
+      mt: Number(m.mt),
+      pi: m.photo ? m.photo + '?s=small' : '',
+      opi: m.photo ? m.photo + '?s=orig' : '',
+      statusMessage: m.status == null ? undefined : m.status,
+    }
+  }
+
+  write(me, chatId, text, extra) {
+    const logId = this.nextLog()
+    const r = this.byChat(chatId)
+    if (r) {
+      r.sent.push({ at: Date.now(), user: str(me), text: String(text || ''), extra: extra ? String(extra) : '', logId })
+      if (r.sent.length > 500) r.sent.splice(0, r.sent.length - 500)
+      this.save()
+    }
+    return { status: 0, logId: L(logId), chatId: L(str(chatId)), sendAt: sec() }
+  }
+
+  // ── 푸시 ───────────────────────────────────────────────────────────────
+  pushTo(userId, packet) {
+    for (const c of this.clients) if (c.userId === str(userId)) c._dispatch(packet)
+  }
+
+  pushRoom(r, packet, exceptUser) {
+    for (const id of Object.keys(r.members)) if (id !== exceptUser) this.pushTo(id, packet)
+  }
+
+  logRow(r, row) {
+    r.msgs.push(row)
+    if (r.msgs.length > 500) r.msgs.splice(0, r.msgs.length - 500)
+  }
+
+  /** 봇 권한을 바꾸고 SYNCMEMT + 피드 11(승격)/12(강등) 를 보낸다(9.4). */
+  setPerm(chatId, botUserId, perm, dropOlu) {
+    const r = this.byChat(chatId)
+    if (!r || !r.members[str(botUserId)]) return { ok: false, error: 'not_in_room' }
+    r.members[str(botUserId)].mt = Number(perm)
+    r.dropOlu = !!dropOlu
+    this.save()
+    const bot = str(botUserId)
+    this.pushTo(bot, resp('SYNCMEMT', { c: L(r.chatId), li: L(r.li), mids: [L(bot)], mts: [Number(perm)] }))
+    const feedType = Number(perm) & 5 ? 11 : 12
+    const logId = this.nextLog()
+    const log = {
+      logId: L(logId), chatId: L(r.chatId), authorId: L(bot), type: 0, sendAt: sec(),
+      message: `{"feedType":${feedType},"members":[{"userId":${bot},"nickName":${JSON.stringify(r.members[bot].nick)}}]}`,
+    }
+    this.pushTo(bot, resp('MSG', { chatId: L(r.chatId), li: L(r.li), chatLog: log }))
+    return { ok: true }
+  }
+
+  /** /v1/fake/event: kicked·deleted·join·leave·message·profile·kickout */
+  event(chatId, botUserId, ev) {
+    const r = this.byChat(chatId)
+    const bot = str(botUserId)
+    const kind = String(ev.kind || '')
+    if (kind === 'kickout') {
+      const reason = ev.reason == null ? 0 : Number(ev.reason)
+      this.pushTo(bot, resp('KICKOUT', { reason }))
+      return { ok: true }
+    }
+    if (!r) return { ok: false, error: 'no_room' }
+    const at = sec()
+    if (kind === 'kicked') {
+      delete r.members[bot]
+      if (!r.bans.includes(bot)) r.bans.push(bot)
+      this.save()
+      this.pushTo(bot, resp('LINKKICKED', {
+        c: L(r.chatId), li: L(r.li),
+        chatLog: { type: 0, message: `{"feedType":6,"members":[{"userId":${bot}}]}` },
+      }))
+      return { ok: true }
+    }
+    if (kind === 'unban') {
+      r.bans = r.bans.filter((x) => x !== bot)
+      this.save()
+      return { ok: true }
+    }
+    if (kind === 'deleted') {
+      r.deleted = true
+      this.save()
+      this.pushTo(bot, resp('LNKDELETED', { li: L(r.li) }))
+      return { ok: true }
+    }
+    const uid = str(ev.user_id)
+    const name = ev.name == null ? '' : String(ev.name)
+    if (kind === 'profile') {
+      if (!r.members[uid]) return { ok: false, error: 'not_member' }
+      if (ev.name != null) r.members[uid].nick = name
+      if (ev.photo != null) r.members[uid].photo = String(ev.photo)
+      if (ev.status !== undefined) r.members[uid].status = ev.status
+      if (ev.mt != null) r.members[uid].mt = Number(ev.mt)
+      this.save()
+      return { ok: true }
+    }
+    const logId = ev.log_id ? String(ev.log_id) : this.nextLog()
+    if (kind === 'join' || kind === 'leave') {
+      if (kind === 'join') r.members[uid] = Object.assign({ mt: 2, photo: '', status: null }, r.members[uid] || {}, { nick: name || (r.members[uid] && r.members[uid].nick) || '' })
+      else delete r.members[uid]
+      this.save()
+      // 큰 id 가 숫자로 뭉개지지 않게 JSON 을 글로 만든다(진짜 피드처럼 userId 는 숫자 칸)
+      const who = `{"userId":${/^[1-9][0-9]*$/.test(uid) ? uid : 0},"nickName":${JSON.stringify(name)}}`
+      const feed = kind === 'join' ? `{"feedType":4,"members":[${who}]}` : `{"feedType":2,"member":${who}}`
+      const log = { logId: L(logId), chatId: L(r.chatId), authorId: L(uid || '1'), type: 0, message: feed, sendAt: ev.at ? Number(ev.at) : at }
+      this.logRow(r, { logId, authorId: uid, type: 0, message: log.message, sendAt: log.sendAt, name })
+      this.pushRoom(r, resp(kind === 'join' ? 'NEWMEM' : 'DELMEM', { chatId: L(r.chatId), chatLog: log }), uid)
+      return { ok: true, log_id: logId }
+    }
+    if (kind === 'message') {
+      if (uid && !r.members[uid]) r.members[uid] = { mt: 2, nick: name, photo: '', status: null }
+      const type = ev.type == null ? 1 : Number(ev.type)
+      const attachment = ev.attachment == null ? '' : (typeof ev.attachment === 'string' ? ev.attachment : JSON.stringify(ev.attachment))
+      const log = { logId: L(logId), chatId: L(r.chatId), authorId: L(uid || '1'), type, message: String(ev.text || ''), attachment, sendAt: ev.at ? Number(ev.at) : at }
+      this.logRow(r, { logId, authorId: uid, type, message: log.message, sendAt: log.sendAt, name })
+      this.save()
+      this.pushRoom(r, resp('MSG', { chatId: L(r.chatId), li: L(r.li), chatLog: log, authorNickname: name }), uid)
+      return { ok: true, log_id: logId }
+    }
+    return { ok: false, error: 'bad_kind' }
+  }
+
+  sentIn(chatId) {
+    const r = this.byChat(chatId)
+    return r ? r.sent.slice() : []
+  }
+
+  roomByChat(chatId) {
+    return this.byChat(chatId)
+  }
+}
+
+let serverOne = null
+
+export function fakeServer() {
+  if (!serverOne) serverOne = new FakeServer()
+  return serverOne
+}
+
+/** 시험이 같은 프로세스 안에서 새 가짜 서버를 쓸 때. */
+export function resetFakeServer() {
+  serverOne = new FakeServer()
+  return serverOne
+}
+
+// ── 가짜 클라이언트 ─────────────────────────────────────────────────────────
+class FakeSession {
+  constructor(client) {
+    this.client = client
+  }
+
+  getConnection() {
+    const c = this.client
+    if (!c.session) return null
+    return { sendPacket: (method, body) => c.server.packet(c, method, body) }
+  }
+
+  send(method, body) {
+    return this.client.server.packet(this.client, method, body)
+  }
+
+  getChatInfo(chatId) { return this.send('CHATONROOM', { chatId }) }
+  getChannelInfo(chatId) { return this.send('CHATINFO', { chatId }) }
+  getOpenLinkInfo(lis) { return this.send('INFOLINK', { lis }) }
+  getAllMembers(chatId) { return this.send('GETMEM', { chatId }) }
+  getMembersByIds(chatId, memberIds) { return this.send('MEMBER', { chatId, memberIds }) }
+  leaveChat(chatId) { return this.send('LEAVE', { chatId }) }
+  sendMessage(chatId, msg) { return this.send('WRITE', { chatId, msg, type: 1 }) }
+}
+
+function formatMember(m) {
+  return {
+    user_id: str(m.userId),
+    nickname: m.nickName || '',
+    profile_image_url: m.pi || null,
+    full_profile_image_url: null,
+    original_profile_image_url: m.opi || null,
+    status_message: m.statusMessage == null ? null : String(m.statusMessage),
+    country_iso: null,
+    user_type: null,
+    open_token: null,
+    open_profile_link_id: null,
+    open_permission: m.mt == null ? null : Number(m.mt),
+  }
+}
+
+export class FakeKakaoClient {
+  constructor(server) {
+    this.server = server || fakeServer()
+    this.userId = ''
+    this.deviceUuid = ''
+    this.oauthToken = null
+    this.session = null
+    this.closed = false
+    this.pushHandlers = new Set()
+    this.sessionHandlers = new Set()
+  }
+
+  async login(creds) {
+    const c = creds || {}
+    if (!c.oauthToken) throw Object.assign(new Error('OAuth token is required'), { code: 'missing_token' })
+    this.oauthToken = String(c.oauthToken)
+    this.userId = str(c.userId)
+    this.deviceUuid = String(c.deviceUuid || '')
+    this.deviceType = c.deviceType || 'tablet'
+    return this
+  }
+
+  getCredentials() {
+    return { oauthToken: this.oauthToken, userId: this.userId, deviceUuid: this.deviceUuid, deviceType: this.deviceType }
+  }
+
+  async acquireSession() {
+    if (this.closed) throw Object.assign(new Error('Client is closed'), { code: 'client_closed' })
+    if (!this.session) {
+      if (/^fake-dead/.test(String(this.oauthToken))) {
+        throw Object.assign(new Error('invalid token'), { code: 'invalid_access_token' })
+      }
+      this.session = new FakeSession(this)
+      this.server.clients.add(this)
+      this.server.logins[this.userId] = (this.server.logins[this.userId] || 0) + 1
+      this.emit({ type: 'connected', userId: this.userId })
+    }
+    return this.session
+  }
+
+  onPush(handler) {
+    this.pushHandlers.add(handler)
+    return () => this.pushHandlers.delete(handler)
+  }
+
+  onSessionEvent(handler) {
+    this.sessionHandlers.add(handler)
+    return () => this.sessionHandlers.delete(handler)
+  }
+
+  emit(ev) {
+    for (const h of this.sessionHandlers) {
+      try { h(ev) } catch { /* 진짜 클라이언트처럼 삼킨다 */ }
+    }
+  }
+
+  isConnected() {
+    return !!this.session && !this.closed
+  }
+
+  // agent-messenger 의 dispatchPush 를 patch-kakao 가 고친 모양 그대로: KICKOUT 은 세션 이벤트(reason 포함)로.
+  _dispatch(packet) {
+    if (!this.session) return
+    if (packet.method === 'KICKOUT') {
+      const reason = packet.body && typeof packet.body.reason === 'number' ? packet.body.reason : null
+      this.session = null
+      this.server.clients.delete(this)
+      this.emit({ type: 'kicked', reason: reason == null ? 'Session kicked — another device logged in' : reason, message: 'Session kicked' })
+      return
+    }
+    for (const h of this.pushHandlers) {
+      try { h(packet) } catch { /* 진짜 클라이언트처럼 삼킨다 */ }
+    }
+  }
+
+  async executeWithReconnect(op) {
+    const session = await this.acquireSession()
+    return op({ session, loginResult: { chatDatas: [] } })
+  }
+
+  close() {
+    this.closed = true
+    this.session = null
+    this.server.clients.delete(this)
+    this.closeCount = (this.closeCount || 0) + 1
+  }
+
+  lookupAuthorName() {
+    return null
+  }
+
+  async getProfile() {
+    await this.acquireSession()
+    const u = this.server.user(this.userId)
+    return { user_id: this.userId, nickname: u.nick, status_message: null, profile_image_url: null }
+  }
+
+  async getChats() {
+    await this.acquireSession()
+    const out = []
+    for (const r of Object.values(this.server.rooms)) {
+      if (!r.members[this.userId]) continue
+      out.push({
+        chat_id: r.chatId, type: 'OM', display_name: null, title: null, link_id: r.li,
+        active_members: Object.keys(r.members).length, unread_count: 0, last_message: null,
+      })
+    }
+    if (!this.server.user(this.userId).bot) {
+      for (const c of CUSTOMER_ROOMS) {
+        out.push({
+          chat_id: c.chat_id, type: 'OM', display_name: '가, 나', title: null, link_id: c.link_id,
+          active_members: c.members, unread_count: 0, last_message: null,
+        })
+      }
+    }
+    return out
+  }
+
+  async getChat(chatId) {
+    await this.acquireSession()
+    const r = this.server.byChat(chatId)
+    if (!r || !r.members[this.userId]) {
+      throw Object.assign(new Error('CHATINFO response missing chatInfo'), {
+        code: 'get_chat_failed', getChatFailureReason: 'chat_info_absent',
+      })
+    }
+    return {
+      chat_id: r.chatId, type: 'OM', display_name: null, title: r.ln, link_id: r.li,
+      active_members: Object.keys(r.members).length, unread_count: 0, last_message: null,
+    }
+  }
+
+  async getMembersByIds(chatId, userIds) {
+    const s = await this.acquireSession()
+    const res = await s.getMembersByIds(L(str(chatId)), (userIds || []).map((x) => L(str(x))))
+    if (res.statusCode !== 0 || (res.body && res.body.status)) {
+      throw Object.assign(new Error('MEMBER failed'), { code: 'get_members_failed' })
+    }
+    return (res.body.members || []).map(formatMember)
+  }
+
+  async getMembers(chatId) {
+    const s = await this.acquireSession()
+    const res = await s.getAllMembers(L(str(chatId)))
+    return ((res.body && res.body.members) || []).map(formatMember)
+  }
+
+  async getMemberSnapshot(chatId) {
+    const members = await this.getMembers(chatId)
+    return { chat_id: str(chatId), active_members: members.length, members, complete: true }
+  }
+
+  async sendMessage(chatId, text) {
+    await this.acquireSession()
+    const r = this.server.write(this.userId, chatId, text, '')
+    return { success: true, status_code: 0, chat_id: str(chatId), log_id: str(r.logId), sent_at: r.sendAt }
+  }
+
+  async sendPhoto(chatId) {
+    return this.sendMessage(chatId, '(사진)')
+  }
+
+  async sendMultiPhoto(chatId) {
+    return this.sendMessage(chatId, '(사진 여러 장)')
+  }
+
+  async sendTyping() {
+    return { success: true }
+  }
+
+  async markRead() {
+    return { success: true }
+  }
+
+  async getMessages(chatId, options) {
+    await this.acquireSession()
+    const r = this.server.byChat(chatId)
+    const n = Math.max(1, Number(options && options.count) || 20)
+    const list = r ? r.msgs.slice(-n) : []
+    return list.map((m) => ({
+      log_id: m.logId, type: m.type, author_id: Number(m.authorId) || 0, author_name: m.name || null,
+      message: m.message, attachment: null, sent_at: m.sendAt,
+    }))
+  }
+
+  async getMessagePage(chatId, options) {
+    const msgs = await this.getMessages(chatId, { count: Number(options && options.count) || 40 })
+    return { messages: msgs, next_cursor: null, complete: true }
+  }
+
+  async leaveChat(chatId) {
+    const s = await this.acquireSession()
+    await s.leaveChat(L(str(chatId)))
+    return { success: true, status_code: 0, chat_id: str(chatId) }
+  }
+}
+
+// ── 가짜 등록(9.4) ──────────────────────────────────────────────────────────
+// 이메일에 'phone' 이 있으면 confirm_on_phone(인증번호 4829, 300초) 뒤 confirm 에서 ok, 비밀번호 'wrong' 이면
+// bad_credentials, 그 밖에는 바로 ok. FAKE_CONFIRM_MS 만큼 confirm 을 늦출 수 있다(관리자 20초 시험용).
+const fakePending = new Map()
+
+function fakeCreds(deviceId) {
+  return {
+    access_token: 'fake-' + randomBytes(12).toString('hex'),
+    refresh_token: 'fake-r-' + randomBytes(8).toString('hex'),
+    user_id: fakeUserId(deviceId),
+    device_uuid: 'fake-' + randomBytes(16).toString('hex'),
+    device_type: 'tablet',
+  }
+}
+
+export function fakeBegin(input) {
+  const deviceId = String(input.device_id || '')
+  const email = String(input.email || '')
+  const password = String(input.password || '')
+  const tablet = { device_name: 'Galaxy Tab S9', device_model: 'SM-X710' }
+  if (password === 'wrong') {
+    return { result: Object.assign({ state: 'bad_credentials', message: '이메일 또는 비밀번호가 맞지 않습니다.', status: -100 }, tablet) }
+  }
+  const user = fakeServer().user(fakeUserId(deviceId))
+  if (/^bot\./.test(deviceId)) {
+    user.bot = true
+    fakeServer().save()
+  }
+  if (email.includes('phone')) {
+    const pendingId = randomBytes(12).toString('hex')
+    fakePending.set(pendingId, { deviceId, email, at: Date.now() })
+    setTimeout(() => fakePending.delete(pendingId), 15 * 60 * 1000).unref()
+    return {
+      result: Object.assign({ state: 'confirm_on_phone', pending_id: pendingId, passcode: '4829', remaining_seconds: 300 }, tablet),
+    }
+  }
+  return { result: Object.assign({ state: 'ok' }, tablet), credentials: fakeCreds(deviceId), deviceId, email }
+}
+
+export async function fakeConfirm(input) {
+  const id = String(input.pending_id || '')
+  const row = fakePending.get(id)
+  if (!row) return { result: { state: 'expired' } }
+  const wait = Number(process.env.FAKE_CONFIRM_MS) || 0
+  if (wait > 0) await new Promise((ok) => setTimeout(ok, wait))
+  fakePending.delete(id)
+  return {
+    result: { state: 'ok', device_name: 'Galaxy Tab S9', device_model: 'SM-X710' },
+    credentials: fakeCreds(row.deviceId),
+    deviceId: row.deviceId,
+    email: row.email,
+  }
+}
+
+export function fakeCancel(pendingId) {
+  fakePending.delete(String(pendingId || ''))
+}
+
+// ── 메모리 저장소(selfcheck 전용, DB 없이 botpool 을 돌린다) ─────────────────
+// lib/db.js 의 room_installs 부분 UNIQUE 를 흉내 낸다: installed 이고 kicked 가 아닌 행끼리 link_id·link_url 이 겹치면 23505.
+export class MemStore {
+  constructor() {
+    this.installs = new Map()
+    this.members = new Map()
+    this.leaves = []
+    this.logs = []
+    this.states = new Map()
+    this.bots = new Map()
+    this.blocks = []
+    this.records = new Map()
+    this.seq = 0
+  }
+
+  addMember(id, blocked) {
+    this.members.set(Number(id), { id: Number(id), blocked_reason: blocked || null })
+  }
+
+  addInstall(row) {
+    const id = row.id || ++this.seq
+    const full = Object.assign({
+      id, member_id: 1, link_url: '', link_id: null, link_name: null, passcode_ct: null, roombot: false, minigame: false,
+      phase: 'installed', order_id: null, bot_device_id: null, hold_reason: null, retry_n: 0, state: 'queued',
+      error_code: null, error_detail: null, chat_id: null, perm: null, perm_at: null, joined_at: null, state_at: null,
+      next_try_at: null, retry_at: null, attempts: 0, config: {}, config_rev: 0, created_at: Date.now(),
+    }, row, { id })
+    this.installs.set(id, full)
+    if (!this.members.has(Number(full.member_id))) this.addMember(full.member_id)
+    return full
+  }
+
+  withMember(r) {
+    const m = this.members.get(Number(r.member_id))
+    return Object.assign({}, r, { member_blocked: m ? m.blocked_reason : null })
+  }
+
+  async listInstalls(botIds) {
+    return [...this.installs.values()].filter((r) => r.phase === 'installed' && botIds.includes(r.bot_device_id)).map((r) => this.withMember(r))
+  }
+
+  async getInstall(id) {
+    const r = this.installs.get(Number(id))
+    return r ? this.withMember(r) : null
+  }
+
+  async listLeaves(botIds) {
+    return this.leaves.filter((l) => !l.done_at && botIds.includes(l.bot_device_id)).map((l) => Object.assign({}, l))
+  }
+
+  async finishLeave(id, botId, result, done) {
+    const l = this.leaves.find((x) => x.id === id && x.bot_device_id === botId)
+    if (!l) return
+    l.result = result
+    if (done) l.done_at = Date.now()
+  }
+
+  exclusive(r) {
+    return r.phase === 'installed' && r.error_code !== 'kicked'
+  }
+
+  async updateInstall(id, botId, fields) {
+    const r = this.installs.get(Number(id))
+    if (!r || r.phase !== 'installed' || r.bot_device_id !== botId) return 0
+    const next = Object.assign({}, r)
+    for (const [k, v] of Object.entries(fields || {})) {
+      if (k === 'attempts') next.attempts = (Number(next.attempts) || 0) + 1
+      else next[k] = v === undefined ? null : v
+    }
+    if (this.exclusive(next)) {
+      for (const o of this.installs.values()) {
+        if (o.id === next.id || !this.exclusive(o)) continue
+        if ((next.link_id && o.link_id === next.link_id) || (next.link_url && o.link_url === next.link_url)) {
+          throw Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' })
+        }
+      }
+    }
+    this.installs.set(next.id, next)
+    return 1
+  }
+
+  async markBotRooms(botId, now) {
+    let n = 0
+    for (const r of this.installs.values()) {
+      if (r.bot_device_id === botId && r.phase === 'installed' && r.state !== 'error') {
+        Object.assign(r, { state: 'error', error_code: 'bot_down', error_detail: null, state_at: now })
+        n++
+      }
+    }
+    return n
+  }
+
+  async isBlocked(linkId, linkUrl) {
+    return this.blocks.some((b) => (linkId && b.link_id === linkId) || (linkUrl && b.link_url === linkUrl))
+  }
+
+  async roomLog(installId, kind, row) {
+    const x = row || {}
+    this.logs.push({ install_id: Number(installId), at: Number(x.at) || Date.now(), kind, user_id: x.user_id || null, name: x.name || null, ok: x.ok !== false, detail: x.detail || {} })
+  }
+
+  async kickHistory(installId, userId) {
+    const rows = this.logs.filter((l) => l.install_id === Number(installId) && l.user_id === String(userId) && (l.kind === 'kick' || l.kind === 'kick_fail'))
+    return { any: rows.length > 0, kicked: rows.some((l) => l.kind === 'kick' && l.ok) }
+  }
+
+  async loadRoomState(installId) {
+    const s = this.states.get(Number(installId))
+    return s ? JSON.parse(JSON.stringify(s)) : null
+  }
+
+  async saveRoomState(installId, runtime) {
+    this.states.set(Number(installId), JSON.parse(JSON.stringify(runtime || {})))
+  }
+
+  async botState(botId, fields) {
+    const b = this.bots.get(botId) || { device_id: botId }
+    if (fields.state) b.state = fields.state
+    if (fields.nickname) b.nickname = fields.nickname
+    b.state_at = Date.now()
+    this.bots.set(botId, b)
+  }
+
+  async botNickname(botId) {
+    const b = this.bots.get(botId)
+    return b && b.nickname ? b.nickname : ''
+  }
+
+  async ensureBotAccount(botId, email) {
+    if (!this.bots.has(botId)) this.bots.set(botId, { device_id: botId, email, state: 'connected' })
+  }
+
+  async saveRecord(id, record) {
+    this.records.set(id, JSON.parse(JSON.stringify(record)))
+  }
+}

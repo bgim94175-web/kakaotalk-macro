@@ -1,12 +1,10 @@
-# K bot — 전체 설계 명세 (v5 · 웹 콘솔 + 서버 발송)
+# K bot — 전체 설계 명세 (v6 · 회원 계정 · 상품 3종 · 방 설치형 봇)
 
-이 문서는 **서버 · 구매 웹사이트 · 발송 콘솔(`/panel`) · 관리 콘솔(`/manage`)** 의 계약(contract)이다.
-구현 중 이 문서와 코드가 어긋나면 **이 문서가 기준**이다. 새 필드를 추가하면 이 문서도 같이 고친다.
+이 문서는 **서버 · 구매 웹사이트 · 발송 콘솔(`/panel`) · 관리 콘솔(`/manage`) · 서버 발송(`sender/`)** 의 계약을 요약한다.
+상세 구현 명세는 **`docs/ACCOUNTS_V1.md`** 가 단일 기준이다(이 문서와 어긋나면 ACCOUNTS_V1 이 이긴다). 새 필드를 추가하면 두 문서를 같이 고친다.
 
-> **안드로이드 앱은 단종됐다.** 사용자앱(KakaoAuto)·관리자앱(KakaoAdmin)과 그 전용 코드는 저장소에서 제거했다.
-> 앱 전용 API(`/verify` `/heartbeat` `/entitlements` `/config` `/pubkey`)와 앱 서명 관련 관리자 API
-> (`/admin/sigs` `/admin/sig-add` `/admin/sig-del` `/admin/reset-device`)도 함께 제거됐다 (아래 "제거된 것" 참고).
-> 제품은 **웹 콘솔 + 서버 발송**이다.
+> **안드로이드 앱은 단종됐다.** 앱 전용 API(`/verify` `/heartbeat` `/entitlements` `/config` `/pubkey`)와 앱 서명 관리자 API 는 제거됐다(아래 8장).
+> **라이선스 키 판매도 끝났다.** 모든 구매·지급은 회원 계정(`members`)에 붙는다. 예전 키는 회원이 `/account` 에서 이관한다.
 
 ---
 
@@ -14,322 +12,187 @@
 
 | 구성 | 위치 |
 |---|---|
-| 라이선스 서버 + 구매 웹 + 콘솔 | Render (Node 18+, Express) |
-| DB | Neon Postgres (`DATABASE_URL`) |
-| 서버 발송 | `sender/` — 라이선스 서버가 띄우는 자식 프로세스. 세션은 Neon `kakao_sessions` |
+| 회원·결제 서버 + 구매 웹 + 콘솔 | Render (Node 22, Express) — `server.js` `lib/` `routes/` `public/` |
+| DB | Neon Postgres (`DATABASE_URL`). 마이그레이션은 `lib/db.js` `STEPS`(idempotent, DROP 없음) |
+| 서버 발송 | `sender/` — 서버가 띄우는 자식 프로세스(127.0.0.1 전용). 고객 카카오 계정과 운영자 K bot 계정의 세션을 `kakao_sessions` 에 둔다 |
 
-환경변수는 `DEPLOY.md` 1장이 단일 소스다. 요점:
-- `ADMIN_PASSWORD` — `/admin/*`(= `/manage`) 비밀번호. 비었거나 `change-me-now` 면 `/admin/*` 전체 503.
-- `CONFIG_SECRET` — `/panel` 로그인 쿠키 서명 키(16자 이상). 비었거나 짧으면 `/panel` 로그인 503. **앱 설정 암호화 용도는 폐기됐다.**
-- `BANK_INFO` `CONTACT_INFO` `PURCHASE_BASE` — 구매 페이지 표시값.
+환경변수는 `DEPLOY.md` 와 ACCOUNTS_V1 9.6 이 단일 소스다. 요점:
+- `ADMIN_PASSWORD` — `/admin/*`(= `/manage`) 비밀번호.
+- `CONFIG_SECRET` — 서명·봉인 키(16자 이상). OAuth 상태 쿠키, 채널톡 회원 식별, **방 참여코드 봉인**(`lib/secretbox.js`)에 쓴다.
+- `BANK_INFO` `CONTACT_INFO` `PURCHASE_BASE` — 구매 페이지 표시값·주문 주소.
 - `DEPOSIT_TOKEN` `DEPOSIT_AUTO_APPROVE` — 자동 입금확인.
 - `SENDER_TOKEN` `SENDER_KEY` — 발송 자식. 없으면 발송 자식만 안 뜨고 나머지는 열린다.
+- 회원·주문 한도: `MEMBER_MAX_SESSIONS`(3) `MEMBER_MAX_ACCOUNTS`(3) `MEMBER_MAX_PENDING_ORDERS`(3) `MEMBER_MAX_PENDING_ROOMS`(10) `IP_MAX_PENDING_ORDERS`(10) `ROOM_RETRY_BASE_MS`(120000) `ROOM_HOLD_WORDS` `ROOM_LOG_KEEP_DAYS`(30) `ORDER_PENDING_TTL_MS`(48시간).
 
 ---
 
-## 1. 판매 구성 — 단일 상품
+## 1. 판매 구성 — 상품 3종 (`lib/pricing.js` 단일 소스)
 
-상품은 하나다: **K bot 1개월 = 30,000원 / 30일 / 기능 3종 전부.**
-기능별 개별 구매, 3개월·1년 플랜, 묶음 할인은 **없다.** 다시 사면(기존 키를 `target_key` 로) 그 키의 기능 3종이 각각 **`max(지금, 현재 만료)` 기준 30일씩 연장**된다.
-
-| id | 한글명 | 설명 (`lib/features.js`) |
-|---|---|---|
-| `macro` | 자동발송 매크로 | 대화방 주기 발송 · 이미지 첨부 · 갠톡 자동응답 · 저격 규칙 |
-| `roombot` | 대화방 관리봇 | 입장·퇴장 로그 · 프로필 변경 감지 · 금지어·링크 가림 · 올킥 감지 |
-| `minigame` | 미니게임봇 | 끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹 |
-
-- 기능마다 **독립된 만료일**(entitlement 단위)을 가진다. 단일 상품은 세 기능을 같은 날짜로 함께 연장한다.
-- 기능을 셋으로 나눠 둔 것은 **예전 키(기능별로 산 키)와 관리자 개별 발급** 때문이다. 판매 흐름에서는 항상 3종이 함께 간다.
-- 서버의 entitlements 표가 유일한 진실이다. `/panel` 과 서버 발송(`sender/`)은 이 표 기준으로만 기능을 연다.
-
-### 가격 단일 소스 — `lib/pricing.js`
+| id | 화면 이름 | 가격 | 단위 | 동작 주체 |
+|---|---|---|---|---|
+| `macro` | 카카오톡 매크로 | 20,000원 | 1개월(30일), 1~12개월 | 고객 **자기** 카카오 계정(콘솔에 등록, 회원당 3개) |
+| `roombot` | 방 관리봇 | 15,000원 | 방 1개, 기간 없음 | 운영자 **K bot 계정**(방장이 부방장으로 지정해야 방 관리 기능 동작) |
+| `minigame` | 미니게임봇 | 15,000원 | 방 1개, 기간 없음 | 운영자 K bot 계정(입장하면 바로 동작) |
 
 ```
-CURRENCY = 'KRW'
-NAME     = 'K bot'
-PLAN     = 'month'        // keys.SALE_PLANS 의 유일한 값
-PLAN_DAYS= 30
-PRICE    = 30000          // 원. 주문 금액 = PRICE + 뒷자리(1~99)
-quote()      → { ok, name, features:[3종], plan:'month', plan_label:'1개월', days:30,
-                 lines:[...], subtotal:30000, discount:0, bundle:false, amount:30000, currency:'KRW' }
-table()      → GET /api/price 본체 (아래 5장)
-bankInfo()   → BANK_INFO 또는 '관리자에게 문의'
-contactInfo()→ CONTACT_INFO 또는 null
+PRODUCTS = { macro:{id,label,unit:'month',price:20000,days:30,min:1,max:12,desc},
+             roombot:{id,label,unit:'room',price:15000,desc}, minigame:{…} }
+MAX_ROOMS = 10
+quote({macro_months, rooms:[{products:[…]}]})
+  → {ok:true, lines:[{product, months?, room?, unit_price, amount}], total}
+  | {ok:false, reason:'empty'|'bad_months'|'too_many_rooms'|'no_products', error, room?}
+table()  → GET /api/price 본체      label(id) · bankInfo() · contactInfo()
 ```
-`quote()` 는 인자를 받지 않는다. 예전 호출부가 (기능목록, 플랜) 을 넘겨도 무시하고 같은 값을 준다.
 
-플랜 코드: 판매는 `month`(30일) 하나다(`keys.SALE_PLANS = ['month']`).
-`keys.PLANS` 에는 `quarter`(90일)·`year`(365일) 라벨이 **표시용으로만** 남아 있다 — 그 플랜으로 발급된 **예전 주문·키가 화면에 바르게 뜨게** 하기 위함이다. `custom`(일수 직접 입력)은 **관리자 발급 전용**이다.
+- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 15000`. 할인 없음. 주문 1건 최대 540,000원(매크로 12개월 + 방 10개 × 2상품).
+- 카카오톡 매크로 기간: 결제 확인 시점부터 30일 × 개월. 다시 사면 `max(지금, 만료) + 30일 × 개월`(`members.macro_until`). 만료되면 sender 가 그 회원의 고객 계정 접속을 멈춘다.
+- 방 상품: 설치 권리는 오픈채팅방의 **link_id**(카카오가 정한 방 id)에 영구히 묶인다. 한 방에 두 상품을 함께 둘 수 있고 같은 K bot 계정이 맡는다. 결제된 설치는 방마다 1개(부분 UNIQUE). 미입금 예약은 다른 회원을 막지 않고 **먼저 입금된 주문이 방을 갖는다**(D9).
+- 화면 이름·설명은 `lib/features.js` `LABELS`·`DESCS` 가 단일 소스다(`자동발송 매크로`·`대화방 관리봇` 은 더 쓰지 않는다).
 
 ---
 
-## 2. DB 스키마 (Neon Postgres)
+## 2. DB 스키마 (요약)
 
-> **테이블·컬럼을 드롭하거나 이름을 바꾸지 않는다(운영 데이터).** 앱 단종으로 더 이상 쓰지 않는 컬럼은 **그대로 두고 쓰지 않을 뿐**이다.
-> 마이그레이션은 기존 테이블을 유지한 채 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 로만 확장하며 **몇 번 실행해도 안전(idempotent)** 해야 한다.
+> 테이블·컬럼을 드롭하거나 이름을 바꾸지 않는다. 쓰지 않는 컬럼은 그대로 둔다. 전체 SQL 은 `lib/db.js` 와 ACCOUNTS_V1 2.1.
 
-```sql
-licenses (
-  key           TEXT PRIMARY KEY,
-  plan          TEXT,              -- 최근 발급 플랜 (표시용)
-  duration_ms   BIGINT,
-  expires_at    BIGINT,            -- 전체 기능 중 가장 늦은 만료 (표시용)
-  device_id     TEXT,              -- [앱 유물] 더 이상 쓰지 않음 (드롭 금지)
-  device_name   TEXT,              -- [앱 유물]
-  device_fp     TEXT,              -- [앱 유물]
-  activated_at  BIGINT,            -- 최초 개시 시점 (/panel 이 쓸 수 있음)
-  revoked       BOOLEAN DEFAULT FALSE,
-  note          TEXT,
-  created_at    BIGINT NOT NULL,
-  last_seen     BIGINT,
-  session_token TEXT,              -- [앱 유물]
-  session_at    BIGINT,            -- [앱 유물]
-  reset_count   INT DEFAULT 0,     -- [앱 유물]
-  last_reset_at BIGINT,            -- [앱 유물]
-  app_sig       TEXT,              -- [앱 유물]
-  blocked_reason TEXT,             -- 관리자 차단 사유 (있으면 거부)
-  owner_name    TEXT,
-  owner_contact TEXT
-)
-
-entitlements (
-  key         TEXT NOT NULL REFERENCES licenses(key) ON DELETE CASCADE,
-  feature     TEXT NOT NULL,        -- macro | roombot | minigame
-  plan        TEXT,
-  starts_at   BIGINT,               -- 개시 전엔 NULL
-  duration_ms BIGINT NOT NULL,
-  expires_at  BIGINT,               -- NULL = 아직 미개시
-  created_at  BIGINT NOT NULL,
-  PRIMARY KEY (key, feature)
-)
-
-orders (
-  id TEXT PRIMARY KEY,              -- ORD-YYMMDD-XXXXXX
-  created_at BIGINT NOT NULL,
-  status TEXT NOT NULL,             -- pending | paid | done | canceled
-  features TEXT NOT NULL,           -- 쉼표구분 feature id (항상 3종)
-  plan TEXT NOT NULL,               -- 항상 'month'
-  base_amount INT,                  -- 기본 금액 (30000)
-  amount INT NOT NULL,              -- 실제 입금액 (= base_amount + suffix)
-  buyer_name TEXT, contact TEXT, depositor TEXT, memo TEXT,
-  target_key TEXT,                  -- 기존 키 연장 대상
-  token TEXT,                       -- 구매자 주문/키 조회용 비밀값 (24 hex)
-  needs_review BOOLEAN DEFAULT FALSE,
-  issued_key TEXT, handled_at BIGINT,
-  auto_canceled BOOLEAN DEFAULT FALSE, -- 48시간 미입금 자동취소 (승인 시 되살아남)
-  android_ok BOOLEAN DEFAULT FALSE     -- [앱 유물] 기본값 유지. 쓰지 않고 응답에 싣지 않는다
-)
-
-deposits (
-  id BIGSERIAL PRIMARY KEY, at BIGINT NOT NULL,
-  amount INT, name TEXT, raw TEXT NOT NULL, source TEXT,
-  raw_hash TEXT NOT NULL,           -- sha256(raw) — 중복 전송 방어 (UNIQUE)
-  matched_order TEXT,
-  status TEXT NOT NULL              -- matched | unmatched | duplicate | ambiguous | ignored
-)
-
-audit_log (
-  id BIGSERIAL PRIMARY KEY, at BIGINT NOT NULL, key TEXT, kind TEXT,
-  device_id TEXT, device_name TEXT, detail TEXT, ip TEXT
-)
-
-app_signatures (sha256 TEXT PRIMARY KEY, label TEXT, allowed BOOLEAN DEFAULT TRUE, created_at BIGINT)  -- [앱 유물] 드롭 금지, 쓰지 않음
-configs (key TEXT PRIMARY KEY, blob TEXT, rev BIGINT, updated_at BIGINT)  -- [앱 유물] 앱 설정 백업. 쓰지 않음
-```
-
-`audit_log.kind` 중 `order`·`bad_admin_pw`·`bad_deposit_token` 등 서버/주문 이벤트는 계속 쓴다.
-`activate`·`mismatch`·`takeover`·`bad_sig`·`tamper`·`reset` 는 앱 유물이라 더 이상 기록되지 않는다(과거 행은 남아 있을 수 있다).
-인덱스: `entitlements(key)`, `audit_log(at DESC)`, `audit_log(key)`, `orders(status, created_at DESC)`, `deposits(raw_hash) UNIQUE`.
-
-카카오 세션 테이블 `kakao_sessions` 는 `sender/` 가 소유한다(토큰만 `SENDER_KEY` 로 봉인). 이 문서의 범위 밖이다 — `sender/README.md` 참고.
-
----
-
-## 3. 구매 웹사이트 (`public/`, Express static + `routes/purchase.js`)
-
-| 경로 | 내용 |
+| 표 | 용도 |
 |---|---|
-| `/` | 랜딩. 단일 상품 안내(가격·기능 3종·FAQ) |
-| `/buy` | 구매 신청 폼: 입금자명(필수)·연락처·메모·기존 키(연장). 기능/플랜 선택은 없다 — 항상 3종 30일 |
-| `/order/:id` | 주문 상태 조회 페이지 (5초 폴링, 발급되면 키 표시) |
-| `/my` | 키 조회 페이지 (`POST /api/lookup`) |
-| `/panel` | 발송 콘솔 (키로 로그인, `routes/panel.js`) |
-| `/manage` | 관리 콘솔 (`ADMIN_PASSWORD` 로 로그인, `/admin/*` 호출) |
+| `members` | 회원. `login_id`(소문자 UNIQUE) · `pw_hash`(scrypt) · `macro_until` · `legacy_room_until` · `blocked_reason` |
+| `member_sessions` · `member_google` | 로그인 세션(쿠키 `kb_s`, 회원당 동시 3대) · Google 연결(`sub`) |
+| `licenses` · `entitlements` | 예전 라이선스 키와 기능별 기간. `licenses.member_id`·`claimed_at` = 회원 이관 |
+| `panel_accounts` · `panel_pending` | 콘솔에 등록한 고객 카카오 계정. `member_id`(새 등록) 또는 `license_key`(예전 키) |
+| `orders` | 주문. 회원 주문은 `kind='member'`, `member_id`, `items`(줄), `applied`(적용 결과), `ip`, `terms_at`. 예전 키 주문은 `kind` NULL |
+| `deposits` | 입금 알림 원문과 매칭 결과 |
+| `bot_accounts` · `bot_pending` | 운영자 K bot 계정 풀(device_id `bot.<16hex>`, 봇마다 `room_cap` 기본 20) |
+| `room_installs` | 방 설치 1개 = 방 1개. `phase`(pending_payment·installed·canceled·removed, 부모가 씀) · `state`(queued·joining·waiting_host·active·error, sender 가 씀) · `bot_device_id` · `passcode_ct`(봉인) · `config`(방 설정) |
+| `room_leaves` · `room_blocklist` | K bot 나가기 대기열(옮기기·해제·링크 바꾸기·금지) · 설치 금지 방 |
+| `room_state` · `room_log` | sender 의 방별 실행 상태 · 조치 기록(30일 보존) |
+| `audit_log` | 감사 기록. `member_id` 칸 추가. 종류: `order` `revoked` `bad_deposit_token` `bad_admin_pw` `member` `member_lockout` `install` `bot`(+ 옛 기록) |
+| `kakao_sessions` | sender 소유. `features` v2 = `{v:2, macro_until, legacy_room_until, grants_at, reg_at}`(고객) / `{v:2, bot:true}`(봇) |
 
-### 3.1 `GET /api/price` — 가격표 (서버 단일 소스)
-
+**`orders.items`**(줄 단위, 방 상품은 상품마다 한 줄이고 항상 `install_id` 가 있다):
 ```json
-{ "ok": true, "currency": "KRW", "name": "K bot",
-  "plan": "month", "plan_label": "1개월", "days": 30, "price": 30000,
-  "features": [ {"id":"macro","label":"자동발송 매크로","desc":"..."},
-                {"id":"roombot","label":"대화방 관리봇","desc":"..."},
-                {"id":"minigame","label":"미니게임봇","desc":"..."} ],
-  "plans": [ {"id":"month","label":"1개월","days":30,"price":30000} ],
-  "bank": "카카오뱅크 3333-00-0000000 홍길동",
-  "contact": "카톡ID: ...",
-  "purchase_base": "https://...",
-  "auto_approve": true }
+[ { "product": "macro",    "months": 2, "unit_price": 20000, "amount": 40000 },
+  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 },
+  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 } ]
 ```
-`features` 는 **항상 3종**(ALL 순서). `bank`·`contact` 는 환경변수에서, `purchase_base`·`auto_approve` 는 라우터가 붙인다.
+확인하지 못한 방 줄은 `"unverified": true`, 확인 대기 낱말(`ROOM_HOLD_WORDS`)에 걸린 방 줄은 `"hold": true`. 참여코드는 줄에 넣지 않는다(`room_installs.passcode_ct` 에만, AES-256-GCM 봉인).
 
-### 3.2 `POST /api/order` — 주문 접수
-
-요청 본문:
-```json
-{ "depositor": "입금자명(필수)", "buyer_name": "", "contact": "", "memo": "", "target_key": "KAKA-...(선택)" }
-```
-- 서버는 본문의 `features`/`plan` 을 **무시**하고 항상 기능 3종 + `plan:'month'` 로 주문한다.
-- `android_ok` 는 **받지도 쓰지도 않는다.**
-- `amount = base(30000) + suffix(1~99)`. suffix 는 현재 `pending` 주문 중 같은 총액이 없도록 고른다
-  (`lib/keys.js` 의 `pickAmount`). 전부 충돌하면 `suffix=0` + `needs_review=true`.
-  `pickAmount` 직전에 48시간 넘긴 `pending` 주문을 자동취소해 뒷자리 풀을 회수한다.
-
-응답:
-```json
-{ "ok": true, "id": "ORD-...", "token": "24hex", "url": "/order/ORD-...?t=...",
-  "amount": 30047, "base_amount": 30000, "suffix": 47, "needs_review": false,
-  "features": ["macro","roombot","minigame"],
-  "feature_labels": ["자동발송 매크로","대화방 관리봇","미니게임봇"],
-  "plan": "month", "plan_label": "1개월", "days": 30,
-  "target_key": "KAKA-****-****-XXXX",
-  "account": "...", "bank": "...", "contact_info": "...",
-  "auto_approve": true, "created_at": 0, "status": "pending" }
-```
-`target_key` 는 **마스킹**해서 돌려준다(뒷자리만 노출). 신규 발급이면 `target_key: null`.
-
-### 3.3 `GET /api/order/:id` — 주문 상태 조회
-
-- `t`(token) 없으면 민감정보를 빼고 상태만: `status`·`amount`·`base_amount`·`features`·`feature_labels`·`plan`·`plan_label`·`days`·`created_at`.
-- `t` 가 맞으면 `issued_key` 까지 포함한다.
-- 응답 모양은 `POST /api/order` 와 같되 **`android_ok` 는 어떤 경우에도 싣지 않는다.**
-- `/order/:id` 페이지는 5초마다 폴링(그리고 창 포커스 시 즉시) → `status==='done'` 이면 키를 크게 + 복사 버튼으로 바꾼다. 최대 30분 폴링 후 [새로고침] 버튼만 남긴다.
-
-### 3.4 `POST /api/lookup` — 키 조회
-
-요청: `{ "key": "KAKA-..." }`. 키 소유 증명 없이 민감정보를 노출하지 않는다.
-응답에 포함: `key`, `revoked`, `blocked`, `expires_at`, `features`(3종 상태 맵), `feature_list`, `purchase`(구매 안내 링크).
-앱 유물 필드(`device_registered`, `reset_count`)는 **싣지 않는다.** `activated_at` 은 `/panel` 이 쓰면 남긴다.
-
-`features` 맵은 항상 3개 키가 ALL 순서로 존재한다:
-```json
-"features": { "macro":{"on":true,"expires_at":179...,"plan":"month"},
-              "roombot":{"on":true,"expires_at":179...,"plan":"month"},
-              "minigame":{"on":true,"expires_at":179...,"plan":"month"} }
-```
-미보유 = `{on:false, expires_at:0, plan:null}`. 샀지만 미개시 = `{on:false, expires_at:0, plan:'month'}`.
-
-### 3.5 `POST /api/deposit-hook` — 자동 입금확인 (아래 7장)
-
-### 3.6 발송 콘솔 API (`/panel/api/*`, `routes/panel.js`)
-
-`/panel` 은 라이선스 키로 로그인하고(쿠키는 `CONFIG_SECRET` 로 서명), 카카오 계정 등록·매크로/봇 설정·갠톡 1:1 응답을 한다.
-로그인/계정등록/방목록/설정/받은함/채팅/로그 엔드포인트가 있다. 설정과 발송의 실제 동작은 `sender/` 가 수행한다.
-이 영역의 상세 계약은 `routes/panel.js` 와 `public/panel.*` 가 소유한다 — 이 문서에서 모양을 재정의하지 않는다.
+**`orders.applied`**: `{ "macro": {"days":60, "until":ms}, "rooms":[{"install_id":12, "products":["roombot","minigame"]}], "skipped":[{"install_id":13, "products":["minigame"], "amount":15000, "why":"room_taken"}] }`.
+예전 키 주문이 이관된 키를 가리킨 경우 `{"legacy_to_member": true, "macro": {...}, "legacy_room_until": ms}`.
 
 ---
 
-## 4. 관리자 API (헤더 `x-admin-password`) — `routes/admin.js`
+## 3. 구매 API (`routes/purchase.js`)
 
-`/manage` 화면이 이 API 를 부른다. 관리자 응답은 서명하지 않는다(비밀번호로 보호). 요청/응답 모양은 변경 없음.
+응답 공통: 성공 `{ok:true, …}`, 실패 `{ok:false, reason, error}` + 상태 코드(400·401·403·404·409·422·429·503). `error` 는 화면에 그대로 보인다.
 
-| 메서드 | 경로 | 본문 / 설명 |
+| 메서드·경로 | 인증 | 요약 |
 |---|---|---|
-| POST | `/admin/create` | `{features,plan,days?,count:1,note?,owner_name?,owner_contact?}` → `{ok,keys:[..]}` (관리자는 `custom` 일수 발급 가능) |
-| POST | `/admin/grant` | `{key,features,plan,days?}` 기존 키에 기능 추가/연장. 이미 있으면 **남은 기간에 더함** |
-| POST | `/admin/revoke-feature` | `{key,feature}` 해당 기능만 회수 |
-| GET | `/admin/list` | `?q=&limit=100&offset=0` → `{ok,now,licenses:[{...,features:[{feature,plan,expires_at}]}]}` |
-| GET | `/admin/license?key=` | 단건 상세 + 최근 audit |
-| POST | `/admin/revoke` | `{key,revoked:true}` |
-| POST | `/admin/block` | `{key,reason}` / `reason:null` 이면 해제 |
-| POST | `/admin/delete` | `{key}` |
-| GET | `/admin/audit` | `?key=&kind=&limit=100` |
-| GET | `/admin/stats` | `{ok, total, active, ...}` + 대기 주문·주의 입금 건수 |
-| GET | `/admin/orders` | `?status=pending` |
-| POST | `/admin/order-approve` | `{id, key?}` key 없으면 신규 발급 → `{ok, key}` (주문의 features/plan 적용 = 3종 30일) |
-| POST | `/admin/order-cancel` | `{id, memo?}` |
-| GET | `/admin/deposits` | `?status=&limit=100` 입금 내역 (원문 포함) |
-| POST | `/admin/deposit-match` | `{deposit_id, order_id}` 수동 매칭 → 주문 승인까지 수행 |
-| POST | `/admin/deposit-ignore` | `{deposit_id}` 무시 처리 |
+| GET `/api/price` | 없음 | `{ok, currency, products:[3종], max_rooms, bank, contact, purchase_base, auto_approve}` |
+| POST `/api/room-preview` `{link}` | 회원 | 붙여넣은 글에서 링크를 뽑아(`openchat.normLink`) 봇으로 조회(sender `/v1/bot/resolve`, 10분 메모리 저장, 회원당 시간 60회). `{ok, verified, room:{link_url, link_id, name, needs_passcode, profile_only, max_users}, mine, available}`. 실패: 400 `bad_link`, 403 `blocked_room`, 404 `not_found`, 422 `not_group`, 409 `taken`(다른 회원의 결제된 설치). sender·봇이 없거나 조회 예산이 바닥나면 `verified:false`(주문은 확인란 동의로 가능, D10) |
+| POST `/api/order` | 회원 | `{macro_months, rooms:[{link, passcode, products, unverified_ok} \| {install_id, products}], terms, depositor, contact?, memo?}`. 검증 오류는 ACCOUNTS_V1 3.3 표(방 오류는 `room` = 보낸 배열의 위치). 새 방은 그 회원의 `pending_payment` 설치로 예약, 같은 회원의 기존 설치와 같은 방이면 상품 추가 줄로 바뀐다. 한 트랜잭션에서 금액 뒷자리 추첨(전역 잠금) → 미입금 상한(회원 3건·방 줄 10개·IP 10건) → 예약 → 주문 INSERT. 응답 `{ok, id, token, url, amount, base_amount, suffix, needs_review, items:[공개 줄], bank, account, contact_info, auto_approve, created_at, status}` |
+| GET `/api/order/:id` | 토큰 `?t=` 또는 주문 주인 회원 | 남의 주문은 404. 회원 주문: `kind`, `items`, `applied`(done), `can_cancel`, `accounts_n`(주인일 때), `rooms:[{install_id, link_url, link_name, display, label, detail, bot}]`. 예전 키 주문만 `issued_key` |
+| GET `/api/my/orders` | 회원 | 최근 50건 `{id, created_at, status, auto_canceled, amount, items, applied, url, can_cancel}` |
+| POST `/api/my/orders/cancel` `{id}` | 회원 | 자기 `pending` 주문만. 그 주문이 예약한 방도 `canceled`. 409 `not_pending` |
+| POST `/api/lookup` `{key}` | 없음 | 예전 키 조회(기능별 만료). `claimed`(회원 이관 여부) 추가 |
+| POST `/api/deposit-hook` | `DEPOSIT_TOKEN` | 7장 |
 
-관리자 비밀번호 무한 추측은 `ADMIN_FAIL_PER_MIN`(기본 10)·`ADMIN_BLOCK_MS`(기본 15분)로 차단한다.
+방 상태 표시(0.1, `lib/installs.js` `displayOf`·`publicView` 가 단일 소스):
 
----
+| `display` | 라벨 | 근거 |
+|---|---|---|
+| `pending` | 입금 대기 | `phase='pending_payment'` |
+| `joining` | 입장 중 (`입장 중 · 순서 대기`) | 입장 대기·진행, 봇 없음(`no_bot`), 속도 제한, 운영자 확인 대기(`hold_reason`) |
+| `waiting` | 부방장 대기 | 방 관리봇이 있고 K bot 계정이 부방장이 아님 |
+| `active` | 사용 중 (`사용 중 · 켜진 기능 없음`) | |
+| `error` | 오류 · {짧은 사유} | `error_code`(ACCOUNTS_V1 5.6 표 = `installs.ERRORS`) |
 
-## 5. 제거된 것 (앱 단종)
-
-아래는 안드로이드 앱 전용이라 **코드·엔드포인트·문서에서 제거**됐다. 요청이 오면 그냥 없는 경로다.
-
-- **앱 라이선스 API:** `POST /verify`, `POST /heartbeat`, `GET /entitlements`, `POST /config` / `GET /config`, `GET /pubkey`.
-  Ed25519 응답 서명, nonce, `config_key`(설정 암호화 키), `recheck_ms`/`grace_ms`(오프라인 유예), `app_sig`/`app_version` 검사가 모두 여기 딸려 있었고 함께 제거됐다.
-- **앱 서명 관리자 API:** `GET /admin/sigs`, `POST /admin/sig-add`, `POST /admin/sig-del`, `POST /admin/reset-device`.
-- **환경변수:** `SIGNING_PRIVATE_KEY`, `ALLOWED_APP_SIGS`, `APP_SIG_MODE`, `MIN_APP_VERSION`, `RECHECK_MS`, `GRACE_MS`, `EXPIRED_AUDIT_MS`, `RATE_LIMIT_PER_MIN`(앱 API 버킷).
-  (`CONFIG_SECRET` 은 제거하지 않고 **`/panel` 로그인 쿠키 서명 키로 용도를 바꿨다.**)
-- **1키 1기기·세션 회전·APK 서명 핀닝·변조 탐지**: 앱 보호 수단이라 전부 제거. 지금의 접근 통제는 **라이선스 키 로그인(`/panel`)** 과 **관리자 비밀번호(`/manage`)** 다.
-- **안드로이드 소스**(`android/auto`, `android/admin`, 키스토어, `build.sh`)와 **APK 빌드 워크플로**(`.github/workflows/build-apk.yml`), 앱 전용 문서(`docs/ANTI_ABUSE.md`, `docs/SEND_GUARD.md`, `docs/MACRO_V4.md`, `docs/APP_SIGNATURE*`, `docs/field/`).
-
-DB 는 예외다 — 위 2장대로 **테이블·컬럼은 드롭하지 않고** 그냥 쓰지 않는다.
+고객 다시 시도는 오류 코드별로 정해져 있고(참여코드·인원 초과·내보내짐·방 나감·프로필 제한·입장 거부), 간격은 2분부터 두 배씩(최대 6시간), 연속 10번이면 관리자만 할 수 있다.
 
 ---
 
-## 6. 하위호환
+## 4. 회원·콘솔 API (요약)
 
-- 예전에 기능별·분기/연 플랜으로 발급된 키와 주문은 그대로 유효하다. `keys.PLANS` 의 `quarter`/`year` 라벨은 그 표시를 위해 남겨 둔다.
-- 예전 주문 행의 `android_ok` 컬럼은 기본값으로 남아 있고 신규 주문은 쓰지 않는다.
-- 기능 상태 맵은 항상 3종(`macro`·`roombot`·`minigame`)을 ALL 순서로 돌려준다 — 구매 페이지가 그걸 전제로 짜여 있다.
+- 회원·인증(`routes/auth.js`): `/api/site`, `/api/me`, `/api/auth/signup|login|logout|logout-all|sessions|password|claim|google/unlink`, `/auth/google/start|callback`. ACCOUNTS_V1 3.2.
+- 콘솔(`routes/panel.js`, 회원 세션): 고객 카카오 계정 등록·매크로 설정·갠톡 + 내 방(`/panel/api/bot-rooms`, `bot-room`, `bot-room/settings|retry|logs|people|hide|unkick|games-reset`). ACCOUNTS_V1 3.4.
+- 기존 키 이관(`entitle.claimKey`): 매크로 남은 기간을 회원 기간에 **더하고**, 키에 묶인 콘솔 계정을 회원 것으로 옮긴다. 이관된 키는 고객이 다시 옮길 수 없다(관리자 `license-reassign`).
 
 ---
 
-## 7. 자동 입금확인 (무인 키 발급)
+## 5. 관리자 API (헤더 `x-admin-password`, `routes/admin.js`)
 
-PG 없이 **개인 계좌 + 판매자 폰 자동화**로 입금을 자동 확인해 키를 즉시 발급한다.
-설정 가이드는 `docs/AUTO_DEPOSIT.md`. 금액 매칭이 핵심이다.
+기존 키 경로(`/admin/create` `/admin/grant` `/admin/list` …)는 관리자 지원용으로 남는다. 이관된 키에 대한 `/admin/grant` 는 409.
+추가·변경(ACCOUNTS_V1 3.5): 주문 승인(`order-approve {id, skip_conflicts?}` — 같은 방 충돌이면 400 + `conflicts`, 충돌 줄을 빼고 승인하면 `applied.skipped` 와 환불할 금액), 입금 매칭(이미 매칭된 입금 409), 회원(`members` `member` `member-grant` `member-block` `member-logout` `member-pwreset`), 키 옮기기(`license-reassign`), 방(`rooms` `room` `room-grant` `room-retry` `room-move` `room-remove` `room-rebind` `room-transfer` `room-products` `room-block` `room-unblock` `room-blocks` `room-release`), K bot 계정(`bots` `bot-register/*` `bot-update` `bot-remove`).
+방 관리 동작은 `lib/installs.js` 의 함수(`grantRoom` `retry({admin})` `move` `remove` `rebind` `transfer` `setProducts` `block` `unblock` `release`)를 그대로 부르고, 나가기는 `room_leaves` 로 sender 에 맡긴다.
+
+---
+
+## 6. sender 내부 API (요약)
+
+자식은 127.0.0.1 에서만 듣고 부모는 `lib/sender-child.js` `call()` 로만 부른다(공개 `/v1/*` 프록시 없음). 모든 요청에 `x-sender-token`.
+부모가 쓰는 것: `POST /v1/grants`(고객 계정 권리 `{v:2, macro_until, legacy_room_until}`; `full:true, as_of` 면 목록에 없는 고객 기록을 멈춤), `POST /v1/bot/resolve {url}`(링크 조회, 봇별 조회 예산), `POST /v1/bot/sync {install_id?}`(설치·나가기 대기열 다시 읽기), `GET /v1/bot/status|room|logs|people`, `POST /v1/bot/hide|unkick|games-reset`. ACCOUNTS_V1 3.6.
+
+권리 밀기(`entitle.pushGrants`): 승인 직후(그 회원), 이관·재배정 직후, 관리자 지급·차단, 계정 등록 완료 직후, **자식이 뜰 때마다(`SENDER_READY`, 전체)**, 10분마다(전체).
+`entitle.startLoop` 는 그 밖에 하루 1번 오래된 `room_log`(30일)·처리된 `room_leaves`(30일)·만료 세션·만료 `bot_pending` 을 지운다.
+`installs.startLoop` 는 1분마다 봇 없는 설치를 다시 배정하고(가장 적게 맡은 봇, 상한 `room_cap`), 15분 넘게 `joining` 에 멈춘 설치를 `queued` 로 되돌린다.
+
+---
+
+## 7. 자동 입금확인 (회원 계정에 무인 적용)
+
+PG 없이 **개인 계좌 + 판매자 폰 자동화**로 입금을 자동 확인해 주문을 회원 계정에 적용한다. 설정 가이드는 `docs/AUTO_DEPOSIT.md`.
 
 ### 7.1 주문 금액 고유 뒷자리
 
-주문 생성 시 `amount = base(30000) + suffix(1~99)`. suffix 는 현재 `pending` 주문 중 같은 총액이 없도록 고른다.
-전부 충돌하면 `suffix=0` + `needs_review`. → 입금 금액이 곧 주문번호 역할을 하므로 이름을 파싱하지 않아도 주문을 특정한다.
-구매 페이지에 **"정확히 30,047원"** 을 크게 띄운다.
+`amount = 총액 + suffix(1~99)`. suffix 는 현재 `pending` 주문 중 같은 금액이 없도록 고른다(`keys.pickAmount`, 전역 advisory lock).
+가격이 모두 5,000원 배수라 총액이 다르면 뒷자리 구간이 겹치지 않는다. 전부 충돌하면 `suffix=0` + `needs_review`.
 
 ### 7.2 `POST /api/deposit-hook`
 
-인증: 헤더 `x-deposit-token` **또는** 쿼리 `?t=`. `DEPOSIT_TOKEN` 과 타이밍 안전 비교. 불일치 → 401.
-`DEPOSIT_TOKEN` 미설정 시 엔드포인트 자체를 비활성(503). 토큰 없이 열어두면 누구나 입금을 위조할 수 있다.
-
-요청(여러 키 허용 — 자동화 앱이 보내기 쉬운 쪽으로):
-```json
-{ "text":"[카카오뱅크] 09/27 14:32 입금 30,047원 홍길동 잔액 1,234,567원", "source":"macrodroid" }
-```
-`text` 대신 `message`/`body` 로 와도, `Content-Type: text/plain` 본문도 `text` 로 취급.
-
-응답(항상 200 + `ok:true`, 결과는 `status` 로):
-```json
-{ "ok":true, "status":"matched", "order":"ORD-...", "amount":30047, "key":"KAKA-..." }
-{ "ok":true, "status":"unmatched", "amount":30047 }
-{ "ok":true, "status":"duplicate" }
-{ "ok":true, "status":"ambiguous", "candidates":2 }
-{ "ok":true, "status":"ignored", "why":"출금 알림" }
-```
+인증: 헤더 `x-deposit-token` 또는 쿼리 `?t=`(타이밍 안전 비교). `DEPOSIT_TOKEN` 미설정이면 503.
+요청은 `{text|message|body|raw, source, at}` JSON, text/plain, 폼 어느 쪽이든 받는다. 응답은 항상 200 + `ok:true`, 결과는 `status`(`matched` `unmatched` `duplicate` `ambiguous` `ignored`).
 
 처리 순서:
-1. `raw_hash = sha256(text)` 중복 확인 → 있으면 `duplicate`.
-2. 출금 판정: `출금`·`결제`·`승인취소`·`이체수수료` 포함 + `입금` 미포함 → `ignored`.
-3. 금액 후보 추출(`잔액|잔고|한도|누적` 바로 뒤 숫자는 제외).
-4. 후보로 `pending` 주문 조회. 정확히 1건 → `matched`, 2건↑ → `ambiguous`, 전부 0건 → `unmatched`.
-5. `matched` 면 `/admin/order-approve` 와 동일 로직으로 발급/연장(`target_key` 있으면 그 키의 3종 연장, 없으면 신규 3종 발급). `orders.status='done'`, `issued_key`, `handled_at`, audit(`order`).
-6. `deposits` 에 결과 기록.
-7. 파싱된 이름이 `orders.depositor` 와 달라도 **거부하지 않고** audit 경고만 남긴다(금액이 고유하므로 금액을 신뢰).
+1. 같은 본문의 1~2시간 안 재전송 → `duplicate`.
+2. 출금 알림 → `ignored`. 금액 후보 추출(`잔액|잔고|한도|누적` 바로 뒤 숫자 제외).
+3. 후보로 `pending` 주문 조회 → 1건 `matched`, 2건↑ `ambiguous`, 0건 `unmatched`. 뒷자리 없는 주문(`needs_review`)은 `ambiguous`.
+4. `matched` 면 `db.tx(c => keys.approveOrder(c, id, null))`:
+   - 회원 주문: 매크로 기간 연장, 예약한 방을 `installed` + K bot 계정 배정(확인 대기 낱말에 걸리면 `hold_reason`, 봇 배정 없음), 기존 설치는 상품만 켬, 처음 켜지는 미니게임은 게임 설정 기본값(켜짐). `orders.status='done'`, `applied`.
+   - 같은 방을 다른 회원이 먼저 입금해 설치했으면 아무것도 적용하지 않고 `{reason:'room_taken'}` → 입금 `ambiguous`, 주문 `needs_review=TRUE`(pending 유지). 관리자가 `skip_conflicts` 로 나머지만 적용하고 그 방 금액을 환불한다.
+   - 예전 키 주문: 예전 규칙(새 키 발급 또는 대상 키 연장). 대상 키가 회원에게 이관된 키면 그 회원에게 적용(`legacy_to_member`).
+5. 커밋 뒤 `entitle.afterApprove(결과)`(기다리지 않음): 그 회원 계정에 권리를 밀고(`/v1/grants`) 새 설치를 sender 에 알린다(`/v1/bot/sync`).
+6. 입금자명이 주문서와 달라도 거부하지 않고 감사 경고만 남긴다(금액이 고유하므로 금액을 신뢰).
 
-`DEPOSIT_AUTO_APPROVE=0` 이면 `matched` 라도 발급하지 않고 기록만 하며, `/manage` [입금] 에서 수동 매칭한다. 구매 웹 문구도 이에 맞춰 바뀐다.
+`DEPOSIT_AUTO_APPROVE=0` 이면 `matched` 주문을 `paid` 로만 바꾸고 적용은 관리자가 한다. 중복 검사(같은 방·같은 상품)는 `paid` 도 처리 대기로 센다.
 
 ### 7.3 48시간 미입금 자동취소
 
-`ORDER_PENDING_TTL_MS`(기본 48시간)를 넘긴 `pending` 주문을 **신규 주문 생성 시** `pickAmount` 직전에 자동취소한다.
-`auto_canceled=TRUE` + 메모 기록. `/manage` [주문] 에서 **승인하면 복구**된다(수동 취소 주문은 복구 안 됨). 자세한 운영은 `DEPLOY.md` 6-2.
+`ORDER_PENDING_TTL_MS`(기본 48시간)를 넘긴 `pending` 주문을 **신규 주문 생성 시** `pickAmount` 직전에 자동취소한다(`auto_canceled=TRUE` + 메모).
+같은 트랜잭션에서 그 주문이 예약한 `pending_payment` 방도 `canceled`. 관리자가 승인하면 복구되며, 그 사이 다른 회원이 같은 방을 설치했으면 그 방 줄은 충돌로 남는다. 사람이 취소한 주문(관리자·회원)은 복구되지 않는다.
 
 ---
 
-## 8. 디자인 · 문구
+## 8. 제거된 것
 
-- 웹 디자인 토큰·화면 명세: `docs/DARK_V1.md`, `docs/UI_V5.md` (콘솔 UI).
-- 서비스 이름 표기: `docs/BRAND.md` (**K bot**).
-- 사용자 노출 문구 규칙: `docs/TONE.md`.
+- **앱 라이선스 API**(`/verify` `/heartbeat` `/entitlements` `/config` `/pubkey`)와 앱 서명 관리자 API, 관련 환경변수(`SIGNING_PRIVATE_KEY` `ALLOWED_APP_SIGS` `APP_SIG_MODE` `MIN_APP_VERSION` `RECHECK_MS` `GRACE_MS` …), 안드로이드 소스와 빌드 워크플로.
+- **라이선스 키 판매·키 로그인**: 새 주문은 키를 발급하지 않고, `/panel` 은 회원 아이디로만 로그인한다. 단일 상품 `K bot 1개월 30,000원`(`pricing.PRICE`·`PLAN`·`NAME`, 인자 없는 `quote()`)은 없어졌다.
+- **부모의 공개 `/v1/*` 프록시**(`senderChild.install`·`proxy`): sender 내부 API 는 인터넷에 노출하지 않는다.
+
+DB 는 예외다 — **테이블·컬럼은 드롭하지 않고** 그냥 쓰지 않는다.
+
+---
+
+## 9. 하위호환
+
+- 예전 키와 키 주문은 그대로 유효하다. 미이관 키에 묶인 고객 계정은 키 만료일까지 발송을 계속한다(서버가 키 만료일로 권리를 밀어 줌). `keys.PLANS` 의 `quarter`/`year` 라벨은 그 표시를 위해 남겨 둔다.
+- 예전 가격으로 받은 미입금 키 주문은 입금되면 예전 규칙으로 처리한다(이관된 키면 회원에게 적용).
+- 키를 이관한 회원은 그 키의 가장 늦은 만료일(`legacy_room_until`)까지 계정 단위 옛 기능(입장·퇴장 로그·프로필 로그·올킥 방지·금지어 검열)을 콘솔에서 계속 쓴다.
+- `/api/lookup` 의 기능 상태 맵은 항상 3종(`macro`·`roombot`·`minigame`)을 같은 순서로 돌려준다.
+
+---
+
+## 10. 디자인 · 문구
+
+- 화면 명세: `docs/UI_V5.md`(콘솔), ACCOUNTS_V1 6장(사이트·콘솔·관리 화면 변경)과 부록 A(사이트 문구 표).
+- 서비스 이름 표기: `docs/BRAND.md` (**K bot**). 사용자 노출 문구 규칙: `docs/TONE.md`.

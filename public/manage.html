@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=6">
+<link rel="stylesheet" href="/style.css?v=7">
 <!-- 판매 관리 화면(/manage) 전용 보충 스타일. 색·글꼴·간격은 전부 style.css 토큰을 쓴다 (다크 고정). -->
 <style>
   /* 로그인 */
@@ -36,25 +36,29 @@
   .mg-brand .tag { flex: none; }
   .mg-main { padding-top: 28px; padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); min-width: 0; }
   .mg-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .mg-head > div { min-width: 0; }
   .mg-head h1 { font-size: clamp(22px, 3vw, 28px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.2; }
-  .mg-head .sub { margin-top: 4px; font-size: var(--t-13); }
+  .mg-head .sub { margin-top: 4px; font-size: var(--t-13); line-height: 1.6; }
   .mg-upd { color: var(--fg-3); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
-  #lockBar { margin-bottom: 14px; }
+  #lockBar, #pauseBar { margin-bottom: 14px; }
+  .mg-band { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid var(--crit-line); border-radius: var(--r-3); background: var(--crit-bg); color: var(--fg); font-size: var(--t-13); line-height: 1.65; }
+  .mg-band .ic { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--crit); display: grid; place-items: center; font: 600 11px/1 var(--f-mono); color: var(--crit); flex: none; margin-top: 2px; }
 
   /* 요약 */
-  .mg-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--line-2); border: 1px solid var(--line-2); border-radius: var(--r-3); overflow: hidden; }
+  .mg-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line-2); border: 1px solid var(--line-2); border-radius: var(--r-3); overflow: hidden; }
   .mg-stat { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 14px 16px; background: var(--bg-1); text-align: left; transition: background var(--d1) var(--ease); }
   .mg-stat:hover { background: var(--bg-2); }
   .mg-stat .k { color: var(--fg-3); font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mg-stat .v { font: 500 var(--t-24)/1.15 var(--f-mono); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .mg-stat .v { font: 500 var(--t-24)/1.15 var(--f-mono); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mg-stat .s { color: var(--fg-3); font-size: var(--t-11); line-height: 1.45; min-height: 1.45em; }
   .mg-stat.hot .v { color: var(--warn); }
   .mg-stat.crit .v { color: var(--crit); }
-  .mg-feat-sum { margin-top: 8px; color: var(--fg-3); font-size: var(--t-12); }
+  .mg-feat-sum { margin-top: 8px; color: var(--fg-3); font-size: var(--t-12); line-height: 1.55; }
 
   /* 탭 */
-  .mg-tabs { display: flex; gap: 2px; margin-top: 28px; border-bottom: 1px solid var(--line-2); }
-  .mg-tab { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 14px; color: var(--fg-3); font-size: var(--t-14); font-weight: 500; white-space: nowrap; transition: color var(--d1); }
+  .mg-tabs { display: flex; gap: 2px; margin-top: 28px; border-bottom: 1px solid var(--line-2); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .mg-tabs::-webkit-scrollbar { display: none; }
+  .mg-tab { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 14px; color: var(--fg-3); font-size: var(--t-14); font-weight: 500; white-space: nowrap; transition: color var(--d1); }
   .mg-tab:hover { color: var(--fg-2); }
   .mg-tab[aria-selected="true"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--fg); }
   .mg-tab .badge-n { background: var(--warn); }
@@ -68,11 +72,14 @@
   .mg-filt button { height: 30px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 15px; color: var(--fg-3); font-size: var(--t-12); font-weight: 500; white-space: nowrap; transition: color var(--d1), background var(--d1), border-color var(--d1); }
   .mg-filt button:hover { color: var(--fg-2); border-color: var(--line-3); }
   .mg-filt button[aria-pressed="true"] { background: var(--bg-4); border-color: var(--line-3); color: var(--fg); }
+  .mg-filt button em { font-style: normal; font-family: var(--f-mono); font-size: var(--t-11); color: var(--fg-3); margin-left: 4px; }
   .mg-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .mg-bar .mg-search { flex: 1 1 320px; }
   .mg-search .inp { flex: 1 1 160px; min-width: 0; width: auto; }
   .mg-search .sel { flex: 0 1 220px; min-width: 0; }
   .mg-sysline { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 14px; }
+  .mg-acts-top { display: flex; gap: 8px; flex-wrap: wrap; }
+  .mg-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; color: var(--fg-3); font-size: var(--t-12); }
 
   /* 항목 카드 */
   .mg-list { display: grid; gap: 8px; }
@@ -82,12 +89,15 @@
   .mg-item.alert { border-color: var(--crit-line); background: var(--crit-bg); }
   .mg-item.click { transition: background var(--d1), border-color var(--d1); }
   .mg-item.click:hover { background: var(--bg-2); border-color: var(--line-3); }
+  .mg-item.dim { opacity: .72; }
   .mg-sep { margin: 10px 0 2px; color: var(--fg-3); font-size: var(--t-12); }
   .mg-r1 { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; }
   .mg-r1 .grow { flex: 1 1 auto; min-width: 0; }
   .mg-id { font-family: var(--f-mono); font-size: var(--t-13); letter-spacing: 0; overflow-wrap: anywhere; }
+  .mg-name { font-size: var(--t-14); font-weight: 500; overflow-wrap: anywhere; }
   .mg-amt { font: 500 var(--t-18)/1.3 var(--f-mono); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
   .mg-line { color: var(--fg-2); font-size: var(--t-13); line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+  .mg-line .mono { font-size: var(--t-12); }
   .mg-meta { color: var(--fg-3); font-size: var(--t-12); line-height: 1.55; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .mg-warn { color: var(--warn); font-size: var(--t-12); line-height: 1.55; }
   .mg-crit { color: var(--crit); font-size: var(--t-12); line-height: 1.55; }
@@ -95,17 +105,37 @@
   .mg-keyline { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: var(--t-13); color: var(--fg-3); min-width: 0; }
   .mg-keyline .mono { color: var(--fg); overflow-wrap: anywhere; }
   .mg-link { font-family: var(--f-mono); font-size: var(--t-14); font-weight: 500; letter-spacing: .01em; text-align: left; overflow-wrap: anywhere; }
+  .mg-link.sans { font-family: var(--f-sans); letter-spacing: -0.01em; }
   .mg-link::after { content: ""; position: absolute; inset: 0; border-radius: var(--r-3); }
   .mg-link:focus-visible { outline: none; }
   .mg-link:focus-visible::after { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .mg-inl { color: var(--fg); font-family: var(--f-mono); font-size: var(--t-12); text-decoration: underline; text-decoration-color: var(--line-3); text-underline-offset: 3px; position: relative; z-index: 1; overflow-wrap: anywhere; text-align: left; }
+  .mg-inl:hover { text-decoration-color: var(--fg-2); }
   .mg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .mg-raw { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--bg); color: var(--fg-2); font: var(--t-12)/1.6 var(--f-mono); letter-spacing: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(3 * 1.6em + 20px); overflow: hidden; }
   .mg-raw.open { max-height: none; }
+  .mg-raw.scroll { max-height: 280px; overflow: auto; }
   .mg-more { justify-self: start; color: var(--fg-3); font-size: var(--t-12); min-height: 28px; position: relative; z-index: 1; }
   .mg-more:hover { color: var(--fg); }
   .mg-empty { padding: 36px 16px; border: 1px dashed var(--line-2); border-radius: var(--r-3); color: var(--fg-3); font-size: var(--t-13); line-height: 1.65; text-align: center; white-space: pre-line; }
   .mg-empty.bad { border-color: var(--crit-line); color: var(--crit); }
+  .mg-empty.sm { padding: 18px 14px; }
   .mg-pager { display: flex; justify-content: center; margin-top: 12px; }
+  .mg-sub-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 32px 0 10px; }
+  .mg-sub-h h2 { font-size: var(--t-16); font-weight: 600; letter-spacing: -0.02em; }
+
+  /* 주문 줄 */
+  .mg-lines { display: grid; gap: 4px; }
+  .mg-lines .ln { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; color: var(--fg-2); font-size: var(--t-13); line-height: 1.5; min-width: 0; }
+  .mg-lines .ln b { color: var(--fg); font-weight: 500; overflow-wrap: anywhere; }
+  .mg-lines .ln .amt { margin-left: auto; color: var(--fg-3); font-family: var(--f-mono); font-size: var(--t-12); }
+
+  /* 부하 막대 */
+  .mg-load { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 420px; }
+  .mg-load .bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; min-width: 60px; }
+  .mg-load .bar i { display: block; height: 100%; width: 0; background: var(--fg-2); transition: width 600ms var(--ease); }
+  .mg-load .bar.warn i { background: var(--warn); }
+  .mg-load .n { flex: none; min-width: 84px; color: var(--fg-3); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
 
   /* 대화상자 */
   .mg-dlg { width: min(520px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-3); border-radius: var(--r-4); background: var(--bg-1); color: var(--fg); box-shadow: var(--shadow); overflow: hidden; }
@@ -117,6 +147,7 @@
   .mg-dlg-h h2 { flex: 1; min-width: 0; font-size: var(--t-16); font-weight: 600; letter-spacing: -0.02em; }
   .mg-x { width: 36px; padding: 0; }
   .mg-dlg-b { display: grid; gap: 16px; padding: 18px 20px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1 1 auto; }
+  .mg-dlg-b > * { min-width: 0; }
   .mg-dlg-e { padding: 0 20px 12px; }
   .mg-dlg-e:empty { display: none; }
   .mg-dlg-f { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--line); }
@@ -126,7 +157,7 @@
   .mg-sec > .lb { margin-bottom: 0; }
   .mg-p { color: var(--fg-2); font-size: var(--t-13); line-height: 1.65; }
   .mg-p b { color: var(--fg); font-weight: 500; }
-  .mg-dlg .kv .r { grid-template-columns: 96px minmax(0, 1fr); }
+  .mg-dlg .kv .r { grid-template-columns: 112px minmax(0, 1fr); }
   .mg-dlg .kv dd { overflow-wrap: anywhere; }
   .mg-dlg .big .v.key { overflow-wrap: anywhere; }
   .mg-keybox { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -141,10 +172,18 @@
   .mg-log:first-child { border-top: 0; }
   .mg-log time { color: var(--fg-3); font-family: var(--f-mono); letter-spacing: 0; white-space: nowrap; }
   .mg-log .d { grid-column: 1 / -1; color: var(--fg-2); overflow-wrap: anywhere; }
+  .mg-rows { display: grid; }
+  .mg-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+  .mg-row:first-child { border-top: 0; padding-top: 2px; }
+  .mg-row .t { display: grid; gap: 3px; min-width: 0; }
+  .mg-row .t .mg-r1 { gap: 6px; }
+  .mg-row .a { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .mg-pick { display: grid; gap: 6px; max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
   .mg-pick .chk { align-items: flex-start; }
   .mg-pick .chk .box { margin-top: 2px; border-radius: 50%; }
   .mg-pick .chk .t { display: grid; gap: 2px; }
+  .mg-checks { display: grid; gap: 6px; }
+  .mg-checks .chk .t { display: grid; gap: 2px; }
   .mg-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .mg-numrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .mg-numrow .inp { width: 112px; }
@@ -153,31 +192,35 @@
   .mg-keys-out .mono { font-size: var(--t-14); overflow-wrap: anywhere; min-width: 0; }
 
   @media (max-width: 960px) {
-    .mg-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .mg-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 560px) {
     .mg-main { padding-top: 20px; }
-    .mg-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .mg-stat { padding: 12px 14px; }
     .mg-stat .v { font-size: var(--t-18); }
     .mg-tabs { margin-top: 22px; }
-    .mg-tab { flex: 1 1 0; padding: 0 4px; gap: 6px; }
+    .mg-tab { padding: 0 12px; gap: 6px; }
     .mg-item { padding: 14px; }
     .mg-filt button { height: 36px; }
     .mg-search .sel { flex: 1 1 100%; }
-    #keyNew { flex: 1 1 100%; }
+    #keyNew, #botNew { flex: 1 1 100%; }
+    .mg-acts-top { flex: 1 1 100%; }
+    .mg-acts-top .btn { flex: 1 1 0; }
     .mg-dlg, .mg-dlg.wide { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: var(--r-4) var(--r-4) 0 0; border-bottom: 0; max-height: 92vh; max-height: 92dvh; }
     .mg-dlg.nomodal { margin: auto 0 0; }
     .mg-dlg-b { padding: 16px; padding-bottom: 18px; }
     .mg-dlg-f { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
     .mg-dlg-f .btn { flex: 1 1 0; }
+    .mg-dlg .kv .r { grid-template-columns: 88px minmax(0, 1fr); }
     .mg-row2 { grid-template-columns: minmax(0, 1fr); }
+    .mg-row { grid-template-columns: minmax(0, 1fr); }
+    .mg-row .a { justify-content: flex-start; }
     .mg-feat { grid-template-columns: minmax(0, 1fr) auto; }
     .mg-feat .chip { grid-row: 1; grid-column: 2; }
     .mg-feat .btn { grid-row: 2; grid-column: 2; justify-self: end; }
   }
 </style>
-<script src="/manage.js?v=1" defer></script>
+<script src="/manage.js?v=2" defer></script>
 </head>
 <body data-page="manage">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -187,6 +230,10 @@
     <symbol id="i-x" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
     <symbol id="i-plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
     <symbol id="i-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></g></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9"/><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9"/></g></symbol>
+    <symbol id="i-user" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5c.7-2.4 2.6-3.8 5-3.8s4.3 1.4 5 3.8"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="3" y="7" width="10" height="6.5" rx="1.4"/><path d="M5.3 7V5.2a2.7 2.7 0 0 1 5.4 0V7"/></g></symbol>
+    <symbol id="i-receipt" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2.5h9v11l-1.5-1-1.5 1-1.5-1-1.5 1-1.5-1-1.5 1z"/><path d="M5.8 5.8h4.4M5.8 8.3h4.4"/></g></symbol>
   </defs>
 </svg>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -197,7 +244,7 @@
     <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true"></span>K bot</a>
     <div>
       <h1>판매 관리</h1>
-      <p class="lead sub">주문 승인 · 입금 매칭 · 키 발급을 처리하는 관리자 화면입니다. 서버에 설정한 관리자 비밀번호(ADMIN_PASSWORD)로 들어갑니다.</p>
+      <p class="lead sub">주문 승인 · 입금 매칭 · 회원 · K bot 계정 · 설치한 방을 처리하는 관리자 화면입니다. 서버에 설정한 관리자 비밀번호(ADMIN_PASSWORD)로 들어갑니다.</p>
     </div>
     <div id="loginNote" class="note warn" role="alert" hidden><span class="ic" aria-hidden="true">!</span><span id="loginNoteT"></span></div>
     <form id="loginForm" class="card" novalidate>
@@ -211,7 +258,7 @@
       <button type="submit" class="btn primary lg wide" id="loginBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">들어가기</span></button>
       <p class="hint">비밀번호는 이 브라우저 탭에만 보관되며, 탭을 닫거나 로그아웃하면 삭제됩니다. 연속으로 틀리면 일정 시간 접속이 차단됩니다.</p>
     </form>
-    <div class="mg-login-foot"><a href="/">K bot 홈</a><a href="/panel">발송 콘솔</a></div>
+    <div class="mg-login-foot"><a href="/">K bot 홈</a><a href="/panel">콘솔</a></div>
   </div>
 </div>
 
@@ -227,12 +274,13 @@
   </header>
 
   <main id="main" class="wrap mg-main" tabindex="-1">
+    <div id="pauseBar" class="mg-band" role="alert" hidden><span class="ic" aria-hidden="true">!</span><span id="pauseBarT"></span></div>
     <div id="lockBar" class="note warn" role="alert" hidden><span class="ic" aria-hidden="true">!</span><span id="lockBarT"></span></div>
 
     <div class="mg-head">
       <div>
         <h1>판매 관리</h1>
-        <p class="sub">상품 K bot 1개월 · 기능 3종 포함. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 키를 발급·연장합니다.</p>
+        <p class="sub" id="prodSub">상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 15,000원/방 · 미니게임봇 15,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.</p>
       </div>
       <span class="mg-upd" id="updAt" aria-live="polite"></span>
     </div>
@@ -241,10 +289,12 @@
       <div class="mg-stats" id="stats">
         <button type="button" class="mg-stat" data-go="orders" data-filter="open"><span class="k">처리 대기 주문</span><span class="v" data-v="pending">–</span><span class="s" data-s="pending"></span></button>
         <button type="button" class="mg-stat" data-go="deposits" data-filter="attention"><span class="k">확인 필요 입금</span><span class="v" data-v="deposits">–</span><span class="s">미매칭 · 금액 중복</span></button>
-        <button type="button" class="mg-stat" data-go="keys"><span class="k">사용 중 키</span><span class="v" data-v="active">–</span><span class="s">기간이 남은 키</span></button>
-        <button type="button" class="mg-stat" data-go="keys"><span class="k">7일 내 만료</span><span class="v" data-v="expiring">–</span><span class="s">연장 안내 대상</span></button>
-        <button type="button" class="mg-stat" data-go="keys"><span class="k">전체 키</span><span class="v" data-v="total">–</span><span class="s">사용 전 포함</span></button>
-        <button type="button" class="mg-stat" data-go="keys"><span class="k">회수 · 차단</span><span class="v" data-v="stopped">–</span><span class="s" data-s="stopped"></span></button>
+        <button type="button" class="mg-stat" data-go="members" data-filter="all"><span class="k">회원</span><span class="v" data-v="members">–</span><span class="s" data-s="members"></span></button>
+        <button type="button" class="mg-stat" data-go="members" data-filter="macro"><span class="k">이용 중 매크로</span><span class="v" data-v="macro">–</span><span class="s">만료 전 회원</span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter=""><span class="k">설치된 방</span><span class="v" data-v="rooms">–</span><span class="s" data-s="rooms"></span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter="waiting"><span class="k">부방장 대기</span><span class="v" data-v="waiting">–</span><span class="s">방장 지정 필요</span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter="attention"><span class="k">오류 방</span><span class="v" data-v="errors">–</span><span class="s">확인 필요</span></button>
+        <button type="button" class="mg-stat" data-go="bots"><span class="k">K bot 계정</span><span class="v" data-v="bots">–</span><span class="s" data-s="bots"></span></button>
       </div>
       <p class="mg-feat-sum" id="featSum"></p>
     </section>
@@ -252,6 +302,9 @@
     <div class="mg-tabs" role="tablist" aria-label="관리 항목">
       <button type="button" class="mg-tab" role="tab" id="tab-orders" data-tab="orders" aria-controls="pane-orders" aria-selected="true">주문<span class="badge-n" data-badge="orders" hidden></span></button>
       <button type="button" class="mg-tab" role="tab" id="tab-deposits" data-tab="deposits" aria-controls="pane-deposits" aria-selected="false" tabindex="-1">입금<span class="badge-n crit" data-badge="deposits" hidden></span></button>
+      <button type="button" class="mg-tab" role="tab" id="tab-members" data-tab="members" aria-controls="pane-members" aria-selected="false" tabindex="-1">회원</button>
+      <button type="button" class="mg-tab" role="tab" id="tab-bots" data-tab="bots" aria-controls="pane-bots" aria-selected="false" tabindex="-1">봇<span class="badge-n crit" data-badge="bots" hidden></span></button>
+      <button type="button" class="mg-tab" role="tab" id="tab-rooms" data-tab="rooms" aria-controls="pane-rooms" aria-selected="false" tabindex="-1">방<span class="badge-n crit" data-badge="rooms" hidden></span></button>
       <button type="button" class="mg-tab" role="tab" id="tab-keys" data-tab="keys" aria-controls="pane-keys" aria-selected="false" tabindex="-1">키</button>
       <button type="button" class="mg-tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="pane-audit" aria-selected="false" tabindex="-1">기록</button>
     </div>
@@ -261,13 +314,13 @@
       <div class="mg-bar">
         <div class="mg-filt" id="ordFilt" role="group" aria-label="주문 상태">
           <button type="button" data-f="open" aria-pressed="true">처리 대기</button>
-          <button type="button" data-f="done" aria-pressed="false">발급 완료</button>
+          <button type="button" data-f="done" aria-pressed="false">완료</button>
           <button type="button" data-f="canceled" aria-pressed="false">취소</button>
           <button type="button" data-f="all" aria-pressed="false">전체</button>
         </div>
         <span class="mg-count" id="ordCount" aria-live="polite"></span>
       </div>
-      <p class="hint" id="ordBank" hidden></p>
+      <p class="hint" id="ordBank" style="margin:-4px 0 12px" hidden></p>
       <div class="mg-list" id="ordList"></div>
     </section>
 
@@ -284,8 +337,68 @@
       <div class="mg-list" id="depList"></div>
     </section>
 
-    <!-- 키 -->
+    <!-- 회원 -->
+    <section id="pane-members" role="tabpanel" aria-labelledby="tab-members" hidden>
+      <div class="mg-bar">
+        <form class="mg-search grow" id="memForm" role="search" novalidate>
+          <label class="sr" for="memQ">회원 검색</label>
+          <input class="inp" type="search" id="memQ" placeholder="아이디 · 회원 번호 · 연락처 · 채널톡 memberId" autocomplete="off" spellcheck="false" maxlength="80">
+          <button type="submit" class="btn"><svg width="14" height="14" aria-hidden="true"><use href="#i-search"></use></svg>검색</button>
+        </form>
+        <div class="mg-filt" id="memFilt" role="group" aria-label="회원 상태">
+          <button type="button" data-f="all" aria-pressed="true">전체</button>
+          <button type="button" data-f="macro" aria-pressed="false">매크로 이용 중</button>
+          <button type="button" data-f="blocked" aria-pressed="false">차단</button>
+        </div>
+      </div>
+      <p class="mg-count" id="memCount" aria-live="polite"></p>
+      <div class="mg-list" id="memList" style="margin-top:10px"></div>
+    </section>
+
+    <!-- K bot 계정 -->
+    <section id="pane-bots" role="tabpanel" aria-labelledby="tab-bots" hidden>
+      <div class="mg-bar">
+        <span class="mg-count grow" id="botCount" aria-live="polite"></span>
+        <button type="button" class="btn primary" id="botNew"><svg width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>K bot 계정 등록</button>
+      </div>
+      <div id="botSys"></div>
+      <div class="mg-list" id="botList"></div>
+      <p class="hint" id="botHint">방장이 진짜 K bot 계정을 구분할 수 있게 봇마다 다른 닉네임을 쓰십시오(예: K bot 1, K bot 2). 배정은 맡은 방이 가장 적은 계정부터 하며, 상한이 차면 다음 계정으로 넘어갑니다.</p>
+    </section>
+
+    <!-- 설치한 방 -->
+    <section id="pane-rooms" role="tabpanel" aria-labelledby="tab-rooms" hidden>
+      <div class="mg-bar">
+        <form class="mg-search grow" id="roomForm" role="search" novalidate>
+          <label class="sr" for="roomQ">방 검색</label>
+          <input class="inp" type="search" id="roomQ" placeholder="방 이름 · 링크 · 회원 아이디 · 설치 번호" autocomplete="off" spellcheck="false" maxlength="200">
+          <button type="submit" class="btn"><svg width="14" height="14" aria-hidden="true"><use href="#i-search"></use></svg>검색</button>
+        </form>
+        <div class="mg-acts-top">
+          <button type="button" class="btn" id="roomGrantBtn"><svg width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>방 지급</button>
+          <button type="button" class="btn danger" id="roomBlockBtn">링크 금지</button>
+        </div>
+      </div>
+      <div class="mg-bar" style="margin-top:0">
+        <div class="mg-filt" id="roomFilt" role="group" aria-label="방 상태">
+          <button type="button" data-f="" aria-pressed="true">전체</button>
+          <button type="button" data-f="attention" aria-pressed="false">확인 필요</button>
+          <button type="button" data-f="hold" aria-pressed="false">확인 대기</button>
+          <button type="button" data-f="waiting" aria-pressed="false">부방장 대기</button>
+          <button type="button" data-f="active" aria-pressed="false">사용 중</button>
+          <button type="button" data-f="pending" aria-pressed="false">입금 대기</button>
+        </div>
+        <span class="mg-count" id="roomCount" aria-live="polite"></span>
+      </div>
+      <div class="mg-scope" id="roomScope" hidden></div>
+      <div class="mg-list" id="roomList"></div>
+      <div class="mg-sub-h"><h2>금지한 방</h2><span class="mg-count" id="blockCount"></span></div>
+      <div class="mg-list" id="blockList"></div>
+    </section>
+
+    <!-- 예전 라이선스 키 -->
     <section id="pane-keys" role="tabpanel" aria-labelledby="tab-keys" hidden>
+      <p class="hint" style="margin-top:18px">예전 라이선스 키입니다. 새 판매는 회원 계정으로 처리하며, 키는 기존 고객 지원용으로만 발급·연장합니다. 회원에게 이관된 키는 회원 화면에서 조정합니다.</p>
       <div class="mg-bar">
         <form class="mg-search grow" id="keyForm" role="search" novalidate>
           <label class="sr" for="keyQ">키 검색</label>
@@ -306,7 +419,9 @@
           <label class="sr" for="audKind">기록 종류</label>
           <span class="sel"><select id="audKind"><option value="">전체 종류</option></select><svg width="14" height="14" aria-hidden="true" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M4 6l4 4 4-4"/></svg></span>
           <label class="sr" for="audKey">키로 좁히기</label>
-          <input class="inp mono" id="audKey" placeholder="키로 좁히기 (KAKA-…)" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="40">
+          <input class="inp mono" id="audKey" placeholder="KAKA-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="40">
+          <label class="sr" for="audMember">회원으로 좁히기</label>
+          <input class="inp" id="audMember" placeholder="회원 아이디 · 번호" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="40">
           <button type="submit" class="btn">조회</button>
         </form>
       </div>

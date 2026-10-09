@@ -1,53 +1,35 @@
 /* ───────────────────────────────────────────────────────────────
    K bot — 판매 관리 화면 (/manage)
-   단종된 관리자 앱(android/admin, KakaoAdmin)을 대신하는 웹 화면이다.
-   routes/admin.js 의 /admin/* 만 부른다. 요청/응답 모양은 거기가 기준이다.
-     GET  /admin/stats            요약 숫자 (로그인 확인도 이걸로 한다)
-     GET  /admin/orders           주문 목록 (?status=&limit=)
-     POST /admin/order-approve    {id, key?}  → 신규 발급 또는 키 연장 (자동 입금확인과 같은 로직)
-     POST /admin/order-cancel     {id, memo?}
-     GET  /admin/deposits         입금 알림 기록
-     POST /admin/deposit-match    {deposit_id, order_id} → 매칭 + 주문 승인
-     POST /admin/deposit-ignore   {deposit_id}
-     GET  /admin/list             키 목록 (?q=&limit=&offset=)
-     GET  /admin/license          키 상세 (?key=) + 최근 기록 20건
-     POST /admin/create           {features, plan, days?, count, note?, owner_name?, owner_contact?}
-     POST /admin/grant            {key, features, plan, days?} → 남은 기간에 더한다
-     POST /admin/revoke-feature   {key, feature}
-     POST /admin/revoke           {key, revoked}
-     POST /admin/block            {key, reason|null}
-     POST /admin/delete           {key}
-     GET  /admin/audit            기록 (?kind=&key=&limit=)
+   routes/admin.js 의 /admin/* 와 공개 /api/price 만 부른다. 요청/응답 모양은 docs/ACCOUNTS_V1.md 3.5 가 기준이다.
+     요약     GET  /admin/stats            (로그인 확인도 이걸로 한다)
+     주문     GET  /admin/orders  POST /admin/order-approve {id, key?, skip_conflicts?}  /admin/order-cancel
+     입금     GET  /admin/deposits  POST /admin/deposit-match {deposit_id, order_id, skip_conflicts?}  /admin/deposit-ignore
+     회원     GET  /admin/members?q=  /admin/member?id=
+              POST /admin/member-grant · member-block · member-logout · member-pwreset · license-reassign
+     봇       GET  /admin/bots   POST /admin/bot-register/begin|confirm|cancel · bot-update · bot-remove
+     방       GET  /admin/rooms?display=&q=&bot=  /admin/room?id=  /admin/room-blocks
+              POST /admin/room-grant · room-retry · room-move · room-remove · room-rebind · room-transfer ·
+                   room-products · room-block · room-unblock · room-release
+     키(예전) GET  /admin/list  /admin/license   POST /admin/create · grant · revoke-feature · revoke · block · delete
+     기록     GET  /admin/audit?kind=&key=&member=
 
    인증: 헤더 x-admin-password. 비밀번호는 sessionStorage 에만 둔다(탭을 닫으면 사라짐).
          401 이면 지우고 로그인 화면으로, 503 admin_disabled 면 서버 설정 문제를 그대로 보여준다.
          429 는 두 종류다 — 비밀번호 연속 실패 차단(too_many_attempts)과 일반 과다요청(rate_limited).
-   판매 상품은 "K bot 1개월" 하나다 (lib/pricing.js). 새 키·연장은 항상 기능 3종을 같이 다룬다.
-   서버 문자열은 전부 textContent 로만 넣는다. 이 파일에 innerHTML 은 없다.
-   외부 라이브러리 안 씀.
+   상품 이름·가격은 /api/price 가 단일 소스다(lib/pricing.js). 이 파일에 상품 상수를 두지 않는다.
+   서버 문자열은 전부 textContent 로만 넣는다. 이 파일에 innerHTML 은 없다. 외부 라이브러리 안 씀.
+   브라우저 대화상자(alert·confirm·prompt)는 쓰지 않는다 — 확인은 <dialog> 안에서 한다.
    ─────────────────────────────────────────────────────────────── */
 (function () {
   'use strict';
 
   /* ══════════════════ 0. 고정 값 ══════════════════ */
 
-  // lib/features.js ALL 과 같은 순서. 판매·연장은 항상 이 3종 전부다.
-  var FEATS = ['macro', 'roombot', 'minigame'];
-  var FEAT_LABEL = { macro: '자동발송 매크로', roombot: '대화방 관리봇', minigame: '미니게임봇' };
-  var FEAT_SHORT = { macro: '매크로', roombot: '관리봇', minigame: '미니게임' };
-
-  // lib/keys.js PLANS. 판매는 month 하나뿐이지만 예전 주문·키가 3개월/1년으로 남아 있다.
+  // 예전 라이선스 키의 기간(lib/keys.js PLANS). 회원 상품에는 쓰지 않는다.
   var SALE_PLAN = 'month';
   var PLANS = { month: { days: 30, label: '1개월' }, quarter: { days: 90, label: '3개월' }, year: { days: 365, label: '1년' } };
-  var PRODUCT = 'K bot';
   var DAY = 86400000;
 
-  var ORDER_ST = {
-    pending:  { kr: '입금 대기',             cls: 'warn' },
-    paid:     { kr: '입금 확인 · 발급 대기', cls: 'info' },
-    done:     { kr: '발급 완료',             cls: 'ok' },
-    canceled: { kr: '취소',                  cls: '' }
-  };
   var DEP_ST = {
     unmatched: { kr: '미매칭',    cls: 'warn' },
     ambiguous: { kr: '확인 필요', cls: 'bad' },
@@ -55,11 +37,23 @@
     duplicate: { kr: '중복 알림', cls: '' },
     ignored:   { kr: '무시',      cls: '' }
   };
+  // 0.1 방 상태 5단계 + 설치 해제·취소 → 사이트 chip 색
+  var ROOM_CLS = { pending: 'warn', joining: 'warn', waiting: 'warn', active: 'ok', error: 'bad', canceled: '', removed: '' };
+  // 주문 적용에서 뺀 방 줄의 사유(entitle.applyOrder conflicts[].why)
+  var WHY_LABEL = {
+    room_taken: '다른 회원이 먼저 설치', duplicate: '같은 방 설치 중복', blocked: '설치 금지 방',
+    removed: '해제된 설치', other_member: '다른 회원 소유', missing: '설치 없음'
+  };
+  var LEAVE_WHY = { move: '옮기기', remove: '설치 해제', rebind: '링크 바꾸기', block: '방 금지' };
   // lib/audit.js KINDS + 단종된 사용자앱이 남긴 옛 종류(표에 그대로 남아 있다)
   var KIND_LABEL = {
+    order: '주문',
+    member: '회원',
+    install: '방 설치',
+    bot: 'K bot 계정',
+    member_lockout: '로그인 잠금',
     activate: '사용 시작',
     revoked: '회수 · 차단 · 삭제',
-    order: '주문',
     bad_deposit_token: '입금 알림 코드 오류',
     bad_admin_pw: '관리자 비밀번호 실패',
     mismatch: '기기 불일치',
@@ -69,15 +63,54 @@
     expired: '기간 만료',
     reset: '기기 초기화'
   };
-  var KIND_BASE = ['activate', 'revoked', 'order', 'bad_deposit_token', 'bad_admin_pw'];
+  var KIND_BASE = ['order', 'member', 'install', 'bot', 'member_lockout', 'activate', 'revoked', 'bad_deposit_token', 'bad_admin_pw'];
   var KIND_LEGACY = ['mismatch', 'takeover', 'bad_sig', 'tamper', 'expired', 'reset'];
-  var ALERT_KINDS = ['bad_deposit_token', 'bad_admin_pw'];   // 서버 alert_kinds 가 오면 그걸로 바꾼다
+  var ALERT_KINDS = ['bad_deposit_token', 'bad_admin_pw', 'member_lockout'];   // 서버 alert_kinds 가 오면 그걸로 바꾼다
 
   var KEY_RE = /^KAKA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
   var PW_STORE = 'kb_manage_pw';
   var POLL_MS = 30000;         // 요약 숫자 갱신 간격 (관리자 버킷 분당 120회 — 여유가 크다)
   var KEY_PAGE = 50;
   var LIST_LIMIT = 200;
+
+  /* ── 상품표(/api/price). 상품 이름·가격·단위는 여기서만 읽는다. */
+  var PRICE = { ids: [], byId: {}, loaded: false, loading: null };
+
+  function loadPrice() {
+    if (PRICE.loaded) return Promise.resolve(PRICE);
+    if (PRICE.loading) return PRICE.loading;
+    var p;
+    try { p = fetch('/api/price', { cache: 'no-store', credentials: 'same-origin', headers: { 'Accept': 'application/json' } }); }
+    catch (e) { p = Promise.reject(e); }
+    PRICE.loading = p.then(function (res) { return res.json(); }).then(function (j) {
+      var list = j && Array.isArray(j.products) ? j.products : [];
+      if (!list.length) throw new Error('empty');
+      PRICE.ids = [];
+      PRICE.byId = {};
+      list.forEach(function (x) { if (x && x.id) { PRICE.ids.push(String(x.id)); PRICE.byId[x.id] = x; } });
+      PRICE.loaded = true;
+      PRICE.loading = null;
+      renderProdSub();
+      return PRICE;
+    }).catch(function () { PRICE.loading = null; return PRICE; });
+    return PRICE.loading;
+  }
+  function plabel(id) { return PRICE.byId[id] && PRICE.byId[id].label ? String(PRICE.byId[id].label) : String(id || ''); }
+  function roomProductIds() { return PRICE.ids.filter(function (id) { return PRICE.byId[id].unit === 'room'; }); }
+  // 예전 키의 기능 목록 = 상품 id 전부(lib/features.js ALL 과 같은 이름)
+  function featIds() { return PRICE.ids.slice(); }
+
+  // "상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 15,000원/방 · …" (6.12)
+  function renderProdSub() {
+    var n = document.getElementById('prodSub');
+    if (!n || !PRICE.ids.length) return;
+    var parts = PRICE.ids.map(function (id) {
+      var p = PRICE.byId[id];
+      var unit = p.unit === 'month' ? '1개월' : (p.unit === 'room' ? '방' : String(p.unit || ''));
+      return plabel(id) + ' ' + won(p.price) + '/' + unit;
+    });
+    n.textContent = '상품: ' + parts.join(' · ') + '. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.';
+  }
 
   /* ══════════════════ 1. 유틸 ══════════════════ */
 
@@ -148,7 +181,9 @@
     if (withTime && withSec) s += ':' + pad2(d.getSeconds());
     return s;
   }
+  function hhmm(ms) { var d = new Date(num(ms) || 0); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
   function daysCeil(ms) { return Math.ceil(ms / DAY); }
+  function shortLink(url) { return String(url || '').replace(/^https?:\/\//i, ''); }
 
   // 키 입력 정리: 영숫자만 남기고 4글자마다 하이픈 (KAKA-XXXX-XXXX-XXXX). public/app.js 와 같은 규칙.
   function normKey(s) {
@@ -166,22 +201,24 @@
     return PLANS[plan] ? PLANS[plan].label : (plan ? String(plan) : '-');
   }
   function planDays(plan) { return PLANS[plan] ? PLANS[plan].days : 0; }
-  // "K bot 1개월 (30일)"
-  function productText(plan) {
-    var d = planDays(plan);
-    return PRODUCT + ' ' + planLabel(plan) + (d ? ' (' + d + '일)' : '');
-  }
-  function featLabel(id) { return FEAT_LABEL[id] || String(id || ''); }
+  function featLabel(id) { return plabel(id); }
   function hasAllFeats(list) {
     var arr = Array.isArray(list) ? list : [];
-    for (var i = 0; i < FEATS.length; i++) if (arr.indexOf(FEATS[i]) < 0) return false;
+    var all = featIds();
+    if (!all.length) return false;
+    for (var i = 0; i < all.length; i++) if (arr.indexOf(all[i]) < 0) return false;
     return true;
   }
   function featText(list) {
     var arr = Array.isArray(list) ? list : [];
     if (!arr.length) return '기능 없음';
-    if (hasAllFeats(arr)) return '기능 3종 전부';
+    if (hasAllFeats(arr)) return '기능 ' + arr.length + '종 전부';
     return arr.map(featLabel).join(' · ');
+  }
+  // 예전 키 주문의 상품 표시: "예전 키 1개월 (30일)"
+  function legacyProductText(plan) {
+    var d = planDays(plan);
+    return '예전 키 ' + planLabel(plan) + (d ? ' (' + d + '일)' : '');
   }
 
   function chip(text, cls) { return el('span', { cls: 'chip' + (cls ? ' ' + cls : ''), text: text }); }
@@ -202,6 +239,11 @@
     b.classList.toggle('busy', !!on);
     b.disabled = !!on;
     if (on) b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
+  }
+  // 목록 안의 밑줄 링크 버튼(회원 아이디 → 회원 상세 등)
+  function inl(text, onClick, label) {
+    return el('button', { type: 'button', cls: 'mg-inl', text: text, 'aria-label': label || null,
+      onclick: function (e) { e.stopPropagation(); onClick(); } });
   }
 
   /* ── 토스트 (style.css #toast) */
@@ -362,7 +404,7 @@
   function hideLock() { var bar = $('#lockBar'); if (bar) bar.hidden = true; }
 
   /* ══════════════════ 4. 대화상자 ══════════════════
-     <dialog> 를 열 때마다 새로 만들고 닫으면 지운다. 겹쳐 열 수 있다(키 상세 위에 확인창).
+     <dialog> 를 열 때마다 새로 만들고 닫으면 지운다. 겹쳐 열 수 있다(회원 상세 위에 확인창).
      처리 중(busy)에는 Esc · 닫기 버튼이 안 먹는다. 입력이 있는 창은 바깥 클릭으로 닫지 않는다. */
 
   var MODALS = [];
@@ -387,10 +429,11 @@
       body: body,
       busy: false,
       setTitle: function (t) { $('#' + tid, dlg).textContent = t; },
-      setBody: function (kids) { clear(body); append(body, kids); },
+      setBody: function (kids) { clear(body); append(body, kids); body.scrollTop = 0; },
       setActions: function (list) { clear(foot); append(foot, list || []); },
       error: function (msg) { err.textContent = msg || ''; },
       setBusy: function (on, b) { ctl.busy = !!on; busyBtn(b, on); xBtn.disabled = !!on; },
+      isOpen: function () { return !closed; },
       close: function () {
         if (closed) return;
         if (dlg.open && typeof dlg.close === 'function' && !dlg.classList.contains('nomodal')) { dlg.close(); return; }
@@ -434,7 +477,8 @@
   }
 
   // 확인 → 실행 → 결과. 실패하면 창을 닫지 않고 그 자리에 사유를 띄운다.
-  // o = { title, body, ok, danger, run: () => Promise<r>, check?: () => 오류문구|'', done?: (r) => void, failMsg? }
+  // o = { title, body, ok, danger, run: () => Promise<r>, check?: () => 오류문구|'', done?: (r) => void,
+  //       failMsg?, onFail?: (r, m) => true(직접 처리함) }
   function confirmAct(o) {
     var okBtn = btn(o.ok || '확인', o.danger ? 'danger solid' : 'primary');
     var m = modal({ title: o.title, body: o.body, wide: o.wide });
@@ -448,7 +492,11 @@
       Promise.resolve(o.run()).then(function (r) {
         m.setBusy(false, okBtn);
         if (kicked(r)) return;
-        if (!r || !r.ok) { m.error(errText(r, o.failMsg)); return; }
+        if (!r || !r.ok) {
+          if (o.onFail && o.onFail(r, m)) return;
+          m.error(errText(r, o.failMsg));
+          return;
+        }
         m.close();
         if (o.done) o.done(r);
       });
@@ -460,7 +508,7 @@
   function note(text, warn) {
     return el('div', { cls: 'note' + (warn ? ' warn' : ' dim') }, [
       el('span', { cls: 'ic', 'aria-hidden': 'true', text: warn ? '!' : 'i' }),
-      el('span', { text: text })
+      el('span', null, text)
     ]);
   }
   function kv(rows) {
@@ -476,8 +524,31 @@
       hint ? el('p', { cls: 'hint', text: hint }) : null
     ]);
   }
+  function sec(title, kids) {
+    return el('section', { cls: 'mg-sec' }, [el('h3', { cls: 'mg-h3', text: title }), kids]);
+  }
+  function textInput(o) {
+    o = o || {};
+    var n = el('input', { cls: 'inp' + (o.mono ? ' mono' : ''), type: o.type || 'text', autocomplete: o.autocomplete || 'off',
+                          spellcheck: 'false', autocapitalize: 'off', maxlength: String(o.max || 200),
+                          placeholder: o.placeholder || null, inputmode: o.inputmode || null,
+                          min: o.min || null, step: o.step || null, value: o.value === undefined ? null : o.value });
+    if (o.maxv) n.setAttribute('max', String(o.maxv));
+    if (o.autofocus) n.setAttribute('data-autofocus', '');
+    return n;
+  }
+  function checkRow(label, sub, checked) {
+    var input = el('input', { type: 'checkbox', checked: !!checked });
+    var node = el('label', { cls: 'chk' }, [
+      input,
+      el('span', { cls: 'box', 'aria-hidden': 'true' }),
+      el('span', { cls: 't' }, [el('span', { text: label }), sub ? el('span', { cls: 'mg-meta', text: sub }) : null])
+    ]);
+    return { node: node, input: input };
+  }
+  function empty(text, bad, sm) { return el('div', { cls: 'mg-empty' + (bad ? ' bad' : '') + (sm ? ' sm' : ''), text: text }); }
 
-  // 기간 선택: 30일(판매 상품과 같음) / 직접 입력(custom, 관리자 전용).  → { get(): {plan, days}|{error} }
+  // 기간 선택: 30일(예전 판매 상품과 같음) / 직접 입력(custom, 관리자 전용).  → { get(): {plan, days}|{error} }
   function periodPicker(name) {
     var rMonth = el('input', { type: 'radio', name: name, value: 'month', checked: true });
     var rCustom = el('input', { type: 'radio', name: name, value: 'custom' });
@@ -508,6 +579,8 @@
       }
     };
   }
+
+  function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
   /* ══════════════════ 5. 로그인 / 화면 전환 ══════════════════ */
 
@@ -580,6 +653,7 @@
     STARTED = true;
     if (statsRes && statsRes.ok) applyStats(statsRes.json);
     else loadStats();
+    loadPrice().then(function () { if (TAB === 'keys' || TAB === 'orders') loadTab(TAB); });
     switchTab(tabFromHash(), true);
     startPoll();
   }
@@ -626,28 +700,57 @@
     STATS = s || {};
     var pend = num(STATS.pending_orders) || 0;
     var paid = num(STATS.paid_orders) || 0;
+    var review = num(STATS.review_orders) || 0;
     var dep = num(STATS.deposits_attention) || 0;
-    var rev = num(STATS.revoked) || 0;
-    var blk = num(STATS.blocked) || 0;
+    var rbd = STATS.rooms_by_display || {};
+    var waiting = num(rbd.waiting) || 0;
+    var errors = num(rbd.error) || 0;
+    var bots = STATS.bots || {};
+    var botTotal = num(bots.total) || 0;
+    var botConn = num(bots.connected) || 0;
+
     setStat('pending', pend);
-    setSub('pending', paid > 0 ? '입금 확인 · 발급 대기 ' + paid + '건' : '입금 대기 포함');
-    tone('pending', paid > 0 ? 'crit' : (pend > 0 ? 'hot' : ''));
+    setSub('pending', paid > 0 ? '입금 확인 · 적용 대기 ' + paid + '건' : (review > 0 ? '확인 필요 ' + review + '건 포함' : '입금 대기 포함'));
+    tone('pending', paid > 0 || review > 0 ? 'crit' : (pend > 0 ? 'hot' : ''));
     setStat('deposits', dep);
     tone('deposits', dep > 0 ? 'crit' : '');
-    setStat('active', num(STATS.active));
-    setStat('expiring', num(STATS.expiring_7d));
-    tone('expiring', (num(STATS.expiring_7d) || 0) > 0 ? 'hot' : '');
-    setStat('total', num(STATS.total));
-    setStat('stopped', rev + blk);
-    setSub('stopped', '회수 ' + rev + ' · 차단 ' + blk);
+    setStat('members', num(STATS.members));
+    setSub('members', (num(STATS.members_blocked) || 0) > 0 ? '차단 ' + STATS.members_blocked + '명' : '가입한 회원');
+    setStat('macro', num(STATS.macro_active));
+    setStat('rooms', num(STATS.rooms_total));
+    var rs = [];
+    if (num(rbd.pending)) rs.push('입금 대기 ' + rbd.pending);
+    if (num(STATS.rooms_hold)) rs.push('확인 대기 ' + STATS.rooms_hold);
+    if (num(rbd.joining)) rs.push('입장 중 ' + rbd.joining);
+    setSub('rooms', rs.length ? rs.join(' · ') : '결제된 설치');
+    tone('rooms', num(STATS.rooms_hold) ? 'hot' : '');
+    setStat('waiting', waiting);
+    tone('waiting', waiting > 0 ? 'hot' : '');
+    setStat('errors', errors);
+    tone('errors', errors > 0 ? 'crit' : '');
+    setStat('bots', botConn + ' / ' + botTotal);
+    setSub('bots', '접속 / 전체 · 방 ' + (num(bots.used) || 0) + ' / ' + (num(bots.cap) || 0));
+    tone('bots', botTotal === 0 ? 'hot' : (botConn < botTotal ? 'crit' : ''));
 
-    var bf = STATS.by_feature || {};
-    $('#featSum').textContent = '기능별 사용 중 — ' + FEATS.map(function (f) {
-      return FEAT_LABEL[f] + ' ' + (num(bf[f]) || 0);
-    }).join(' · ');
+    // 예전 라이선스 키 요약 (키 탭)
+    $('#featSum').textContent = '예전 라이선스 키 — 사용 중 ' + (num(STATS.active) || 0) + ' · 7일 내 만료 ' +
+      (num(STATS.expiring_7d) || 0) + ' · 전체 ' + (num(STATS.total) || 0) +
+      ' · 회수·차단 ' + ((num(STATS.revoked) || 0) + (num(STATS.blocked) || 0));
 
-    badge('orders', pend);
-    badge('deposits', dep);
+    // 카카오가 서버 IP 의 입장을 막았으면 맨 위 띠(5.3 -444)
+    var paused = num(STATS.join_paused_until) || 0;
+    var pb = $('#pauseBar');
+    if (paused > Date.now()) {
+      $('#pauseBarT').textContent = '카카오가 서버 IP 의 입장을 막았습니다. ' + hhmm(paused) + '까지 모든 방 입장을 멈춥니다.';
+      pb.hidden = false;
+    } else {
+      pb.hidden = true;
+    }
+
+    badge('orders', pend, '주문');
+    badge('deposits', dep, '입금');
+    badge('rooms', errors, '방');
+    badge('bots', botTotal > botConn ? botTotal - botConn : 0, '봇');
     var n = pend + dep;
     document.title = (n > 0 ? '(' + n + ') ' : '') + '판매 관리 · K bot';
     $('#updAt').textContent = '갱신 ' + dateKr(num(STATS.now) || Date.now(), true, true);
@@ -660,14 +763,13 @@
     }
   }
 
-  function badge(name, n) {
+  function badge(name, n, base) {
     var b = $('[data-badge="' + name + '"]');
     if (!b) return;
     b.hidden = !(n > 0);
     b.textContent = n > 99 ? '99+' : String(n || 0);
     var tab = b.parentNode;
-    var base = name === 'orders' ? '주문' : '입금';
-    tab.setAttribute('aria-label', base + (n > 0 ? ' (처리할 항목 ' + n + '건)' : ''));
+    tab.setAttribute('aria-label', base + (n > 0 ? ' (확인할 항목 ' + n + '건)' : ''));
   }
 
   function startPoll() {
@@ -681,12 +783,13 @@
 
   function refreshAll() {
     loadStats();
+    loadPrice();
     loadTab(TAB);
   }
 
   /* ══════════════════ 7. 탭 ══════════════════ */
 
-  var TABS = ['orders', 'deposits', 'keys', 'audit'];
+  var TABS = ['orders', 'deposits', 'members', 'bots', 'rooms', 'keys', 'audit'];
   var TAB = 'orders';
 
   function tabFromHash() {
@@ -708,12 +811,18 @@
     if (('#' + name) !== location.hash) {
       try { history.replaceState(null, '', '#' + name); } catch (e) { /* 없음 */ }
     }
+    var tb = $('#tab-' + name);
+    if (tb && tb.scrollIntoView && changed) { try { tb.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* 없음 */ } }
     if (changed || force) loadTab(name);
+    if (changed && STARTED) loadStats();      // 탭을 옮기면 요약 숫자도 새로 읽는다(30초 주기를 기다리지 않게)
   }
 
   function loadTab(name) {
     if (name === 'orders') loadOrders();
     else if (name === 'deposits') loadDeposits();
+    else if (name === 'members') loadMembers();
+    else if (name === 'bots') loadBots();
+    else if (name === 'rooms') loadRooms();
     else if (name === 'keys') loadKeys(false);
     else if (name === 'audit') loadAudit();
   }
@@ -739,16 +848,29 @@
 
   function listState(box, text, bad) {
     clear(box);
-    box.appendChild(el('div', { cls: 'mg-empty' + (bad ? ' bad' : ''), text: text }));
+    box.appendChild(empty(text, bad));
   }
+  function isLoadingBox(box) { return !box.firstChild || box.firstChild.className.indexOf('mg-empty') >= 0; }
 
-  /* ══════════════════ 8. 주문 ══════════════════ */
+  /* ══════════════════ 8. 주문 ══════════════════
+     회원 주문(kind='member')은 회원 계정에 적용된다(키 없음). 예전 키 주문은 예전 화면 그대로 키를 발급·연장한다. */
 
   var ORD = { filter: 'open', gen: 0 };
 
+  function isMemberOrder(o) { return !!o && (o.kind === 'member' || num(o.member_id) !== null); }
+
+  function orderSt(o) {
+    var m = isMemberOrder(o);
+    if (o.status === 'pending') return { kr: '입금 대기', cls: 'warn' };
+    if (o.status === 'paid') return { kr: m ? '입금 확인 · 적용 대기' : '입금 확인 · 발급 대기', cls: 'info' };
+    if (o.status === 'done') return { kr: m ? '적용 완료' : '발급 완료', cls: 'ok' };
+    if (o.status === 'canceled') return { kr: '취소', cls: '' };
+    return { kr: o.status || '-', cls: '' };
+  }
+
   function orderRank(o) {
-    if (o.status === 'paid') return 0;                       // 입금 확인됨 — 발급만 남았다
-    if (o.status === 'pending' && o.needs_review) return 1;  // 금액 뒷자리 없음 — 사람 확인 필요
+    if (o.status === 'paid') return 0;                       // 입금 확인됨 — 적용만 남았다
+    if (o.status === 'pending' && o.needs_review) return 1;  // 사람 확인 필요
     if (o.status === 'pending') return 2;
     return 3;
   }
@@ -758,6 +880,72 @@
       if (d) return d;
       return (num(b.created_at) || 0) - (num(a.created_at) || 0);
     });
+  }
+
+  // 주문 줄(orders.items) → 매크로 줄 + 방별 묶음
+  function orderGroups(o) {
+    var items = Array.isArray(o.items) ? o.items : [];
+    var macro = null;
+    var rooms = [];
+    var by = {};
+    items.forEach(function (it) {
+      if (!it || typeof it !== 'object') return;
+      if (it.product === 'macro') {
+        macro = { months: (macro ? macro.months : 0) + (num(it.months) || 0), amount: (macro ? macro.amount : 0) + (num(it.amount) || 0) };
+        return;
+      }
+      var k = String(it.install_id || it.link_url || rooms.length);
+      var g = by[k];
+      if (!g) {
+        g = by[k] = { install_id: num(it.install_id), name: str(it.link_name), url: str(it.link_url), products: [],
+                      amount: 0, unverified: false, hold: false };
+        rooms.push(g);
+      }
+      if (g.products.indexOf(it.product) < 0) g.products.push(it.product);
+      g.amount += num(it.amount) || 0;
+      if (it.unverified) g.unverified = true;
+      if (it.hold) g.hold = true;
+    });
+    return { macro: macro, rooms: rooms };
+  }
+
+  // "카카오톡 매크로 2개월 · 방 관리봇 1개 · 미니게임봇 1개"
+  function orderSummary(o) {
+    if (!isMemberOrder(o)) return legacyProductText(o.plan) + ' · ' + featText(o.features);
+    var g = orderGroups(o);
+    var parts = [];
+    if (g.macro && g.macro.months) parts.push(plabel('macro') + ' ' + g.macro.months + '개월');
+    var cnt = {};
+    g.rooms.forEach(function (r) { r.products.forEach(function (p) { cnt[p] = (cnt[p] || 0) + 1; }); });
+    roomProductIds().concat(Object.keys(cnt).filter(function (p) { return roomProductIds().indexOf(p) < 0; })).forEach(function (p) {
+      if (cnt[p]) parts.push(plabel(p) + ' ' + cnt[p] + '개');
+    });
+    return parts.length ? parts.join(' · ') : '상품 없음';
+  }
+
+  function roomLabel(g) { return g.name || shortLink(g.url) || ('설치 #' + g.install_id); }
+
+  function orderLinesNode(o) {
+    var g = orderGroups(o);
+    var box = el('div', { cls: 'mg-lines' });
+    if (g.macro && g.macro.months) {
+      box.appendChild(el('div', { cls: 'ln' }, [
+        el('b', { text: plabel('macro') + ' ' + g.macro.months + '개월' }),
+        el('span', { cls: 'amt' }, wonKids(g.macro.amount))
+      ]));
+    }
+    g.rooms.forEach(function (r) {
+      box.appendChild(el('div', { cls: 'ln' }, [
+        el('b', { text: roomLabel(r) }),
+        el('span', { text: r.products.map(plabel).join(' · ') }),
+        r.unverified ? tag('미확인', 'warn') : null,
+        r.hold ? tag('확인 대기', 'warn') : null,
+        r.install_id ? el('span', { cls: 'mono dim tiny', text: '#' + r.install_id }) : null,
+        el('span', { cls: 'amt' }, wonKids(r.amount))
+      ]));
+    });
+    if (!box.firstChild) box.appendChild(el('div', { cls: 'ln', text: '주문 줄이 없습니다' }));
+    return box;
   }
 
   function fetchOrders(filter) {
@@ -781,7 +969,7 @@
   function loadOrders() {
     var my = ++ORD.gen;
     var box = $('#ordList');
-    if (!box.firstChild || box.firstChild.className.indexOf('mg-empty') >= 0) listState(box, '불러오는 중…');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
     var filter = ORD.filter;
     fetchOrders(filter).then(function (r) {
       if (my !== ORD.gen) return;   // 그사이 필터를 바꿨다
@@ -793,7 +981,7 @@
       var bankEl = $('#ordBank');
       bankEl.hidden = !bank;
       bankEl.textContent = bank ? '입금 계좌: ' + bank : '';
-      var label = { open: '처리 대기', done: '발급 완료', canceled: '취소', all: '전체' }[filter] || '';
+      var label = { open: '처리 대기', done: '완료', canceled: '취소', all: '전체' }[filter] || '';
       $('#ordCount').textContent = label + ' ' + list.length + '건' + (list.length >= LIST_LIMIT ? ' (최근 ' + LIST_LIMIT + '건까지 표시)' : '');
       clear(box);
       if (!list.length) {
@@ -812,8 +1000,33 @@
     ]);
   }
 
+  function memberLine(o, prefix) {
+    var login = o.member && o.member.login_id ? o.member.login_id : '#' + o.member_id;
+    return el('div', { cls: 'mg-line' }, [
+      (prefix || '회원') + ' ',
+      inl(login, function () { openMember(o.member_id); }, '회원 ' + login + ' 상세 열기')
+    ]);
+  }
+
+  function appliedNode(o) {
+    var a = o.applied;
+    if (!a || typeof a !== 'object') return null;
+    var parts = [];
+    if (a.macro && a.macro.until) parts.push(plabel('macro') + ' 만료 ' + dateKr(a.macro.until, true));
+    if (Array.isArray(a.rooms) && a.rooms.length) parts.push('방 ' + a.rooms.length + '개 적용');
+    if (a.legacy_to_member) parts.push('이관된 키 → 회원 계정');
+    var kids = [];
+    if (parts.length) kids.push(el('div', { cls: 'mg-meta', text: '적용: ' + parts.join(' · ') }));
+    if (Array.isArray(a.skipped) && a.skipped.length) {
+      var refund = a.skipped.reduce(function (s, x) { return s + (num(x && x.amount) || 0); }, 0);
+      kids.push(el('p', { cls: 'mg-warn', text: '제외한 방 ' + a.skipped.length + '개 · 환불할 금액 ' + won(refund) }));
+    }
+    return kids;
+  }
+
   function orderItem(o) {
-    var st = ORDER_ST[o.status] || { kr: o.status || '-', cls: '' };
+    var st = orderSt(o);
+    var member = isMemberOrder(o);
     var open = o.status === 'pending' || o.status === 'paid';
     var revivable = o.status === 'canceled' && !!o.auto_canceled;
     var amt = num(o.amount) || 0;
@@ -827,6 +1040,7 @@
 
     item.appendChild(el('div', { cls: 'mg-r1' }, [
       el('span', { cls: 'mg-id grow', text: o.id }),
+      member ? null : tag('예전 키 주문', 'line'),
       open && o.needs_review ? tag('확인 필요', 'warn') : null,
       revivable ? tag('미입금 자동 취소', 'line') : null,
       chip(st.kr, st.cls)
@@ -837,22 +1051,33 @@
       !suffix && base && open ? el('span', { cls: 'mg-meta', text: '뒷자리 없음' }) : null
     ]));
     if (open && o.needs_review) {
-      item.appendChild(el('p', { cls: 'mg-warn', text:
-        '금액 뒷자리가 배정되지 않은 주문입니다. 금액만으로 입금을 구분할 수 없으므로 [입금] 탭의 원문과 입금자명을 확인한 후 승인하십시오.' }));
+      item.appendChild(el('p', { cls: 'mg-warn', text: suffix
+        ? '같은 방을 다른 회원이 먼저 결제하여 자동 적용을 멈춘 주문입니다. 승인하면 충돌한 방과 환불할 금액이 표시됩니다.'
+        : '금액 뒷자리가 배정되지 않은 주문입니다. 금액만으로 입금을 구분할 수 없으므로 [입금] 탭의 원문과 입금자명을 확인한 후 승인하십시오.' }));
     }
     if (o.status === 'paid') {
-      item.appendChild(el('p', { cls: 'mg-line', text: '입금이 확인되었습니다(수동 확인 모드). 승인하면 키가 발급됩니다.' }));
+      item.appendChild(el('p', { cls: 'mg-line', text: member
+        ? '입금이 확인되었습니다(수동 확인 모드). 승인하면 회원 계정에 적용됩니다.'
+        : '입금이 확인되었습니다(수동 확인 모드). 승인하면 키가 발급됩니다.' }));
     }
 
-    item.appendChild(el('div', { cls: 'mg-line', text: productText(o.plan) + ' · ' + featText(o.features) }));
+    if (member) {
+      item.appendChild(memberLine(o));
+      item.appendChild(orderLinesNode(o));
+    } else {
+      item.appendChild(el('div', { cls: 'mg-line', text: legacyProductText(o.plan) + ' · ' + featText(o.features) }));
+    }
     var who = ['입금자 ' + (str(o.depositor) || '미기재')];
     if (str(o.buyer_name) && str(o.buyer_name) !== str(o.depositor)) who.push('구매자 ' + str(o.buyer_name));
     if (str(o.contact)) who.push(str(o.contact));
     item.appendChild(el('div', { cls: 'mg-line', text: who.join(' · ') }));
 
-    if (o.target_key) item.appendChild(keyLine('연장 대상', o.target_key));
-    if (o.issued_key && o.issued_key !== o.target_key) item.appendChild(keyLine('발급 키', o.issued_key));
-    else if (o.issued_key && o.status === 'done') item.appendChild(el('div', { cls: 'mg-meta', text: '연장 대상 키에 적용되었습니다' }));
+    if (!member) {
+      if (o.target_key) item.appendChild(keyLine('연장 대상', o.target_key));
+      if (o.issued_key && o.issued_key !== o.target_key) item.appendChild(keyLine('발급 키', o.issued_key));
+      else if (o.issued_key && o.status === 'done') item.appendChild(el('div', { cls: 'mg-meta', text: '연장 대상 키에 적용되었습니다' }));
+    }
+    append(item, appliedNode(o));
 
     var meta = '접수 ' + dateKr(o.created_at, true);
     if (num(o.handled_at)) meta += ' · 처리 ' + dateKr(o.handled_at, true);
@@ -862,6 +1087,7 @@
     var acts = el('div', { cls: 'mg-acts' });
     if (open || revivable) acts.appendChild(btn(revivable ? '승인 (복구)' : '승인', 'sm primary', function () { openApprove(o); }));
     if (open) acts.appendChild(btn('취소', 'sm danger', function () { openCancel(o); }));
+    if (member) acts.appendChild(btn('회원 상세', 'sm', function () { openMember(o.member_id); }));
     if (o.issued_key) acts.appendChild(copyBtn(o.issued_key, '키가', '키 복사'));
     acts.appendChild(copyBtn(o.id, '주문번호가', '주문번호 복사'));
     item.appendChild(acts);
@@ -873,9 +1099,132 @@
                          maxlength: '24', placeholder: placeholder || 'KAKA-XXXX-XXXX-XXXX', value: value || '' });
   }
 
-  // 주문 승인. 이 창 자체가 확인 단계다.
-  // 서버 규칙(keys.approveOrder): 입력한 키 > 주문의 target_key > 신규 발급. 비워도 target_key 가 있으면 그 키를 연장한다.
   function openApprove(o) {
+    if (isMemberOrder(o)) openApproveMember(o);
+    else openApproveLegacy(o);
+  }
+
+  // 같은 방 충돌(room_taken)로 멈춘 승인 → 충돌 방 목록 + 환불 금액 + "충돌한 방을 빼고 …" (3.5)
+  function conflictBody(j, okLabel) {
+    var list = Array.isArray(j.conflicts) ? j.conflicts : [];
+    var refund = num(j.refund);
+    if (refund === null) refund = list.reduce(function (s, c) { return s + (num(c.amount) || 0); }, 0);
+    var rows = el('div', { cls: 'mg-rows' }, list.map(function (c) {
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('div', { cls: 'mg-r1' }, [
+            el('span', { cls: 'mg-name', text: c.link_name || shortLink(c.link_url) || ('설치 #' + c.install_id) }),
+            tag(WHY_LABEL[c.why] || '충돌', 'warn')
+          ]),
+          c.link_url ? el('div', { cls: 'mg-meta mono', text: shortLink(c.link_url) }) : null,
+          el('div', { cls: 'mg-meta', text: (c.products || []).map(plabel).join(' · ') + (c.install_id ? ' · 설치 #' + c.install_id : '') })
+        ]),
+        el('div', { cls: 'a' }, [el('span', { cls: 'mg-amt' }, wonKids(c.amount))])
+      ]);
+    }));
+    return [
+      note('같은 방에 먼저 결제된 다른 회원의 설치가 있어 이 주문을 적용하지 못했습니다. [' + okLabel +
+           ']을 누르면 아래 방 줄을 빼고 나머지를 적용합니다. 뺀 방의 금액은 입금자 계좌로 환불하십시오.', true),
+      sec('충돌한 방 ' + list.length + '개', list.length ? rows : empty('충돌한 방 정보가 없습니다', false, true)),
+      el('div', { cls: 'big hi' }, [
+        el('div', { cls: 'k', text: '환불할 금액' }),
+        el('div', { cls: 'v xl mono' }, wonKids(refund))
+      ])
+    ];
+  }
+
+  // 회원 주문 승인. 이 창 자체가 확인 단계다. 키 입력 없음.
+  function openApproveMember(o) {
+    var revivable = o.status === 'canceled' && !!o.auto_canceled;
+    var okBtn = btn('승인', 'primary');
+    var login = o.member && o.member.login_id ? o.member.login_id : '#' + o.member_id;
+    var m = modal({ title: revivable ? '주문 복구 · 승인' : '주문 승인', wide: true, body: [
+      kv([
+        ['주문', o.id, 'mono'],
+        ['금액', won(o.amount)],
+        ['회원', login],
+        ['입금자', str(o.depositor) || '미기재'],
+        ['상태', orderSt(o).kr]
+      ]),
+      sec('적용할 상품', orderLinesNode(o)),
+      o.status === 'paid' ? note('입금이 확인된 주문입니다. 승인하면 회원 계정에 적용되고 방은 K bot 계정이 입장합니다.') : null,
+      o.needs_review ? note('확인이 필요한 주문입니다. [입금] 탭의 원문에서 입금 금액과 입금자명을 확인한 후 승인하십시오.', true) : null,
+      revivable ? note('미입금으로 자동 취소된 주문입니다. 승인하면 주문이 복구되고, 그 사이 다른 회원에게 가지 않은 방만 되살아납니다.', true) : null,
+      o.status === 'pending' && !o.needs_review ? note('입금 확인 전입니다. 입금 내역을 확인한 경우에만 승인하십시오.', true) : null
+    ] });
+    m.setActions([btn('닫기', 'ghost', function () { if (!m.busy) m.close(); }), okBtn]);
+    var skip = false;
+    okBtn.addEventListener('click', function () {
+      if (m.busy) return;
+      m.error('');
+      m.setBusy(true, okBtn);
+      var body = { id: o.id };
+      if (skip) body.skip_conflicts = true;
+      api('POST', '/admin/order-approve', body).then(function (r) {
+        m.setBusy(false, okBtn);
+        if (kicked(r)) return;
+        if (r.ok) {
+          m.close();
+          showApplied({ title: '승인 완료', order: o, json: r.json });
+          afterOrderChange();
+          return;
+        }
+        if (r.json && r.json.reason === 'room_taken' && !skip) {
+          skip = true;
+          m.setTitle('충돌한 방 확인');
+          m.setBody(conflictBody(r.json, '충돌한 방을 빼고 승인'));
+          okBtn.querySelector('.lbl-idle').textContent = '충돌한 방을 빼고 승인';
+          return;
+        }
+        m.error(errText(r, '주문을 승인하지 못했습니다'));
+      });
+    });
+  }
+
+  // 회원 주문 적용 결과
+  function showApplied(o) {
+    var j = o.json || {};
+    var a = j.applied || {};
+    var refund = num(j.refund) || 0;
+    var login = j.member && j.member.login_id ? j.member.login_id : (j.member_id ? '#' + j.member_id : '-');
+    var rows = [['회원', login]];
+    if (a.macro && a.macro.until) rows.push([plabel('macro'), '+' + (num(a.macro.days) || 0) + '일 · 만료 ' + dateKr(a.macro.until, true)]);
+    if (a.legacy_room_until) rows.push(['기존 키 기능', dateKr(a.legacy_room_until, true) + '까지']);
+    if (Array.isArray(a.rooms) && a.rooms.length) {
+      rows.push(['방', el('div', { cls: 'kv-list' }, a.rooms.map(function (x) {
+        return el('span', { text: '설치 #' + x.install_id + ' · ' + (x.products || []).map(plabel).join(' · ') });
+      }))]);
+    }
+    var body = [
+      el('div', { cls: 'chip-row' }, [chip(j.already ? '이미 처리된 주문' : '적용 완료', 'ok')]),
+      para(j.already ? '이미 적용된 주문입니다. 아래는 그때 적용한 내용입니다.'
+        : '회원 계정에 적용했습니다. 방은 K bot 계정이 순서대로 입장하며, 방 관리봇은 방장이 부방장으로 지정하면 동작합니다.'),
+      kv(rows)
+    ];
+    if (Array.isArray(a.skipped) && a.skipped.length) {
+      body.push(sec('제외한 방 ' + a.skipped.length + '개', el('div', { cls: 'mg-rows' }, a.skipped.map(function (x) {
+        return el('div', { cls: 'mg-row' }, [
+          el('div', { cls: 't' }, [el('span', { text: '설치 #' + x.install_id + ' · ' + (x.products || []).map(plabel).join(' · ') }),
+                                   el('span', { cls: 'mg-meta', text: WHY_LABEL[x.why] || '충돌' })]),
+          el('div', { cls: 'a' }, [el('span', { cls: 'mg-amt' }, wonKids(x.amount))])
+        ]);
+      }))));
+      body.push(el('div', { cls: 'big hi' }, [
+        el('div', { cls: 'k', text: '환불할 금액' }),
+        el('div', { cls: 'v xl mono' }, wonKids(refund)),
+        el('div', { cls: 'tiny dim', text: '제외한 방의 금액입니다. 입금자 계좌로 환불하십시오.' })
+      ]));
+    }
+    var m = modal({ title: o.title, light: true, wide: true, body: body });
+    var acts = [btn('닫기', 'ghost', function () { m.close(); })];
+    if (j.member_id) acts.push(btn('회원 상세', 'primary', function () { m.close(); openMember(j.member_id); }, { 'data-autofocus': '' }));
+    m.setActions(acts);
+    var af = $('[data-autofocus]', m.dlg);
+    if (af) af.focus();
+  }
+
+  // 예전 키 주문 승인. 서버 규칙(keys.approveOrder): 입력한 키 > 주문의 target_key > 신규 발급.
+  function openApproveLegacy(o) {
     var days = planDays(o.plan);
     var revivable = o.status === 'canceled' && !!o.auto_canceled;
     var input = keyInput(o.target_key || '');
@@ -884,36 +1233,34 @@
     var hint = el('p', { cls: 'hint', 'aria-live': 'polite' });
     function upd() {
       var k = normKey(input.value);
-      if (k) hint.textContent = '이 키의 기능 3종이 ' + (days || '주문 기간만큼') + (days ? '일' : '') + ' 연장됩니다. 남은 기간이 있으면 만료일에 더해집니다.';
+      if (k) hint.textContent = '이 키의 기능이 ' + (days || '주문 기간만큼') + (days ? '일' : '') + ' 연장됩니다. 회원에게 이관된 키면 그 회원 계정에 적용됩니다.';
       else if (o.target_key) hint.textContent = '비워 두면 주문에 적힌 연장 대상 키(' + o.target_key + ')가 연장됩니다.';
       else hint.textContent = '비워 두면 새 키가 발급됩니다. 기존 키를 입력하면 그 키가 연장됩니다.';
     }
     input.addEventListener('input', upd);
     upd();
 
-    var body = [
-      kv([
-        ['주문', o.id, 'mono'],
-        ['금액', won(o.amount)],
-        ['상품', productText(o.plan)],
-        ['기능', featText(o.features)],
-        ['입금자', str(o.depositor) || '미기재'],
-        ['상태', (ORDER_ST[o.status] || { kr: o.status }).kr]
-      ]),
-      o.status === 'paid' ? note('입금이 확인된 주문입니다. 승인하면 키가 발급 또는 연장됩니다.') : null,
-      o.needs_review ? note('금액 뒷자리가 없는 주문입니다. [입금] 탭의 원문에서 입금 금액과 입금자명을 확인한 후 승인하십시오.', true) : null,
-      revivable ? note('미입금으로 자동 취소된 주문입니다. 승인하면 주문이 복구되고 키가 발급 또는 연장됩니다.', true) : null,
-      o.status === 'pending' && !o.needs_review ? note('입금 확인 전입니다. 입금 내역을 확인한 경우에만 승인하십시오.', true) : null,
-      el('div', { cls: 'fld' }, [
-        el('label', { for: 'apKey', text: o.target_key ? '연장할 키' : '기존 키에 적용 (선택)' }),
-        input,
-        hint
-      ])
-    ];
-
     confirmAct({
       title: revivable ? '주문 복구 · 승인' : '주문 승인',
-      body: body,
+      body: [
+        kv([
+          ['주문', o.id, 'mono'],
+          ['금액', won(o.amount)],
+          ['상품', legacyProductText(o.plan)],
+          ['기능', featText(o.features)],
+          ['입금자', str(o.depositor) || '미기재'],
+          ['상태', orderSt(o).kr]
+        ]),
+        note('예전 가격으로 접수된 키 주문입니다. 새 판매는 회원 주문으로 접수됩니다.'),
+        o.needs_review ? note('금액 뒷자리가 없는 주문입니다. [입금] 탭의 원문에서 입금 금액과 입금자명을 확인한 후 승인하십시오.', true) : null,
+        revivable ? note('미입금으로 자동 취소된 주문입니다. 승인하면 주문이 복구되고 키가 발급 또는 연장됩니다.', true) : null,
+        o.status === 'pending' && !o.needs_review ? note('입금 확인 전입니다. 입금 내역을 확인한 경우에만 승인하십시오.', true) : null,
+        el('div', { cls: 'fld' }, [
+          el('label', { for: 'apKey', text: o.target_key ? '연장할 키' : '기존 키에 적용 (선택)' }),
+          input,
+          hint
+        ])
+      ],
       ok: '승인',
       check: function () {
         var raw = str(input.value);
@@ -929,15 +1276,16 @@
       failMsg: '주문을 승인하지 못했습니다',
       done: function (r) {
         var j = r.json;
-        showIssued({
-          title: '승인 완료',
-          key: j.key,
-          lead: j.already ? '이미 처리된 주문입니다. 아래는 이 주문에 연결된 키입니다.'
-            : (j.issued ? '새 키가 발급되었습니다. 구매자에게 아래 키를 전달하십시오.'
-                        : '기존 키의 기능 3종이 연장되었습니다.'),
-          isNew: !!j.issued && !j.already,
-          orderId: o.id
-        });
+        if (j.member_id) showApplied({ title: '승인 완료', order: o, json: j });
+        else {
+          showIssued({
+            title: '승인 완료',
+            key: j.key,
+            lead: j.already ? '이미 처리된 주문입니다. 아래는 이 주문에 연결된 키입니다.'
+              : (j.issued ? '새 키가 발급되었습니다. 구매자에게 아래 키를 전달하십시오.' : '기존 키의 기능이 연장되었습니다.'),
+            orderId: o.id
+          });
+        }
         afterOrderChange();
       }
     });
@@ -953,7 +1301,7 @@
       ]),
       el('p', { cls: 'hint', text:
         (o.orderId ? '구매자는 주문 상태 화면(/order/' + o.orderId + ')에서도 같은 키를 확인할 수 있습니다. ' : '') +
-        (o.isNew ? '이 키로 콘솔(/panel)에 처음 로그인하는 시점부터 사용 기간이 시작됩니다.' : '') })
+        '키는 회원 가입 후 내 계정의 기존 라이선스 키 등록에서 회원 계정으로 옮겨 사용합니다.' })
     ] });
     var acts = [btn('닫기', 'ghost', function () { m.close(); })];
     if (key) {
@@ -972,8 +1320,10 @@
       title: '주문 취소',
       danger: true,
       body: [
-        kv([['주문', o.id, 'mono'], ['금액', won(o.amount)], ['입금자', str(o.depositor) || '미기재']]),
-        note('직접 취소한 주문은 승인으로 되돌릴 수 없으며, 이후 같은 금액이 입금되어도 자동 발급되지 않습니다.', true),
+        kv([['주문', o.id, 'mono'], ['금액', won(o.amount)], ['입금자', str(o.depositor) || '미기재'],
+            isMemberOrder(o) ? ['상품', orderSummary(o)] : null]),
+        note('직접 취소한 주문은 승인으로 되돌릴 수 없으며, 이후 같은 금액이 입금되어도 자동 적용되지 않습니다.' +
+             (isMemberOrder(o) ? ' 이 주문이 예약한 입금 대기 방도 함께 취소됩니다.' : ''), true),
         el('div', { cls: 'fld' }, [el('label', { for: 'cnMemo', text: '취소 사유 (선택)' }), memo])
       ],
       ok: '주문 취소',
@@ -981,7 +1331,7 @@
         var s = str(memo.value);
         return api('POST', '/admin/order-cancel', { id: o.id, memo: s || null });
       },
-      failMsg: '취소하지 못했습니다. 이미 발급 완료된 주문이거나 없는 주문입니다',
+      failMsg: '취소하지 못했습니다. 이미 완료된 주문이거나 없는 주문입니다',
       done: function () {
         toast('주문이 취소되었습니다', 'ok');
         afterOrderChange();
@@ -1005,7 +1355,7 @@
   function loadDeposits() {
     var my = ++DEP.gen;
     var box = $('#depList');
-    if (!box.firstChild || box.firstChild.className.indexOf('mg-empty') >= 0) listState(box, '불러오는 중…');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
     var filter = DEP.filter;
     api('GET', '/admin/deposits?limit=' + LIST_LIMIT).then(function (r) {
       if (my !== DEP.gen) return;
@@ -1045,13 +1395,13 @@
     var box = $('#depSys');
     clear(box);
     box.appendChild(chip(hook ? '입금 알림 수신 켜짐' : '입금 알림 수신 꺼짐', hook ? 'ok' : 'bad'));
-    box.appendChild(chip(auto ? '자동 발급 켜짐' : '자동 발급 꺼짐', auto ? 'ok' : 'warn'));
+    box.appendChild(chip(auto ? '자동 적용 켜짐' : '자동 적용 꺼짐', auto ? 'ok' : 'warn'));
     if (!hook) {
       box.appendChild(el('p', { cls: 'hint', style: 'flex-basis:100%', text:
         '서버에 DEPOSIT_TOKEN 이 설정되지 않아 은행 입금 알림을 받지 않습니다. 모든 주문을 [주문] 탭에서 직접 승인해야 합니다.' }));
     } else if (!auto) {
       box.appendChild(el('p', { cls: 'hint', style: 'flex-basis:100%', text:
-        '자동 발급이 꺼져 있습니다(DEPOSIT_AUTO_APPROVE=0). 금액이 일치한 주문은 입금 확인 상태로 바뀌며, [주문] 탭에서 승인해야 키가 발급됩니다.' }));
+        '자동 적용이 꺼져 있습니다(DEPOSIT_AUTO_APPROVE=0). 금액이 일치한 주문은 입금 확인 상태로 바뀌며, [주문] 탭에서 승인해야 회원 계정에 적용됩니다.' }));
     }
   }
 
@@ -1076,7 +1426,7 @@
       ]));
     }
     if (d.status === 'unmatched') item.appendChild(el('p', { cls: 'mg-warn', text: '금액이 일치하는 대기 주문이 없습니다. 뒷자리를 빼고 입금했거나 이미 처리된 주문일 수 있습니다.' }));
-    if (d.status === 'ambiguous') item.appendChild(el('p', { cls: 'mg-crit', text: '금액만으로 주문을 특정할 수 없어 자동 발급하지 않았습니다. 원문과 입금자명을 확인한 후 매칭하십시오.' }));
+    if (d.status === 'ambiguous') item.appendChild(el('p', { cls: 'mg-crit', text: '금액만으로 주문을 특정할 수 없거나 같은 방 충돌이 있어 자동 적용하지 않았습니다. 원문과 입금자명을 확인한 후 매칭하십시오.' }));
 
     var raw = str(d.raw);
     var pre = el('pre', { cls: 'mg-raw', text: raw || '(원문 없음)' });
@@ -1117,14 +1467,14 @@
         ['수신', dateKr(d.at, true, true)]
       ]),
       el('pre', { cls: 'mg-raw open', text: str(d.raw) || '(원문 없음)' }),
-      el('div', { cls: 'mg-empty', text: '승인 가능한 주문을 불러오는 중…' })
+      empty('승인 가능한 주문을 불러오는 중…')
     ] });
     m.setActions([btn('닫기', 'ghost', function () { if (!m.busy) m.close(); }), okBtn]);
 
     api('GET', '/admin/orders?limit=' + LIST_LIMIT).then(function (r) {
       if (kicked(r)) return;
       if (!r.ok) {
-        m.setBody([el('div', { cls: 'mg-empty bad', text: '주문 목록을 불러오지 못했습니다\n' + errText(r) })]);
+        m.setBody([empty('주문 목록을 불러오지 못했습니다\n' + errText(r), true)]);
         return;
       }
       var cands = (r.json.orders || []).filter(matchable).sort(function (a, b) {
@@ -1144,6 +1494,7 @@
       var manual = el('input', { cls: 'inp mono keyin', id: 'mtManual', autocomplete: 'off', spellcheck: 'false',
                                  autocapitalize: 'characters', maxlength: '32', placeholder: 'ORD-YYMMDD-XXXXXX' });
       var summary = el('p', { cls: 'mg-p', 'aria-live': 'polite' });
+      function find(id) { for (var i = 0; i < cands.length; i++) if (cands[i].id === id) return cands[i]; return null; }
       function chosen() {
         var mv = normOrderId(manual.value);
         if (mv) return mv;
@@ -1155,12 +1506,11 @@
         okBtn.disabled = !id;
         clear(summary);
         if (!id) { summary.textContent = '연결할 주문을 선택하십시오.'; return; }
-        var o = null;
-        for (var i = 0; i < cands.length; i++) if (cands[i].id === id) o = cands[i];
-        append(summary, [
-          '입금 기록 #' + d.id + ' 을 주문 ', el('b', { cls: 'mono', text: id }), ' 에 연결하고 승인합니다. ',
-          o ? (o.target_key ? '연장 대상 키의 기능 3종이 연장됩니다.' : '새 키가 발급됩니다.') : '주문의 연장 대상 키가 있으면 연장, 없으면 새 키가 발급됩니다.'
-        ]);
+        var o = find(id);
+        var how = '주문 내용대로 적용됩니다.';
+        if (o && isMemberOrder(o)) how = '회원 ' + (o.member && o.member.login_id ? o.member.login_id : '#' + o.member_id) + ' 계정에 적용됩니다: ' + orderSummary(o) + '.';
+        else if (o) how = o.target_key ? '연장 대상 키가 연장됩니다.' : '새 키가 발급됩니다.';
+        append(summary, ['입금 기록 #' + d.id + ' 을 주문 ', el('b', { cls: 'mono', text: id }), ' 에 연결하고 승인합니다. ', how]);
         if (o && amount !== null && num(o.amount) !== amount) {
           summary.appendChild(el('span', { cls: 'mg-warn', style: 'display:block;margin-top:4px', text:
             '⚠ 입금 금액(' + won(amount) + ')과 주문 금액(' + won(o.amount) + ')이 다릅니다.' }));
@@ -1172,7 +1522,7 @@
         var same = amount !== null && num(o.amount) === amount;
         var radio = el('input', { type: 'radio', name: gname, value: o.id, checked: o.id === preset });
         radio.addEventListener('change', function () { manual.value = ''; upd(); });
-        var st = ORDER_ST[o.status] || { kr: o.status };
+        var st = orderSt(o);
         pick.appendChild(el('label', { cls: 'chk' }, [
           radio,
           el('span', { cls: 'box', 'aria-hidden': 'true' }),
@@ -1181,12 +1531,14 @@
               el('span', { cls: 'mono', style: 'color:var(--fg)', text: o.id }),
               same ? tag('금액 일치', '') : null,
               o.id === d.matched_order ? tag('후보', 'warn') : null,
-              o.needs_review ? tag('뒷자리 없음', 'warn') : null
+              o.needs_review ? tag('확인 필요', 'warn') : null
             ]),
             el('span', { cls: 'mg-meta', text: won(o.amount) + ' · 입금자 ' + (str(o.depositor) || '미기재') + ' · ' +
                                                 st.kr + (o.auto_canceled && o.status === 'canceled' ? '(자동)' : '') +
                                                 ' · ' + dateKr(o.created_at, true) }),
-            o.target_key ? el('span', { cls: 'mg-meta', text: '연장 대상 ' + o.target_key }) : null
+            el('span', { cls: 'mg-meta', text: isMemberOrder(o)
+              ? '회원 ' + (o.member && o.member.login_id ? o.member.login_id : '#' + o.member_id) + ' · ' + orderSummary(o)
+              : (o.target_key ? '예전 키 주문 · 연장 대상 ' + o.target_key : '예전 키 주문') })
           ])
         ]));
       });
@@ -1195,7 +1547,7 @@
         upd();
       });
 
-      m.setBody([
+      var pickBody = [
         kv([
           ['입금 금액', amount === null ? '금액 읽지 못함' : won(amount)],
           ['입금자', str(d.name) || '알 수 없음'],
@@ -1204,7 +1556,7 @@
         el('pre', { cls: 'mg-raw', text: str(d.raw) || '(원문 없음)' }),
         el('div', { cls: 'mg-sec' }, [
           el('span', { cls: 'mg-h3', text: '승인 가능한 주문 ' + cands.length + '건 · 금액이 같은 주문을 위에 표시합니다' }),
-          cands.length ? pick : el('div', { cls: 'mg-empty', text: '승인 가능한 주문이 없습니다' })
+          cands.length ? pick : empty('승인 가능한 주문이 없습니다', false, true)
         ]),
         el('div', { cls: 'fld' }, [
           el('label', { for: 'mtManual', text: '목록에 없는 주문번호 직접 입력' }),
@@ -1212,31 +1564,46 @@
           el('p', { cls: 'hint', text: '최근 ' + LIST_LIMIT + '건 밖의 주문이면 주문번호를 입력하십시오.' })
         ]),
         summary
-      ]);
+      ];
+      m.setBody(pickBody);
       upd();
       var first = $('input[name="' + gname + '"]:checked', m.dlg) || $('input[name="' + gname + '"]', m.dlg) || manual;
       try { first.focus(); } catch (e) { /* 없음 */ }
 
+      var skipId = '';     // 충돌을 보여 준 주문 — 다시 누르면 충돌한 방을 빼고 매칭한다
       okBtn.addEventListener('click', function () {
         if (m.busy) return;
-        var id = chosen();
+        var id = skipId || chosen();
         if (!id) { m.error('연결할 주문을 선택하십시오'); return; }
         m.error('');
         m.setBusy(true, okBtn);
-        api('POST', '/admin/deposit-match', { deposit_id: d.id, order_id: id }).then(function (res) {
+        var body = { deposit_id: d.id, order_id: id };
+        if (skipId) body.skip_conflicts = true;
+        api('POST', '/admin/deposit-match', body).then(function (res) {
           m.setBusy(false, okBtn);
           if (kicked(res)) return;
+          if (!res.ok && res.json && res.json.reason === 'room_taken' && !skipId) {
+            skipId = id;
+            m.setTitle('충돌한 방 확인');
+            m.setBody(conflictBody(res.json, '충돌한 방을 빼고 매칭'));
+            okBtn.querySelector('.lbl-idle').textContent = '충돌한 방을 빼고 매칭';
+            return;
+          }
           if (!res.ok) { m.error(errText(res, '매칭하지 못했습니다')); return; }
           m.close();
-          showIssued({
-            title: '매칭 완료',
-            key: res.json.key,
-            lead: res.json.already
-              ? '이미 처리된 주문입니다. 입금 기록만 이 주문에 연결되었습니다.'
-              : '주문 ' + id + ' 이 승인되었습니다. 아래 키가 발급 또는 연장되었습니다.',
-            isNew: false,
-            orderId: id
-          });
+          var o = find(id);
+          if (res.json.member_id) {
+            showApplied({ title: '매칭 완료', order: o, json: res.json });
+          } else {
+            showIssued({
+              title: '매칭 완료',
+              key: res.json.key,
+              lead: res.json.already
+                ? '이미 처리된 주문입니다. 입금 기록만 이 주문에 연결되었습니다.'
+                : '주문 ' + id + ' 이 승인되었습니다. 아래 키가 발급 또는 연장되었습니다.',
+              orderId: id
+            });
+          }
           afterOrderChange();
         });
       });
@@ -1248,11 +1615,11 @@
       title: '입금 무시',
       body: [
         kv([['입금 금액', num(d.amount) === null ? '금액 읽지 못함' : won(d.amount)], ['입금자', str(d.name) || '알 수 없음'], ['수신', dateKr(d.at, true, true)]]),
-        para('이 입금 기록을 무시 처리합니다. 확인 필요 목록에서 빠지며, 주문 상태와 키는 바뀌지 않습니다. 판매와 관계없는 입금(이체·환불 등)에 사용하십시오.')
+        para('이 입금 기록을 무시 처리합니다. 확인 필요 목록에서 빠지며, 주문 상태와 회원 계정은 바뀌지 않습니다. 판매와 관계없는 입금(이체·환불 등)에 사용하십시오.')
       ],
       ok: '무시',
       run: function () { return api('POST', '/admin/deposit-ignore', { deposit_id: d.id }); },
-      failMsg: '처리하지 못했습니다. 이미 삭제된 기록입니다',
+      failMsg: '처리하지 못했습니다. 이미 매칭되었거나 삭제된 기록입니다',
       done: function () {
         toast('무시 처리되었습니다', 'ok');
         loadStats();
@@ -1261,7 +1628,1131 @@
     });
   }
 
-  /* ══════════════════ 10. 키 ══════════════════ */
+  /* ══════════════════ 10. 회원 ══════════════════ */
+
+  var MEM = { q: '', filter: 'all', gen: 0 };
+
+  function macroText(until, now) {
+    var u = num(until) || 0;
+    var t = num(now) || Date.now();
+    if (u > t) return '매크로 D-' + daysCeil(u - t);
+    if (u > 0) return '매크로 만료';
+    return '매크로 없음';
+  }
+
+  function loadMembers() {
+    var my = ++MEM.gen;
+    var box = $('#memList');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
+    var q = '/admin/members?limit=' + LIST_LIMIT + (MEM.q ? '&q=' + encodeURIComponent(MEM.q) : '');
+    if (MEM.filter === 'blocked') q += '&blocked=1';
+    if (MEM.filter === 'macro') q += '&macro=1';
+    api('GET', q).then(function (r) {
+      if (my !== MEM.gen) return;
+      if (kicked(r)) return;
+      if (!r.ok) { listState(box, '회원 목록을 불러오지 못했습니다\n' + errText(r), true); $('#memCount').textContent = ''; return; }
+      var list = r.json.members || [];
+      var total = num(r.json.total) || list.length;
+      var label = { all: '전체', macro: '매크로 이용 중', blocked: '차단' }[MEM.filter] || '';
+      $('#memCount').textContent = (MEM.q ? '검색 ‘' + MEM.q + '’ · ' : '') + label + ' ' + total + '명' +
+        (total > list.length ? ' 중 ' + list.length + '명 표시 · 최근 가입 순' : ' · 최근 가입 순');
+      clear(box);
+      if (!list.length) {
+        listState(box, MEM.q ? '검색 결과가 없습니다.\n아이디 일부, 회원 번호, 연락처, 채널톡 memberId(m으로 시작하는 25자)로 찾을 수 있습니다.' : '해당하는 회원이 없습니다');
+        return;
+      }
+      var now = num(r.json.now) || Date.now();
+      list.forEach(function (mb) { box.appendChild(memberItem(mb, now)); });
+    });
+  }
+
+  function memberItem(mb, now) {
+    var blocked = !!str(mb.blocked_reason);
+    var item = el('article', { cls: 'mg-item click' + (blocked ? ' alert' : ''), 'aria-label': '회원 ' + mb.login_id });
+    item.appendChild(el('div', { cls: 'mg-r1' }, [
+      el('span', { cls: 'grow' }, el('button', { type: 'button', cls: 'mg-link', text: mb.login_id,
+        'aria-label': '회원 ' + mb.login_id + ' 상세 열기', onclick: function () { openMember(mb.id); } })),
+      mb.google_linked ? tag('Google 연결', 'line') : null,
+      chip(blocked ? '차단' : '정상', blocked ? 'bad' : 'ok')
+    ]));
+    item.appendChild(el('div', { cls: 'mg-line', text: macroText(mb.macro_until, now) + ' · ' + plabel('roombot') + ' ' +
+      (num(mb.roombot_n) || 0) + ' · ' + plabel('minigame') + ' ' + (num(mb.minigame_n) || 0) }));
+    item.appendChild(el('div', { cls: 'mg-meta', text: '가입 ' + dateKr(mb.created_at) + ' · 최근 로그인 ' +
+      (num(mb.last_login_at) ? dateKr(mb.last_login_at, true) : '없음') + ' · 회원 #' + mb.id +
+      ' · 카카오 계정 ' + (num(mb.accounts_n) || 0) + ' · 로그인 기기 ' + (num(mb.sessions_n) || 0) +
+      (str(mb.contact) ? ' · ' + str(mb.contact) : '') }));
+    if (blocked) item.appendChild(el('div', { cls: 'mg-crit', text: '차단 사유: ' + str(mb.blocked_reason) }));
+    item.appendChild(memberActs(mb, function () { loadMembers(); loadStats(); }));
+    return item;
+  }
+
+  // 회원 동작 버튼 줄(목록·상세 공통). changed() 는 성공 뒤 다시 읽기.
+  function memberActs(mb, changed, inDetail) {
+    var blocked = !!str(mb.blocked_reason);
+    return el('div', { cls: inDetail ? 'btn-row' : 'mg-acts', style: inDetail ? 'margin-top:0' : null }, [
+      inDetail ? null : btn('상세', 'sm', function () { openMember(mb.id); }),
+      btn('기간 추가', inDetail ? 'primary' : 'sm', function () { openMemberGrant(mb, changed); }),
+      inDetail ? btn('방 지급', '', function () { openRoomGrant(mb.login_id, changed); }) : null,
+      btn(blocked ? '차단 해제' : '차단', (inDetail ? '' : 'sm') + (blocked ? '' : ' danger'), function () { openMemberBlock(mb, changed); }),
+      btn('로그아웃', inDetail ? '' : 'sm', function () { openMemberLogout(mb, changed); }),
+      btn('임시 비밀번호', inDetail ? '' : 'sm', function () { openMemberPwReset(mb, changed); })
+    ]);
+  }
+
+  /* ── 회원 상세 (창 하나를 계속 다시 그린다) */
+  function openMember(id) {
+    var m = modal({ title: '회원 상세', wide: true, light: true,
+                    onClose: function () { if (TAB === 'members') loadMembers(); },
+                    body: empty('불러오는 중…') });
+    m.setActions([btn('닫기', 'ghost', function () { m.close(); })]);
+    var gen = 0;
+    function refresh() {
+      var my = ++gen;
+      return api('GET', '/admin/member?id=' + encodeURIComponent(String(id))).then(function (r) {
+        if (my !== gen || !m.isOpen()) return;
+        if (kicked(r)) return;
+        if (!r.ok) { m.setBody(empty(errText(r, '회원을 불러오지 못했습니다'), true)); return; }
+        renderMemberDetail(m, r.json, function () { loadStats(); refresh(); });
+      });
+    }
+    refresh();
+    return m;
+  }
+
+  function renderMemberDetail(m, j, changed) {
+    var mb = j.member || {};
+    var now = num(j.now) || Date.now();
+    var blocked = !!str(mb.blocked_reason);
+    m.setTitle('회원 상세 · ' + mb.login_id);
+
+    var top = el('div', { cls: 'big hi' }, [
+      el('div', { cls: 'k', text: '회원 #' + mb.id }),
+      el('div', { cls: 'mg-keybox' }, [el('div', { cls: 'v key', text: mb.login_id }), copyBtn(mb.login_id, '아이디가', '아이디 복사')]),
+      el('div', { cls: 'chip-row', style: 'margin-top:10px' }, [
+        chip(blocked ? '차단' : '정상', blocked ? 'bad' : 'ok'),
+        j.google ? tag('Google 연결', 'line') : tag('Google 미연결', 'line')
+      ])
+    ]);
+    var alerts = [];
+    if (blocked) alerts.push(note('차단된 회원입니다. 로그인할 수 없고, 카카오 계정 발송과 설치한 방의 K bot 기능이 멈춰 있습니다. 사유: ' + str(mb.blocked_reason), true));
+
+    var macro = mb.macro || {};
+    var info = kv([
+      [plabel('macro'), num(macro.until) > now ? 'D-' + daysCeil(macro.until - now) + ' · 만료 ' + dateKr(macro.until, true)
+        : (num(macro.until) ? '만료 ' + dateKr(macro.until, true) : '없음')],
+      num(mb.legacy_room_until) > now ? ['기존 키 기능', dateKr(mb.legacy_room_until, true) + '까지'] : null,
+      ['카카오 계정', (num(mb.accounts_n) || 0) + '개'],
+      ['설치한 방', (num(mb.rooms_n) || 0) + '개 · ' + plabel('roombot') + ' ' + (num(mb.roombot_n) || 0) + ' · ' + plabel('minigame') + ' ' + (num(mb.minigame_n) || 0)],
+      ['연락처', str(mb.contact) || '-'],
+      ['가입', dateKr(mb.created_at, true)],
+      ['최근 로그인', num(mb.last_login_at) ? dateKr(mb.last_login_at, true) : '없음'],
+      num(mb.pw_changed_at) ? ['비밀번호 변경', dateKr(mb.pw_changed_at, true)] : null,
+      j.google ? ['Google', [el('span', { cls: 'mono', text: str(j.google.email) || '-' }), ' · 연결 ' + dateKr(j.google.linked_at)]] : null,
+      mb.channel_member_id ? ['채널톡 memberId', mb.channel_member_id, 'mono'] : null
+    ]);
+
+    // 설치한 방
+    var rooms = Array.isArray(j.rooms) ? j.rooms : [];
+    var roomBox = rooms.length ? el('div', { cls: 'mg-rows' }, rooms.map(function (v) {
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('div', { cls: 'mg-r1' }, [
+            el('span', { cls: 'mg-name', text: v.link_name || '이름 확인 전' }),
+            productTags(v),
+            chip(v.label, ROOM_CLS[v.display] || '')
+          ]),
+          el('div', { cls: 'mg-meta mono', text: shortLink(v.link_url) }),
+          el('div', { cls: 'mg-meta', text: '설치 #' + v.id + (v.bot ? ' · ' + botName(v) : '') + (v.phase === 'removed' ? ' · 해제 ' + dateKr(v.removed_at) : '') })
+        ]),
+        el('div', { cls: 'a' }, [btn('방 상세', 'sm', function () { openRoom(v.id, changed); })])
+      ]);
+    })) : empty('설치한 방이 없습니다', false, true);
+
+    // 카카오 계정
+    var accs = Array.isArray(j.accounts) ? j.accounts : [];
+    var accBox = accs.length ? el('div', { cls: 'mg-rows' }, accs.map(function (a) {
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('span', { cls: 'mono', style: 'color:var(--fg)', text: a.email || '-' }),
+          el('span', { cls: 'mg-meta' }, [el('span', { cls: 'mono', text: a.device_id }), ' · 등록 ' + dateKr(a.created_at) +
+            (a.legacy_key ? ' · 이관 키 ' + a.legacy_key : '')])
+        ])
+      ]);
+    })) : empty('등록한 카카오 계정이 없습니다', false, true);
+
+    // 구매 내역
+    var orders = Array.isArray(j.orders) ? j.orders : [];
+    var ordBox = orders.length ? el('div', { cls: 'mg-rows' }, orders.map(function (o) {
+      var st = orderSt(o);
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('div', { cls: 'mg-r1' }, [el('span', { cls: 'mg-id', text: o.id }), chip(st.kr, st.cls)]),
+          el('div', { cls: 'mg-meta', text: orderSummary(o) + ' · ' + won(o.amount) + ' · ' + dateKr(o.created_at, true) })
+        ]),
+        el('div', { cls: 'a' }, [
+          (o.status === 'pending' || o.status === 'paid' || (o.status === 'canceled' && o.auto_canceled))
+            ? btn('승인', 'sm primary', function () { openApprove(o); }) : null,
+          copyBtn(o.id, '주문번호가', '복사')
+        ])
+      ]);
+    })) : empty('구매 내역이 없습니다', false, true);
+
+    // 로그인 기기
+    var sess = Array.isArray(j.sessions) ? j.sessions : [];
+    var sessBox = sess.length ? el('div', { cls: 'mg-rows' }, sess.map(function (s) {
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('div', { cls: 'mg-r1' }, [
+            el('span', { text: s.device || '알 수 없는 기기' }),
+            tag(s.method === 'google' ? 'Google' : '비밀번호', 'line'),
+            s.active ? chip('로그인 중', 'ok') : chip(s.revoked_at ? '로그아웃' : '만료', '')
+          ]),
+          el('div', { cls: 'mg-meta', text: '마지막 사용 ' + dateKr(s.last_seen_at, true) + ' · 시작 ' + dateKr(s.created_at, true) +
+            (s.ip ? ' · IP ' + s.ip : '') + (s.revoked_why ? ' · 종료 사유 ' + s.revoked_why : '') })
+        ])
+      ]);
+    })) : empty('로그인 기록이 없습니다', false, true);
+
+    // 이관한 키
+    var lic = Array.isArray(j.licenses) ? j.licenses : [];
+    var licBox = lic.length ? el('div', { cls: 'mg-rows' }, lic.map(function (l) {
+      return el('div', { cls: 'mg-row' }, [
+        el('div', { cls: 't' }, [
+          el('span', { cls: 'mono', style: 'color:var(--fg)', text: l.key }),
+          el('span', { cls: 'mg-meta', text: '이관 ' + dateKr(l.claimed_at, true, true) + ' · IP ' + (str(l.claim_ip) || '기록 없음') })
+        ]),
+        el('div', { cls: 'a' }, [btn('다른 회원으로 옮기기', 'sm', function () { openReassign(l, mb, changed); })])
+      ]);
+    })) : empty('이관한 키가 없습니다', false, true);
+
+    // 최근 기록
+    var logs = Array.isArray(j.audit) ? j.audit : [];
+    var logBox = el('div');
+    if (!logs.length) logBox.appendChild(el('p', { cls: 'mg-meta', text: '기록이 없습니다' }));
+    logs.forEach(function (a) {
+      logBox.appendChild(el('div', { cls: 'mg-log' }, [
+        el('time', { text: dateKr(a.at, true, true) }),
+        el('span', null, [chip(KIND_LABEL[a.kind] || str(a.kind) || '-', isAlert(a.kind) ? 'bad' : '')]),
+        el('span', { cls: 'd', text: (str(a.detail) || '-') + (str(a.ip) ? ' · IP ' + str(a.ip) : '') })
+      ]));
+    });
+
+    m.setBody([
+      top,
+      alerts,
+      sec('관리', memberActs(mb, changed, true)),
+      sec('이용 중인 상품', info),
+      sec('설치한 방 ' + rooms.length + '개', roomBox),
+      sec('카카오 계정 ' + accs.length + '개', accBox),
+      sec('구매 내역 ' + orders.length + '건', ordBox),
+      sec('로그인 기기', sessBox),
+      sec('이관한 키 ' + lic.length + '개', licBox),
+      el('section', { cls: 'mg-sec' }, [
+        el('h3', { cls: 'mg-h3', text: '최근 기록 ' + logs.length + '건' }),
+        logBox,
+        btn('기록 탭에서 전체 보기', 'sm ghost', function () { m.close(); showAuditForMember(mb.login_id); })
+      ])
+    ]);
+  }
+
+  function openMemberGrant(mb, changed) {
+    var days = textInput({ type: 'number', mono: true, inputmode: 'numeric', min: '1', maxv: 3650, step: '1', value: '30', autofocus: true });
+    days.style.width = '112px';
+    var prev = el('p', { cls: 'mg-p', 'aria-live': 'polite' });
+    var cur = num(mb.macro_until) || 0;
+    function parse() { var d = Math.floor(Number(days.value)); return isFinite(d) && d >= 1 && d <= 3650 && String(days.value).indexOf('.') < 0 ? d : 0; }
+    function upd() {
+      var d = parse();
+      prev.textContent = d ? '만료 예정: ' + dateKr(Math.max(Date.now(), cur) + d * DAY, true) + ' (지금 만료일 뒤로 ' + d + '일)' : '기간은 1~3650일로 입력하십시오.';
+    }
+    days.addEventListener('input', upd);
+    upd();
+    confirmAct({
+      title: '매크로 기간 추가',
+      body: [
+        kv([['회원', mb.login_id], [plabel('macro'), cur > Date.now() ? '만료 ' + dateKr(cur, true) : (cur ? '만료됨' : '없음')]]),
+        para('결제 없이 ' + plabel('macro') + ' 기간을 늘립니다. 남은 기간이 있으면 만료일 뒤로 이어지고, 이미 만료되었으면 지금부터 계산합니다. 이 회원의 카카오 계정에 바로 반영됩니다.'),
+        el('div', { cls: 'fld' }, [el('label', { text: '추가할 일수' }), el('div', { cls: 'mg-numrow' }, [days, el('span', { cls: 'dim tiny', text: '일 (1~3650)' })])]),
+        prev
+      ],
+      ok: '기간 추가',
+      check: function () { return parse() ? '' : '기간은 1~3650일로 입력하십시오'; },
+      run: function () { return api('POST', '/admin/member-grant', { id: mb.id, macro_days: parse() }); },
+      failMsg: '기간을 추가하지 못했습니다',
+      done: function (r) {
+        toast('매크로 기간을 추가했습니다 · 만료 ' + dateKr(r.json.macro_until, true), 'ok');
+        if (changed) changed();
+      }
+    });
+  }
+
+  function openMemberBlock(mb, changed) {
+    var blocked = !!str(mb.blocked_reason);
+    if (blocked) {
+      confirmAct({
+        title: '차단 해제',
+        body: [
+          kv([['회원', mb.login_id], ['차단 사유', str(mb.blocked_reason)]]),
+          para('차단을 해제합니다. 다시 로그인할 수 있고, 카카오 계정 발송과 설치한 방의 K bot 기능이 이어집니다.')
+        ],
+        ok: '차단 해제',
+        run: function () { return api('POST', '/admin/member-block', { id: mb.id, reason: null }); },
+        failMsg: '처리하지 못했습니다',
+        done: function () { toast('차단을 해제했습니다', 'ok'); if (changed) changed(); }
+      });
+      return;
+    }
+    var reason = textInput({ max: 200, placeholder: '예: 결제 분쟁, 이용 조건 위반', autofocus: true });
+    confirmAct({
+      title: '회원 차단',
+      danger: true,
+      body: [
+        kv([['회원', mb.login_id]]),
+        note('이 회원의 로그인을 막고 모든 기기에서 로그아웃시킵니다. 카카오 계정 발송과 설치한 방의 K bot 기능이 멈추며, K bot 계정은 방에 남아 조용히 있습니다. 차단을 해제하면 그대로 이어집니다.', true),
+        field('차단 사유 (필수, 200자 이하)', reason, null, 'mbReason')
+      ],
+      ok: '차단',
+      check: function () { var s = str(reason.value); return s && s.length <= 200 ? '' : '차단 사유를 1~200자로 입력하십시오'; },
+      run: function () { return api('POST', '/admin/member-block', { id: mb.id, reason: str(reason.value) }); },
+      failMsg: '차단하지 못했습니다',
+      done: function (r) { toast('회원을 차단했습니다 · 로그아웃 ' + (num(r.json.ended) || 0) + '대', 'ok'); if (changed) changed(); }
+    });
+  }
+
+  function openMemberLogout(mb, changed) {
+    confirmAct({
+      title: '모든 기기 로그아웃',
+      body: [kv([['회원', mb.login_id], ['로그인 기기', (num(mb.sessions_n) || 0) + '대']]),
+             para('이 회원의 모든 로그인을 끝냅니다. 회원은 다시 로그인하면 이어서 사용할 수 있습니다.')],
+      ok: '로그아웃',
+      run: function () { return api('POST', '/admin/member-logout', { id: mb.id }); },
+      failMsg: '처리하지 못했습니다',
+      done: function (r) { toast('로그아웃했습니다 · ' + (num(r.json.ended) || 0) + '대', 'ok'); if (changed) changed(); }
+    });
+  }
+
+  function openMemberPwReset(mb, changed) {
+    confirmAct({
+      title: '임시 비밀번호 발급',
+      danger: true,
+      body: [
+        kv([['회원', mb.login_id]]),
+        note('12자 임시 비밀번호를 만들어 지금 비밀번호를 바꾸고 모든 기기에서 로그아웃시킵니다. 임시 비밀번호는 다음 화면에서 한 번만 표시됩니다. 상담에서 본인 확인을 마친 경우에만 발급하십시오.', true)
+      ],
+      ok: '발급',
+      run: function () { return api('POST', '/admin/member-pwreset', { id: mb.id }); },
+      failMsg: '발급하지 못했습니다',
+      done: function (r) {
+        var pw = str(r.json.temp_password);
+        var m2 = modal({ title: '임시 비밀번호', body: [
+          para('아래 비밀번호를 회원에게 전달하십시오. 이 창을 닫으면 다시 볼 수 없습니다. 회원은 로그인한 뒤 내 계정에서 비밀번호를 바꿔야 합니다.'),
+          el('div', { cls: 'big hi' }, [
+            el('div', { cls: 'k', text: '아이디 ' + (r.json.login_id || mb.login_id) }),
+            el('div', { cls: 'mg-keybox' }, [el('div', { cls: 'v key', text: pw })])
+          ])
+        ] });
+        m2.setActions([btn('닫기', 'ghost', function () { m2.close(); }),
+                       btn('복사', 'primary', function () { copy(pw, '임시 비밀번호가'); }, { 'data-autofocus': '' })]);
+        var af = $('[data-autofocus]', m2.dlg);
+        if (af) af.focus();
+        if (changed) changed();
+      }
+    });
+  }
+
+  function openReassign(l, mb, changed) {
+    var login = textInput({ max: 40, placeholder: '옮길 회원 아이디', autofocus: true });
+    confirmAct({
+      title: '키 옮기기',
+      danger: true,
+      body: [
+        kv([['키', l.key, 'mono'], ['지금 회원', mb.login_id], ['이관', dateKr(l.claimed_at, true) + ' · IP ' + (str(l.claim_ip) || '기록 없음')]]),
+        note('잘못 이관된 키를 다른 회원에게 옮깁니다. 키에 묶인 카카오 계정도 함께 옮겨지고, 지금 회원은 모든 기기에서 로그아웃됩니다. 매크로 기간은 자동으로 다시 계산하지 않으므로 필요하면 두 회원의 기간을 따로 조정하십시오.', true),
+        field('옮길 회원 아이디', login, '회원 번호를 입력해도 됩니다.', 'raLogin')
+      ],
+      ok: '옮기기',
+      check: function () { return str(login.value) ? '' : '옮길 회원 아이디를 입력하십시오'; },
+      run: function () {
+        var v = str(login.value);
+        var body = { key: l.key_ref };
+        if (/^#?\d+$/.test(v)) body.member_id = v.replace(/^#/, ''); else body.login_id = v;
+        return api('POST', '/admin/license-reassign', body);
+      },
+      failMsg: '옮기지 못했습니다',
+      done: function () { toast('키를 옮겼습니다', 'ok'); if (changed) changed(); }
+    });
+  }
+
+  /* ══════════════════ 11. K bot 계정 ══════════════════
+     봇 카카오 계정은 콘솔의 계정 등록과 같은 단계로 등록한다(휴대폰 확인 번호 → 확인 대기 → 완료).
+     비밀번호는 서버에 저장하지 않는다(sender 메모리에만, 8.11). */
+
+  var BOTS = { list: [], gen: 0, senderUp: true, defaultCap: 20 };
+
+  function botState(b) {
+    if (b.state === 'needs_register') return { kr: '등록 필요', cls: 'bad' };
+    var conn = b.live ? !!b.live.connected : b.state === 'connected';
+    if (conn) return { kr: '접속 중', cls: 'ok' };
+    return { kr: '연결 대기', cls: 'warn' };
+  }
+  function botTitle(b) { return str(b.nickname) || '닉네임 확인 전'; }
+
+  function loadBots() {
+    var my = ++BOTS.gen;
+    var box = $('#botList');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
+    return api('GET', '/admin/bots').then(function (r) {
+      if (my !== BOTS.gen) return null;
+      if (kicked(r)) return null;
+      if (!r.ok) { listState(box, 'K bot 계정을 불러오지 못했습니다\n' + errText(r), true); $('#botCount').textContent = ''; return null; }
+      var j = r.json;
+      BOTS.list = j.bots || [];
+      BOTS.senderUp = j.sender_up !== false;
+      BOTS.defaultCap = num(j.default_cap) || 20;
+      var sys = $('#botSys');
+      clear(sys);
+      if (!BOTS.senderUp) sys.appendChild(el('div', { style: 'margin-bottom:12px' }, note('발송 프로세스가 멈춰 있어 접속 상태를 확인할 수 없고, 등록·해제를 할 수 없습니다. 프로세스가 다시 뜨면 저장된 계정으로 이어서 접속합니다.', true)));
+      var used = 0, cap = 0, conn = 0;
+      BOTS.list.forEach(function (b) { used += num(b.rooms_n) || 0; if (b.enabled) cap += num(b.room_cap) || 0; if (botState(b).cls === 'ok') conn++; });
+      $('#botCount').textContent = 'K bot 계정 ' + BOTS.list.length + '개 · 접속 ' + conn + ' · 맡은 방 ' + used + ' / ' + cap;
+      clear(box);
+      if (!BOTS.list.length) {
+        listState(box, '등록된 K bot 계정이 없습니다.\n[K bot 계정 등록]으로 운영자 카카오 계정을 등록하면 결제된 방에 자동으로 입장합니다.');
+        return BOTS.list;
+      }
+      BOTS.list.forEach(function (b) { box.appendChild(botItem(b)); });
+      return BOTS.list;
+    });
+  }
+
+  function loadBar(n, cap) {
+    var pct = cap > 0 ? Math.min(1, n / cap) : 0;
+    var bar = el('span', { cls: 'bar' + (pct >= 0.8 ? ' warn' : ''), role: 'img', 'aria-label': '맡은 방 ' + n + ' / 상한 ' + cap });
+    var fill = el('i');
+    fill.style.width = Math.round(pct * 100) + '%';
+    bar.appendChild(fill);
+    return el('div', { cls: 'mg-load' }, [bar, el('span', { cls: 'n', text: '방 ' + n + ' / ' + cap })]);
+  }
+
+  function botItem(b) {
+    var st = botState(b);
+    var item = el('article', { cls: 'mg-item' + (st.cls === 'bad' ? ' alert' : ''), 'aria-label': 'K bot 계정 ' + botTitle(b) });
+    item.appendChild(el('div', { cls: 'mg-r1' }, [
+      el('span', { cls: 'mg-name grow', text: botTitle(b) }),
+      b.nickname_dup ? tag('닉네임 중복', 'warn') : null,
+      b.enabled ? null : tag('배정 중지', 'line'),
+      chip(st.kr, st.cls)
+    ]));
+    item.appendChild(el('div', { cls: 'mg-line mono', text: b.email || '-' }));
+    if (b.nickname_dup) item.appendChild(el('p', { cls: 'hint', style: 'margin-top:0', text: '방장이 구분할 수 있게 봇마다 다른 닉네임을 쓰십시오' }));
+    item.appendChild(loadBar(num(b.rooms_n) || 0, num(b.room_cap) || 0));
+    var meta = [];
+    if (str(b.label)) meta.push(str(b.label));
+    meta.push('등록 ' + dateKr(b.created_at));
+    if (num(b.state_at)) meta.push('상태 변경 ' + dateKr(b.state_at, true));
+    if (num(b.leaves_n)) meta.push('나가기 대기 ' + b.leaves_n + '개');
+    item.appendChild(el('div', { cls: 'mg-meta' }, [el('span', { cls: 'mono', text: b.device_id }), ' · ' + meta.join(' · ')]));
+    item.appendChild(el('div', { cls: 'mg-acts' }, [
+      btn('재등록', 'sm', function () { openBotRegister(b); }),
+      btn(b.enabled ? '배정 중지' : '배정 재개', 'sm', function () { openBotEnable(b); }),
+      btn('상한 변경', 'sm', function () { openBotCap(b); }),
+      btn('맡은 방', 'sm', function () { showRoomsForBot(b); }),
+      btn('해제', 'sm danger', function () { openBotRemove(b); })
+    ]));
+    return item;
+  }
+
+  function afterBotChange() { loadStats(); if (TAB === 'bots') loadBots(); }
+
+  function openBotEnable(b) {
+    var on = !b.enabled;
+    confirmAct({
+      title: on ? '배정 재개' : '배정 중지',
+      body: [kv([['K bot 계정', botTitle(b)], ['카카오계정', b.email || '-', 'mono'], ['맡은 방', (num(b.rooms_n) || 0) + '개']]),
+             para(on ? '새로 결제된 방을 이 계정에 다시 배정합니다.' : '이 계정에 새 방을 배정하지 않습니다. 이미 맡은 방은 그대로 유지합니다.')],
+      ok: on ? '배정 재개' : '배정 중지',
+      run: function () { return api('POST', '/admin/bot-update', { device_id: b.device_id, enabled: on }); },
+      failMsg: '바꾸지 못했습니다',
+      done: function () { toast(on ? '배정을 재개했습니다' : '배정을 중지했습니다', 'ok'); afterBotChange(); }
+    });
+  }
+
+  function openBotCap(b) {
+    var cap = textInput({ type: 'number', mono: true, inputmode: 'numeric', min: '1', maxv: 200, step: '1', value: String(num(b.room_cap) || BOTS.defaultCap), autofocus: true });
+    cap.style.width = '112px';
+    function parse() { var n = Math.floor(Number(cap.value)); return isFinite(n) && n >= 1 && n <= 200 && String(cap.value).indexOf('.') < 0 ? n : 0; }
+    confirmAct({
+      title: '상한 변경',
+      body: [
+        kv([['K bot 계정', botTitle(b)], ['맡은 방', (num(b.rooms_n) || 0) + '개'], ['지금 상한', (num(b.room_cap) || 0) + '개']]),
+        para('이 계정이 맡을 수 있는 방의 수입니다. 상한을 맡은 방보다 낮추어도 이미 맡은 방은 옮기지 않습니다. 방마다 주기 점검이 돌므로 너무 높이지 마십시오.'),
+        el('div', { cls: 'fld' }, [el('label', { text: '방 상한' }), el('div', { cls: 'mg-numrow' }, [cap, el('span', { cls: 'dim tiny', text: '개 (1~200)' })])])
+      ],
+      ok: '변경',
+      check: function () { return parse() ? '' : '방 상한은 1~200개로 입력하십시오'; },
+      run: function () { return api('POST', '/admin/bot-update', { device_id: b.device_id, room_cap: parse() }); },
+      failMsg: '바꾸지 못했습니다',
+      done: function () { toast('상한을 ' + parse() + '개로 바꿨습니다', 'ok'); afterBotChange(); }
+    });
+  }
+
+  function openBotRemove(b) {
+    confirmAct({
+      title: 'K bot 계정 해제',
+      danger: true,
+      body: [
+        kv([['K bot 계정', botTitle(b)], ['카카오계정', b.email || '-', 'mono'], ['맡은 방', (num(b.rooms_n) || 0) + '개']]),
+        note('이 카카오 계정의 연결을 끊고 목록에서 뺍니다. 맡은 방이나 처리하지 않은 나가기가 있으면 해제할 수 없습니다. 먼저 [방] 탭에서 다른 K bot 계정으로 옮기십시오.', true)
+      ],
+      ok: '해제',
+      run: function () { return api('POST', '/admin/bot-remove', { device_id: b.device_id }); },
+      failMsg: '해제하지 못했습니다',
+      done: function () { toast('K bot 계정을 해제했습니다', 'ok'); afterBotChange(); }
+    });
+  }
+
+  // 등록 마법사(콘솔 계정 등록과 같은 단계). bot = 재등록할 계정 또는 null
+  function openBotRegister(bot) {
+    var st = { pendingId: '', deviceId: bot ? bot.device_id : '', gen: 0, done: false, email: '' };
+    var m = modal({ title: bot ? 'K bot 계정 재등록' : 'K bot 계정 등록', onClose: function () {
+      st.gen++;
+      if (st.pendingId && !st.done) api('POST', '/admin/bot-register/cancel', { pending_id: st.pendingId });
+      if (st.done) afterBotChange();
+    } });
+
+    var email = textInput({ max: 80, placeholder: '카카오계정 이메일 또는 전화번호', autocomplete: 'off', value: bot ? (bot.email || '') : '', autofocus: true });
+    var pw = textInput({ type: 'password', max: 200, autocomplete: 'new-password' });
+    var label = textInput({ max: 40, placeholder: '예: K bot 3 (관리용 메모)', value: bot ? (bot.label || '') : '' });
+    var cap = textInput({ type: 'number', mono: true, inputmode: 'numeric', min: '1', maxv: 200, step: '1', value: String(bot ? (num(bot.room_cap) || BOTS.defaultCap) : BOTS.defaultCap) });
+    var forceBox = el('div', { hidden: true });
+
+    function step1(msg) {
+      st.pendingId = '';
+      m.setTitle(bot ? 'K bot 계정 재등록' : 'K bot 계정 등록');
+      clear(forceBox);
+      forceBox.hidden = true;
+      m.setBody([
+        note(bot ? '같은 K bot 계정 id 로 다시 로그인합니다. 맡은 방과 설정은 그대로 이어집니다.'
+                 : '운영자 명의의 카카오 계정을 K bot 계정으로 등록합니다. 고객 계정과 다른 계정을 쓰고, 카카오톡 닉네임은 다른 K bot 계정과 겹치지 않게 정하십시오.'),
+        field('카카오계정', email, null, 'brEmail'),
+        field('비밀번호', pw, '비밀번호는 저장하지 않습니다. 확인이 끝나면 버립니다.', 'brPw'),
+        el('div', { cls: 'mg-row2' }, [
+          field('관리용 이름 (선택)', label, null, 'brLabel'),
+          el('div', { cls: 'fld' }, [el('label', { for: 'brCap', text: '방 상한' }), el('div', { cls: 'mg-numrow' }, [cap, el('span', { cls: 'dim tiny', text: '개' })])])
+        ]),
+        forceBox
+      ]);
+      cap.id = 'brCap';
+      cap.style.width = '112px';
+      var next = btn('다음', 'primary', function () { begin(false, next); });
+      m.setActions([btn('닫기', 'ghost', function () { if (!m.busy) m.close(); }), next]);
+      m.error(msg || '');
+    }
+
+    function begin(forced, b) {
+      if (m.busy) return;
+      var e = str(email.value), p = pw.value;
+      if (!e) { m.error('카카오계정을 입력하십시오'); email.focus(); return; }
+      if (!p) { m.error('비밀번호를 입력하십시오'); pw.focus(); return; }
+      var c = Math.floor(Number(cap.value));
+      if (!isFinite(c) || c < 1 || c > 200) { m.error('방 상한은 1~200개로 입력하십시오'); cap.focus(); return; }
+      m.error('');
+      m.setBusy(true, b);
+      st.email = e;
+      var body = { email: e, password: p, label: str(label.value) || null, room_cap: c, forced: !!forced };
+      if (st.deviceId) body.device_id = st.deviceId;
+      api('POST', '/admin/bot-register/begin', body).then(function (r) {
+        m.setBusy(false, b);
+        if (kicked(r)) return;
+        if (!r.ok) { m.error(errText(r, '등록하지 못했습니다')); return; }
+        var v = r.json;
+        if (v.device_id) st.deviceId = v.device_id;
+        if (v.state === 'ok') { pw.value = ''; done(); return; }
+        if (v.state === 'confirm_on_phone') { step2(v); return; }
+        m.error(v.text || '등록하지 못했습니다. 입력한 계정을 확인한 뒤 다시 시도하십시오.');
+        if (v.can_force) {
+          clear(forceBox);
+          forceBox.hidden = false;
+          var fb = btn('다른 기기 끊기', 'sm primary', function () { begin(true, fb); });
+          forceBox.appendChild(el('div', { cls: 'note warn' }, [
+            el('span', { cls: 'ic', 'aria-hidden': 'true', text: '!' }),
+            el('span', { cls: 'mg-sec' }, [
+              el('span', null, [el('b', { text: '같은 계정이 다른 태블릿·PC에 접속되어 있어 등록하지 못했습니다.' }),
+                ' 다른 기기 접속을 끊으면 그 기기의 카카오톡이 로그아웃되고 이 계정을 다시 등록합니다.']),
+              el('span', null, fb)
+            ])
+          ]));
+        }
+      });
+    }
+
+    function step2(v) {
+      st.pendingId = v.pending_id || st.pendingId;
+      m.setTitle('휴대폰 확인');
+      var started = Date.now();
+      var elapsed = el('span', { cls: 'el', text: '0초' });
+      var waitTxt = el('span', { text: '카카오톡 확인을 기다리는 중입니다' });
+      var hasCode = !!v.passcode;
+      m.setBody([
+        el('div', { cls: 'big hi' }, [
+          el('div', { cls: 'k', text: hasCode ? '휴대폰 카카오톡에 아래 번호를 입력하십시오' : '휴대폰 카카오톡에서 로그인을 확인하십시오' }),
+          hasCode ? el('div', { cls: 'mg-keybox' }, [el('div', { cls: 'v key', text: String(v.passcode), 'aria-label': '확인 번호 ' + v.passcode }), copyBtn(String(v.passcode), '확인 번호가', '번호 복사')]) : null,
+          el('div', { cls: 'tiny dim' }, [el('span', { cls: 'mono', text: st.email }),
+            v.remaining_seconds ? ' · 유효 시간 약 ' + Math.ceil(v.remaining_seconds / 60) + '분' : ''])
+        ]),
+        el('div', { cls: 'wait' }, [
+          el('i', { cls: 'dot live pulse', 'aria-hidden': 'true' }),
+          el('span', { cls: 'txt' }, [waitTxt, el('span', { cls: 'dots', 'aria-hidden': 'true' }, [el('i'), el('i'), el('i')])]),
+          elapsed
+        ]),
+        el('p', { cls: 'hint', text: '이 계정이 로그인된 휴대폰의 카카오톡에서 확인하면 이 창이 자동으로 다음 단계로 넘어갑니다. 2초마다 확인합니다.' })
+      ]);
+      m.setActions([btn('취소', 'ghost', function () {
+        var pid = st.pendingId;
+        st.gen++;
+        st.pendingId = '';
+        if (pid) api('POST', '/admin/bot-register/cancel', { pending_id: pid });
+        step1('');
+      })]);
+      var gen = ++st.gen;
+      var tick = setInterval(function () {
+        if (gen !== st.gen || !m.isOpen()) { clearInterval(tick); return; }
+        elapsed.textContent = Math.floor((Date.now() - started) / 1000) + '초';
+      }, 1000);
+      (function loop() {
+        if (gen !== st.gen || !m.isOpen() || !st.pendingId) { clearInterval(tick); return; }
+        api('POST', '/admin/bot-register/confirm', { pending_id: st.pendingId }).then(function (r) {
+          if (gen !== st.gen || !m.isOpen()) { clearInterval(tick); return; }
+          if (kicked(r)) { clearInterval(tick); return; }
+          if (!r.ok) {
+            m.error('연결이 잠깐 끊겼습니다. 카카오톡 확인을 계속 기다립니다.');
+            sleep(2000).then(loop);
+            return;
+          }
+          var v2 = r.json;
+          m.error('');
+          if (v2.state === 'ok') { clearInterval(tick); pw.value = ''; done(); return; }
+          if (v2.state === 'waiting') { waitTxt.textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다'; sleep(2000).then(loop); return; }
+          if (v2.state === 'confirm_on_phone') { clearInterval(tick); step2(v2); return; }
+          clearInterval(tick);
+          st.pendingId = '';
+          step1(v2.text || '확인 시간이 지났습니다. 처음부터 다시 등록하십시오.');
+        });
+      })();
+    }
+
+    function done() {
+      st.done = true;
+      st.pendingId = '';
+      m.setTitle(bot ? '재등록 완료' : '등록 완료');
+      m.setBody([
+        el('div', { cls: 'chip-row' }, [chip(bot ? '재등록 완료' : '등록 완료', 'ok')]),
+        para(bot ? '다시 연결되었습니다. 맡은 방은 생존·권한 점검 뒤 이어서 동작합니다.'
+                 : '등록되었습니다. 결제된 방 가운데 K bot 계정을 기다리는 방이 있으면 1분 안에 이 계정에 배정됩니다.'),
+        kv([
+          ['카카오계정', st.email, 'mono'],
+          ['K bot 계정 id', st.deviceId, 'mono'],
+          ['닉네임', bot && bot.nickname ? bot.nickname : '접속하면 자동으로 채워집니다']
+        ]),
+        el('p', { cls: 'hint', text: '닉네임이 다른 K bot 계정과 같으면 목록에 닉네임 중복이 표시됩니다. 그때는 카카오톡에서 이 계정의 닉네임을 바꾸십시오.' })
+      ]);
+      var close = btn('닫기', 'primary', function () { m.close(); }, { 'data-autofocus': '' });
+      m.setActions([close]);
+      try { close.focus(); } catch (e) { /* 없음 */ }
+    }
+
+    step1('');
+    try { email.focus(); } catch (e) { /* 없음 */ }
+  }
+
+  /* ══════════════════ 12. 설치한 방 ══════════════════
+     상태 라벨·보조 문구는 서버(installs.publicView)가 준 label·detail 을 그대로 쓴다. */
+
+  var ROOMS = { filter: '', q: '', bot: '', botName: '', gen: 0 };
+
+  // 「K bot 테스트 1」 (관리용 이름)
+  function botName(v) {
+    var nick = str(v.bot_nickname) || '닉네임 확인 전';
+    return '「' + nick + '」' + (str(v.bot_label) && str(v.bot_label) !== nick ? ' ' + str(v.bot_label) : '');
+  }
+
+  function productTags(v) {
+    var out = [];
+    var p = v.products || {};
+    var pp = v.pending_products || {};
+    roomProductIds().forEach(function (id) {
+      if (p[id]) out.push(tag(plabel(id), ''));
+      else if (pp[id]) out.push(tag(plabel(id) + ' · 입금 대기', 'line'));
+    });
+    if (!out.length && !roomProductIds().length) {
+      if (p.roombot) out.push(tag('roombot', ''));
+      if (p.minigame) out.push(tag('minigame', ''));
+    }
+    return out;
+  }
+
+  function roomReason(v) {
+    var parts = [];
+    if (v.hold_reason) parts.push('확인 대기 ' + v.hold_reason);
+    if (v.raw_error_code) parts.push('오류 ' + v.raw_error_code);
+    if (v.error_detail) parts.push(v.error_detail === 'no_bot' ? '배정할 K bot 계정 없음' : (v.error_detail === 'rate_limited' ? '입장 제한 대기' : v.error_detail));
+    if (num(v.next_try_at) && num(v.next_try_at) > Date.now()) parts.push(hhmm(v.next_try_at) + ' 다시 입장');
+    return parts.join(' · ');
+  }
+
+  function loadRooms() {
+    var my = ++ROOMS.gen;
+    var box = $('#roomList');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
+    var q = '/admin/rooms?limit=300&display=' + encodeURIComponent(ROOMS.filter) +
+      (ROOMS.q ? '&q=' + encodeURIComponent(ROOMS.q) : '') + (ROOMS.bot ? '&bot=' + encodeURIComponent(ROOMS.bot) : '');
+    renderRoomScope();
+    loadBlocks();
+    return api('GET', q).then(function (r) {
+      if (my !== ROOMS.gen) return;
+      if (kicked(r)) return;
+      if (!r.ok) { listState(box, '방 목록을 불러오지 못했습니다\n' + errText(r), true); $('#roomCount').textContent = ''; return; }
+      var list = r.json.rooms || [];
+      var c = r.json.counts || {};
+      var cnt = { '': c.live, attention: c.attention, hold: c.hold, waiting: c.waiting, active: c.active, pending: c.pending };
+      $$('#roomFilt button').forEach(function (b) {
+        var f = b.getAttribute('data-f');
+        var em = $('em', b);
+        if (!em) { em = el('em'); b.appendChild(em); }
+        em.textContent = num(cnt[f]) === null ? '' : String(cnt[f]);
+      });
+      $('#roomCount').textContent = list.length + '개 표시' + (list.length >= 300 ? ' (최근 300개까지)' : '') + ' · 최근 설치 순';
+      clear(box);
+      if (!list.length) {
+        listState(box, ROOMS.q || ROOMS.bot ? '조건에 맞는 방이 없습니다' : (ROOMS.filter ? '해당 상태의 방이 없습니다' : '설치한 방이 없습니다.\n회원이 방 상품을 결제하거나 [방 지급]으로 설치하면 이 목록에 표시됩니다.'));
+        return;
+      }
+      list.forEach(function (v) { box.appendChild(roomItem(v)); });
+    });
+  }
+
+  function renderRoomScope() {
+    var box = $('#roomScope');
+    clear(box);
+    if (!ROOMS.bot) { box.hidden = true; return; }
+    box.hidden = false;
+    box.appendChild(el('span', { text: 'K bot 계정 「' + (ROOMS.botName || ROOMS.bot) + '」의 방만 표시합니다' }));
+    box.appendChild(btn('전체 보기', 'sm ghost', function () { ROOMS.bot = ''; ROOMS.botName = ''; listState($('#roomList'), '불러오는 중…'); loadRooms(); }));
+  }
+
+  function showRoomsForBot(b) {
+    ROOMS.bot = b.device_id;
+    ROOMS.botName = botTitle(b);
+    ROOMS.filter = '';
+    ROOMS.q = '';
+    $('#roomQ').value = '';
+    setFilter('#roomFilt', '');
+    if (TAB === 'rooms') { listState($('#roomList'), '불러오는 중…'); loadRooms(); } else switchTab('rooms');
+  }
+
+  function roomItem(v) {
+    var live = v.phase === 'installed' || v.phase === 'pending_payment';
+    var cls = 'mg-item';
+    if (v.display === 'error') cls += ' alert';
+    else if (v.hold_reason) cls += ' review';
+    if (!live) cls += ' dim';
+    var item = el('article', { cls: cls, 'aria-label': '설치 #' + v.id });
+    item.appendChild(el('div', { cls: 'mg-r1' }, [
+      el('span', { cls: 'grow' }, el('button', { type: 'button', cls: 'mg-link sans', text: v.link_name || '이름 확인 전',
+        'aria-label': '설치 #' + v.id + ' 상세 열기', onclick: function () { openRoom(v.id); } })),
+      productTags(v),
+      v.hold_reason ? tag('확인 대기', 'warn') : null,
+      chip(v.label, ROOM_CLS[v.display] || '')
+    ]));
+    item.appendChild(el('div', { cls: 'mg-line' }, [
+      el('span', { cls: 'mono', text: shortLink(v.link_url) }), ' · 회원 ',
+      inl(v.member && v.member.login_id ? v.member.login_id : '#' + (v.member ? v.member.id : '-'), function () { openMember(v.member.id); })
+    ]));
+    if (v.detail && (v.display === 'error' || v.display === 'waiting' || v.display === 'joining')) {
+      item.appendChild(el('div', { cls: v.display === 'error' ? 'mg-crit' : 'mg-meta', text: v.detail }));
+    }
+    var meta = ['설치 #' + v.id];
+    meta.push(v.bot_device_id ? 'K bot 계정 ' + botName(v) : 'K bot 계정 미배정');
+    var reason = roomReason(v);
+    if (reason) meta.push(reason);
+    meta.push('입장 시도 ' + (num(v.attempts) || 0) + '회');
+    meta.push('고객 다시 시도 ' + (num(v.retry_n) || 0) + '회');
+    if (v.phase === 'removed') meta.push('해제 ' + dateKr(v.removed_at, true));
+    if (v.phase === 'canceled') meta.push('취소된 예약');
+    if (v.order_id) meta.push('주문 ' + v.order_id);
+    item.appendChild(el('div', { cls: 'mg-meta', text: meta.join(' · ') }));
+    item.appendChild(roomActs(v, function () { loadStats(); loadRooms(); }));
+    return item;
+  }
+
+  // 방 동작 줄(목록·상세 공통)
+  function roomActs(v, changed, inDetail) {
+    var sm = inDetail ? '' : 'sm';
+    var acts = el('div', { cls: inDetail ? 'btn-row' : 'mg-acts', style: inDetail ? 'margin-top:0' : null });
+    if (!inDetail) acts.appendChild(btn('상세', 'sm', function () { openRoom(v.id); }));
+    if (v.phase === 'installed') {
+      if (v.hold_reason) acts.appendChild(btn('확인 후 입장', (sm + ' primary').trim(), function () { openRoomRelease(v, changed); }));
+      acts.appendChild(btn('다시 시도', sm, function () { openRoomRetry(v, changed); }));
+      acts.appendChild(btn('다른 봇으로 이동', sm, function () { openRoomMove(v, changed); }));
+      acts.appendChild(btn('링크 바꾸기', sm, function () { openRoomRebind(v, changed); }));
+      acts.appendChild(btn('상품 변경', sm, function () { openRoomProducts(v, changed); }));
+      acts.appendChild(btn('다른 회원에게 넘기기', sm, function () { openRoomTransfer(v, changed); }));
+      acts.appendChild(btn('설치 해제', (sm + ' danger').trim(), function () { openRoomRemove(v, changed); }));
+      acts.appendChild(btn('방 금지', (sm + ' danger').trim(), function () { openRoomBlock(v, changed); }));
+    } else if (v.phase === 'pending_payment' && v.order_id) {
+      acts.appendChild(btn('주문 보기', sm, function () { ORD.filter = 'open'; setFilter('#ordFilt', 'open'); closeAllModals(); switchTab('orders'); }));
+    }
+    return acts;
+  }
+
+  function roomHead(v) {
+    return kv([
+      ['방', v.link_name || '이름 확인 전'],
+      ['링크', shortLink(v.link_url), 'mono'],
+      ['회원', v.member && v.member.login_id ? v.member.login_id : '-'],
+      ['상태', v.label]
+    ]);
+  }
+
+  function openRoom(id, outerChanged) {
+    var m = modal({ title: '방 상세', wide: true, light: true, body: empty('불러오는 중…'),
+                    onClose: function () { if (TAB === 'rooms') loadRooms(); } });
+    m.setActions([btn('닫기', 'ghost', function () { m.close(); })]);
+    var gen = 0;
+    function refresh() {
+      var my = ++gen;
+      return api('GET', '/admin/room?id=' + encodeURIComponent(String(id))).then(function (r) {
+        if (my !== gen || !m.isOpen()) return;
+        if (kicked(r)) return;
+        if (!r.ok) { m.setBody(empty(errText(r, '방을 불러오지 못했습니다'), true)); return; }
+        renderRoomDetail(m, r.json, function () { loadStats(); refresh(); if (outerChanged) outerChanged(); });
+      });
+    }
+    refresh();
+  }
+
+  function renderRoomDetail(m, j, changed) {
+    var v = j.room || {};
+    m.setTitle('방 상세 · 설치 #' + v.id);
+    var top = el('div', { cls: 'big hi' }, [
+      el('div', { cls: 'k', text: '설치 #' + v.id + (v.phase === 'removed' ? ' · 설치 해제' : (v.phase === 'canceled' ? ' · 취소된 예약' : '')) }),
+      el('div', { cls: 'v', text: v.link_name || '이름 확인 전' }),
+      el('div', { cls: 'chip-row', style: 'margin-top:10px' }, [chip(v.label, ROOM_CLS[v.display] || ''), productTags(v),
+        v.hold_reason ? tag('확인 대기', 'warn') : null])
+    ]);
+    var alerts = [];
+    if (v.detail) alerts.push(note(v.detail, v.display === 'error' || v.display === 'waiting'));
+    if (v.hold_reason) alerts.push(note('운영자 확인 대기 중입니다(' + v.hold_reason + '). 방 이름이 확인 대기 낱말에 걸렸습니다. 문제가 없으면 [확인 후 입장]을 누르십시오.', true));
+    var live = j.live;
+    var info = kv([
+      ['링크', [el('span', { cls: 'mono', text: shortLink(v.link_url) }), ' ', copyBtn(v.link_url, '링크가', '복사')]],
+      ['방 id', v.link_id || '확인 전', v.link_id ? 'mono' : null],
+      ['채팅 id', v.chat_id || '-', v.chat_id ? 'mono' : null],
+      ['회원', [inl(v.member && v.member.login_id ? v.member.login_id : '-', function () { openMember(v.member.id); }), ' · #' + (v.member ? v.member.id : '-')]],
+      ['K bot 계정', v.bot_device_id ? [botName(v) + ' · ', el('span', { cls: 'mono', text: v.bot_device_id })] : '미배정'],
+      ['상태', (v.state || '-') + (v.raw_error_code ? ' · ' + v.raw_error_code : '') + (v.error_detail ? ' · ' + v.error_detail : '')],
+      ['권한', (num(v.perm) ? String(v.perm) + ((num(v.perm) & 5) ? ' (관리 권한 있음)' : ' (관리 권한 없음)') : '-') +
+        (live ? ' · 지금 ' + (live.connected ? '연결됨' : '연결 안 됨') + (live.perm !== undefined && live.perm !== null ? ' · 권한 ' + live.perm : '') : '')],
+      ['입장 시도', (num(v.attempts) || 0) + '회' + (num(v.next_try_at) ? ' · 다음 ' + dateKr(v.next_try_at, true) : '')],
+      ['고객 다시 시도', (num(v.retry_n) || 0) + '회' + (num(v.retry_at) ? ' · 마지막 ' + dateKr(v.retry_at, true) : '')],
+      ['참여코드', v.has_passcode ? '저장됨(값은 표시하지 않음)' : '없음'],
+      ['주문', v.order_id || '관리자 지급', v.order_id ? 'mono' : null],
+      ['설치', dateKr(v.installed_at || v.created_at, true) + (num(v.joined_at) ? ' · 입장 ' + dateKr(v.joined_at, true) : '')],
+      v.phase === 'removed' ? ['해제', dateKr(v.removed_at, true)] : null
+    ]);
+    var leaves = Array.isArray(j.leaves) ? j.leaves : [];
+    var leaveBox = leaves.length ? el('div', { cls: 'mg-rows' }, leaves.map(function (l) {
+      return el('div', { cls: 'mg-row' }, [el('div', { cls: 't' }, [
+        el('span', { text: (LEAVE_WHY[l.why] || l.why) + ' · ' + dateKr(l.created_at, true) }),
+        el('span', { cls: 'mg-meta' }, [el('span', { cls: 'mono', text: l.bot_device_id }), l.result ? ' · ' + l.result : ' · 처리 대기'])
+      ])]);
+    })) : null;
+    var logs = Array.isArray(j.log) ? j.log : [];
+    var logBox = el('div');
+    if (!logs.length) logBox.appendChild(el('p', { cls: 'mg-meta', text: '기록이 없습니다' }));
+    logs.forEach(function (x) {
+      logBox.appendChild(el('div', { cls: 'mg-log' }, [
+        el('time', { text: dateKr(x.at, true, true) }),
+        el('span', null, [chip(x.text || x.kind, x.ok === false ? 'bad' : '')]),
+        x.detail && Object.keys(x.detail).length ? el('span', { cls: 'd', text: JSON.stringify(x.detail) }) : null
+      ]));
+    });
+    var cfg = el('pre', { cls: 'mg-raw scroll', text: JSON.stringify(j.config || {}, null, 2) });
+    m.setBody([
+      top,
+      alerts,
+      v.phase === 'installed' ? sec('관리', roomActs(v, changed, true)) : null,
+      sec('정보', info),
+      leaveBox ? sec('처리 대기 중인 나가기 ' + leaves.length + '개', leaveBox) : null,
+      sec('설정 · 버전 ' + (num(j.config_rev) || 0) + (num(j.config_at) ? ' · ' + dateKr(j.config_at, true) : ''), cfg),
+      sec('조치 기록 ' + logs.length + '건 (최근 ' + 100 + '건)', logBox)
+    ]);
+  }
+
+  function roomDone(msg, changed) { return function () { toast(msg, 'ok'); if (changed) changed(); }; }
+
+  function openRoomRetry(v, changed) {
+    confirmAct({
+      title: '다시 시도',
+      body: [roomHead(v), para('상태와 오류에 관계없이 처음부터 다시 입장합니다. 고객 다시 시도 횟수와 입장 제한 대기가 초기화됩니다. 이미 방에 있으면 입장 없이 상태만 다시 확인합니다.')],
+      ok: '다시 시도',
+      run: function () { return api('POST', '/admin/room-retry', { id: v.id }); },
+      failMsg: '다시 시도하지 못했습니다',
+      done: roomDone('다시 입장 대기 목록에 넣었습니다', changed)
+    });
+  }
+
+  function openRoomRelease(v, changed) {
+    confirmAct({
+      title: '확인 후 입장',
+      body: [roomHead(v), kv([['확인 대기 사유', v.hold_reason || '-']]),
+             para('운영자 확인 대기를 풀고 K bot 계정을 배정해 입장합니다. 금지할 방이면 이 버튼 대신 [방 금지]를 쓰십시오.')],
+      ok: '입장 허용',
+      run: function () { return api('POST', '/admin/room-release', { id: v.id }); },
+      failMsg: '처리하지 못했습니다',
+      done: function (r) {
+        toast(r.json.bot ? '입장을 허용했습니다' : '입장을 허용했습니다. 배정할 K bot 계정이 없어 순서를 기다립니다', 'ok');
+        if (changed) changed();
+      }
+    });
+  }
+
+  function openRoomMove(v, changed) {
+    var m = modal({ title: '다른 봇으로 이동', body: [roomHead(v), empty('K bot 계정을 불러오는 중…', false, true)] });
+    var okBtn = btn('이동', 'primary');
+    okBtn.disabled = true;
+    m.setActions([btn('닫기', 'ghost', function () { if (!m.busy) m.close(); }), okBtn]);
+    api('GET', '/admin/bots').then(function (r) {
+      if (!m.isOpen()) return;
+      if (kicked(r)) return;
+      if (!r.ok) { m.setBody([roomHead(v), empty(errText(r, 'K bot 계정을 불러오지 못했습니다'), true, true)]); return; }
+      var gname = 'mg-move-' + v.id;
+      var pick = el('div', { cls: 'mg-pick', role: 'radiogroup', 'aria-label': '옮길 K bot 계정' });
+      function opt(value, title, sub, tagsKids, checked, disabled) {
+        var radio = el('input', { type: 'radio', name: gname, value: value, checked: !!checked, disabled: !!disabled });
+        radio.addEventListener('change', function () { okBtn.disabled = false; });
+        return el('label', { cls: 'chk' }, [radio, el('span', { cls: 'box', 'aria-hidden': 'true' }),
+          el('span', { cls: 't' }, [el('span', { cls: 'mg-r1' }, [el('span', { style: 'color:var(--fg)', text: title }), tagsKids]),
+                                    sub ? el('span', { cls: 'mg-meta', text: sub }) : null])]);
+      }
+      pick.appendChild(opt('', '자동 배정', '지금 계정을 빼고 맡은 방이 가장 적은 계정으로 옮깁니다', null, true));
+      (r.json.bots || []).forEach(function (b) {
+        if (b.device_id === v.bot_device_id) return;
+        var s = botState(b);
+        pick.appendChild(opt(b.device_id, botTitle(b), (b.email || '') + ' · 방 ' + (num(b.rooms_n) || 0) + ' / ' + (num(b.room_cap) || 0),
+          [chip(s.kr, s.cls), b.enabled ? null : tag('배정 중지', 'line')], false, false));
+      });
+      okBtn.disabled = false;
+      m.setBody([
+        roomHead(v),
+        kv([['지금 K bot 계정', v.bot_device_id ? botName(v) : '미배정']]),
+        note('지금 K bot 계정은 방에서 나가고 새 계정이 입장합니다. 방 관리봇이 있으면 방장이 새 계정을 부방장으로 다시 지정해야 합니다.', true),
+        sec('옮길 K bot 계정', pick)
+      ]);
+    });
+    okBtn.addEventListener('click', function () {
+      if (m.busy) return;
+      var chosen = $('input[name="mg-move-' + v.id + '"]:checked', m.dlg);
+      if (!chosen) { m.error('옮길 K bot 계정을 고르십시오'); return; }
+      m.error('');
+      m.setBusy(true, okBtn);
+      api('POST', '/admin/room-move', { id: v.id, bot_device_id: chosen.value || null }).then(function (res) {
+        m.setBusy(false, okBtn);
+        if (kicked(res)) return;
+        if (!res.ok) { m.error(errText(res, '옮기지 못했습니다')); return; }
+        m.close();
+        toast('다른 K bot 계정으로 옮겼습니다', 'ok');
+        if (changed) changed();
+      });
+    });
+  }
+
+  function openRoomRebind(v, changed) {
+    var link = textInput({ type: 'url', inputmode: 'url', max: 2000, placeholder: 'https://open.kakao.com/o/…', autofocus: true });
+    confirmAct({
+      title: '링크 바꾸기',
+      body: [roomHead(v),
+             note('지금 방에서 나가고 새 링크의 방으로 다시 입장합니다. 링크가 만료되었거나 방이 삭제된 경우에 씁니다. 다른 설치와 같은 방이면 바꿀 수 없습니다.', true),
+             field('새 오픈채팅방 링크', link, '카카오톡에서 공유한 글을 그대로 붙여 넣어도 링크만 읽습니다.', 'rbLink')],
+      ok: '링크 바꾸기',
+      check: function () { return str(link.value) ? '' : '새 링크를 입력하십시오'; },
+      run: function () { return api('POST', '/admin/room-rebind', { id: v.id, link: str(link.value) }); },
+      failMsg: '링크를 바꾸지 못했습니다',
+      done: function (r) { toast(r.json.verified === false ? '링크를 바꿨습니다. 방은 입장할 때 확인합니다' : '링크를 바꿨습니다', 'ok'); if (changed) changed(); }
+    });
+  }
+
+  function openRoomProducts(v, changed) {
+    var p = v.products || {};
+    var rows = roomProductIds().map(function (id) {
+      return { id: id, c: checkRow(plabel(id), id === 'roombot' ? '방장이 K bot 계정을 부방장으로 지정해야 동작합니다' : '입장하면 바로 게임 명령어를 쓸 수 있습니다', !!p[id]) };
+    });
+    confirmAct({
+      title: '상품 변경',
+      body: [roomHead(v),
+             para('결제 없이 상품을 켜거나 끕니다(지급·회수). 미니게임봇을 처음 켜면 게임 설정이 기본값(켜짐)으로 채워집니다. 모두 빼려면 설치를 해제하십시오.'),
+             el('div', { cls: 'mg-checks' }, rows.map(function (x) { return x.c.node; }))],
+      ok: '저장',
+      check: function () { return rows.some(function (x) { return x.c.input.checked; }) ? '' : '상품을 1개 이상 선택하십시오'; },
+      run: function () {
+        var body = { id: v.id };
+        rows.forEach(function (x) { body[x.id] = !!x.c.input.checked; });
+        return api('POST', '/admin/room-products', body);
+      },
+      failMsg: '상품을 바꾸지 못했습니다',
+      done: roomDone('상품을 바꿨습니다', changed)
+    });
+  }
+
+  function openRoomTransfer(v, changed) {
+    var login = textInput({ max: 40, placeholder: '받을 회원 아이디', autofocus: true });
+    confirmAct({
+      title: '다른 회원에게 넘기기',
+      body: [roomHead(v),
+             note('설치의 주인을 바꿉니다. 상품·설정·K bot 계정은 그대로입니다. 방장 확인은 상담에서 끝낸 뒤 넘기십시오.', true),
+             field('받을 회원 아이디', login, '회원 번호를 입력해도 됩니다.', 'tfLogin')],
+      ok: '넘기기',
+      check: function () { return str(login.value) ? '' : '받을 회원 아이디를 입력하십시오'; },
+      run: function () {
+        var s = str(login.value);
+        var body = { id: v.id };
+        if (/^#?\d+$/.test(s)) body.member_id = s.replace(/^#/, ''); else body.login_id = s;
+        return api('POST', '/admin/room-transfer', body);
+      },
+      failMsg: '넘기지 못했습니다',
+      done: roomDone('설치를 넘겼습니다', changed)
+    });
+  }
+
+  function openRoomRemove(v, changed) {
+    confirmAct({
+      title: '설치 해제',
+      danger: true,
+      body: [roomHead(v), note('설치를 해제합니다. K bot 계정이 방에서 나가고 회원의 내 방 목록에서 사라집니다. 되돌릴 수 없으며, 환불은 운영자가 계좌로 처리합니다.', true)],
+      ok: '설치 해제',
+      run: function () { return api('POST', '/admin/room-remove', { id: v.id }); },
+      failMsg: '해제하지 못했습니다',
+      done: roomDone('설치를 해제했습니다', changed)
+    });
+  }
+
+  function openRoomBlock(v, changed) {
+    var reason = textInput({ max: 200, placeholder: '예: 도박 홍보 방', autofocus: true });
+    confirmAct({
+      title: '방 금지',
+      danger: true,
+      body: [roomHead(v),
+             note('이 설치를 해제하고, 같은 방(링크·방 id)의 미리 보기·주문·입장을 막습니다. K bot 계정은 방에서 나갑니다.', true),
+             field('금지 사유 (필수, 200자 이하)', reason, null, 'rbkReason')],
+      ok: '방 금지',
+      check: function () { var s = str(reason.value); return s && s.length <= 200 ? '' : '금지 사유를 1~200자로 입력하십시오'; },
+      run: function () { return api('POST', '/admin/room-block', { id: v.id, reason: str(reason.value) }); },
+      failMsg: '금지하지 못했습니다',
+      done: roomDone('방을 금지했습니다', changed)
+    });
+  }
+
+  function openLinkBlock() {
+    var link = textInput({ type: 'url', inputmode: 'url', max: 2000, placeholder: 'https://open.kakao.com/o/…', autofocus: true });
+    var reason = textInput({ max: 200, placeholder: '예: 스팸 방' });
+    confirmAct({
+      title: '링크 금지',
+      danger: true,
+      body: [para('아직 설치되지 않은 방을 미리 막습니다. 이 링크(확인되면 방 id 도)로는 미리 보기·주문·입장을 할 수 없습니다. 설치된 방이면 그 방의 [방 금지]를 쓰십시오.'),
+             field('오픈채팅방 링크', link, null, 'lbLink'),
+             field('금지 사유 (필수, 200자 이하)', reason, null, 'lbReason')],
+      ok: '금지',
+      check: function () {
+        if (!str(link.value)) return '링크를 입력하십시오';
+        var s = str(reason.value);
+        return s && s.length <= 200 ? '' : '금지 사유를 1~200자로 입력하십시오';
+      },
+      run: function () { return api('POST', '/admin/room-block', { link: str(link.value), reason: str(reason.value) }); },
+      failMsg: '금지하지 못했습니다',
+      done: function () { toast('링크를 금지했습니다', 'ok'); loadBlocks(); }
+    });
+  }
+
+  function openRoomGrant(presetLogin, changed) {
+    var login = textInput({ max: 40, placeholder: '회원 아이디', value: presetLogin || '', autofocus: !presetLogin });
+    var link = textInput({ type: 'url', inputmode: 'url', max: 2000, placeholder: 'https://open.kakao.com/o/…', autofocus: !!presetLogin });
+    var code = textInput({ max: 20, placeholder: '없으면 비워 두십시오' });
+    var rows = roomProductIds().map(function (id) { return { id: id, c: checkRow(plabel(id), null, false) }; });
+    confirmAct({
+      title: '방 지급',
+      body: [para('결제 없이 방에 설치합니다(주문 없음). 링크 확인·다른 회원 설치·금지 방 검사는 주문과 같습니다. 이 회원이 이미 같은 방을 가지고 있으면 상품만 더합니다.'),
+             field('회원 아이디', login, '회원 번호를 입력해도 됩니다.', 'rgLogin'),
+             field('오픈채팅방 링크', link, null, 'rgLink'),
+             field('참여코드 (선택)', code, '저장할 때 봉인하며 화면에 다시 보이지 않습니다.', 'rgCode'),
+             sec('설치할 상품', el('div', { cls: 'mg-checks' }, rows.map(function (x) { return x.c.node; })))],
+      ok: '지급',
+      check: function () {
+        if (!str(login.value)) return '회원 아이디를 입력하십시오';
+        if (!str(link.value)) return '링크를 입력하십시오';
+        if (str(code.value).length > 20) return '참여코드는 20자 이하로 입력하십시오';
+        return rows.some(function (x) { return x.c.input.checked; }) ? '' : '설치할 상품을 1개 이상 선택하십시오';
+      },
+      run: function () {
+        var s = str(login.value);
+        var body = { link: str(link.value), passcode: str(code.value) || null };
+        if (/^#?\d+$/.test(s)) body.member_id = s.replace(/^#/, ''); else body.login_id = s;
+        rows.forEach(function (x) { body[x.id] = !!x.c.input.checked; });
+        return api('POST', '/admin/room-grant', body);
+      },
+      failMsg: '지급하지 못했습니다',
+      done: function (r) {
+        toast(r.json.added === false ? '이미 있는 설치에 상품을 더했습니다' : '방을 지급했습니다 · 설치 #' + r.json.install_id, 'ok');
+        loadStats();
+        if (TAB === 'rooms') loadRooms();
+        if (changed) changed();
+      }
+    });
+  }
+
+  /* ── 금지한 방 */
+  var BLK = { gen: 0 };
+  function loadBlocks() {
+    var my = ++BLK.gen;
+    var box = $('#blockList');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
+    return api('GET', '/admin/room-blocks').then(function (r) {
+      if (my !== BLK.gen) return;
+      if (kicked(r)) return;
+      if (!r.ok) { listState(box, '금지 목록을 불러오지 못했습니다\n' + errText(r), true); return; }
+      var list = r.json.blocks || [];
+      $('#blockCount').textContent = list.length + '개';
+      clear(box);
+      if (!list.length) { box.appendChild(empty('금지한 방이 없습니다', false, true)); return; }
+      list.forEach(function (b) {
+        box.appendChild(el('article', { cls: 'mg-item', 'aria-label': '금지한 방 ' + b.id }, [
+          el('div', { cls: 'mg-r1' }, [
+            b.link_url ? el('span', { cls: 'mg-id grow', text: shortLink(b.link_url) })
+                       : el('span', { cls: 'grow' }, ['방 id ', el('span', { cls: 'mg-id', text: b.link_id })]),
+            tag('금지', 'crit')
+          ]),
+          el('div', { cls: 'mg-line', text: '사유: ' + (b.reason || '-') }),
+          el('div', { cls: 'mg-meta', text: (b.link_id ? '방 id ' + b.link_id + ' · ' : '') + '금지 ' + dateKr(b.created_at, true) }),
+          el('div', { cls: 'mg-acts' }, [btn('금지 해제', 'sm', function () { openUnblock(b); })])
+        ]));
+      });
+    });
+  }
+
+  function openUnblock(b) {
+    confirmAct({
+      title: '금지 해제',
+      body: [kv([['링크', b.link_url ? shortLink(b.link_url) : '-', 'mono'], ['방 id', b.link_id || '-', b.link_id ? 'mono' : null], ['사유', b.reason || '-']]),
+             para('금지 목록에서 지웁니다. 이 방을 다시 미리 보기·주문할 수 있습니다. 해제한 설치는 되살아나지 않습니다.')],
+      ok: '금지 해제',
+      run: function () { return api('POST', '/admin/room-unblock', { block_id: b.id }); },
+      failMsg: '해제하지 못했습니다',
+      done: function () { toast('금지를 해제했습니다', 'ok'); loadBlocks(); }
+    });
+  }
+
+  /* ══════════════════ 13. 예전 라이선스 키 ══════════════════
+     새 판매는 회원 계정으로 처리한다. 키 화면은 기존 고객 지원용이다(createLicenses·grant 는 남겨 둔다).
+     회원에게 이관된 키(member_id)는 서버가 연장·회수를 409 로 막는다 → 화면도 회원 상세로 안내한다. */
 
   var KEYS = { term: '', rows: [], total: 0, now: 0, gen: 0, dirty: false };
 
@@ -1270,17 +2761,26 @@
     for (var i = 0; i < fs.length; i++) if (fs[i] && fs[i].feature === id) return fs[i];
     return null;
   }
+  // 키에 있는 기능 + 상품표의 기능(순서는 상품표 먼저)
+  function keyFeatIds(lic) {
+    var ids = featIds();
+    (lic && Array.isArray(lic.features) ? lic.features : []).forEach(function (e) {
+      if (e && e.feature && ids.indexOf(e.feature) < 0) ids.push(e.feature);
+    });
+    return ids;
+  }
   function maxExp(lic) {
     var m = 0;
     (lic.features || []).forEach(function (e) { var x = num(e.expires_at) || 0; if (x > m) m = x; });
     return m;
   }
-  // "시작됐다" 판정은 lib/keys.js grant() 와 같다: 예전 앱 기기 등록 · /panel 첫 로그인 · 만료일이 잡힌 기능
+  // "시작됐다" 판정은 lib/keys.js grant() 와 같다: 예전 앱 기기 등록 · 예전 /panel 첫 로그인 · 만료일이 잡힌 기능
   function isStarted(lic) {
     if (lic.device_id || num(lic.activated_at)) return true;
     return (lic.features || []).some(function (e) { return num(e.expires_at) !== null; });
   }
   function licState(lic, now) {
+    if (lic.member_id) return { kr: '회원 이관', cls: 'info' };
     if (str(lic.blocked_reason)) return { kr: '차단', cls: 'bad' };
     if (lic.revoked) return { kr: '회수', cls: 'bad' };
     if (!(lic.features || []).length) return { kr: '기능 없음', cls: '' };
@@ -1306,10 +2806,11 @@
     return p + ' · ' + dateKr(exp, true) + ' 까지';
   }
 
-  // 목록용 기능 칩: 3종 만료일이 같으면(새 키는 항상 그렇다) 칩 하나로 줄인다
+  // 목록용 기능 칩: 기능 만료일이 모두 같으면 칩 하나로 줄인다
   function featChips(lic, now) {
-    var fs = FEATS.map(function (f) { return findFeat(lic, f); });
-    var all = fs.every(Boolean);
+    var ids = keyFeatIds(lic);
+    var fs = ids.map(function (f) { return findFeat(lic, f); });
+    var all = fs.length > 0 && fs.every(Boolean);
     if (all) {
       var e0 = fs[0];
       var same = fs.every(function (e) {
@@ -1320,38 +2821,38 @@
         var s = featState(e0, now);
         var extra = num(e0.expires_at) !== null ? ' · ' + dateKr(e0.expires_at) + ' 까지'
           : ' · 대기 ' + Math.round((num(e0.duration_ms) || 0) / DAY) + '일';
-        return [chip('기능 3종 ' + s.kr + extra, s.cls)];
+        return [chip('기능 ' + fs.length + '종 ' + s.kr + extra, s.cls)];
       }
     }
     var out = [];
     var missing = [];
-    FEATS.forEach(function (f, i) {
-      if (fs[i]) { var s2 = featState(fs[i], now); out.push(chip(FEAT_SHORT[f] + ' ' + s2.kr, s2.cls)); }
-      else missing.push(FEAT_SHORT[f]);
+    ids.forEach(function (f, i) {
+      if (fs[i]) { var s2 = featState(fs[i], now); out.push(chip(featLabel(f) + ' ' + s2.kr, s2.cls)); }
+      else missing.push(featLabel(f));
     });
     if (missing.length) out.push(tag('미보유 ' + missing.join(' · '), 'line'));
     return out;
   }
 
-  function loadKeys(append) {
+  function loadKeys(appendMore) {
     var my = ++KEYS.gen;
     var box = $('#keyList');
     var more = $('#keyMore');
-    if (!append) {
+    if (!appendMore) {
       KEYS.rows = [];
-      if (!box.firstChild || box.firstChild.className.indexOf('mg-empty') >= 0) listState(box, '불러오는 중…');
+      if (isLoadingBox(box)) listState(box, '불러오는 중…');
     } else {
       busyBtn(more, true);
     }
     KEYS.dirty = false;
-    var offset = append ? KEYS.rows.length : 0;
+    var offset = appendMore ? KEYS.rows.length : 0;
     var q = '/admin/list?limit=' + KEY_PAGE + '&offset=' + offset + (KEYS.term ? '&q=' + encodeURIComponent(KEYS.term) : '');
     api('GET', q).then(function (r) {
       if (my !== KEYS.gen) return;
       busyBtn(more, false);
       if (kicked(r)) return;
       if (!r.ok) {
-        if (append) { toast('목록을 더 불러오지 못했습니다 · ' + errText(r), 'bad'); return; }
+        if (appendMore) { toast('목록을 더 불러오지 못했습니다 · ' + errText(r), 'bad'); return; }
         listState(box, '키 목록을 불러오지 못했습니다\n' + errText(r), true);
         $('#keyCount').textContent = '';
         more.hidden = true;
@@ -1359,7 +2860,7 @@
       }
       KEYS.total = num(r.json.total) || 0;
       KEYS.now = num(r.json.now) || Date.now();
-      KEYS.rows = (append ? KEYS.rows : []).concat(r.json.licenses || []);
+      KEYS.rows = (appendMore ? KEYS.rows : []).concat(r.json.licenses || []);
       renderKeys();
     });
   }
@@ -1372,7 +2873,7 @@
       : '전체 ' + KEYS.total + '건 중 ' + KEYS.rows.length + '건 표시 · 최근 발급 순';
     $('#keyMore').hidden = KEYS.rows.length >= KEYS.total;
     if (!KEYS.rows.length) {
-      listState(box, KEYS.term ? '검색 결과가 없습니다' : '발급된 키가 없습니다.\n[새 키 발급] 으로 키를 발급하십시오.');
+      listState(box, KEYS.term ? '검색 결과가 없습니다' : '발급된 키가 없습니다.');
       return;
     }
     KEYS.rows.forEach(function (lic) { box.appendChild(keyItem(lic, KEYS.now)); });
@@ -1386,6 +2887,10 @@
         'aria-label': '키 ' + lic.key + ' 상세 열기', onclick: function () { openKey(lic.key); } })),
       chip(st.kr, st.cls)
     ]));
+    if (lic.member_id) {
+      item.appendChild(el('div', { cls: 'mg-line' }, ['회원 ', inl(lic.member && lic.member.login_id ? lic.member.login_id : '#' + lic.member_id,
+        function () { openMember(lic.member_id); }), '에게 이관 · ' + dateKr(lic.claimed_at, true)]));
+    }
     var who = [];
     if (str(lic.owner_name)) who.push(str(lic.owner_name));
     if (str(lic.owner_contact)) who.push(str(lic.owner_contact));
@@ -1403,16 +2908,16 @@
   function openKey(key) {
     var k = normKey(key) || str(key);
     var m = modal({ title: '키 상세', wide: true, light: true, onClose: function () { if (KEYS.dirty && TAB === 'keys') loadKeys(false); },
-                    body: el('div', { cls: 'mg-empty', text: '불러오는 중…' }) });
+                    body: empty('불러오는 중…') });
     m.setActions([btn('닫기', 'ghost', function () { m.close(); })]);
     var gen = 0;
     function refresh() {
       var my = ++gen;
       return api('GET', '/admin/license?key=' + encodeURIComponent(k)).then(function (r) {
-        if (my !== gen) return;
+        if (my !== gen || !m.isOpen()) return;
         if (kicked(r)) return;
         if (!r.ok) {
-          m.setBody(el('div', { cls: 'mg-empty bad', text: errText(r, '키를 불러오지 못했습니다') }));
+          m.setBody(empty(errText(r, '키를 불러오지 못했습니다'), true));
           return;
         }
         renderKeyDetail(m, r.json, refresh);
@@ -1427,11 +2932,11 @@
     var now = num(j.now) || Date.now();
     var key = lic.key;
     var st = licState(lic, now);
+    var claimed = !!lic.member_id;
     var changed = function () { KEYS.dirty = true; loadStats(); refresh(); };
 
     m.setTitle('키 상세');
 
-    // 키 + 상태
     var top = el('div', { cls: 'big hi' }, [
       el('div', { cls: 'k', text: '라이선스 키' }),
       el('div', { cls: 'mg-keybox' }, [
@@ -1441,22 +2946,26 @@
       el('div', { cls: 'chip-row', style: 'margin-top:10px' }, [chip(st.kr, st.cls)])
     ]);
     var alerts = [];
+    if (claimed) {
+      alerts.push(note(['회원 ', el('b', { text: lic.member && lic.member.login_id ? lic.member.login_id : '#' + lic.member_id }),
+        '에게 이관된 키입니다(' + dateKr(lic.claimed_at, true) + '). 기간 연장·기능 회수는 회원 화면에서 조정하십시오. 잘못 이관되었으면 회원 상세의 [다른 회원으로 옮기기]를 쓰십시오.']));
+    }
     if (str(lic.blocked_reason)) alerts.push(note('차단된 키입니다. 사유: ' + str(lic.blocked_reason), true));
-    if (lic.revoked) alerts.push(note('회수된 키입니다. 이 키로는 콘솔(/panel)에 접속할 수 없습니다. 남은 기간은 보존됩니다.', true));
-    if (!isStarted(lic) && (lic.features || []).length) {
-      alerts.push(note('아직 사용 전입니다. 이 키로 콘솔(/panel)에 처음 로그인하는 시점부터 사용 기간이 시작됩니다.'));
+    if (lic.revoked) alerts.push(note('회수된 키입니다. 회원 계정에 등록할 수 없고, 이 키에 묶인 카카오 계정의 발송이 멈춥니다. 남은 기간은 보존됩니다.', true));
+    if (!claimed && !isStarted(lic) && (lic.features || []).length) {
+      alerts.push(note('아직 사용 전입니다. 회원이 내 계정에서 이 키를 등록하면 그때부터 남은 기간이 계산되어 회원 기간에 더해집니다.'));
     }
 
     // 기능
     var featBox = el('div');
-    FEATS.forEach(function (f) {
+    keyFeatIds(lic).forEach(function (f) {
       var e = findFeat(lic, f);
       var s = featState(e, now);
       featBox.appendChild(el('div', { cls: 'mg-feat' }, [
-        el('span', { cls: 'nm', text: FEAT_LABEL[f] }),
+        el('span', { cls: 'nm', text: featLabel(f) }),
         el('span', { cls: 'ln', text: featLine(e) }),
         chip(s.kr, s.cls),
-        e ? btn('회수', 'sm danger', function () { revokeFeature(key, f, changed); }) : el('span')
+        e && !claimed ? btn('회수', 'sm danger', function () { revokeFeature(key, f, changed); }) : el('span')
       ]));
     });
 
@@ -1467,12 +2976,14 @@
       str(lic.note) ? ['메모', str(lic.note)] : null,
       ['발급', dateKr(lic.created_at, true)],
       ['사용 시작', num(lic.activated_at) ? dateKr(lic.activated_at, true) : '-'],
-      ['최종 만료', maxExp(lic) ? dateKr(maxExp(lic), true) : '-']
+      ['최종 만료', maxExp(lic) ? dateKr(maxExp(lic), true) : '-'],
+      claimed ? ['이관', dateKr(lic.claimed_at, true)] : null
     ]);
 
     // 관리
     var acts = el('div', { cls: 'btn-row', style: 'margin-top:0' }, [
-      btn('+30일 연장', 'primary', function () { openExtend(lic, now, changed); }),
+      claimed ? btn('회원 상세', 'primary', function () { openMember(lic.member_id); })
+              : btn('+30일 연장', 'primary', function () { openExtend(lic, now, changed); }),
       btn(lic.revoked ? '회수 해제' : '회수', lic.revoked ? '' : 'danger', function () { toggleRevoke(lic, changed); }),
       btn(str(lic.blocked_reason) ? '차단 해제' : '차단', str(lic.blocked_reason) ? '' : 'danger', function () { toggleBlock(lic, changed); }),
       btn('삭제', 'danger solid', function () { openDelete(lic, m); })
@@ -1495,7 +3006,8 @@
       alerts,
       el('section', { cls: 'mg-sec' }, [el('h3', { cls: 'mg-h3', text: '기능' }), featBox]),
       el('section', { cls: 'mg-sec' }, [el('h3', { cls: 'mg-h3', text: '관리' }), acts,
-        el('p', { cls: 'hint', style: 'margin-top:0', text: '연장은 기능 3종 모두에 적용됩니다. 환불은 삭제 대신 회수를 사용하면 기록이 남습니다.' })]),
+        el('p', { cls: 'hint', style: 'margin-top:0', text: claimed ? '이관된 키의 기간은 회원 계정에서 관리합니다.'
+          : '연장은 키의 모든 기능에 적용됩니다. 환불은 삭제 대신 회수를 사용하면 기록이 남습니다.' })]),
       el('section', { cls: 'mg-sec' }, [el('h3', { cls: 'mg-h3', text: '정보' }), info]),
       el('section', { cls: 'mg-sec' }, [
         el('h3', { cls: 'mg-h3', text: '최근 기록 ' + logs.length + '건' }),
@@ -1508,7 +3020,7 @@
   // 연장 미리보기 — lib/keys.js grant() 계산을 그대로 따라 한다 (서버 시각 기준, 대략값)
   function previewGrant(lic, now, durMs) {
     var started = isStarted(lic);
-    return FEATS.map(function (f) {
+    return keyFeatIds(lic).map(function (f) {
       var cur = findFeat(lic, f);
       if (!cur) return { f: f, text: started ? dateKr(now + durMs, true) + ' 까지 (새로 추가)' : '사용 시작 전 · 대기 ' + Math.round(durMs / DAY) + '일 (새로 추가)' };
       var prevExp = num(cur.expires_at);
@@ -1529,7 +3041,7 @@
       previewGrant(lic, now, p.days * DAY).forEach(function (x) {
         var e = findFeat(lic, x.f);
         prev.appendChild(el('div', { cls: 'mg-feat' }, [
-          el('span', { cls: 'nm', text: FEAT_LABEL[x.f] }),
+          el('span', { cls: 'nm', text: featLabel(x.f) }),
           el('span', { cls: 'ln', text: '현재 ' + featLine(e) + '  →  ' + x.text })
         ]));
       });
@@ -1540,15 +3052,15 @@
       title: '기간 연장',
       body: [
         kv([['키', lic.key, 'mono'], ['소유자', str(lic.owner_name) || '-']]),
-        para('기능 3종 모두에 적용됩니다. 남은 기간이 있으면 만료일에 더해지고, 이미 만료된 기능은 지금부터 계산됩니다. 보유하지 않은 기능은 새로 추가됩니다.'),
+        para('키의 모든 기능에 적용됩니다. 남은 기간이 있으면 만료일에 더해지고, 이미 만료된 기능은 지금부터 계산됩니다. 보유하지 않은 기능은 새로 추가됩니다.'),
         per.node,
         el('section', { cls: 'mg-sec' }, [el('h3', { cls: 'mg-h3', text: '연장 후 (예상)' }), prev])
       ],
       ok: '연장',
-      check: function () { var p = per.get(); return p.error || ''; },
+      check: function () { var p = per.get(); if (p.error) return p.error; return keyFeatIds(lic).length ? '' : '상품 정보를 불러오지 못했습니다. 새로고침한 뒤 다시 시도하십시오'; },
       run: function () {
         var p = per.get();
-        var body = { key: lic.key, features: FEATS.slice(), plan: p.plan };
+        var body = { key: lic.key, features: keyFeatIds(lic), plan: p.plan };
         if (p.plan === 'custom') body.days = p.days;
         return api('POST', '/admin/grant', body);
       },
@@ -1565,8 +3077,8 @@
       title: '기능 회수',
       danger: true,
       body: [
-        kv([['키', key, 'mono'], ['기능', FEAT_LABEL[f]]]),
-        note(FEAT_LABEL[f] + ' 기능을 이 키에서 삭제합니다. 남은 기간도 함께 소멸되며 되돌릴 수 없습니다. 다시 부여하려면 기간 연장을 사용하십시오.', true)
+        kv([['키', key, 'mono'], ['기능', featLabel(f)]]),
+        note(featLabel(f) + ' 기능을 이 키에서 삭제합니다. 남은 기간도 함께 소멸되며 되돌릴 수 없습니다. 다시 부여하려면 기간 연장을 사용하십시오.', true)
       ],
       ok: '기능 회수',
       run: function () { return api('POST', '/admin/revoke-feature', { key: key, feature: f }); },
@@ -1582,8 +3094,8 @@
       danger: on,
       body: [
         kv([['키', lic.key, 'mono'], ['소유자', str(lic.owner_name) || '-']]),
-        on ? note('이 키의 사용을 중지합니다. 이 키로는 콘솔(/panel)에 접속할 수 없게 됩니다. 남은 기간은 보존되며, 회수 해제로 되돌릴 수 있습니다.', true)
-           : para('회수를 해제합니다. 이 키로 콘솔(/panel)에 다시 접속할 수 있습니다.')
+        on ? note('이 키의 사용을 중지합니다. 회원 계정에 등록할 수 없게 되고, 아직 이관하지 않은 키라면 묶인 카카오 계정의 발송이 멈춥니다. 남은 기간은 보존되며, 회수 해제로 되돌릴 수 있습니다.', true)
+           : para('회수를 해제합니다. 남은 기간이 있으면 이 키의 카카오 계정 발송이 이어지고, 회원 계정에 등록할 수 있습니다.')
       ],
       ok: on ? '회수' : '회수 해제',
       run: function () { return api('POST', '/admin/revoke', { key: lic.key, revoked: on }); },
@@ -1599,7 +3111,7 @@
         title: '차단 해제',
         body: [
           kv([['키', lic.key, 'mono'], ['차단 사유', str(lic.blocked_reason)]]),
-          para('차단을 해제합니다. 이 키로 콘솔(/panel)에 다시 접속할 수 있습니다.')
+          para('차단을 해제합니다. 이 키를 다시 회원 계정에 등록할 수 있습니다.')
         ],
         ok: '차단 해제',
         run: function () { return api('POST', '/admin/block', { key: lic.key, reason: null }); },
@@ -1608,14 +3120,14 @@
       });
       return;
     }
-    var reason = el('input', { cls: 'inp', id: 'blReason', maxlength: '500', autocomplete: 'off', placeholder: '예: 결제 분쟁, 이용 약관 위반' });
+    var reason = el('input', { cls: 'inp', id: 'blReason', maxlength: '500', autocomplete: 'off', placeholder: '예: 결제 분쟁, 이용 조건 위반' });
     reason.setAttribute('data-autofocus', '');
     confirmAct({
       title: '키 차단',
       danger: true,
       body: [
         kv([['키', lic.key, 'mono'], ['소유자', str(lic.owner_name) || '-']]),
-        note('이 키의 사용을 차단합니다. 이 키로는 콘솔(/panel)에 접속할 수 없고, 이 키로 연장 주문을 할 수 없습니다. 차단 사유는 기록에 남습니다.', true),
+        note('이 키의 사용을 차단합니다. 회원 계정에 등록할 수 없고, 아직 이관하지 않은 키라면 묶인 카카오 계정의 발송이 멈춥니다. 차단 사유는 기록에 남습니다.', true),
         field('차단 사유 (필수)', reason)
       ],
       ok: '차단',
@@ -1653,20 +3165,20 @@
   }
   function normKeyTail(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(-4); }
 
-  /* ── 새 키 발급 */
+  /* ── 새 키 발급 (지원용) */
 
   function openCreate() {
     var per = periodPicker('mg-new-' + (++modalSeq));
     var count = el('input', { cls: 'inp mono', type: 'number', inputmode: 'numeric', min: '1', max: '20', step: '1', value: '1' });
     var owner = el('input', { cls: 'inp', maxlength: '100', autocomplete: 'off' });
     var contact = el('input', { cls: 'inp', maxlength: '100', autocomplete: 'off' });
-    var memo = el('input', { cls: 'inp', maxlength: '500', autocomplete: 'off', placeholder: '예: 테스트용, 지인 제공' });
+    var memo = el('input', { cls: 'inp', maxlength: '500', autocomplete: 'off', placeholder: '예: 기존 고객 보상, 지인 제공' });
     owner.setAttribute('data-autofocus', '');
     confirmAct({
       title: '새 키 발급',
       body: [
-        note('판매 상품(K bot 1개월)과 같은 구성입니다. 기능 3종(' + FEATS.map(featLabel).join(' · ') +
-             ')이 모두 포함되며, 사용 기간은 이 키로 콘솔(/panel)에 처음 로그인한 시점부터 시작됩니다.'),
+        note('기존 고객 지원용 라이선스 키를 발급합니다. 기능 ' + featIds().length + '종(' + featIds().map(featLabel).join(' · ') +
+             ')이 모두 포함됩니다. 받은 사람은 회원 가입 후 내 계정에서 키를 등록하며, 그때부터 기간이 계산되어 회원 기간에 더해집니다. 새 판매에는 회원 주문을 쓰십시오.'),
         per.node,
         el('div', { cls: 'mg-sec' }, [el('span', { cls: 'lb', text: '수량' }),
           el('div', { cls: 'mg-numrow' }, [count, el('span', { cls: 'dim tiny', text: '개 (최대 20개)' })])]),
@@ -1677,6 +3189,7 @@
       check: function () {
         var p = per.get();
         if (p.error) return p.error;
+        if (!featIds().length) return '상품 정보를 불러오지 못했습니다. 새로고침한 뒤 다시 시도하십시오';
         var n = Math.floor(Number(count.value));
         if (!isFinite(n) || n < 1 || n > 20) return '수량은 1~20 사이로 입력하십시오';
         return '';
@@ -1684,7 +3197,7 @@
       run: function () {
         var p = per.get();
         var body = {
-          features: FEATS.slice(), plan: p.plan, count: Math.floor(Number(count.value)) || 1,
+          features: featIds(), plan: p.plan, count: Math.floor(Number(count.value)) || 1,
           note: str(memo.value) || null, owner_name: str(owner.value) || null, owner_contact: str(contact.value) || null
         };
         if (p.plan === 'custom') body.days = p.days;
@@ -1703,7 +3216,7 @@
 
   function showCreated(list, days) {
     var m = modal({ title: '발급 완료', light: true, body: [
-      para(list.length + '개 키가 발급되었습니다. 기능 3종 · ' + (days || '') + '일. 사용 기간은 첫 로그인 시점부터 시작됩니다.'),
+      para(list.length + '개 키가 발급되었습니다 · ' + (days || '') + '일. 받은 사람이 회원 계정에 등록하면 그때부터 기간이 계산됩니다.'),
       el('div', { cls: 'mg-keys-out' }, list.map(function (k) {
         return el('div', { cls: 'r' }, [el('span', { cls: 'mono', text: k }), copyBtn(k, '키가')]);
       }))
@@ -1714,9 +3227,9 @@
     m.setActions(acts);
   }
 
-  /* ══════════════════ 11. 기록 ══════════════════ */
+  /* ══════════════════ 14. 기록 ══════════════════ */
 
-  var AUD = { gen: 0, kind: '', key: '', learned: false };
+  var AUD = { gen: 0, kind: '', key: '', member: '', learned: false };
 
   function isAlert(kind) { return ALERT_KINDS.indexOf(kind) >= 0; }
 
@@ -1738,10 +3251,11 @@
   function loadAudit() {
     var my = ++AUD.gen;
     var box = $('#audList');
-    if (!box.firstChild || box.firstChild.className.indexOf('mg-empty') >= 0) listState(box, '불러오는 중…');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
     var q = '/admin/audit?limit=' + LIST_LIMIT;
     if (AUD.kind) q += '&kind=' + encodeURIComponent(AUD.kind);
     if (AUD.key) q += '&key=' + encodeURIComponent(AUD.key);
+    if (AUD.member) q += '&member=' + encodeURIComponent(AUD.member);
     api('GET', q).then(function (r) {
       if (my !== AUD.gen) return;
       if (kicked(r)) return;
@@ -1751,6 +3265,7 @@
       var list = r.json.audit || [];
       var label = AUD.kind ? (KIND_LABEL[AUD.kind] || AUD.kind) : '전체';
       $('#audCount').textContent = label + ' ' + list.length + '건' + (AUD.key ? ' · 키 ' + AUD.key : '') +
+        (AUD.member ? ' · 회원 ' + (r.json.member ? r.json.member.login_id : AUD.member + '(없음)') : '') +
         (list.length >= LIST_LIMIT ? ' (최근 ' + LIST_LIMIT + '건까지 표시)' : '');
       clear(box);
       if (!list.length) { listState(box, '해당 조건의 기록이 없습니다'); return; }
@@ -1774,6 +3289,15 @@
         AUD.key !== a.key ? btn('이 키만 보기', 'sm ghost', function () { showAuditFor(a.key); }) : null
       ]));
     }
+    if (a.member_id) {
+      var login = a.member_login || ('#' + a.member_id);
+      item.appendChild(el('div', { cls: 'mg-keyline' }, [
+        el('span', { text: '회원' }),
+        el('span', { cls: 'mono', text: login }),
+        btn('회원 상세', 'sm ghost', function () { openMember(a.member_id); }),
+        AUD.member !== (a.member_login || String(a.member_id)) ? btn('이 회원만 보기', 'sm ghost', function () { showAuditForMember(a.member_login || String(a.member_id)); }) : null
+      ]));
+    }
     if (str(a.detail)) item.appendChild(el('div', { cls: 'mg-line', text: str(a.detail) }));
     var meta = [];
     if (str(a.ip)) meta.push('IP ' + str(a.ip));
@@ -1785,12 +3309,23 @@
   function showAuditFor(key) {
     AUD.key = normKey(key) || str(key);
     AUD.kind = '';
+    AUD.member = '';
     $('#audKey').value = AUD.key;
+    $('#audMember').value = '';
+    $('#audKind').value = '';
+    if (TAB === 'audit') loadAudit(); else switchTab('audit');
+  }
+  function showAuditForMember(login) {
+    AUD.member = str(login);
+    AUD.kind = '';
+    AUD.key = '';
+    $('#audKey').value = '';
+    $('#audMember').value = AUD.member;
     $('#audKind').value = '';
     if (TAB === 'audit') loadAudit(); else switchTab('audit');
   }
 
-  /* ══════════════════ 12. 시작 ══════════════════ */
+  /* ══════════════════ 15. 시작 ══════════════════ */
 
   function bind() {
     $('#loginForm').addEventListener('submit', onLoginSubmit);
@@ -1809,28 +3344,44 @@
         var f = b.getAttribute('data-filter');
         if (go === 'orders' && f) { ORD.filter = f; setFilter('#ordFilt', f); }
         if (go === 'deposits' && f) { DEP.filter = f; setFilter('#depFilt', f); }
+        if (go === 'members' && f) { MEM.filter = f; MEM.q = ''; $('#memQ').value = ''; setFilter('#memFilt', f); }
+        if (go === 'rooms' && f !== null) { ROOMS.filter = f; ROOMS.bot = ''; ROOMS.botName = ''; setFilter('#roomFilt', f); }
         if (go === TAB) loadTab(go); else switchTab(go);
         var tab = $('#tab-' + go);
         if (tab && tab.scrollIntoView) tab.scrollIntoView({ block: 'start', behavior: 'smooth' });
       });
     });
 
-    $$('#ordFilt button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        ORD.filter = b.getAttribute('data-f');
-        setFilter('#ordFilt', ORD.filter);
-        listState($('#ordList'), '불러오는 중…');
-        loadOrders();
+    function filterGroup(sel, state, box, load) {
+      $$(sel + ' button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          state.filter = b.getAttribute('data-f');
+          setFilter(sel, state.filter);
+          listState($(box), '불러오는 중…');
+          load();
+        });
       });
+    }
+    filterGroup('#ordFilt', ORD, '#ordList', loadOrders);
+    filterGroup('#depFilt', DEP, '#depList', loadDeposits);
+    filterGroup('#memFilt', MEM, '#memList', loadMembers);
+    filterGroup('#roomFilt', ROOMS, '#roomList', loadRooms);
+
+    $('#memForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      MEM.q = str($('#memQ').value).slice(0, 80);
+      listState($('#memList'), '불러오는 중…');
+      loadMembers();
     });
-    $$('#depFilt button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        DEP.filter = b.getAttribute('data-f');
-        setFilter('#depFilt', DEP.filter);
-        listState($('#depList'), '불러오는 중…');
-        loadDeposits();
-      });
+    $('#roomForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      ROOMS.q = str($('#roomQ').value).slice(0, 200);
+      listState($('#roomList'), '불러오는 중…');
+      loadRooms();
     });
+    $('#roomGrantBtn').addEventListener('click', function () { openRoomGrant('', null); });
+    $('#roomBlockBtn').addEventListener('click', openLinkBlock);
+    $('#botNew').addEventListener('click', function () { openBotRegister(null); });
 
     $('#keyForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -1839,7 +3390,7 @@
       loadKeys(false);
     });
     $('#keyMore').addEventListener('click', function () { loadKeys(true); });
-    $('#keyNew').addEventListener('click', openCreate);
+    $('#keyNew').addEventListener('click', function () { loadPrice().then(openCreate); });
 
     $('#audForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -1847,6 +3398,7 @@
       var raw = str($('#audKey').value);
       AUD.key = raw ? (normKey(raw) || raw.toUpperCase()) : '';
       if (raw) $('#audKey').value = AUD.key;
+      AUD.member = str($('#audMember').value).slice(0, 40);
       listState($('#audList'), '불러오는 중…');
       loadAudit();
     });
@@ -1871,6 +3423,7 @@
   function boot() {
     bind();
     fillKinds([]);
+    loadPrice();
     PW = loadPw();
     if (!PW) { showLogin(); return; }
     // 보관된 비밀번호가 아직 맞는지 요약 숫자로 확인한다. 틀리면 kicked() 가 로그인으로 돌린다.

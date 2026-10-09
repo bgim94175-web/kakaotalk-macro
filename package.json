@@ -1,7 +1,7 @@
 {
   "name": "kakao-license-server",
   "version": "2.0.0",
-  "description": "K bot 라이선스 서버 + 구매 웹사이트 + 웹 콘솔(/panel) + 서버 발송 (Express + Neon Postgres)",
+  "description": "K bot 구매 웹사이트 + 회원 계정 + 웹 콘솔(/panel) + 서버 발송 + 방 설치형 봇 (Express + Neon Postgres)",
   "main": "server.js",
   "private": true,
   "engines": {
@@ -10,7 +10,13 @@
   "scripts": {
     "start": "node server.js",
     "postinstall": "npm install --prefix sender --omit=dev",
-    "check": "node --check server.js && node --check lib/db.js && node --check lib/sender-child.js && node --check lib/sign.js && node --check lib/keys.js && node --check lib/features.js && node --check lib/pricing.js && node --check lib/audit.js && node --check lib/ratelimit.js && node --check lib/auth-text.js && node --check lib/panel-auth.js && node --check lib/panel-config.js && node --check lib/panel-ids.js && node --check lib/panel-inbox.js && node lib/panel-inbox-check.js && node --check routes/admin.js && node --check routes/purchase.js && node --check routes/panel.js && node lib/panel-check.js"
+    "check": "node --check server.js && node --check lib/db.js && node --check lib/sender-child.js && node --check lib/sign.js && node --check lib/keys.js && node --check lib/features.js && node --check lib/pricing.js && node --check lib/audit.js && node --check lib/ratelimit.js && node --check lib/auth-text.js && node --check lib/panel-auth.js && node --check lib/panel-config.js && node --check lib/panel-ids.js && node --check lib/panel-inbox.js && node lib/panel-inbox-check.js && node --check routes/admin.js && node --check routes/purchase.js && node --check routes/panel.js && node lib/panel-check.js && npm run check:w1 && npm run check:w2 && npm run check:w3 && npm run check:w4 && npm run check:w5 && npm run check:w6",
+    "check:w1": "node --check lib/member-auth.js && node --check lib/google-oauth.js && node --check routes/auth.js && node --check lib/room-config.js && node --check routes/panel.js && node --check server.js && node lib/auth-check.js && node lib/room-config-check.js && node lib/panel-inbox-check.js",
+    "check:w2": "node --check lib/db.js && node --check lib/pricing.js && node --check lib/keys.js && node --check lib/entitle.js && node --check lib/installs.js && node --check lib/openchat.js && node --check lib/secretbox.js && node --check lib/sender-child.js && node --check routes/purchase.js && node lib/purchase-check.js",
+    "check:w3": "npm --prefix sender run check",
+    "check:w4": "node --check public/app.js && node --check public/support.js",
+    "check:w5": "node --check public/panel.js && node lib/panel-check.js",
+    "check:w6": "node --check routes/admin.js && node --check public/manage.js"
   },
   "dependencies": {
     "express": "^4.19.2",

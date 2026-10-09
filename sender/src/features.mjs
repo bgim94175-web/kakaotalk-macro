@@ -1,5 +1,6 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
+import { profileObserve } from './roomfeat.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -356,6 +357,7 @@ function asChatLog(raw, hint) {
     type: raw.type != null ? raw.type : raw.message_type,
     authorId: raw.authorId != null ? raw.authorId : raw.author_id,
     attachment,
+    sendAt: raw.sendAt != null ? raw.sendAt : raw.sent_at,
   }
 }
 
@@ -496,9 +498,22 @@ function pushSend(out, chatId, text, delayMs) {
   out.push({ chatId, text: String(text), delayMs: delayMs || 0, images: null })
 }
 
-function featureOn(record, id) {
-  const f = record.features || {}
+// 권리 v2(docs/ACCOUNTS_V1.md 5.1): 부모가 /v1/grants 로 미는 만료 시각으로 판정한다.
+// 고객 계정의 roombot·minigame 은 v2 에서 늘 꺼짐(방 상품은 K bot 계정이 맡는다). v2 가 아니면 예전 의미 그대로.
+export function featureOn(record, id) {
+  const f = (record && record.features) || {}
+  if (f.v === 2) {
+    if (f.bot) return false
+    if (id === 'macro') return Date.now() < Number(f.macro_until || 0)
+    return false
+  }
   return f[id] !== false
+}
+
+/** v2 기록인데 계정 단위 옛 기능 유예(legacy_room_until)가 끝났으면 true(D20). */
+export function legacyRoomOff(record) {
+  const f = record && record.features
+  return !!(f && f.v === 2 && !(Date.now() < Number(f.legacy_room_until || 0)))
 }
 
 export function onInbound(record, msg) {
@@ -524,7 +539,7 @@ export function onInbound(record, msg) {
   state.knownRooms[room.key] = true
   if (!mine) {
     if (featureOn(record, 'roombot')) roomBot(record, out, room, parsed, who, text, group, now, state)
-    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state)
+    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state, msg.authorId)
   }
   return out
 }
@@ -764,11 +779,28 @@ function game(state, key) {
   return state.games[key]
 }
 
+// 방 설치형 봇(cfg.byId)은 점수를 authorId 로 저장하고 {id: 이름} 표로 이름을 보인다(7.3).
+// 이름이 빈 두 사람이 한 점수로 섞이지 않게. 계정 단위 옛 기능은 예전처럼 이름이 열쇠다.
+function scoreKey(state, who) {
+  return state._sk != null ? state._sk : (who || '')
+}
+
 function scoreAdd(state, roomKey, who, n) {
   if (!state.scores[roomKey]) state.scores[roomKey] = {}
-  const k = who || ''
+  const k = scoreKey(state, who)
   state.scores[roomKey][k] = (Number(state.scores[roomKey][k]) || 0) + n
+  if (state._sk != null) {
+    if (!state.names || typeof state.names !== 'object') state.names = {}
+    if (!state.names[roomKey]) state.names[roomKey] = {}
+    state.names[roomKey][k] = String(who || '').slice(0, 40)
+  }
   return state.scores[roomKey][k]
+}
+
+function scoreName(state, roomKey, k) {
+  const names = state.names && state.names[roomKey]
+  if (names && Object.prototype.hasOwnProperty.call(names, k)) return names[k]
+  return String(k).startsWith('n:') ? String(k).slice(2) : k
 }
 
 function gameOn(cfg, id) {
@@ -801,18 +833,23 @@ function gameSend(state, cfg, room, text, now, out) {
   return true
 }
 
-function miniGame(record, out, room, parsed, who, text, now, state) {
+function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
   const cfg = record.config && record.config.minigame
   if (!cfg || !cfg.enabled) return
   if (!coversList(cfg.rooms || [], room.key)) return
   const body = text.trim()
   if (saidRecently(state, room.key, body, now)) return
   const prefix = cfg.cmdPrefix && String(cfg.cmdPrefix).trim() ? String(cfg.cmdPrefix).trim() : '!'
-  if (body.startsWith(prefix) && body.length > prefix.length) {
-    gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out)
-    return
+  if (cfg.byId) state._sk = realId(String(authorId || '')) ? String(authorId) : 'n:' + String(who || '')
+  try {
+    if (body.startsWith(prefix) && body.length > prefix.length) {
+      gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out)
+      return
+    }
+    play(state, cfg, room, who, body, prefix, now, out)
+  } finally {
+    delete state._sk
   }
-  play(state, cfg, room, who, body, prefix, now, out)
 }
 
 function roomBotOwnsHelp(record, room, prefix) {
@@ -838,7 +875,7 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
   if (cmd === '정답') return reveal(state, cfg, room, now, out)
   if (cmd === '포기') return giveUp(state, cfg, room, now, out)
   if (cmd === '점수') {
-    const n = (state.scores[room.key] && state.scores[room.key][who || '']) || 0
+    const n = (state.scores[room.key] && state.scores[room.key][scoreKey(state, who)]) || 0
     gameSend(state, cfg, room, `${nameOf(who)}님 누적 점수 ${n}점입니다.`, now, out)
     return
   }
@@ -846,13 +883,25 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
     const board = state.scores[room.key] || {}
     const rows = Object.entries(board).sort((a, b) => b[1] - a[1]).slice(0, 10)
     const text = rows.length
-      ? rows.map((r, i) => `${i + 1}. ${nameOf(r[0])} ${r[1]}점`).join('\n')
+      ? rows.map((r, i) => `${i + 1}. ${nameOf(scoreName(state, room.key, r[0]))} ${r[1]}점`).join('\n')
       : '아직 점수가 없습니다.'
     gameSend(state, cfg, room, text, now, out)
     return
   }
   if (cmd === '게임도움' || cmd === '게임' || cmd === '도움' || cmd === '명령') {
     if ((cmd === '도움' || cmd === '명령') && roomBotOwnsHelp(record, room, prefix)) return
+    if (cfg.byId) {
+      // 방 설치형 봇은 켜진 게임만 보인다
+      const on = []
+      if (gameOn(cfg, 'word')) on.push(prefix + '끝말잇기')
+      if (gameOn(cfg, 'baseball')) on.push(prefix + '숫자야구')
+      if (gameOn(cfg, 'dice')) on.push(prefix + '주사위')
+      if (gameOn(cfg, 'rps')) on.push(prefix + '가위바위보')
+      if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
+      on.push(prefix + '포기', prefix + '랭킹')
+      gameSend(state, cfg, room, on.join(' '), now, out)
+      return
+    }
     gameSend(state, cfg, room, `${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
   }
 }
@@ -1239,6 +1288,7 @@ export function coverSkipsLink(openPermission) {
 }
 
 function coverRoom(record, ev) {
+  if (legacyRoomOff(record)) return null
   const cfg = record && record.config && record.config.cover
   if (!cfg || cfg.enabled !== true || !ev || ev.mine) return null
   const type = Number(ev.messageType)
@@ -1366,6 +1416,7 @@ function stamp(map, key, now, windowMs) {
 
 function enabledRooms(record, cfg) {
   const out = []
+  if (legacyRoomOff(record)) return out
   const keys = Array.isArray(cfg.rooms) ? cfg.rooms : []
   for (const key of keys) {
     const chatId = chatForRoom(record.rooms, key)
@@ -1378,6 +1429,7 @@ function enabledRooms(record, cfg) {
 }
 
 function roomOf(record, chatId) {
+  if (legacyRoomOff(record)) return null
   const cfg = guardCfg(record)
   if (!cfg) return null
   const room = roomByChat(record.rooms, chatId)
@@ -1394,6 +1446,11 @@ function roomLabel(room) {
 
 function isKickFeed(text, messageType) {
   const body = String(text || '').trim()
+  if (body.charAt(0) === '{') {
+    // 오픈채팅 강퇴 피드(feedType 6) JSON 도 센다(7.2)
+    if (feedTypeOf(body, null) !== 6) return false
+    return messageType == null || Number(messageType) === 0
+  }
   if (!body || body.length > 80) return false
   if (!KICK_PHRASE.test(body)) return false
   return messageType == null || Number(messageType) === 0
@@ -1456,6 +1513,7 @@ function openProfileLink(raw) {
 }
 
 function visitRoom(record, chatId) {
+  if (legacyRoomOff(record)) return null
   const cfg = record && record.config && record.config.visit
   if (!cfg || cfg.enabled !== true) return null
   const room = roomByChat(record.rooms, chatId)
@@ -1486,23 +1544,40 @@ function visitIdentity(authorId, authorName) {
   return { id, name, key: id || ('n:' + name) }
 }
 
-function visitSeen(v, chatId, who, kind, now) {
+// 같은 입장·퇴장 판정(7.2(a)): logId 가 있으면 chat|logId|사람(방마다 1시간·400개),
+// 없으면 같은 사람·같은 종류 5초(VISIT_DEDUP_MS). 예전 60초 규칙은 없앴다. 시각은 ev.at(=sendAt) 우선.
+const VISIT_DEDUP_MS = 5000
+
+function visitSeen(v, chatId, who, kind, at, logId, now) {
+  if (logId) {
+    const key = `L${SEP}${chatId}${SEP}${logId}${SEP}${who.key}`
+    if (v.seen[key]) return true
+    v.seen[key] = now
+    pruneSeen(v, chatId, now)
+    return false
+  }
   const keys = []
   if (who.id) keys.push(`${chatId}${SEP}${who.id}${SEP}${kind}`)
   if (who.name) keys.push(`${chatId}${SEP}n:${who.name}${SEP}${kind}`)
   if (!keys.length) keys.push(`${chatId}${SEP}${who.key}${SEP}${kind}`)
   for (const key of keys) {
     const prev = Number(v.seen[key] || 0)
-    if (prev && now - prev < 60000) return true
+    if (prev && Math.abs(at - prev) < VISIT_DEDUP_MS) return true
   }
-  for (const key of keys) v.seen[key] = now
-  const all = Object.keys(v.seen)
-  if (all.length > 400) {
-    for (const k of all) {
-      if (now - Number(v.seen[k] || 0) > 60000) delete v.seen[k]
-    }
-  }
+  for (const key of keys) v.seen[key] = at
+  pruneSeen(v, chatId, now)
   return false
+}
+
+function pruneSeen(v, chatId, now) {
+  const all = Object.keys(v.seen)
+  if (all.length <= 400) return
+  for (const k of all) {
+    const t = Number(v.seen[k] || 0)
+    if (k.charAt(0) === 'L' ? now - t > 60 * 60 * 1000 : Math.abs(now - t) > 60000) delete v.seen[k]
+  }
+  const mine = Object.keys(v.seen).filter((k) => k.startsWith(`L${SEP}${chatId}${SEP}`))
+  for (let i = 0; i < mine.length - 400; i++) delete v.seen[mine[i]]
 }
 
 function trimTimes(list, now) {
@@ -1581,8 +1656,11 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     leaves: uniqTimes(prev.leaves, now),
     changes: trimChanges(changes, now),
   }
-  if (kind === 'join') row.joins.push(now)
-  else row.leaves.push(now)
+  // 시각이 같아도 이벤트마다 센다(7.2(a)). 같은 값은 합칠 때 하나로 줄어드므로 1ms 씩 민다.
+  const list = kind === 'join' ? row.joins : row.leaves
+  let t = now
+  while (list.includes(t)) t += 1
+  list.push(t)
   row.joins = uniqTimes(row.joins, now)
   row.leaves = uniqTimes(row.leaves, now)
   for (const key of keys) v.people[key] = row
@@ -1709,6 +1787,7 @@ export function visitMentionExtra(text, mention) {
 // 조회 없이, 메시지·입장·퇴장에 따라오는 작성자 닉만으로 판단한다.
 // 이미 본 사람(userId 기준)이 닉을 바꾸면 그 즉시 알린다. 처음 본 사람은 기준만 잡는다.
 function profileRoom(record, chatId) {
+  if (legacyRoomOff(record)) return null
   const cfg = record && record.config && record.config.profile
   if (!cfg || cfg.enabled !== true) return null
   const room = roomByChat(record.rooms, chatId)
@@ -1753,30 +1832,24 @@ function applyProfile(record, ev, sends) {
   if (ev.mine) return false
   const id = /^[1-9][0-9]*$/.test(String(ev.authorId || '').trim()) ? String(ev.authorId).trim() : ''
   const name = String(ev.authorName || '').trim().slice(0, 40)
-  if (!id || !name) return false
+  if (!id || (!name && ev.photo == null && ev.status == null)) return false
   const now = Number(ev.now) || Date.now()
   const p = profileState(record)
   const chatId = String(room.chat_id)
-  const key = `${chatId}${SEP}${id}`
-  const prev = p.people[key]
-  if (!prev || typeof prev !== 'object' || !prev.name) {
-    p.people[key] = { name, userId: id, at: now, changes: Array.isArray(prev && prev.changes) ? prev.changes : [] }
-    pruneProfile(p)
-    return false
+  const cfg = record.config.profile
+  // 이름(메시지·입장의 작성자 닉), 사진 서명·상태 메시지(회원 카드)를 한 곳에서 비교한다(7.2(c)).
+  const notes = profileObserve(rt(record), chatId, cfg, { userId: id, name, photo: ev.photo, status: ev.status }, now)
+  for (const n of notes) {
+    sends.push({ chatId, text: n.text, mention: n.mention, delayMs: profileDelay(p, chatId, now), kind: 'profile' })
   }
-  if (String(prev.name).trim() === name) {
-    prev.at = now
-    return false
-  }
-  const prevName = String(prev.name).trim()
-  const changes = trimChanges((Array.isArray(prev.changes) ? prev.changes : []).concat([
-    { at: now, name: prevName, link: '' },
-  ]), now)
-  p.people[key] = { name, userId: id, at: now, changes }
-  pruneProfile(p)
-  const notice = profileNotice(name, id, prevName, changes, now)
-  sends.push({ chatId, text: notice.text, mention: notice.mention, delayMs: profileDelay(p, chatId, now) })
-  return true
+  return notes.length > 0
+}
+
+/** 프로필 관찰만(입장 때 회원 카드, 주기적 다시 읽기). → sends */
+export function profileOnly(record, ev) {
+  const sends = []
+  applyProfile(record, ev, sends)
+  return sends
 }
 
 function profileNotice(name, userId, prevName, changes, now) {
@@ -1807,15 +1880,17 @@ function applyVisit(record, ev, sends) {
   const who = visitIdentity(ev.authorId, ev.authorName)
   if (!who) return false
   const now = Number(ev.now) || Date.now()
+  const at = Number(ev.at) || now
   const v = visitState(record)
-  if (visitSeen(v, String(room.chat_id), who, ev.kind, now)) return true
-  const row = rememberPerson(v, String(room.chat_id), who, now, ev.kind, ev.profileLink)
+  if (visitSeen(v, String(room.chat_id), who, ev.kind, at, ev.logId ? String(ev.logId) : '', now)) return true
+  const row = rememberPerson(v, String(room.chat_id), who, at, ev.kind, ev.profileLink)
   const notice = visitNotice(row, ev.kind)
   sends.push({
     chatId: String(room.chat_id),
     text: notice.text,
     mention: notice.mention,
     delayMs: visitDelay(v, String(room.chat_id), now),
+    kind: 'visit',
   })
   return true
 }
@@ -1841,7 +1916,8 @@ export function guardOnChat(record, ev) {
   const mine = !!ev.mine
   const author = ev.authorId == null ? '' : String(ev.authorId)
 
-  if (ev.kind === 'msg' && !mine && cfg.kickOn === true && isKickFeed(ev.text, ev.messageType)) {
+  // 봇 자신의 강퇴(ownKick, 60초)는 올킥 계산에서 뺀다(7.2)
+  if (ev.kind === 'msg' && !mine && !ev.ownKick && cfg.kickOn === true && isKickFeed(ev.text, ev.messageType)) {
     const windowMs = num(cfg.kickSecs, 5, 300, 30) * 1000
     const need = num(cfg.kickCount, 3, 30, 5)
     const times = stamp(g.kicks, chatId, now, windowMs)
@@ -1937,10 +2013,20 @@ function logChanges(list, withLink) {
     if (!Number.isFinite(at) || at <= 0) continue
     const name = String(c.name || '')
     const link = String(c.link || '')
-    const sig = at + SEP + name + SEP + (withLink ? link : '')
+    const kind = c.kind === 'photo' || c.kind === 'status' ? c.kind : 'name'
+    const sig = at + SEP + name + SEP + (withLink ? link : kind)
     if (seen.has(sig)) continue
     seen.add(sig)
-    out.push(withLink ? { at, name, link } : { at, name })
+    if (withLink) out.push({ at, name, link })
+    else {
+      // 프로필 기록 행은 항목(kind)을 같이 낸다(7.5). 사진은 바뀐 사실만, 주소는 내보내지 않는다(8.11).
+      const row = { at, name, kind }
+      if (kind === 'status') {
+        row.from = String(c.from || '').slice(0, 200)
+        row.to = String(c.to || '').slice(0, 200)
+      }
+      out.push(row)
+    }
   }
   return out.sort((a, b) => a.at - b.at)
 }

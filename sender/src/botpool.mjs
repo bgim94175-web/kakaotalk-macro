@@ -1,0 +1,2079 @@
+// K bot 계정(운영자 봇 카카오 계정) 풀 — docs/ACCOUNTS_V1.md 5.2~5.7·7장.
+// 봇 하나 = BotSlot 하나. 봇은 고객이 산 방(room_installs)에 들어가 방 관리봇·미니게임을 돌린다.
+//   · 입장: 봇마다 직렬(나가기 → 입장), 입장 사이 BOT_JOIN_GAP_MS(±20%), 원시 패킷 1회(executeWithReconnect 안 씀),
+//     결과 판정은 locoOk, 입장 실패로 클라이언트를 닫았다 열지 않는다. 예산(시간·하루)·전역 정지(-444)를 강제한다.
+//   · 권한·생존 점검: 부방장 대기 60초(±15초), 사용 중 10분, 재접속 직후, SYNCMEMT·피드 11/12/15 푸시 3초 뒤.
+//   · 방별 처리: 방 어댑터 기록(roomfeat.adapterRecord)으로 features.mjs 를 부르고, 새 기능은 roomfeat.mjs.
+//   · DB 쓰기는 2.2 의 sender 칸만, 늘 WHERE id AND phase='installed' AND bot_device_id=봇(store.updateInstall).
+// 네트워크·DB 는 주입받는다(store, newClient) — selfcheck 가 가짜 연결·메모리 저장소로 같은 코드를 돈다.
+import { Long } from 'bson'
+
+import {
+  coverNeedsAuthor,
+  coverPlan,
+  coverSkipsLink,
+  guardFinishHalt,
+  guardOnChat,
+  logsView,
+  onInbound,
+  profileOnly,
+  visitEventsFromMessage,
+  visitMentionExtra,
+} from './features.mjs'
+import * as R from './roomfeat.mjs'
+import { open as openPasscode } from './secretbox.mjs'
+
+const MIN = 60 * 1000
+const HOUR = 60 * MIN
+const DAY = 24 * HOUR
+
+const RATE_STATUS = new Set([-312, -805, -819])
+const GONE_STATUS = new Set([-324])
+const DEAD_CODES = new Set(['invalid_access_token', 'login_rejected', 'kicked', 'reauth'])
+
+function envNum(name, dflt) {
+  const raw = process.env[name]
+  if (raw == null || String(raw).trim() === '') return dflt
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : dflt
+}
+
+function envList(name, dflt) {
+  const raw = String(process.env[name] || '').trim()
+  if (!raw) return dflt
+  const list = raw.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n >= 0)
+  return list.length ? list : dflt
+}
+
+export function poolOptions(over) {
+  return Object.assign({
+    joinGapMs: envNum('BOT_JOIN_GAP_MS', 45000),
+    permPollMs: envNum('BOT_PERM_POLL_MS', 60000),
+    activeCheckMs: envNum('BOT_ACTIVE_CHECK_MS', 600000),
+    joinPerHour: envNum('BOT_JOIN_PER_HOUR', 20),
+    joinPerDay: envNum('BOT_JOIN_PER_DAY', 80),
+    resolvePerMin: envNum('BOT_RESOLVE_PER_MIN', 10),
+    resolvePerDay: envNum('BOT_RESOLVE_PER_DAY', 300),
+    // 속도 제한(-312·-805·-819) 뒤 다시 시도까지 [1번째, 2번째, 3번째 이후](5.3 6)
+    rateWaits: envList('BOT_RATE_WAIT_MS', [10 * MIN, 30 * MIN, 2 * HOUR]),
+    // 서버 IP 차단(-444) 뒤 모든 입장·조회 정지 [연속 1, 2, 3번 이상]
+    ipWaits: envList('BOT_IP_WAIT_MS', [30 * MIN, 2 * HOUR, 6 * HOUR]),
+    reconcileMs: envNum('BOT_RECONCILE_MS', 5 * MIN),
+    pushDelayMs: envNum('BOT_PERM_PUSH_DELAY_MS', 3000),
+    packetTimeoutMs: envNum('BOT_PACKET_TIMEOUT_MS', 20000),
+    transientWaitMs: envNum('BOT_TRANSIENT_WAIT_MS', 2 * MIN),
+    hideGapMs: envNum('BOT_HIDE_GAP_MS', 300),
+    flushMs: 5000,
+    tickMs: 1000,
+    reconnectGapMs: 2000,
+    trace: process.env.SENDER_TRACE_PUSH === '1',
+  }, over || {})
+}
+
+function log(id, msg) {
+  process.stderr.write(`[sender] ${id} ${msg}\n`)
+}
+
+function errText(e) {
+  return e && e.message ? e.message : String(e)
+}
+
+function L(v) {
+  return Long.fromString(String(v))
+}
+
+function jitter(ms, frac) {
+  const f = frac == null ? 0.2 : frac
+  return Math.max(0, Math.round(ms * (1 - f + Math.random() * 2 * f)))
+}
+
+function atMs(v) {
+  const n = Number(v && typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : v)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n)
+}
+
+function withTimeout(p, ms) {
+  if (!ms) return p
+  let t
+  return Promise.race([
+    p.finally(() => clearTimeout(t)),
+    new Promise((_, reject) => {
+      t = setTimeout(() => reject(Object.assign(new Error('packet timeout'), { timeout: true })), ms)
+      if (t.unref) t.unref()
+    }),
+  ])
+}
+
+function credsOf(record) {
+  const c = (record && record.credentials) || {}
+  return {
+    access_token: String(c.access_token || ''),
+    refresh_token: String(c.refresh_token || ''),
+    user_id: String(c.user_id || ''),
+    device_uuid: String(c.device_uuid || ''),
+    device_type: c.device_type === 'pc' ? 'pc' : 'tablet',
+  }
+}
+
+function productsOf(row) {
+  return { roombot: !!row.roombot, minigame: !!row.minigame }
+}
+
+// ── 풀 ────────────────────────────────────────────────────────────────────
+export class BotPool {
+  constructor(deps) {
+    const d = deps || {}
+    this.store = d.store
+    this.newClient = d.newClient
+    this.refreshToken = d.refreshToken || null
+    this.opts = poolOptions(d.opts)
+    this.now = d.now || (() => Date.now())
+    this.bots = new Map()
+    this.joinPausedUntil = 0
+    this.ipStreak = 0
+    this.hideJobs = new Map()
+    this.jobSeq = 0
+    this.syncing = null
+    this.syncAgain = false
+    this.timers = []
+    this.traced = new Set()
+  }
+
+  start() {
+    if (this.timers.length) return
+    const every = (ms, fn) => {
+      const t = setInterval(() => { fn().catch((e) => log('pool', errText(e))) }, ms)
+      if (t.unref) t.unref()
+      this.timers.push(t)
+    }
+    every(this.opts.reconcileMs, () => this.reconcile(null, { periodic: true }))
+    every(this.opts.flushMs, () => this.flush())
+  }
+
+  async stop() {
+    for (const t of this.timers) clearInterval(t)
+    this.timers = []
+    for (const s of this.bots.values()) await s.stop()
+    await this.flush()
+  }
+
+  isBot(id) {
+    return R.isBotId(id)
+  }
+
+  async attach(id, record) {
+    let slot = this.bots.get(id)
+    const c = credsOf(record)
+    if (slot && !slot.dead && credsOf(slot.record).access_token === c.access_token && credsOf(slot.record).device_uuid === c.device_uuid) {
+      slot.record = record
+      if (this.store.saveRecord) await this.store.saveRecord(id, record)
+      return slot
+    }
+    if (slot) await slot.stop()
+    slot = new BotSlot(this, id, record)
+    this.bots.set(id, slot)
+    await slot.start()
+    return slot
+  }
+
+  async detach(id) {
+    const slot = this.bots.get(id)
+    if (!slot) return
+    await slot.stop()
+    this.bots.delete(id)
+  }
+
+  status(id) {
+    const slot = this.bots.get(id)
+    if (!slot) return { linked: false, needs_register: false, reason: 'absent', connected: false }
+    return {
+      linked: !slot.record.needs_register,
+      needs_register: !!slot.record.needs_register,
+      reason: slot.record.reason || (slot.record.needs_register ? 'reauth' : 'ok'),
+      connected: slot.live(),
+      notices: [],
+    }
+  }
+
+  viewOf(installId) {
+    const id = Number(installId)
+    for (const s of this.bots.values()) {
+      const v = s.byInstall.get(id)
+      if (v) return { slot: s, view: v }
+    }
+    return null
+  }
+
+  slotOf(botId) {
+    return this.bots.get(botId) || null
+  }
+
+  // 서버 IP 차단(-444): 봇을 내리지 않고 모든 봇의 입장·조회를 멈춘다(5.3 6).
+  ipBlocked(now) {
+    const wait = this.opts.ipWaits[Math.min(this.ipStreak, this.opts.ipWaits.length - 1)]
+    this.ipStreak += 1
+    this.joinPausedUntil = Math.max(this.joinPausedUntil, now + wait)
+    log('pool', `kakao blocked the server IP for joins, paused until ${new Date(this.joinPausedUntil).toISOString()}`)
+    return this.joinPausedUntil
+  }
+
+  joinOk() {
+    this.ipStreak = 0
+  }
+
+  // 설치·나가기 대기열을 DB 에서 다시 읽어 반영한다(부팅·/v1/bot/sync·5분마다, 5.2). 겹치는 호출은 하나로 모은다.
+  async reconcile(installId, opt) {
+    if (this.syncing) {
+      this.syncAgain = true
+      if (opt && opt.periodic) this.syncPeriodic = true
+      return this.syncing
+    }
+    this.syncing = (async () => {
+      let periodic = !!(opt && opt.periodic)
+      do {
+        this.syncAgain = false
+        await this.reconcileOnce(periodic || this.syncPeriodic)
+        this.syncPeriodic = false
+        periodic = false
+      } while (this.syncAgain)
+    })().finally(() => { this.syncing = null })
+    return this.syncing
+  }
+
+  async reconcileOnce(periodic) {
+    const slots = [...this.bots.values()].filter((s) => !s.dead && !s.stopped)
+    const ids = slots.map((s) => s.id)
+    if (!ids.length) return
+    const rows = await this.store.listInstalls(ids)
+    const leaves = await this.store.listLeaves(ids)
+    for (const s of slots) {
+      try {
+        await s.apply(rows.filter((r) => r.bot_device_id === s.id), leaves.filter((l) => l.bot_device_id === s.id))
+        if (periodic && s.live()) await this.store.botState(s.id, { state: 'connected', nickname: s.nickname || undefined })
+      } catch (e) {
+        log(s.id, `reconcile failed: ${errText(e)}`)
+      }
+    }
+  }
+
+  async flush() {
+    for (const s of this.bots.values()) await s.flush()
+  }
+
+  // ── /v1/bot/resolve ─────────────────────────────────────────────────────
+  // 조회는 맡은 방이 가장 적은 연결된 봇이 한다. 예산이 없으면 budget, 봇이 없으면 no_bot.
+  async resolve(url) {
+    const now = this.now()
+    const live = [...this.bots.values()].filter((s) => s.live())
+    if (!live.length) return { ok: false, error: 'no_bot' }
+    if (this.joinPausedUntil > now) return { ok: false, error: 'budget' }
+    const cands = live.filter((s) => s.resolveM.ok(now) && s.resolveD.ok(now)).sort((a, b) => a.load() - b.load())
+    if (!cands.length) return { ok: false, error: 'budget' }
+    const s = cands[0]
+    s.resolveM.add(now)
+    s.resolveD.add(now)
+    const r = await s.raw('JOININFO', { lu: String(url), ref: 'EW' })
+    const st = R.locoStatus(r)
+    if (r && r.noSession) return { ok: false, error: 'no_bot' }
+    if (GONE_STATUS.has(st)) return { ok: false, error: 'not_found', status: st }
+    if (st === -444) {
+      this.ipBlocked(now)
+      return { ok: false, error: 'budget' }
+    }
+    if (st !== 0) return { ok: false, error: 'kakao_error', status: st }
+    const ol = r.body && r.body.ol
+    if (!ol || typeof ol !== 'object') return { ok: false, error: 'kakao_error', status: 0 }
+    if (Number(ol.lt) !== 2) return { ok: false, error: 'not_group' }
+    const li = R.idText(ol.li)
+    if (!li) return { ok: false, error: 'kakao_error', status: 0 }
+    const pv = Number(ol.pv) || 0
+    const maxUsers = ol.ml != null ? Number(ol.ml) : (ol.mu != null ? Number(ol.mu) : null)
+    return {
+      ok: true,
+      link_id: li,
+      name: typeof ol.ln === 'string' ? ol.ln : '',
+      url: typeof ol.lu === 'string' && ol.lu ? ol.lu : String(url),
+      type: Number(ol.lt),
+      needs_passcode: (pv & 64) !== 0,
+      profile_only: (pv & 32) === 0,
+      max_users: Number.isFinite(maxUsers) ? maxUsers : null,
+    }
+  }
+
+  // ── /v1/bot/status ──────────────────────────────────────────────────────
+  botStatus() {
+    const now = this.now()
+    const bots = []
+    const rooms = []
+    for (const s of this.bots.values()) {
+      bots.push({
+        device_id: s.id,
+        connected: s.live(),
+        nickname: s.nickname || null,
+        rooms: s.load(),
+        budget: {
+          join_h: Math.max(0, s.joinH.max - s.joinH.count(now)),
+          join_d: Math.max(0, s.joinD.max - s.joinD.count(now)),
+          resolve_m: Math.max(0, s.resolveM.max - s.resolveM.count(now)),
+        },
+      })
+      for (const v of s.byInstall.values()) {
+        rooms.push({ install_id: v.install_id, connected: s.live(), perm: v.perm == null ? null : v.perm, state: v.state })
+      }
+      for (const id of s.joinQ.keys()) {
+        if (!s.byInstall.has(id)) rooms.push({ install_id: id, connected: s.live(), perm: null, state: 'joining' })
+      }
+    }
+    return { ok: true, bots, rooms, join_paused_until: this.joinPausedUntil > now ? this.joinPausedUntil : 0 }
+  }
+
+  // 뷰가 없으면(아직 입장 전·오류) DB 행과 room_state 로 읽기 전용 뷰를 만든다.
+  async viewOrRow(installId) {
+    const got = this.viewOf(installId)
+    if (got) return got
+    const row = await this.store.getInstall(installId)
+    if (!row || row.phase !== 'installed') return null
+    const runtime = (await this.store.loadRoomState(row.id)) || {}
+    return {
+      slot: null,
+      view: {
+        install_id: Number(row.id), chat_id: row.chat_id || '', link_id: row.link_id || '', link_name: row.link_name || '',
+        products: productsOf(row), perm: row.perm, state: row.state, cfg: R.normRoomConfig(row.config), runtime, ring: [],
+      },
+      row,
+    }
+  }
+
+  // ── /v1/bot/room ────────────────────────────────────────────────────────
+  async room(installId) {
+    const got = await this.viewOrRow(installId)
+    if (!got) return { ok: true, live: null, ranking: [] }
+    const v = got.view
+    return {
+      ok: true,
+      live: { connected: !!(got.slot && got.slot.live() && v.chat_id && v.state !== 'error'), perm: v.perm == null ? null : Number(v.perm) },
+      ranking: v.products.minigame ? R.rankingOf(v.runtime, 10) : [],
+    }
+  }
+
+  // ── /v1/bot/logs ────────────────────────────────────────────────────────
+  async logs(installId) {
+    const got = await this.viewOrRow(installId)
+    if (!got || !got.view.products.roombot) return { ok: true, visit: [], profile: [], guard: [] }
+    const rec = R.adapterRecord(got.view, got.slot ? got.slot.id : '')
+    return Object.assign({ ok: true }, logsView(rec))
+  }
+
+  // 방 관리 경로 공통 게이트(3.4.3): 방 관리봇 상품 없음 → no_roombot, 사용 중 아님 → not_active.
+  async gate(installId) {
+    const got = await this.viewOrRow(installId)
+    if (!got) return { error: 'not_active' }
+    if (!got.view.products.roombot) return { error: 'no_roombot' }
+    if (!got.slot || !R.roombotLive(got.view)) return { error: 'not_active' }
+    return got
+  }
+
+  // ── /v1/bot/people ──────────────────────────────────────────────────────
+  async people(installId) {
+    const g = await this.gate(installId)
+    if (g.error) return { ok: false, error: g.error }
+    return { ok: true, people: g.slot.peopleOf(g.view) }
+  }
+
+  // ── /v1/bot/hide ────────────────────────────────────────────────────────
+  async hide(installId, body) {
+    const g = await this.gate(installId)
+    if (g.error) return { ok: false, error: g.error }
+    const b = body || {}
+    let req
+    if (b.user_id != null && b.user_id !== '') {
+      const uid = String(b.user_id).trim()
+      if (!/^[1-9][0-9]{0,19}$/.test(uid)) return { ok: false, error: 'bad_request' }
+      req = { userId: uid }
+    } else {
+      const n = Number(b.last)
+      if (!Number.isInteger(n) || n < 1 || n > R.RING_MAX) return { ok: false, error: 'bad_request' }
+      req = { last: n }
+    }
+    const by = b.by === 'panel' || !b.by ? 'panel' : String(b.by)
+    return g.slot.startHide(g.view, req, by)
+  }
+
+  hideStatus(jobId, installId) {
+    const job = this.hideJobs.get(String(jobId || ''))
+    if (!job || (installId != null && installId !== '' && Number(installId) !== job.install_id)) return { ok: false, error: 'not_found' }
+    return { ok: true, state: job.state, total: job.total, done: job.done, failed: job.failed }
+  }
+
+  // ── /v1/bot/unkick ──────────────────────────────────────────────────────
+  async unkick(installId, userId) {
+    const g = await this.gate(installId)
+    if (g.error) return { ok: false, error: g.error }
+    return g.slot.unkickUser(g.view, String(userId || ''))
+  }
+
+  // ── /v1/bot/games-reset ─────────────────────────────────────────────────
+  async gamesReset(installId) {
+    const got = await this.viewOrRow(installId)
+    if (!got) return { ok: true }
+    const rt = got.view.runtime
+    if (rt.scores) rt.scores.r = {}
+    if (rt.names) rt.names.r = {}
+    if (rt.games) delete rt.games.r
+    if (got.slot) got.view.dirty = true
+    else await this.store.saveRoomState(got.view.install_id, rt)
+    return { ok: true }
+  }
+}
+
+// ── 봇 슬롯 ─────────────────────────────────────────────────────────────────
+export class BotSlot {
+  constructor(pool, id, record) {
+    this.pool = pool
+    this.store = pool.store
+    this.opts = pool.opts
+    this.id = id
+    this.record = record
+    this.client = null
+    this.unpush = null
+    this.unsession = null
+    this.stopped = false
+    this.dead = false
+    this.nickname = ''
+    this.userId = credsOf(record).user_id
+    this.views = new Map()        // chat_id → BotRoom
+    this.byInstall = new Map()    // install_id → BotRoom
+    this.joinQ = new Map()        // install_id → {notBefore}
+    this.leaveQ = []
+    this.leaveTries = new Map()
+    this.nextJoinAt = 0
+    this.pumping = false
+    this.pumpAgain = false
+    this.pumpTimer = null
+    this.pumpAt = 0
+    this.joinH = new R.Win(HOUR, this.opts.joinPerHour)
+    this.joinD = new R.Win(DAY, this.opts.joinPerDay)
+    this.resolveM = new R.Win(MIN, this.opts.resolvePerMin)
+    this.resolveD = new R.Win(DAY, this.opts.resolvePerDay)
+    this.limits = R.botLimits()
+    this.pacer = new R.Pacer()
+    this.sending = false
+    this.sendTimer = null
+    this.sendAt = 0
+    this.ownKicks = new Map()
+    this.rateN = new Map()
+    this.transient = new Map()
+    this.chain = Promise.resolve()
+    this.checks = Promise.resolve()
+    this.timers = []
+    this.connects = 0
+    this.refreshed = false
+    this.downWritten = false
+  }
+
+  now() {
+    return this.pool.now()
+  }
+
+  live() {
+    return !this.stopped && !this.dead && !this.record.needs_register && !!this.client && this.client.isConnected()
+  }
+
+  load() {
+    let n = this.byInstall.size
+    for (const id of this.joinQ.keys()) if (!this.byInstall.has(id)) n++
+    return n
+  }
+
+  enqueue(fn) {
+    const run = this.chain.then(fn, fn)
+    this.chain = run.then(() => {}, () => {})
+    return run
+  }
+
+  bg(p, what) {
+    Promise.resolve(p).catch((e) => log(this.id, `${what || 'task'} failed: ${errText(e)}`))
+  }
+
+  async start() {
+    if (this.store.saveRecord) await this.store.saveRecord(this.id, this.record)
+    const every = (ms, fn) => {
+      const t = setInterval(fn, ms)
+      if (t.unref) t.unref()
+      this.timers.push(t)
+    }
+    every(20000, () => this.bg(this.ensure(), 'ensure'))
+    every(this.opts.tickMs, () => this.tick())
+    await this.ensure()
+  }
+
+  async stop() {
+    this.stopped = true
+    for (const t of this.timers) clearInterval(t)
+    this.timers = []
+    if (this.pumpTimer) clearTimeout(this.pumpTimer)
+    if (this.sendTimer) clearTimeout(this.sendTimer)
+    this.pumpTimer = null
+    this.sendTimer = null
+    await this.flush()
+    try { this.unpush && this.unpush() } catch {}
+    try { this.unsession && this.unsession() } catch {}
+    try { this.client && this.client.close() } catch {}
+    this.client = null
+  }
+
+  // ── 접속 ────────────────────────────────────────────────────────────────
+  async ensure() {
+    if (this.stopped || this.dead || this.record.needs_register) return
+    if (this.client && this.client.isConnected()) return
+    if (this.opening) return this.opening
+    // 클라이언트가 있으면 새로 만들지 않고 그 클라이언트의 세션을 다시 얻는다(agent-messenger 가 끊긴 상태를 지웠으므로
+    // 다음 acquireSession() 이 스스로 다시 접속한다, 5.3). 클라이언트를 닫았다 여는 일은 처음 접속 때만.
+    this.opening = (this.client ? this.reacquire() : this.open()).finally(() => { this.opening = null })
+    return this.opening
+  }
+
+  async reacquire() {
+    try {
+      await this.client.acquireSession()
+      this.downWritten = false
+      await this.afterConnect(false)
+    } catch (e) {
+      const code = e && e.code
+      if (code === 'invalid_access_token' || code === 'client_closed') return this.open()
+      if (DEAD_CODES.has(code)) {
+        await this.markDead(code)
+        return
+      }
+      log(this.id, `bot session reconnect failed: ${code || ''} ${errText(e)}`)
+      await this.markDown()
+    }
+  }
+
+  async open() {
+    const creds = credsOf(this.record)
+    if (!creds.access_token) {
+      await this.markDead('reauth')
+      return
+    }
+    try {
+      if (this.client) {
+        try { this.unpush && this.unpush() } catch {}
+        try { this.unsession && this.unsession() } catch {}
+        try { this.client.close() } catch {}
+      }
+      const client = this.pool.newClient()
+      await client.login({ oauthToken: creds.access_token, userId: creds.user_id, deviceUuid: creds.device_uuid, deviceType: creds.device_type })
+      this.unsession = client.onSessionEvent((ev) => this.onSession(ev))
+      this.unpush = client.onPush((p) => this.onPushRaw(p))
+      this.client = client
+      await client.acquireSession()
+      this.refreshed = false
+      this.downWritten = false
+      await this.afterConnect(true)
+    } catch (e) {
+      const code = e && e.code
+      if (code === 'invalid_access_token' && !this.refreshed && this.pool.refreshToken) {
+        this.refreshed = true
+        try {
+          const r = await this.pool.refreshToken(creds)
+          this.record.credentials.access_token = r.accessToken
+          this.record.credentials.refresh_token = r.refreshToken
+          if (this.store.saveRecord) await this.store.saveRecord(this.id, this.record)
+          return this.open()
+        } catch (err) {
+          log(this.id, `token refresh failed: ${err && err.code ? err.code : errText(err)}`)
+        }
+      }
+      if (DEAD_CODES.has(code)) {
+        await this.markDead(code)
+        return
+      }
+      log(this.id, `bot session open failed: ${code || ''} ${errText(e)}`)
+      await this.markDown()
+    }
+  }
+
+  // 접속(또는 재접속) 직후: 닉네임을 읽고 bot_accounts 를 고치고, 맡은 방을 2초 간격으로 점검한다(5.4).
+  async afterConnect(fresh) {
+    this.connects += 1
+    let nick = ''
+    try {
+      const prof = await withTimeout(this.client.getProfile(), 10000)
+      nick = prof && prof.nickname ? String(prof.nickname).trim() : ''
+    } catch (e) {
+      log(this.id, `profile read failed: ${errText(e)}`)
+    }
+    if (!nick) {
+      try { nick = await this.store.botNickname(this.id) } catch { nick = '' }
+    }
+    if (nick) this.nickname = nick
+    try {
+      await this.store.botState(this.id, { state: 'connected', nickname: this.nickname || undefined })
+    } catch (e) {
+      log(this.id, `bot_accounts update failed: ${errText(e)}`)
+    }
+    const now = this.now()
+    let i = 0
+    for (const v of this.byInstall.values()) {
+      if (!v.chat_id) continue
+      v.nextCheckAt = now + this.opts.reconnectGapMs * i++
+      v.checkFull = true
+    }
+    if (fresh || this.connects > 1) this.bg(this.pool.reconcile(null), 'reconcile')
+    this.schedulePump(now)
+    this.scheduleSend(now)
+  }
+
+  onSession(ev) {
+    if (!ev || this.stopped) return
+    if (ev.type === 'kicked') {
+      // KICKOUT 사유 0(다른 기기 로그인)·1(계정 삭제)·없음일 때만 진짜 종료(5.2). -2(CHANGE_SERVER) 와 그 밖은 재접속.
+      const r = ev.reason
+      if (typeof r === 'number' && r !== 0 && r !== 1) {
+        log(this.id, `kickout reason ${r}, reconnecting`)
+        setTimeout(() => this.bg(this.ensure(), 'reconnect'), 1000).unref?.()
+        return
+      }
+      this.bg(this.markDead('kicked'), 'markDead')
+      return
+    }
+    if (ev.type === 'disconnected') {
+      this.bg(this.markDown(), 'markDown')
+      setTimeout(() => this.bg(this.ensure(), 'reconnect'), this.opts.reconnectGapMs).unref?.()
+      return
+    }
+    if (ev.type === 'connected' && this.client && this.connects > 0 && !this.opening) {
+      // 라이브러리가 스스로 다시 붙은 경우(소켓이 닫힌 뒤 다음 호출에서): 재접속 직후 점검
+      this.downWritten = false
+      this.bg(this.afterConnect(false), 'afterConnect')
+    }
+  }
+
+  async markDown() {
+    if (this.downWritten || this.dead) return
+    this.downWritten = true
+    try { await this.store.botState(this.id, { state: 'down' }) } catch {}
+  }
+
+  // 진짜 세션 종료(KICKOUT 0·1·없음, 토큰 무효, -997): 기록은 needs_register, 맡은 방은 bot_down(D17).
+  async markDead(reason) {
+    if (this.dead) return
+    this.dead = true
+    this.record.needs_register = true
+    this.record.reason = reason || 'reauth'
+    const c = credsOf(this.record)
+    this.record.credentials = { access_token: '', refresh_token: '', user_id: c.user_id, device_uuid: '', device_type: 'tablet' }
+    log(this.id, `bot session ended: ${this.record.reason}`)
+    try { if (this.store.saveRecord) await this.store.saveRecord(this.id, this.record) } catch (e) { log(this.id, errText(e)) }
+    try { await this.store.botState(this.id, { state: 'needs_register' }) } catch {}
+    try { await this.store.markBotRooms(this.id, this.now()) } catch (e) { log(this.id, errText(e)) }
+    for (const v of this.byInstall.values()) {
+      if (v.state !== 'error') {
+        v.state = 'error'
+        v.error_code = 'bot_down'
+      }
+    }
+    await this.stop()
+  }
+
+  // ── 원시 패킷 ───────────────────────────────────────────────────────────
+  // 같은 세션에 1회만 보낸다(5.3). 세션이 없거나 응답이 없으면 {statusCode:-1}. 다시 접속하지 않는다.
+  async raw(method, body) {
+    if (!this.client) return { statusCode: -1, body: {}, noSession: true }
+    let s
+    try {
+      s = await this.client.acquireSession()
+    } catch (e) {
+      return { statusCode: -1, body: {}, noSession: true, error: errText(e) }
+    }
+    const conn = s && typeof s.getConnection === 'function' ? s.getConnection() : null
+    if (!conn) return { statusCode: -1, body: {}, noSession: true }
+    try {
+      const r = await withTimeout(conn.sendPacket(method, body), this.opts.packetTimeoutMs)
+      return r || { statusCode: -1, body: {} }
+    } catch (e) {
+      return { statusCode: -1, body: {}, error: errText(e), timeout: !!(e && e.timeout) }
+    }
+  }
+
+  // ── DB 쓰기 ─────────────────────────────────────────────────────────────
+  async write(installId, fields) {
+    return this.store.updateInstall(Number(installId), this.id, fields)
+  }
+
+  async roomLog(installId, kind, row) {
+    try {
+      await this.store.roomLog(Number(installId), kind, Object.assign({ at: this.now() }, row || {}))
+    } catch (e) {
+      log(this.id, `room_log ${kind} failed: ${errText(e)}`)
+    }
+  }
+
+  // ── 재조정 반영(5.2) ────────────────────────────────────────────────────
+  async apply(rows, leaves) {
+    const seen = new Set()
+    const now = this.now()
+    for (const row of rows) {
+      const id = Number(row.id)
+      seen.add(id)
+      if (row.hold_reason) {
+        await this.dropView(id)
+        this.joinQ.delete(id)
+        continue
+      }
+      if (row.state === 'queued' || row.state === 'joining') {
+        await this.dropView(id)
+        const nb = Number(row.next_try_at) || 0
+        const cur = this.joinQ.get(id)
+        if (!cur || cur.notBefore !== nb) this.joinQ.set(id, { notBefore: nb })
+        continue
+      }
+      this.joinQ.delete(id)
+      if (row.state === 'error' && row.error_code === 'bot_down' && this.live()) {
+        // 봇이 다시 붙었다: 오류로 두지 않고 바로 생존·권한 점검(5.2)
+        if (!row.chat_id) {
+          await this.write(id, { state: 'queued', error_code: null, error_detail: null, state_at: now })
+          this.joinQ.set(id, { notBefore: 0 })
+          continue
+        }
+        const v = await this.upsertView(row)
+        v.nextCheckAt = now
+        v.checkFull = true
+        continue
+      }
+      await this.upsertView(row)
+    }
+    for (const id of [...this.byInstall.keys()]) if (!seen.has(id)) await this.dropView(id)
+    for (const id of [...this.joinQ.keys()]) if (!seen.has(id)) this.joinQ.delete(id)
+    this.leaveQ = leaves.slice()
+    this.schedulePump(now)
+  }
+
+  newView(row) {
+    return {
+      install_id: Number(row.id),
+      member_id: Number(row.member_id),
+      chat_id: '',
+      link_id: row.link_id || '',
+      link_url: row.link_url || '',
+      link_name: row.link_name || '',
+      products: productsOf(row),
+      perm: row.perm == null ? null : Number(row.perm),
+      state: row.state,
+      error_code: row.error_code || null,
+      cfg: R.normRoomConfig(row.config),
+      rev: Number(row.config_rev) || 0,
+      licensed: !row.member_blocked,
+      runtime: {},
+      dirty: false,
+      ring: [],
+      ringFilled: false,
+      names: new Map(),
+      perms: new Map(),
+      cardAt: new Map(),
+      nextCheckAt: 0,
+      checkFull: false,
+      checking: false,
+      limits: R.roomLimits(),
+      failStreak: 0,
+      actPausedUntil: 0,
+      hideJob: null,
+      profileScanAt: 0,
+    }
+  }
+
+  async upsertView(row) {
+    const id = Number(row.id)
+    let v = this.byInstall.get(id)
+    if (!v) {
+      // 맵에 먼저 넣고 읽는다(겹친 호출이 뷰를 둘 만들지 않게)
+      v = this.newView(row)
+      this.byInstall.set(id, v)
+      let saved = null
+      try {
+        saved = await this.store.loadRoomState(id)
+      } catch (e) {
+        log(this.id, `room_state read failed: ${errText(e)}`)
+      }
+      v.runtime = v.dirty ? Object.assign(saved || {}, v.runtime) : (saved || {})
+    }
+    v.member_id = Number(row.member_id)
+    v.link_id = row.link_id || ''
+    v.link_url = row.link_url || ''
+    v.link_name = row.link_name || ''
+    v.products = productsOf(row)
+    v.perm = row.perm == null ? null : Number(row.perm)
+    v.state = row.state
+    v.error_code = row.error_code || null
+    v.licensed = !row.member_blocked
+    if (v.rev !== (Number(row.config_rev) || 0) || !v.cfg) {
+      v.cfg = R.normRoomConfig(row.config)
+      v.rev = Number(row.config_rev) || 0
+    }
+    const chat = row.chat_id ? String(row.chat_id) : ''
+    if (v.chat_id !== chat) {
+      if (v.chat_id && this.views.get(v.chat_id) === v) this.views.delete(v.chat_id)
+      v.chat_id = chat
+    }
+    if (chat) {
+      // 내보내진 옛 설치(오류)가 같은 방의 새 설치를 가리지 않게
+      const cur = this.views.get(chat)
+      if (!cur || cur === v || cur.state === 'error' || v.state !== 'error') this.views.set(chat, v)
+    }
+    const now = this.now()
+    if (!v.nextCheckAt && chat) {
+      if (v.state === 'waiting_host') v.nextCheckAt = now + jitter(this.opts.permPollMs, 0.25)
+      else if (v.state === 'active') v.nextCheckAt = now + this.opts.activeCheckMs
+    }
+    return v
+  }
+
+  async dropView(installId) {
+    const v = this.byInstall.get(Number(installId))
+    if (!v) return
+    await this.flushView(v)
+    if (v.chat_id && this.views.get(v.chat_id) === v) this.views.delete(v.chat_id)
+    this.byInstall.delete(Number(installId))
+    this.pacer.drop(String(v.install_id))
+  }
+
+  async flushView(v) {
+    if (!v.dirty) return
+    v.dirty = false
+    try {
+      await this.store.saveRoomState(v.install_id, v.runtime)
+    } catch (e) {
+      v.dirty = true
+      log(this.id, `room_state save failed: ${errText(e)}`)
+    }
+  }
+
+  async flush() {
+    for (const v of this.byInstall.values()) await this.flushView(v)
+  }
+
+  // ── 나가기 → 입장 작업 줄(5.2·5.3) ──────────────────────────────────────
+  schedulePump(at) {
+    if (this.stopped) return
+    const now = this.now()
+    const when = Math.max(now, at || now)
+    if (this.pumpTimer && this.pumpAt <= when) return
+    if (this.pumpTimer) clearTimeout(this.pumpTimer)
+    this.pumpAt = when
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = null
+      this.bg(this.pump(), 'pump')
+    }, Math.max(0, when - now))
+    if (this.pumpTimer.unref) this.pumpTimer.unref()
+  }
+
+  async pump() {
+    if (this.pumping) {
+      this.pumpAgain = true
+      return
+    }
+    this.pumping = true
+    try {
+      do {
+        this.pumpAgain = false
+        await this.pumpOnce()
+      } while (this.pumpAgain && !this.stopped)
+    } finally {
+      this.pumping = false
+    }
+  }
+
+  async pumpOnce() {
+    if (!this.live()) return
+    while (this.leaveQ.length && this.live()) {
+      const lv = this.leaveQ.shift()
+      try {
+        await this.doLeave(lv)
+      } catch (e) {
+        log(this.id, `leave ${lv.id} failed: ${errText(e)}`)
+      }
+    }
+    while (this.live()) {
+      const now = this.now()
+      let best = null
+      for (const [id, j] of this.joinQ) {
+        if (!best || j.notBefore < best.notBefore || (j.notBefore === best.notBefore && id < best.id)) best = { id, notBefore: j.notBefore }
+      }
+      if (!best) return
+      if (best.notBefore > now) {
+        this.schedulePump(best.notBefore)
+        return
+      }
+      if (this.nextJoinAt > now) {
+        this.schedulePump(this.nextJoinAt)
+        return
+      }
+      this.joinQ.delete(best.id)
+      let used = false
+      try {
+        used = await this.joinOne(best.id)
+      } catch (e) {
+        log(this.id, `join ${best.id} failed: ${errText(e)}`)
+      }
+      if (used) this.nextJoinAt = this.now() + jitter(this.opts.joinGapMs, 0.2)
+    }
+  }
+
+  // 나가기 1행(5.2). 지금 이 봇이 같은 link_id 의 설치를 맡고 있으면 나가지 않는다(kept).
+  async doLeave(lv) {
+    const li = lv.link_id ? String(lv.link_id) : ''
+    if (li) {
+      for (const v of this.byInstall.values()) if (v.link_id === li) return this.finishLeave(lv, 'kept', true)
+      const rows = await this.store.listInstalls([this.id])
+      if (rows.some((r) => String(r.link_id || '') === li)) return this.finishLeave(lv, 'kept', true)
+    }
+    let chatId = lv.chat_id ? String(lv.chat_id) : ''
+    let inRoom = false
+    try {
+      const chats = await this.client.getChats({ all: true })
+      if (chatId) inRoom = chats.some((c) => String(c.chat_id) === chatId)
+      if (!inRoom && li) {
+        const hit = chats.find((c) => String(c.link_id || '') === li)
+        if (hit) {
+          chatId = String(hit.chat_id)
+          inRoom = true
+        }
+      }
+    } catch (e) {
+      return this.leaveFailed(lv, 'list')
+    }
+    if (!inRoom) return this.finishLeave(lv, 'not_in_room', true)
+    try {
+      await this.client.leaveChat(chatId)
+    } catch (e) {
+      const m = /statusCode=(-?\d+)/.exec(errText(e))
+      return this.leaveFailed(lv, m ? m[1] : 'error')
+    }
+    if (this.views.get(chatId)) this.views.delete(chatId)
+    return this.finishLeave(lv, 'left', true)
+  }
+
+  async leaveFailed(lv, status) {
+    const n = (this.leaveTries.get(lv.id) || 0) + 1
+    this.leaveTries.set(lv.id, n)
+    await this.finishLeave(lv, 'failed:' + status, n >= 5)
+  }
+
+  async finishLeave(lv, result, done) {
+    if (done) this.leaveTries.delete(lv.id)
+    await this.store.finishLeave(lv.id, this.id, result, done)
+  }
+
+  async chatByLink(li) {
+    if (!li) return null
+    try {
+      const chats = await this.client.getChats({ all: true })
+      const hit = (chats || []).find((c) => String(c.link_id || '') === String(li))
+      return hit ? { chat_id: String(hit.chat_id), link_id: String(li) } : null
+    } catch (e) {
+      log(this.id, `chat list failed: ${errText(e)}`)
+      return null
+    }
+  }
+
+  // 입장 1건(5.3). → Kakao 에 입장 패킷을 보냈으면 true(다음 입장까지 간격을 둔다).
+  async joinOne(id) {
+    const row = await this.store.getInstall(id)
+    if (!row || row.phase !== 'installed' || row.bot_device_id !== this.id || row.hold_reason) return false
+    if (row.state !== 'queued' && row.state !== 'joining') return false
+    const now = this.now()
+    if (Number(row.next_try_at) > now) {
+      this.joinQ.set(Number(row.id), { notBefore: Number(row.next_try_at) })
+      return false
+    }
+    if (await this.store.isBlocked(row.link_id || null, row.link_url || null)) {
+      await this.fail(row, 'blocked')
+      return false
+    }
+    // 0. 사전 확인: 이미 그 방에 있으면 JOINLINK 없이 성공 처리
+    if (row.link_id) {
+      const ch = await this.chatByLink(row.link_id)
+      if (ch) {
+        await this.joined(row, ch, null)
+        return false
+      }
+    }
+    if (this.pool.joinPausedUntil > now) {
+      await this.rateLimited(row, this.pool.joinPausedUntil)
+      return false
+    }
+    const free = Math.max(this.joinH.freeAt(now), this.joinD.freeAt(now))
+    if (free > now) {
+      await this.rateLimited(row, free)
+      return false
+    }
+    this.joinH.add(now)
+    this.joinD.add(now)
+    // 1.
+    if (!(await this.write(row.id, { state: 'joining', attempts: '+1', state_at: now }))) return false
+    // 2. JOININFO
+    const info = await this.raw('JOININFO', { lu: String(row.link_url), ref: 'EW' })
+    const ist = R.locoStatus(info)
+    if (ist !== 0) {
+      await this.joinFail(row, ist, { step: 'info', res: info })
+      return true
+    }
+    const ol = info.body && info.body.ol
+    if (!ol || typeof ol !== 'object') {
+      await this.joinFail(row, 0, { step: 'info', res: info, empty: true })
+      return true
+    }
+    if (Number(ol.lt) !== 2) {
+      await this.fail(row, 'not_group')
+      return true
+    }
+    const li = R.idText(ol.li)
+    const name = typeof ol.ln === 'string' && ol.ln.trim() ? ol.ln.trim().slice(0, 200) : null
+    if (!li) {
+      await this.fail(row, 'kakao_error', '카카오 상태 ' + ist)
+      return true
+    }
+    if (!row.link_id) {
+      try {
+        await this.write(row.id, { link_id: li, link_name: name || row.link_name || null })
+      } catch (e) {
+        if (e && e.code === '23505') {
+          await this.fail(row, 'duplicate_room')
+          return true
+        }
+        throw e
+      }
+      row.link_id = li
+      if (name) row.link_name = name
+      if (await this.store.isBlocked(li, null)) {
+        await this.fail(row, 'blocked')
+        return true
+      }
+      const ch = await this.chatByLink(li)
+      if (ch) {
+        await this.joined(row, ch, null)
+        return true
+      }
+    } else if (String(row.link_id) !== li) {
+      await this.fail(row, 'link_changed', 'li ' + li)
+      return true
+    } else if (name && name !== row.link_name) {
+      await this.write(row.id, { link_name: name })
+      row.link_name = name
+    }
+    // 3. 참여코드
+    const pv = Number(ol.pv) || 0
+    let tk = null
+    if (pv & 64) {
+      if (!row.passcode_ct) {
+        await this.fail(row, 'passcode_needed')
+        return true
+      }
+      const pc = openPasscode(row.passcode_ct)
+      if (pc == null) {
+        await this.fail(row, 'passcode_needed', 'passcode_unreadable')
+        return true
+      }
+      const cj = await this.raw('CHECKJOIN', { li: L(li), pc })
+      const cst = R.locoStatus(cj)
+      if (cst !== 0) {
+        if (RATE_STATUS.has(cst) || cst === -444 || cst === -997 || cst === -1) {
+          await this.joinFail(row, cst, { step: 'check', res: cj, li })
+        } else {
+          await this.fail(row, 'passcode_wrong', '카카오 상태 ' + cst)
+        }
+        return true
+      }
+      tk = cj.body && cj.body.tk != null ? cj.body.tk : null
+    }
+    // 4. JOINLINK. 기본 프로필 참여가 허용되면 봇의 기본 프로필(ptp 1), 아니면 닉네임 프로필(ptp 2, 10.1 #9 실측 전 가정)
+    const body = (pv & 32)
+      ? { li: L(li), ref: 'EW:', ptp: 1 }
+      : { li: L(li), ref: 'EW:', ptp: 2, nn: this.nickname || 'K bot', pp: '' }
+    if (tk != null) body.tk = tk
+    const jr = await this.raw('JOINLINK', body)
+    const jst = R.locoStatus(jr)
+    if (jst === 0) {
+      const room = jr.body && jr.body.chatRoom
+      const chatId = R.idText(room && (room.chatId != null ? room.chatId : room.c)) || R.idText(jr.body && jr.body.chatId)
+      if (chatId) {
+        await this.joined(row, { chat_id: chatId, link_id: li }, jr.body.olu)
+        return true
+      }
+      await this.joinFail(row, -1, { step: 'join', res: jr, li, ptp: body.ptp })
+      return true
+    }
+    await this.joinFail(row, jst, { step: 'join', res: jr, li, ptp: body.ptp })
+    return true
+  }
+
+  // 5.3 6 실패 처리
+  async joinFail(row, status, ctx) {
+    const now = this.now()
+    const res = ctx.res || {}
+    if (res.noSession) {
+      // 봇 연결이 없다: 오류로 두지 않고 다시 줄에 넣는다
+      this.joinQ.set(Number(row.id), { notBefore: now + this.opts.transientWaitMs })
+      this.schedulePump(now + this.opts.transientWaitMs)
+      return
+    }
+    if (RATE_STATUS.has(status)) {
+      const n = this.rateN.get(Number(row.id)) || 0
+      this.rateN.set(Number(row.id), n + 1)
+      const wait = this.opts.rateWaits[Math.min(n, this.opts.rateWaits.length - 1)]
+      await this.rateLimited(row, now + wait)
+      return
+    }
+    if (status === -444) {
+      const until = this.pool.ipBlocked(now)
+      await this.rateLimited(row, until)
+      return
+    }
+    if (status === -997) {
+      await this.fail(row, 'bot_down', '카카오 상태 -997')
+      await this.markDead('restricted')
+      return
+    }
+    if (GONE_STATUS.has(status)) {
+      await this.fail(row, 'link_gone', '카카오 상태 ' + status)
+      return
+    }
+    if (status === -815) {
+      await this.fail(row, 'kicked', '카카오 상태 -815')
+      return
+    }
+    if (status === -501) {
+      await this.fail(row, 'room_full', '카카오 상태 -501')
+      return
+    }
+    if (ctx.step === 'info') {
+      // 조회 단계의 응답 유실·알 수 없는 status: 세 번까지는 잠시 뒤 다시
+      const n = (this.transient.get(Number(row.id)) || 0) + 1
+      this.transient.set(Number(row.id), n)
+      if ((status === -1 || ctx.empty) && n < 3) {
+        await this.write(row.id, { state: 'joining', error_detail: null, next_try_at: now + this.opts.transientWaitMs, state_at: now })
+        this.joinQ.set(Number(row.id), { notBefore: now + this.opts.transientWaitMs })
+        this.schedulePump(now + this.opts.transientWaitMs)
+        return
+      }
+      await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
+      return
+    }
+    // 입장 단계: ptp 2 의 확정 실패는 profile_blocked(실측 전에는 알 수 없는 status 도 여기로)
+    const lost = status === -1 || !!res.timeout
+    if (!lost && ctx.step === 'join' && ctx.ptp === 2) {
+      await this.fail(row, 'profile_blocked', '카카오 상태 ' + status)
+      return
+    }
+    // 응답 유실·알 수 없는 status: 다시 접속하지 않는다. 지금 세션의 방 목록에서 같은 li 의 방을 찾는다.
+    const ch = ctx.li ? await this.chatByLink(ctx.li) : null
+    if (ch) {
+      await this.joined(row, ch, null)
+      return
+    }
+    if (ctx.step === 'join' && ctx.ptp === 2) {
+      await this.fail(row, 'profile_blocked', '카카오 상태 ' + status)
+      return
+    }
+    await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
+  }
+
+  async rateLimited(row, until) {
+    const now = this.now()
+    await this.write(row.id, { state: 'joining', error_detail: 'rate_limited', next_try_at: until, state_at: now })
+    this.joinQ.set(Number(row.id), { notBefore: until })
+    this.schedulePump(until)
+  }
+
+  async fail(row, code, detail) {
+    const now = this.now()
+    let n = 0
+    try {
+      n = await this.write(row.id, { state: 'error', error_code: code, error_detail: detail || null, next_try_at: null, state_at: now })
+    } catch (e) {
+      // 오류 칸을 쓰다 부분 UNIQUE 에 걸리면(다른 회원이 그 방을 설치함) 배타권이 없는 kicked 로 둔다
+      if (e && e.code === '23505') {
+        n = await this.write(row.id, { state: 'error', error_code: 'kicked', error_detail: code, next_try_at: null, state_at: now })
+      } else throw e
+    }
+    this.transient.delete(Number(row.id))
+    this.joinQ.delete(Number(row.id))
+    if (!n) return
+    await this.roomLog(row.id, 'state', { ok: false, detail: { state: 'error', code } })
+    const v = this.byInstall.get(Number(row.id))
+    if (v) {
+      v.state = 'error'
+      v.error_code = code
+    }
+    log(this.id, `install ${row.id} join error ${code}${detail ? ' (' + detail + ')' : ''}`)
+  }
+
+  // 5. 입장 성공(또는 이미 들어가 있음)
+  async joined(row, ch, joinOlu) {
+    const now = this.now()
+    const chatId = String(ch.chat_id)
+    const li = String(ch.link_id || row.link_id || '')
+    let perm = await this.readPerm(chatId, joinOlu && joinOlu.lmt != null ? Number(joinOlu.lmt) : null)
+    const products = productsOf(row)
+    let state = 'active'
+    if (products.roombot) state = perm != null && (perm & 5) ? 'active' : 'waiting_host'
+    const fields = {
+      chat_id: chatId, joined_at: now, error_code: null, error_detail: null, next_try_at: null,
+      state, perm: perm == null ? null : perm, perm_at: perm == null ? null : now, state_at: now,
+    }
+    if (!row.link_id && li) fields.link_id = li
+    try {
+      await this.write(row.id, fields)
+    } catch (e) {
+      if (e && e.code === '23505') {
+        // 내보내진 동안 다른 회원이 이 방을 설치했다
+        try { await this.client.leaveChat(chatId) } catch {}
+        await this.fail(row, 'room_taken')
+        return
+      }
+      throw e
+    }
+    this.pool.joinOk()
+    this.rateN.delete(Number(row.id))
+    this.transient.delete(Number(row.id))
+    await this.roomLog(row.id, 'state', { detail: { state, event: 'join' } })
+    const v = await this.upsertView(Object.assign({}, row, fields, { link_id: row.link_id || li, state }))
+    v.nextCheckAt = now + (state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
+    if (v.runtime.welcomedChat !== chatId && v.licensed) {
+      v.runtime.welcomedChat = chatId
+      v.dirty = true
+      this.say(v, R.joinNotice(v, this.nickname), { what: 'notice' })
+    }
+    if (state === 'active' && products.roombot && !v.runtime.hostNoticed) {
+      v.runtime.hostNoticed = true
+      v.dirty = true
+      await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: true, to: 'active' } })
+      this.say(v, R.PROMOTED_NOTICE, { what: 'notice' })
+    }
+  }
+
+  // 권한 읽기(D13): CHATONROOM 의 olu.lmt → (입장 때) JOINLINK 의 olu.lmt → MEMBER(self) 의 mt → null(판정 보류)
+  async readPerm(chatId, fallback) {
+    const r = await this.raw('CHATONROOM', { chatId: L(chatId) })
+    if (R.locoOk(r)) {
+      const olu = r.body && r.body.olu
+      if (olu && olu.lmt != null && Number.isFinite(Number(olu.lmt))) return Number(olu.lmt)
+    }
+    if (fallback != null && Number.isFinite(Number(fallback))) return Number(fallback)
+    if (!this.userId) return null
+    const m = await this.raw('MEMBER', { chatId: L(chatId), memberIds: [L(this.userId)] })
+    if (R.locoOk(m)) {
+      const list = (m.body && m.body.members) || []
+      const me = list.find((x) => R.idText(x && x.userId) === this.userId) || list[0]
+      if (me && me.mt != null && Number.isFinite(Number(me.mt))) return Number(me.mt)
+    }
+    return null
+  }
+
+  // ── 권한·생존 점검(5.4) ─────────────────────────────────────────────────
+  tick() {
+    if (!this.live()) return
+    const now = this.now()
+    for (const v of this.byInstall.values()) {
+      if (v.checking || !v.chat_id || !v.nextCheckAt || v.nextCheckAt > now) continue
+      if (v.state === 'error' && v.error_code !== 'bot_down') {
+        v.nextCheckAt = 0
+        continue
+      }
+      v.checking = true
+      this.checks = this.checks.then(() => this.checkRoom(v)).catch((e) => log(this.id, `check ${v.install_id} failed: ${errText(e)}`)).finally(() => { v.checking = false })
+    }
+    for (const v of this.byInstall.values()) this.profileScan(v, now)
+    for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
+  }
+
+  async checkRoom(v) {
+    if (!this.live() || !this.byInstall.has(v.install_id)) return
+    const now = this.now()
+    const full = v.checkFull || v.state === 'active' || v.state === 'error'
+    v.checkFull = false
+    if (full) {
+      try {
+        await this.client.getChat(v.chat_id)
+      } catch (e) {
+        if (e && e.getChatFailureReason === 'chat_info_absent') {
+          await this.roomGone(v, 'kicked')
+          return
+        }
+        v.nextCheckAt = now + MIN
+        return
+      }
+      // INFOLINK 에 링크가 없으면 방 삭제(5.4). 한 번의 빈 응답으로 방을 나가지 않게 두 번 연속일 때만.
+      if (v.link_id) {
+        const r = await this.raw('INFOLINK', { lis: [L(v.link_id)] })
+        if (R.locoOk(r)) {
+          const ols = (r.body && Array.isArray(r.body.ols)) ? r.body.ols : []
+          if (ols.some((o) => R.idText(o && o.li) === v.link_id)) v.linkMiss = 0
+          else {
+            v.linkMiss = (v.linkMiss || 0) + 1
+            if (v.linkMiss >= 2) {
+              await this.roomGone(v, 'room_deleted')
+              return
+            }
+            v.checkFull = true
+            v.nextCheckAt = this.now() + MIN
+            return
+          }
+        }
+      }
+    }
+    if (v.products.roombot) {
+      const perm = await this.readPerm(v.chat_id, null)
+      if (perm != null) await this.applyPerm(v, perm)
+    } else if (v.state !== 'active') {
+      await this.applyPerm(v, v.perm == null ? 2 : v.perm)
+    }
+    if (!this.byInstall.has(v.install_id) || v.state === 'error') return
+    v.nextCheckAt = this.now() + (v.state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
+  }
+
+  // 방 관리봇이 있는 방: perm & 5 면 active, 아니면 waiting_host. 미니게임만 있는 방은 권한을 보지 않는다(늘 active).
+  async applyPerm(v, perm) {
+    const now = this.now()
+    const prev = v.state
+    const state = v.products.roombot ? ((perm & 5) ? 'active' : 'waiting_host') : 'active'
+    const fields = { perm, perm_at: now }
+    if (state !== prev || v.error_code) Object.assign(fields, { state, state_at: now, error_code: null, error_detail: null })
+    const n = await this.write(v.install_id, fields)
+    if (!n) return
+    v.perm = perm
+    v.state = state
+    v.error_code = null
+    if (prev === state) return
+    if (prev === 'error') await this.roomLog(v.install_id, 'state', { detail: { state, event: 'revive' } })
+    if (v.products.roombot && (prev === 'waiting_host' || prev === 'active')) {
+      await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: state === 'active', to: state } })
+    }
+    if (state === 'active' && v.products.roombot && !v.runtime.hostNoticed) {
+      v.runtime.hostNoticed = true
+      v.dirty = true
+      if (prev !== 'waiting_host') await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: true, to: state } })
+      this.say(v, R.PROMOTED_NOTICE, { what: 'notice' })
+    }
+  }
+
+  soon(v) {
+    const at = this.now() + this.opts.pushDelayMs
+    if (!v.nextCheckAt || v.nextCheckAt > at) v.nextCheckAt = at
+  }
+
+  // 내보내짐·방 삭제·나감(5.4 표)
+  async roomGone(v, code) {
+    const now = this.now()
+    const n = await this.write(v.install_id, { state: 'error', error_code: code, error_detail: null, state_at: now })
+    v.state = 'error'
+    v.error_code = code
+    v.nextCheckAt = 0
+    if (n) await this.roomLog(v.install_id, 'state', { ok: false, detail: { state: 'error', code } })
+    this.pacer.drop(String(v.install_id))
+    if (code === 'kicked' && v.link_id) {
+      await this.raw('KICKLEAVE', { c: L(v.chat_id), li: L(v.link_id) })
+    } else if (code === 'room_deleted') {
+      try { await this.client.leaveChat(v.chat_id) } catch {}
+    }
+    log(this.id, `install ${v.install_id} ${code}`)
+  }
+
+  // ── 푸시 ────────────────────────────────────────────────────────────────
+  onPushRaw(packet) {
+    if (!packet || this.stopped) return
+    if (this.opts.trace && !this.pool.traced.has(packet.method)) {
+      this.pool.traced.add(packet.method)
+      log(this.id, `push ${packet.method} keys ${Object.keys(packet.body || {}).join(',')}`)
+    }
+    this.enqueue(() => this.onPush(packet)).catch((e) => log(this.id, `push ${packet.method} failed: ${errText(e)}`))
+  }
+
+  viewByLink(li) {
+    const s = R.idText(li)
+    if (!s) return null
+    for (const v of this.byInstall.values()) if (v.link_id === s) return v
+    return null
+  }
+
+  async onPush(packet) {
+    const m = packet.method
+    const b = packet.body || {}
+    if (m === 'MSG' || m === 'NEWMEM' || m === 'DELMEM') {
+      const log0 = b.chatLog || {}
+      const chatId = R.idText(b.chatId) || R.idText(log0.chatId) || R.idText(b.c)
+      if (chatId) await this.onChatLog(chatId, log0, typeof b.authorNickname === 'string' ? b.authorNickname : '', m)
+      return
+    }
+    if (m === 'SYNCMEMT') {
+      const chatId = R.idText(b.c) || R.idText(b.chatId)
+      const v = this.views.get(chatId)
+      if (!v) return
+      const mids = (b.mids || []).map((x) => R.idText(x))
+      const mts = b.mts || []
+      mids.forEach((id, i) => {
+        if (!id || id === this.userId) return
+        if (mts[i] != null) v.perms.set(id, { mt: Number(mts[i]), at: this.now() })
+      })
+      if (mids.includes(this.userId) && v.products.roombot && v.state !== 'error') this.soon(v)
+      return
+    }
+    if (m === 'LINKKICKED') {
+      const v = this.views.get(R.idText(b.c) || R.idText(b.chatId)) || this.viewByLink(b.li)
+      if (v && v.state !== 'error') await this.roomGone(v, 'kicked')
+      return
+    }
+    if (m === 'LNKDELETED' || m === 'SYNCLINKDL') {
+      const li = b.li != null ? b.li : (b.ol && b.ol.li)
+      const v = this.viewByLink(li) || this.views.get(R.idText(b.c) || R.idText(b.chatId))
+      if (v && v.state !== 'error') await this.roomGone(v, 'room_deleted')
+      return
+    }
+    if (m === 'LEFT') {
+      const v = this.views.get(R.idText(b.chatId) || R.idText(b.c))
+      if (v && v.state !== 'error') await this.roomGone(v, 'left')
+      return
+    }
+    if (m === 'SYNCLINKPF') {
+      // 오픈 프로필 변경 푸시(7.2(c), 모양은 실측 전). 사람 id 와 이름이 보이면 프로필 관찰로만 쓴다.
+      const v = this.views.get(R.idText(b.c) || R.idText(b.chatId)) || this.viewByLink(b.li)
+      if (!v || !v.licensed || v.state === 'error' || !R.roombotLive(v) || !v.cfg.profile.enabled) return
+      const p = [b.olu, b.member, b.profile, b].find((x) => x && typeof x === 'object' && R.idText(x.userId))
+      if (!p) return
+      const uid = R.idText(p.userId)
+      if (uid === this.userId) return
+      const name = String(p.nickName || p.nn || '').trim().slice(0, 40)
+      const photo = R.photoSig(p.opi || p.originalProfileImageUrl, p.pi || p.profileImageUrl) || null
+      const status = p.statusMessage == null ? null : String(p.statusMessage)
+      const adapter = R.adapterRecord(v, this.id)
+      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: uid, authorName: name, photo, status, now: this.now() }))
+      v.dirty = true
+    }
+  }
+
+  async onChatLog(chatId, chatLog, authorNickname, method) {
+    const v = this.views.get(chatId)
+    if (!v || !v.licensed || v.state === 'error') return
+    const now = this.now()
+    const type = Number(chatLog.type)
+    const authorId = R.idText(chatLog.authorId)
+    const message = typeof chatLog.message === 'string' ? chatLog.message : (chatLog.message == null ? '' : String(chatLog.message))
+    const ev = {
+      logId: R.idText(chatLog.logId),
+      authorId,
+      type,
+      text: message,
+      attachment: chatLog.attachment,
+      at: atMs(chatLog.sendAt) || now,
+      nick: String(authorNickname || '').trim().slice(0, 40),
+    }
+    if (type === 0 || method !== 'MSG') {
+      await this.onFeed(v, ev)
+      return
+    }
+    if (authorId && authorId === this.userId) return
+    await this.onMessage(v, ev)
+  }
+
+  // 피드: 권한 변경(11·12·15), 강퇴(6), 입장(4)·퇴장(2·3)
+  async onFeed(v, ev) {
+    const feed = R.feedOf(ev.text)
+    const now = this.now()
+    if (feed) {
+      const ft = feed.feedType
+      if (ft === 11 || ft === 12 || ft === 15) {
+        for (const m of feed.members) {
+          if (m.userId === this.userId) continue
+          if (ft === 11) v.perms.set(m.userId, { mt: 4, at: now })
+          else v.perms.delete(m.userId)
+        }
+        if (R.feedHas(feed, this.userId) && v.products.roombot) this.soon(v)
+        return
+      }
+      if (ft === 6) {
+        if (R.feedHas(feed, this.userId)) {
+          await this.roomGone(v, 'kicked')
+          return
+        }
+        if (R.roombotLive(v) && v.cfg.guard.enabled) {
+          const own = feed.members.length > 0 && feed.members.every((x) => this.ownKicks.has(x.userId))
+          const adapter = R.adapterRecord(v, this.id)
+          const g = guardOnChat(adapter, { kind: 'msg', chatId: v.chat_id, text: ev.text, authorId: ev.authorId, messageType: 0, mine: false, ownKick: own, now })
+          if (g.askHalt) {
+            const allowed = !!(Number(v.perm) & 5)
+            guardFinishHalt(adapter, v.chat_id, allowed, now, v.link_name || '대화방', g.askHalt.count)
+            await this.roomLog(v.install_id, 'wave', { detail: { n: g.askHalt.count } })
+          }
+          this.sendAll(v, g.sends)
+          v.dirty = true
+        }
+        return
+      }
+    }
+    if (!R.roombotLive(v)) return
+    const events = visitEventsFromMessage({ message: ev.text, message_type: 0, author_id: ev.authorId, attachment: ev.attachment })
+    for (const e of events) {
+      if (e.authorId && e.authorId === this.userId) continue
+      await this.onVisit(v, { kind: e.kind, userId: e.authorId || '', name: e.authorName || '', logId: ev.logId, at: ev.at })
+    }
+  }
+
+  ctxFor(v) {
+    const now = this.now()
+    return {
+      selfId: this.userId,
+      permOf: (uid) => {
+        if (uid === this.userId) return v.perm
+        const p = v.perms.get(String(uid))
+        return p && now - p.at < 10 * MIN ? p.mt : null
+      },
+    }
+  }
+
+  // 작성자 권한(모르면 MEMBER 로 읽어 10분 둔다)
+  async permOf(v, userId) {
+    const uid = String(userId || '')
+    if (!uid) return null
+    if (uid === this.userId) return v.perm
+    const hit = v.perms.get(uid)
+    if (hit && this.now() - hit.at < 10 * MIN) return hit.mt
+    const card = await this.memberCard(v, uid)
+    return card ? card.perm : null
+  }
+
+  async memberCard(v, userId) {
+    try {
+      const rows = await this.client.getMembersByIds(v.chat_id, [String(userId)])
+      const row = (rows || []).find((x) => x && String(x.user_id) === String(userId))
+      if (!row) return null
+      const perm = row.open_permission == null ? null : Number(row.open_permission)
+      if (perm != null) v.perms.set(String(userId), { mt: perm, at: this.now() })
+      v.cardAt.set(String(userId), this.now())
+      return {
+        name: String(row.nickname || '').trim().slice(0, 40),
+        photo: R.photoSig(row.original_profile_image_url, row.profile_image_url) || null,
+        status: row.status_message == null ? null : String(row.status_message),
+        perm,
+        pli: row.open_profile_link_id ? String(row.open_profile_link_id) : '',
+      }
+    } catch (e) {
+      log(this.id, `member read failed: ${errText(e)}`)
+      return null
+    }
+  }
+
+  async profileLink(pli) {
+    if (!/^[1-9][0-9]*$/.test(String(pli || ''))) return ''
+    try {
+      const body = await this.client.executeWithReconnect(async ({ session }) => {
+        const r = await session.getOpenLinkInfo([L(pli)])
+        return r && r.body
+      })
+      const row = body && Array.isArray(body.ols) ? body.ols[0] : null
+      const lu = row && typeof row.lu === 'string' ? row.lu.trim() : ''
+      return /^https:\/\/open\.kakao\.com\//i.test(lu) ? lu : ''
+    } catch {
+      return ''
+    }
+  }
+
+  async memberIdByName(v, name) {
+    const want = String(name || '').trim()
+    if (!want) return ''
+    try {
+      const body = await this.client.executeWithReconnect(async ({ session }) => {
+        const r = await session.getAllMembers(L(v.chat_id))
+        return r && r.body
+      })
+      const ids = []
+      for (const m of (body && body.members) || []) {
+        const nm = String((m && (m.nickName || m.nickname || m.nn)) || '').trim()
+        const id = R.idText(m && m.userId)
+        if (nm === want && id && !ids.includes(id)) ids.push(id)
+      }
+      return ids.length === 1 ? ids[0] : ''
+    } catch {
+      return ''
+    }
+  }
+
+  // 입장·퇴장 1건(7.2 (a)(b)(c) + 입장·퇴장 로그)
+  async onVisit(v, ev) {
+    const cfg = v.cfg
+    const rt = v.runtime
+    const now = this.now()
+    if (!rt.evSeen || typeof rt.evSeen !== 'object') rt.evSeen = {}
+    if (R.visitDedup(rt.evSeen, v.chat_id, ev, now)) return
+    v.dirty = true
+    if (!ev.userId && ev.name && ev.kind === 'join' && cfg.churn.enabled) ev.userId = await this.memberIdByName(v, ev.name)
+    let card = null
+    if (ev.kind === 'join' && ev.userId && (cfg.visit.enabled || cfg.profile.enabled)) card = await this.memberCard(v, ev.userId)
+    const adapter = R.adapterRecord(v, this.id)
+    const link = card && card.pli && cfg.visit.enabled ? await this.profileLink(card.pli) : ''
+    const g = guardOnChat(adapter, {
+      kind: ev.kind, chatId: v.chat_id, authorId: ev.userId, authorName: (card && card.name) || ev.name,
+      profileLink: link, mine: false, now, at: ev.at, logId: ev.logId,
+    })
+    this.sendAll(v, g.sends)
+    if (card && cfg.profile.enabled) {
+      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: ev.userId, authorName: card.name, photo: card.photo, status: card.status, now }))
+    }
+    const ctx = this.ctxFor(v)
+    if (ev.kind === 'join') {
+      if (ev.userId && R.bannedNow(rt, ev.userId, now)) {
+        // 나간 뒤 내보내지 못한 사람이 다시 들어왔다: 지금은 방 안이라 내보낼 수 있다(7.2(b))
+        const name = ev.name || (rt.bans[ev.userId] && rt.bans[ev.userId].name) || ''
+        const r = await this.kick(v, ev.userId, name, 'leave')
+        if (r.ok) {
+          delete rt.bans[ev.userId]
+          if (cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(name), { what: 'notice' })
+        }
+        return
+      }
+      if (!rt.churn || typeof rt.churn !== 'object') rt.churn = {}
+      const plan = R.churnCheck(rt.churn, cfg, { kind: 'join', userId: ev.userId, name: (card && card.name) || ev.name, at: ev.at }, ctx, now)
+      if (plan) await this.doChurn(v, plan)
+      return
+    }
+    const lk = R.leaveKickPlan(cfg, ev, ctx)
+    if (lk) await this.doLeaveKick(v, lk)
+  }
+
+  async doChurn(v, plan) {
+    let result = 'warn'
+    if (plan.action === 'kick') {
+      const r = await this.kick(v, plan.userId, plan.name, 'churn')
+      result = r.ok ? 'kicked' : 'kick_failed'
+    }
+    const detail = { windowMin: plan.windowMin, joins: plan.count, action: plan.action }
+    if (plan.idUnknown) detail.note = 'id 확인 불가'
+    await this.roomLog(v.install_id, 'churn', { user_id: plan.userId || null, name: plan.name, ok: result !== 'kick_failed', detail })
+    if (plan.notice) {
+      const n = R.churnNotice(plan, result)
+      this.say(v, n.text, { mention: n.mention, what: 'notice' })
+    }
+  }
+
+  async doLeaveKick(v, plan) {
+    if (plan.type === 'kick_fail') {
+      await this.roomLog(v.install_id, 'kick_fail', { name: plan.name, ok: false, detail: { why: 'leave', note: plan.note } })
+      return
+    }
+    const r = await this.kick(v, plan.userId, plan.name, 'leave')
+    if (r.ok) {
+      if (v.cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(plan.name), { what: 'notice' })
+      return
+    }
+    if (!r.skipped) {
+      // 나간 사람의 내보내기가 실패하면 30일 안에 다시 들어오는 즉시 내보낸다
+      R.noteBan(v.runtime, plan.userId, plan.name, this.now())
+      v.dirty = true
+    }
+  }
+
+  // ── 조치(5.5) ───────────────────────────────────────────────────────────
+  async openAction(v, method, extra) {
+    if (!v.link_id || !v.chat_id) return { ok: false, status: -1 }
+    const r = await this.raw(method, Object.assign({ li: L(v.link_id), c: L(v.chat_id) }, extra || {}))
+    return { ok: R.locoOk(r), status: R.locoStatus(r) }
+  }
+
+  // 강퇴는 재시도하지 않는다. 한도를 넘으면 건너뛰고 skip 기록.
+  async kick(v, userId, name, why) {
+    const now = this.now()
+    const uid = String(userId || '')
+    if (!uid) return { ok: false, skipped: true }
+    if (!R.roombotLive(v)) return { ok: false, skipped: true }
+    if (v.actPausedUntil > now) {
+      await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'paused' } })
+      return { ok: false, skipped: true }
+    }
+    const g = v.runtime.guard
+    if (g && g.halt && Number(g.halt[v.chat_id] || 0) > now) {
+      await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'wave' } })
+      return { ok: false, skipped: true }
+    }
+    if (!v.limits.kick.ok(now) || !this.limits.kickH.ok(now) || !this.limits.kickD.ok(now)) {
+      await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick' } })
+      return { ok: false, skipped: true }
+    }
+    v.limits.kick.add(now)
+    this.limits.kickH.add(now)
+    this.limits.kickD.add(now)
+    this.ownKicks.set(uid, now)
+    const r = await this.openAction(v, 'KICKMEM', { mid: L(uid) })
+    if (r.ok) {
+      v.failStreak = 0
+      await this.roomLog(v.install_id, 'kick', { user_id: uid, name, detail: { why } })
+      return { ok: true }
+    }
+    await this.roomLog(v.install_id, 'kick_fail', { user_id: uid, name, ok: false, detail: { why, status: r.status } })
+    await this.actionFailed(v)
+    return { ok: false, status: r.status }
+  }
+
+  async hideOne(v, logId, type) {
+    const now = this.now()
+    if (v.actPausedUntil > now) return { ok: false, skipped: true }
+    if (!v.limits.hide.ok(now) || !this.limits.hide.ok(now)) return { ok: false, skipped: true, limit: true }
+    v.limits.hide.add(now)
+    this.limits.hide.add(now)
+    const r = await this.openAction(v, 'REWRITE', { logId: L(logId), t: Number(type) || 1 })
+    if (r.ok) {
+      v.failStreak = 0
+      const m = v.ring.find((x) => x.logId === String(logId))
+      if (m) m.hidden = true
+      return { ok: true }
+    }
+    await this.actionFailed(v)
+    return { ok: false, status: r.status }
+  }
+
+  // 강퇴·가리기가 실패하면 권한을 바로 다시 읽는다. 잃었으면 waiting_host, 아니면 연속 3회에 10분 멈춤.
+  async actionFailed(v) {
+    const perm = await this.readPerm(v.chat_id, null)
+    if (perm != null && !(perm & 5) && v.products.roombot) {
+      await this.applyPerm(v, perm)
+      return
+    }
+    v.failStreak += 1
+    if (v.failStreak >= 3) {
+      v.failStreak = 0
+      v.actPausedUntil = this.now() + 10 * MIN
+    }
+  }
+
+  // ── 메시지(5.7) ─────────────────────────────────────────────────────────
+  async onMessage(v, m) {
+    const cfg = v.cfg
+    const now = this.now()
+    const name = m.nick || (v.names.get(m.authorId) || '')
+    const prefix = cfg.cmdPrefix
+    const text = m.text || ''
+    const mentions = R.mentionIds(m.attachment)
+    const isCmd = text.trim().startsWith(prefix)
+    if (v.products.roombot && m.logId) {
+      // 가리기 링 버퍼·작성자 목록은 방 관리봇이 있는 방에서만(8.11)
+      R.ringPush(v.ring, { logId: m.logId, type: m.type, authorId: m.authorId, name, at: m.at, cmd: isCmd && /가리기/.test(text) })
+      if (m.authorId && name) v.names.set(m.authorId, name)
+      if (v.names.size > 500) v.names.delete(v.names.keys().next().value)
+    }
+    const live = R.roombotLive(v)
+    if (R.isHelpCommand(text, prefix)) {
+      const line = R.helpLine(v)
+      if (line) this.say(v, line, { what: 'reply' })
+      return
+    }
+    if (live && cfg.hide.command) {
+      const hc = R.parseHideCommand(text, prefix, mentions)
+      if (hc) {
+        await this.hideCommand(v, m, hc)
+        return
+      }
+    }
+    if (live && cfg.profile.enabled && new RegExp('^' + escapeRe(prefix) + '프로필(\\s|$)').test(text.trim())) {
+      if (cfg.profile.lookup === 'staff') await this.permOf(v, m.authorId)
+      const arg = text.trim().slice((prefix + '프로필').length).trim()
+      const reply = R.profileLookup(v.runtime, v.chat_id, cfg, { authorId: m.authorId, arg, mentions }, this.ctxFor(v), now)
+      if (reply) this.say(v, reply, { what: 'reply' })
+      return
+    }
+    const adapter = R.adapterRecord(v, this.id)
+    if (live) {
+      let promo = null
+      const pev = { userId: m.authorId, name, type: m.type, text, attachment: m.attachment }
+      if (R.promoViolation(cfg, pev, this.ctxFor(v))) {
+        await this.permOf(v, m.authorId)
+        if (!v.runtime.promo || typeof v.runtime.promo !== 'object') v.runtime.promo = {}
+        promo = R.promoCheck(v.runtime.promo, cfg, pev, this.ctxFor(v), now)
+      }
+      if (promo) {
+        await this.doPromo(v, promo, m)
+      } else {
+        const coverEv = { chatId: v.chat_id, text, logId: m.logId, messageType: m.type, mine: false, staff: true }
+        if (coverNeedsAuthor(adapter, coverEv)) coverEv.staff = coverSkipsLink(await this.permOf(v, m.authorId))
+        const plan = coverPlan(adapter, coverEv)
+        if (plan) {
+          const r = await this.hideOne(v, plan.logId, plan.type)
+          if (r.limit) await this.roomLog(v.install_id, 'skip', { user_id: m.authorId, name, detail: { what: 'hide' } })
+          else await this.roomLog(v.install_id, 'cover', { user_id: m.authorId, name, ok: !!r.ok })
+        }
+      }
+      const g = guardOnChat(adapter, { kind: 'msg', chatId: v.chat_id, text, authorId: m.authorId, authorName: name, mine: false, messageType: m.type, now })
+      this.sendAll(v, g.sends)
+      v.dirty = true
+    }
+    if (R.gamesLive(v)) {
+      const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mine: false })
+      this.sendAll(v, sends, 'reply')
+      v.dirty = true
+    }
+  }
+
+  async doPromo(v, plan, m) {
+    let hidden = false
+    let kicked = false
+    if (plan.hide && m.logId) {
+      const r = await this.hideOne(v, m.logId, m.type)
+      hidden = !!r.ok
+      if (r.limit) await this.roomLog(v.install_id, 'skip', { user_id: plan.userId, name: plan.name, detail: { what: 'hide' } })
+    }
+    if (plan.kick) {
+      const r = await this.kick(v, plan.userId, plan.name, 'promo')
+      kicked = !!r.ok
+    }
+    await this.roomLog(v.install_id, 'promo', { user_id: plan.userId, name: plan.name, detail: { n: plan.n, why: plan.why, hidden, kicked } })
+    if (plan.notice) {
+      const n = R.promoNotice(plan, { hidden, kicked })
+      this.say(v, n.text, { mention: n.mention, what: 'notice' })
+    }
+    v.dirty = true
+  }
+
+  // ── 가리기(7.2 (e)) ─────────────────────────────────────────────────────
+  async hideCommand(v, m, hc) {
+    const p = await this.permOf(v, m.authorId)
+    const n = Number(p)
+    if (!(Number.isFinite(n) && ((n & 1) || (n & 4)))) {
+      this.say(v, '가리기는 방장과 부방장만 할 수 있습니다.', { what: 'reply' })
+      return
+    }
+    if (hc.usage) {
+      this.say(v, R.hideUsage(v.cfg.cmdPrefix), { what: 'reply' })
+      return
+    }
+    let req
+    if (hc.userId) req = { userId: hc.userId }
+    else if (hc.name) {
+      if (!v.ringFilled) await this.fillRing(v)
+      const ids = [...new Set(v.ring.filter((x) => x.name === hc.name && x.authorId).map((x) => x.authorId))]
+      if (ids.length !== 1) {
+        this.say(v, ids.length > 1 ? `같은 이름이 ${ids.length}명입니다. @멘션으로 지정하십시오.` : `「${hc.name}」의 최근 글이 없습니다.`, { what: 'reply' })
+        return
+      }
+      req = { userId: ids[0] }
+    } else req = { last: hc.last }
+    const r = await this.startHide(v, req, m.authorId)
+    if (!r.ok && r.error === 'busy') this.say(v, '가리기 작업이 진행 중입니다.', { what: 'reply' })
+  }
+
+  async fillRing(v) {
+    v.ringFilled = true
+    try {
+      const msgs = await this.client.getMessages(v.chat_id, { count: R.RING_MAX })
+      for (const x of msgs || []) {
+        const logId = R.idText(x && x.log_id)
+        if (!logId) continue
+        const authorId = R.idText(x.author_id)
+        R.ringPush(v.ring, {
+          logId, type: Number(x.type), authorId, name: String(x.author_name || v.names.get(authorId) || ''),
+          at: atMs(x.sent_at), cmd: typeof x.message === 'string' && x.message.trim().startsWith(v.cfg.cmdPrefix + '가리기'),
+        })
+      }
+    } catch (e) {
+      log(this.id, `ring fill failed: ${errText(e)}`)
+    }
+  }
+
+  async startHide(v, req, by) {
+    const now = this.now()
+    if (v.hideJob && v.hideJob.state === 'running') return { ok: false, error: 'busy' }
+    if (by === 'panel' && Number(v.runtime.hideCooldownUntil || 0) > now) {
+      return { ok: false, error: 'cooldown', retry_at: Number(v.runtime.hideCooldownUntil) }
+    }
+    if (!v.ringFilled) await this.fillRing(v)
+    const items = R.hidePlan(v.ring, req, this.ctxFor(v))
+    this.pool.jobSeq += 1
+    const job = { id: `${v.install_id}.${this.pool.jobSeq}`, install_id: v.install_id, by, total: items.length, done: 0, failed: 0, state: 'running', at: now }
+    this.pool.hideJobs.set(job.id, job)
+    for (const [k, j] of this.pool.hideJobs) if (now - j.at > HOUR) this.pool.hideJobs.delete(k)
+    v.hideJob = job
+    this.bg(this.runHide(v, job, items), 'hide')
+    return { ok: true, job: job.id }
+  }
+
+  async runHide(v, job, items) {
+    let skipped = 0
+    try {
+      for (let i = 0; i < items.length; i++) {
+        if (!this.live() || !R.roombotLive(v)) {
+          job.failed += items.length - i
+          break
+        }
+        const r = await this.hideOne(v, items[i].logId, items[i].type)
+        if (r.ok) job.done += 1
+        else {
+          job.failed += 1
+          if (r.limit) skipped += 1
+        }
+        if (this.opts.hideGapMs && i < items.length - 1) await new Promise((ok) => setTimeout(ok, this.opts.hideGapMs))
+      }
+    } finally {
+      job.state = 'done'
+      const now = this.now()
+      if (job.by === 'panel') {
+        v.runtime.hideCooldownUntil = now + 10 * MIN
+        v.dirty = true
+      }
+      if (skipped) await this.roomLog(v.install_id, 'skip', { detail: { what: 'hide', n: skipped } })
+      await this.roomLog(v.install_id, 'hide', {
+        user_id: job.by === 'panel' ? null : job.by,
+        ok: job.failed === 0,
+        detail: { n: job.done, failed: job.failed, by: job.by === 'panel' ? 'panel' : 'host' },
+      })
+      if (job.total > 0) this.say(v, R.hideDoneNotice(job.done, job.failed), { what: 'notice' })
+      else if (job.by !== 'panel') this.say(v, '가릴 글이 없습니다.', { what: 'reply' })
+    }
+  }
+
+  peopleOf(v) {
+    const map = new Map()
+    for (const m of v.ring) {
+      if (!m.authorId || m.authorId === this.userId || Number(m.type) === 0) continue
+      const row = map.get(m.authorId) || { user_id: m.authorId, name: '', count: 0 }
+      row.count += 1
+      if (m.name) row.name = m.name
+      map.set(m.authorId, row)
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }
+
+  // 내보내기 해제: K bot 이 내보낸 사람(이 설치의 kick·kick_fail 기록, bans)만(3.4.3)
+  async unkickUser(v, userId) {
+    const uid = String(userId || '')
+    if (!/^[1-9][0-9]*$/.test(uid)) return { ok: false, error: 'not_kicked' }
+    const inBans = R.bannedNow(v.runtime, uid, this.now()) || !!(v.runtime.bans && v.runtime.bans[uid])
+    const hist = await this.store.kickHistory(v.install_id, uid)
+    if (!inBans && !hist.any) return { ok: false, error: 'not_kicked' }
+    const name = (v.runtime.bans && v.runtime.bans[uid] && v.runtime.bans[uid].name) || v.names.get(uid) || ''
+    if (hist.kicked) {
+      const r = await this.openAction(v, 'KLDELITEM', { kid: L(uid) })
+      if (!r.ok) {
+        await this.actionFailed(v)
+        return { ok: false, error: 'failed', status: r.status }
+      }
+    }
+    if (v.runtime.bans) delete v.runtime.bans[uid]
+    v.dirty = true
+    await this.roomLog(v.install_id, 'unkick', { user_id: uid, name })
+    return { ok: true }
+  }
+
+  // 30분 넘게 안 본 작성자를 방마다 60초에 최대 1회, 20명까지 다시 읽는다(사진·상태 메시지, 7.2(c)).
+  profileScan(v, now) {
+    if (!R.roombotLive(v) || !v.cfg.profile.enabled || (!v.cfg.profile.photo && !v.cfg.profile.status)) return
+    if (now - v.profileScanAt < MIN || v.scanning) return
+    v.profileScanAt = now
+    const due = []
+    for (const uid of v.names.keys()) {
+      if (uid === this.userId) continue
+      if (now - (v.cardAt.get(uid) || 0) > 30 * MIN) due.push(uid)
+      if (due.length >= 20) break
+    }
+    if (!due.length) return
+    v.scanning = true
+    this.checks = this.checks.then(async () => {
+      try {
+        const rows = await this.client.getMembersByIds(v.chat_id, due)
+        const adapter = R.adapterRecord(v, this.id)
+        for (const row of rows || []) {
+          const uid = String(row.user_id)
+          v.cardAt.set(uid, this.now())
+          if (row.open_permission != null) v.perms.set(uid, { mt: Number(row.open_permission), at: this.now() })
+          this.sendAll(v, profileOnly(adapter, {
+            chatId: v.chat_id, authorId: uid, authorName: String(row.nickname || '').trim().slice(0, 40),
+            photo: R.photoSig(row.original_profile_image_url, row.profile_image_url) || null,
+            status: row.status_message == null ? null : String(row.status_message), now: this.now(),
+          }))
+        }
+        for (const uid of due) if (!v.cardAt.has(uid)) v.cardAt.set(uid, this.now())
+        v.dirty = true
+      } catch (e) {
+        log(this.id, `profile scan failed: ${errText(e)}`)
+      } finally {
+        v.scanning = false
+      }
+    })
+  }
+
+  // ── 송신(5.5 공정 몫) ───────────────────────────────────────────────────
+  say(v, text, opt) {
+    const o = opt || {}
+    // 차단된 회원의 방에서는 봇이 조용히 있는다(D27)
+    if (!text || !String(text).trim() || !v.chat_id || !v.licensed) return
+    const now = this.now()
+    const item = { text: String(text), mention: o.mention || null, notBefore: now + Math.max(0, Number(o.delayMs) || 0), what: o.what || 'send', chat_id: v.chat_id }
+    if (!this.pacer.push(String(v.install_id), item, now)) {
+      this.bg(this.roomLog(v.install_id, 'skip', { detail: { what: item.what === 'reply' ? 'reply' : 'send' } }), 'skip log')
+      return
+    }
+    this.scheduleSend(item.notBefore)
+  }
+
+  sendAll(v, sends, what) {
+    for (const s of sends || []) this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+  }
+
+  scheduleSend(at) {
+    if (this.stopped) return
+    const now = this.now()
+    const when = Math.max(now, at || now)
+    if (this.sendTimer && this.sendAt <= when) return
+    if (this.sendTimer) clearTimeout(this.sendTimer)
+    this.sendAt = when
+    this.sendTimer = setTimeout(() => {
+      this.sendTimer = null
+      this.bg(this.drainSends(), 'send')
+    }, Math.max(0, when - now))
+    if (this.sendTimer.unref) this.sendTimer.unref()
+  }
+
+  async drainSends() {
+    if (this.sending) return
+    this.sending = true
+    try {
+      const now0 = this.now()
+      for (const s of this.pacer.stale(now0)) {
+        await this.roomLog(Number(s.key), 'skip', { detail: { what: 'send', note: 'stale' } })
+      }
+      while (this.live()) {
+        const next = this.pacer.next(this.now())
+        if (!next) break
+        const v = this.byInstall.get(Number(next.key))
+        if (!v || v.state === 'error' || v.chat_id !== next.item.chat_id) continue
+        await this.deliver(v, next.item)
+      }
+    } finally {
+      this.sending = false
+    }
+    if (!this.pacer.pending()) return
+    if (!this.live()) {
+      this.scheduleSend(this.now() + 2000)
+      return
+    }
+    const wake = this.pacer.wakeAt(this.now())
+    if (wake) this.scheduleSend(Math.max(wake, this.now() + 50))
+  }
+
+  async deliver(v, item) {
+    try {
+      const extra = item.mention ? visitMentionExtra(item.text, item.mention) : ''
+      if (extra) {
+        this.msgSeq = (this.msgSeq || 0) + 1
+        const r = await this.raw('WRITE', { chatId: L(v.chat_id), msgId: Long.fromNumber(this.msgSeq), msg: item.text, type: 1, noSeen: false, scope: 1, extra })
+        if (!R.locoOk(r)) log(this.id, `send failed status ${R.locoStatus(r)} install ${v.install_id}`)
+        return
+      }
+      const res = await this.client.sendMessage(v.chat_id, item.text)
+      if (!res || res.success !== true) log(this.id, `send failed install ${v.install_id}`)
+    } catch (e) {
+      log(this.id, `send failed install ${v.install_id}: ${errText(e)}`)
+    }
+  }
+}
+
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+}
