@@ -1,11 +1,13 @@
 /* ───────────────────────────────────────────────────────────────
-   카톡 매크로 / 봇 — 구매 웹 공통 스크립트
+   K bot — 구매 웹 공통 스크립트
    페이지 구분: <body data-page="home|buy|my|order">
    쓰는 서버 API (SPEC 5장):
      GET  /api/price        가격표 (서버가 단일 소스 — 여기서 하드코딩 안 함)
-     POST /api/order        주문 접수  → {ok, id, amount, account}
+     POST /api/order        주문 접수  → {ok, id, token, amount, account, ...}
      GET  /api/order/:id    주문 상태
-     POST /api/lookup       키 조회 (기능/만료일/기기등록여부만)
+     POST /api/lookup       키 조회 (기능별 만료일 · 사용 중지/차단 여부만)
+   상품은 "K bot 1개월" 하나다 (lib/pricing.js). 기능 3종이 모두 들어 있고 고를 게 없다.
+   다시 사면 같은 키가 기능 3종 모두 연장된다. 사용은 웹 콘솔(/panel)에서 키로 로그인해서 한다.
    외부 라이브러리 안 씀. 이 파일 하나에 공통 로직 다 들어있다.
 
    주문 상태 페이지는 무인 자동발급(SPEC 12장) 때문에 스스로 폴링한다 — 8장 pageOrder 참고.
@@ -15,53 +17,19 @@
   'use strict';
 
   /* ══════════════════ 0. 카탈로그 (SPEC 1장) ══════════════════
-     가격은 절대 여기 안 적는다. 이름/설명/불릿만. 가격은 /api/price. */
+     가격 · 기간 · 기능 설명은 절대 여기 안 적는다. 전부 /api/price.
+     아래 이름표는 응답을 받기 전이나 못 받았을 때 화면이 비지 않게 하는 용도뿐이다. */
 
   var FEATURES = [
-    {
-      id: 'macro', name: '자동발송 매크로', tag: '추천',
-      desc: '대화방별 주기 자동발송 + 이미지 첨부 + 메시지 추적 + 오픈프로필 자동응답',
-      bullets: [
-        '대화방별로 주기(분 단위)와 메시지를 따로 지정',
-        '이미지 최대 5장 첨부 발송',
-        '메시지 추적 — 정해둔 문구가 올라오면 즉시 응답',
-        '오픈프로필 개인톡 자동응답 (문구 직접 작성)',
-        '{이름} {방} {시간} 자동 입력 지원'
-      ]
-    },
-    {
-      id: 'roombot', name: '대화방 관리봇', tag: '',
-      desc: '입/퇴장 인사, 금지어·도배 감지, 공지 자동안내',
-      bullets: [
-        '입장 / 퇴장 인사 자동 발송',
-        '금지어 감지 → 경고 메시지 + 횟수 누적',
-        '도배 감지 (N초 안에 M개 넘으면 경고)',
-        '링크 · 초대 차단 경고',
-        '!공지 · !규칙 명령'
-      ]
-    },
-    {
-      id: 'minigame', name: '미니게임봇', tag: '',
-      desc: '끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹',
-      bullets: [
-        '끝말잇기 (사전 내장, 두음법칙 처리)',
-        '숫자야구 3자리 · 주사위 · 가위바위보',
-        '퀴즈 50문항 내장',
-        '대화방별 점수 랭킹 (!랭킹)',
-        '명령어 앞글자 변경 · 쿨타임 / 하루 한도'
-      ]
-    }
+    { id: 'macro',    name: '자동발송 매크로' },
+    { id: 'roombot',  name: '대화방 관리봇' },
+    { id: 'minigame', name: '미니게임봇' }
   ];
 
-  var PLANS = [
-    { id: 'month',   name: '1개월', days: 30,  note: '' },
-    { id: 'quarter', name: '3개월', days: 90,  note: '' },
-    { id: 'year',    name: '1년',   days: 365, note: '' }
-  ];
+  var FEAT_IDS = FEATURES.map(function (f) { return f.id; });
 
-  var FEAT_IDS  = FEATURES.map(function (f) { return f.id; });
-  var BUNDLE_RATE_DEFAULT = 0.15;  // SPEC 5장 기본값. 서버가 값을 주면 그걸 쓴다.
-  var BUNDLE_MIN_DEFAULT  = 3;
+  /* 남은 기간 막대의 분모 — 서버가 기간(days)을 알려주기 전에만 쓴다 */
+  var DAYS_FALLBACK = 30;
 
   var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없습니다';
 
@@ -105,43 +73,45 @@
   /* 서버 reason 코드 → 한국어 (SPEC 3.1 표 + 웹 전용 몇 개) */
   var REASON_KR = {
     bad_request:   '요청 형식이 올바르지 않습니다',
-    bad_feature:   '기능을 1개 이상 선택하십시오',
-    bad_plan:      '결제 기간을 선택하십시오 (1개월 / 3개월 / 1년)',
     no_depositor:  '입금자명을 입력하십시오',
     invalid_key:   '등록되지 않은 키입니다',
+    key_blocked:   '사용이 중지된 키는 연장할 수 없습니다. 관리자에게 문의하십시오',
     not_found:     '조회 결과가 없습니다',
     revoked:       '사용이 중지된 키입니다',
     blocked:       '차단된 키입니다. 관리자에게 문의하십시오',
     expired:       '사용 기간이 만료되었습니다',
     no_entitlement:'구매한 기능이 없습니다',
-    device_mismatch:'다른 기기에 등록된 키입니다 (키 1개당 기기 1대)',
     server_error:  '서버 오류가 발생했습니다. 잠시 후 다시 시도하십시오',
     rate_limited:  '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오',
     unauthorized:  '권한이 없습니다'
   };
 
-  function featOf(id) {
-    for (var i = 0; i < FEATURES.length; i++) if (FEATURES[i].id === id) return FEATURES[i];
-    return null;
-  }
   function featName(id) {
-    var f = featOf(id);
-    if (f) return (PRICE && PRICE.feats[id] && PRICE.feats[id].label) || f.name;
+    if (PRICE && PRICE.feats[id] && PRICE.feats[id].label) return PRICE.feats[id].label;
+    for (var i = 0; i < FEATURES.length; i++) if (FEATURES[i].id === id) return FEATURES[i].name;
     return String(id || '');
   }
-  function planOf(id) {
-    for (var i = 0; i < PLANS.length; i++) if (PLANS[i].id === id) return PLANS[i];
-    return null;
-  }
-  function planName(id) {
-    var p = planOf(id);
-    if (p) return (PRICE && PRICE.planLabel[id]) || p.name;
+  /* 플랜 이름표. 판매는 /api/price 의 플랜 하나뿐이지만, 예전에 팔던 다른 기간의 주문·키도
+     그대로 보여야 하므로 서버가 준 이름표(plan_label)를 먼저 쓴다. 없으면 현재 상품의 이름표,
+     그것도 아니면 id 그대로. */
+  function planName(id, label) {
+    var lb = str(label);
+    if (lb) return lb;
+    if (PRICE && id && id === PRICE.plan && PRICE.planLabel) return PRICE.planLabel;
     return id ? String(id) : '-';
   }
-  function planDays(id) {
-    var p = planOf(id);
-    var d = PRICE && PRICE.planDays[id];
-    return num(d) || (p ? p.days : 0);
+  /* 기간 일수 — 응답에 days 가 있으면 그걸, 없으면 현재 판매 중인 플랜일 때만 안다 (모르면 0 → 생략) */
+  function planDays(id, days) {
+    var d = num(days);
+    if (d) return d;
+    return (PRICE && id && id === PRICE.plan && PRICE.days) || 0;
+  }
+  /* "K bot 1개월 (30일)" — 주문 화면의 상품 줄 */
+  function productText(id, label, days) {
+    if (!id && !str(label)) return '-';
+    var d = planDays(id, days);
+    var name = PRICE && PRICE.name ? PRICE.name + ' ' : '';
+    return name + planName(id, label) + (d ? ' (' + d + '일)' : '');
   }
 
   /* ══════════════════ 1. 유틸 ══════════════════ */
@@ -183,7 +153,7 @@
     return undefined;
   }
 
-  /* 금액 추출 — 숫자 / "15,000원" / {amount:15000} 다 받는다 */
+  /* 금액 추출 — 숫자 / "30,000원" / {amount:30000} 다 받는다 */
   function amount(v) {
     if (v === null || v === undefined) return null;
     if (typeof v === 'number') return isFinite(v) ? v : null;
@@ -249,27 +219,6 @@
 
   function qs() { return new URLSearchParams(location.search); }
 
-  /* ?feature=macro / ?feature=macro,roombot / ?feature=a&feature=b 다 받는다 */
-  function qFeatures(q) {
-    var raw = [];
-    ['feature', 'features', 'f'].forEach(function (k) {
-      q.getAll(k).forEach(function (v) { raw.push(v); });
-    });
-    var out = [];
-    raw.forEach(function (v) {
-      String(v).split(/[,\s|+]+/).forEach(function (x) {
-        var id = x.trim().toLowerCase();
-        if (FEAT_IDS.indexOf(id) >= 0 && out.indexOf(id) < 0) out.push(id);
-      });
-    });
-    return out;
-  }
-
-  function qPlan(q) {
-    var p = str(q.get('plan')).toLowerCase();
-    return planOf(p) ? p : '';
-  }
-
   /* 주문 상태 링크. 토큰이 있어야 발급된 키·입금자명을 볼 수 있다 (서버가 ?t= 로 확인) */
   function orderUrl(id, token) {
     return '/order/' + encodeURIComponent(id) + (token ? '?t=' + encodeURIComponent(token) : '');
@@ -296,12 +245,9 @@
     } catch (e) { return ''; }
   }
 
-  function buyUrl(ids, plan, key) {
-    var p = [];
-    if (ids && ids.length) p.push('feature=' + encodeURIComponent(ids.join(',')));
-    if (plan) p.push('plan=' + encodeURIComponent(plan));
-    if (key) p.push('key=' + encodeURIComponent(key));
-    return '/buy' + (p.length ? '?' + p.join('&') : '');
+  /* 구매 링크. 키가 있으면 연장 주문으로 미리 채운다 (/buy 가 ?key= 를 기존 키 칸에 넣는다) */
+  function buyUrl(key) {
+    return '/buy' + (key ? '?key=' + encodeURIComponent(key) : '');
   }
 
   /* ── 토스트 */
@@ -440,121 +386,56 @@
   }
 
   /* ══════════════════ 3. 가격표 ══════════════════
-     서버 응답 모양이 조금 달라도 받아먹게 정규화한다. (SPEC엔 경로만 있고 키 이름은 안 박혀 있음)
-     정규화 결과: { rate, min, bank, contact, feats:{id:{label,prices:{month,quarter,year}}},
-                    planDays:{}, planLabel:{} }                                              */
+     GET /api/price → { ok, currency, name, plan, plan_label, days, price,
+                        features:[{id,label,desc}], plans:[{id,label,days,price}],
+                        bank, contact, purchase_base, auto_approve }
+     정규화 결과: { name, price, plan, planLabel, days, order:[id...], feats:{id:{label,desc}}, bank, contact } */
 
   var PRICE = null;
   var pricePromise = null;
 
-  function readEntry(src, id) {
-    if (!src) return null;
-    if (Array.isArray(src)) {
-      for (var i = 0; i < src.length; i++) {
-        var e = src[i];
-        if (!e || typeof e !== 'object') continue;
-        if (str(pick(e, ['id', 'feature', 'key', 'code', 'slug'])) === id) return e;
-      }
-      return null;
-    }
-    if (typeof src === 'object' && src[id] !== undefined) return src[id];
-    return null;
-  }
-
-  function entryPrices(entry, id, root) {
-    var out = {}, sub = entry && typeof entry === 'object'
-      ? pick(entry, ['prices', 'price', 'plans', 'amounts', 'by_plan', 'byPlan'])
-      : null;
-    PLANS.forEach(function (p) {
-      var v = null, cands = [entry, sub];
-      for (var i = 0; i < cands.length && v === null; i++) {
-        var s = cands[i];
-        if (!s || typeof s !== 'object') continue;
-        v = amount(pick(s, [p.id, p.id + '_price', p.id + 'Price', String(p.days), p.days]));
-      }
-      if (v === null) v = amount(pick(root, [id + '_' + p.id, id + '-' + p.id]));  // 납작한 형태도 허용
-      if (v !== null) out[p.id] = v;
-    });
-    return out;
-  }
-
-  function readBundle(P, src) {
-    if (!src || typeof src !== 'object') return;
-    var d = pick(src, ['bundle_discount', 'bundleDiscount', 'bundle_rate', 'bundleRate',
-                       'bundle', 'discount', 'discount_rate', 'discountRate']);
-    if (d === undefined) return;
-    if (typeof d === 'object') {
-      var mn = num(pick(d, ['min', 'min_features', 'minFeatures', 'count', 'features']));
-      if (mn) P.min = mn;
-      d = pick(d, ['rate', 'percent', 'pct', 'value', 'ratio', 'discount', 'amount']);
-    }
-    var r = num(d);
-    if (r !== null && r > 0) P.rate = r > 1 ? r / 100 : r;   // 15 로 와도 0.15 로 본다
-  }
-
   function normalizePrice(raw) {
     if (!raw || typeof raw !== 'object') throw new Error(MSG_PRICE_FAIL);
+    var plans = Array.isArray(raw.plans) ? raw.plans : [];
+    var first = (plans[0] && typeof plans[0] === 'object') ? plans[0] : {};
 
-    var root = raw;
-    var hasTop = pick(raw, ['features', 'items', 'products', 'catalog']) !== undefined ||
-                 readEntry(raw, 'macro') !== null;
-    if (!hasTop) {
-      /* 최상위가 껍데기면 한 겹 안쪽에서 알맹이를 찾는다 */
-      ['pricing', 'price', 'prices', 'data', 'result'].forEach(function (k) {
-        if (root !== raw) return;
-        if (raw[k] && typeof raw[k] === 'object' && !Array.isArray(raw[k]) &&
-            pick(raw[k], ['features', 'items', 'products', 'macro', 'catalog'])) root = raw[k];
-      });
-    }
+    var price = amount(pick(raw, ['price', 'amount']));
+    if (price === null) price = amount(pick(first, ['price', 'amount']));
+    if (price === null) throw new Error(MSG_PRICE_FAIL);
 
     var P = {
-      rate: BUNDLE_RATE_DEFAULT, min: BUNDLE_MIN_DEFAULT,
-      bank: '', contact: '', feats: {}, planDays: {}, planLabel: {}
+      name: str(pick(raw, ['name', 'title'])),
+      price: price,
+      plan: str(pick(raw, ['plan'])) || str(pick(first, ['id', 'plan'])),
+      planLabel: str(pick(raw, ['plan_label', 'planLabel'])) || str(pick(first, ['label', 'name'])),
+      days: num(pick(raw, ['days'])) || num(pick(first, ['days'])) || 0,
+      order: [], feats: {},
+      bank: str(pick(raw, ['account', 'bank', 'bank_info', 'bankInfo'])),
+      contact: str(pick(raw, ['admin_contact', 'adminContact', 'contact', 'support']))
     };
 
-    readBundle(P, root);
-    if (root !== raw) readBundle(P, raw);
-
-    P.bank    = str(pick(raw, ['account', 'bank', 'bank_info', 'bankInfo', 'deposit', 'deposit_account'])) ||
-                str(pick(root, ['account', 'bank', 'bank_info', 'bankInfo', 'deposit', 'deposit_account']));
-    P.contact = str(pick(raw, ['admin_contact', 'adminContact', 'support', 'support_contact', 'contact'])) ||
-                str(pick(root, ['admin_contact', 'adminContact', 'support', 'support_contact', 'contact']));
-
-    /* 플랜 메타(일수/이름)를 서버가 주면 반영 */
-    var pm = pick(root, ['plans', 'periods', 'durations']);
-    if (pm && typeof pm === 'object') {
-      var list = Array.isArray(pm) ? pm : Object.keys(pm).map(function (k) {
-        var v = pm[k];
-        return (v && typeof v === 'object') ? Object.assign({ id: k }, v) : null;
-      });
-      list.forEach(function (e) {
-        if (!e || typeof e !== 'object') return;
-        var id = str(pick(e, ['id', 'plan', 'code']));
-        if (!planOf(id)) return;
-        var dd = num(pick(e, ['days', 'duration_days', 'durationDays']));
-        if (dd) P.planDays[id] = dd;
-        var lb = str(pick(e, ['label', 'name', 'title', 'kr']));
-        if (lb) P.planLabel[id] = lb;
-      });
-    }
-
-    var fsrc = pick(root, ['features', 'items', 'products', 'catalog', 'list']) || root;
-    var flat = pick(root, ['prices', 'price_table', 'priceTable']);
-
-    var found = 0;
-    FEATURES.forEach(function (f) {
-      var entry = readEntry(fsrc, f.id);
-      if (entry === null && fsrc !== root) entry = readEntry(root, f.id);
-      var prices = entryPrices(entry, f.id, root);
-      if (!Object.keys(prices).length && flat) prices = entryPrices(readEntry(flat, f.id), f.id, root);
-      var label = (entry && typeof entry === 'object')
-        ? str(pick(entry, ['label', 'name', 'title', 'kr'])) : '';
-      if (Object.keys(prices).length) found++;
-      P.feats[f.id] = { label: label || f.name, prices: prices };
+    (Array.isArray(raw.features) ? raw.features : []).forEach(function (e) {
+      if (!e || typeof e !== 'object') return;
+      var id = str(pick(e, ['id', 'feature', 'key']));
+      if (!id || P.feats[id]) return;
+      P.order.push(id);
+      P.feats[id] = { label: str(pick(e, ['label', 'name'])), desc: str(pick(e, ['desc', 'description'])) };
     });
-
-    if (!found) throw new Error(MSG_PRICE_FAIL);
     return P;
+  }
+
+  /* 정적 문구 안의 [data-bind] 자리에 서버 값을 채운다 (HTML 에 적힌 값은 스크립트가 꺼졌을 때의 대체 문구) */
+  function bindPrice() {
+    if (!PRICE) return;
+    var vals = {
+      plan:  planTitle(),
+      price: won(PRICE.price),
+      days:  PRICE.days ? PRICE.days + '일' : ''
+    };
+    $$('[data-bind]').forEach(function (n) {
+      var v = vals[n.getAttribute('data-bind')];
+      if (v) n.textContent = v;
+    });
   }
 
   function loadPrice() {
@@ -562,6 +443,7 @@
     pricePromise = api('/api/price').then(function (raw) {
       PRICE = normalizePrice(raw);
       applyAutoCopy(raw && raw.auto_approve);    // 자동 발급이 꺼져 있으면 문구를 바꾼다
+      bindPrice();
       return PRICE;
     }).catch(function (e) {
       pricePromise = null;                       // 다시 시도할 수 있게 캐시 비움
@@ -570,294 +452,158 @@
     return pricePromise;
   }
 
-  function unitPrice(id, plan) {
-    if (!PRICE || !PRICE.feats[id]) return null;
-    var v = PRICE.feats[id].prices[plan];
-    return v === undefined ? null : v;
+  /* ══════════════════ 4. 상품 카드 + 결제 금액 (랜딩 / 구매 공용) ══════════════════
+     상품은 하나라 고를 게 없다. 카드 = 상품 줄 1개 + 포함 기능 줄, 합계 상자 = 금액 + 버튼. */
+
+  /* "K bot 1개월" */
+  function planTitle() {
+    if (!PRICE) return '';
+    return ((PRICE.name ? PRICE.name + ' ' : '') + planName(PRICE.plan)).trim();
   }
 
-  /* 금액 계산 — 3종(=P.min개) 다 고르면 총액 할인 */
-  function calc(ids, plan) {
-    var r = { ok: true, subtotal: 0, discount: 0, total: 0, bundled: false, missing: [], rate: PRICE ? PRICE.rate : BUNDLE_RATE_DEFAULT, min: PRICE ? PRICE.min : BUNDLE_MIN_DEFAULT };
-    ids.forEach(function (id) {
-      var v = unitPrice(id, plan);
-      if (v === null) { r.ok = false; r.missing.push(id); return; }
-      r.subtotal += v;
+  /* 포함 기능 목록 — 서버가 준 순서 그대로. 응답이 비어 있으면 이름표만 */
+  function featList() {
+    var ids = (PRICE && PRICE.order.length) ? PRICE.order : FEAT_IDS;
+    return ids.map(function (id) {
+      var f = (PRICE && PRICE.feats[id]) || {};
+      return { id: id, label: f.label || featName(id), desc: f.desc || '' };
     });
-    if (!r.ok || !ids.length) { r.ok = r.ok && !!ids.length; return r; }
-    if (ids.length >= r.min) {
-      r.bundled = true;
-      r.discount = Math.round(r.subtotal * r.rate);
-    }
-    r.total = r.subtotal - r.discount;
-    return r;
   }
 
-  /* ══════════════════ 4. 기능 선택 + 합계 (랜딩 / 구매 공용) ══════════════════ */
-
-  function Picker(opts) {
-    var self = {
-      ids: (opts.ids || []).filter(function (x) { return FEAT_IDS.indexOf(x) >= 0; }),
-      plan: planOf(opts.plan) ? opts.plan : 'month',
-      variant: opts.variant || 'cards',      // cards(랜딩) | rows(구매폼)
-      mount: opts.mount,
-      planMount: opts.planMount,
-      sumMount: opts.sumMount,
-      onChange: opts.onChange || function () {},
-      cta: opts.cta || { text: '구매 신청', kind: 'link' },
-      cards: {}, boxes: {}, amts: {}
-    };
-
-    /* 플랜 세그먼트 */
-    function buildPlan() {
-      if (!self.planMount) return;
-      clear(self.planMount);
-      var box = el('div', { cls: 'seg', role: 'radiogroup', 'aria-label': '결제 기간' });
-      PLANS.forEach(function (p) {
-        var input = el('input', {
-          type: 'radio', name: 'plan', value: p.id, id: 'plan-' + p.id,
-          checked: self.plan === p.id ? true : null,
-          onchange: function () { if (input.checked) { self.plan = p.id; paint(); self.onChange(self); } }
-        });
-        var lab = el('label', { for: 'plan-' + p.id }, [
-          input,
-          el('span', null, [ (PRICE && PRICE.planLabel[p.id]) || p.name, el('em', null, [String(planDays(p.id)), el('span', { cls: 'sans', text: '일' })]) ])
-        ]);
-        box.appendChild(lab);
-      });
-      self.planMount.appendChild(box);
-    }
-
-    /* 상품 카드 (랜딩) */
-    function buildCards() {
-      clear(self.mount);
-      FEATURES.forEach(function (f) {
-        var id = 'sel-' + f.id;
-        var input = el('input', {
-          type: 'checkbox', id: id, value: f.id,
-          checked: self.ids.indexOf(f.id) >= 0 ? true : null,
-          onchange: function () { toggle(f.id, input.checked); }
-        });
-        var amt = el('span', { cls: 'amt' });
-        var prices = el('div', { cls: 'prices' });
-        PLANS.forEach(function (p) {
-          prices.appendChild(el('div', { cls: 'pr', 'data-plan': p.id }, [
-            el('span', { cls: 'pl', text: (PRICE && PRICE.planLabel[p.id]) || p.name }),
-            el('span', { cls: 'pv', text: '—' })
-          ]));
-        });
-
-        var card = el('article', { cls: 'card prod' }, [
-          el('div', { cls: 'head' }, [
-            el('div', { cls: 't' }, [
-              el('div', { cls: 'chip-row' }, [
-                el('h3', { text: featName(f.id) }),
-                f.tag ? el('span', { cls: 'chip tagx', text: f.tag }) : null
-              ]),
-              el('p', { cls: 'desc', text: f.desc })
-            ])
+  /* 랜딩 상품 카드 (#prods) */
+  function renderPlanCard(mount) {
+    var d = PRICE.days, list = featList();
+    clear(mount);
+    mount.appendChild(el('article', { cls: 'card prod one sel' }, [
+      el('div', { cls: 'head' }, [
+        el('div', { cls: 't' }, [
+          el('div', { cls: 'chip-row' }, [
+            el('h3', { text: planTitle() }),
+            el('span', { cls: 'chip tagx', text: '모든 기능 포함' })
           ]),
-          el('ul', { cls: 'bul' }, f.bullets.map(function (b) { return el('li', { text: b }); })),
-          prices,
-          el('label', { cls: 'chk', for: id }, [
-            input,
-            el('span', { cls: 'box', 'aria-hidden': 'true' }),
-            /* 화면 낭독기가 어떤 카드의 선택인지 읽도록 이름을 붙인다 (보이는 글자는 '선택') */
-            el('span', { cls: 't' }, [el('span', { cls: 'sr', text: featName(f.id) + ' ' }), '선택']),
-            amt
+          el('p', { cls: 'desc', text: (d ? d + '일 동안 ' : '') + '아래 기능 ' + list.length + '종을 모두 사용합니다.' })
+        ])
+      ]),
+      el('ul', { cls: 'bul' }, [
+        el('li', { text: '라이선스 키 1개 · 카카오 계정 최대 8개' }),
+        el('li', { text: '사용 기간은 콘솔 첫 로그인 시점부터 시작' }),
+        el('li', { text: '다시 구매하면 같은 키의 기간' + (d ? ' ' + d + '일' : '') + ' 연장' })
+      ]),
+      el('div', { cls: 'prices' }, [
+        el('div', { cls: 'pr', 'data-on': '1' }, [
+          el('span', { cls: 'pl', text: planName(PRICE.plan) }),
+          el('span', { cls: 'pv' }, wonKids(PRICE.price))
+        ]),
+        d ? el('div', { cls: 'pr' }, [
+          el('span', { cls: 'pl', text: '기간' }),
+          el('span', { cls: 'pv' }, [String(d), el('span', { cls: 'sans', text: '일' })])
+        ]) : null
+      ])
+    ]));
+    list.forEach(function (f) {
+      mount.appendChild(el('article', { cls: 'card prod one' }, [
+        el('div', { cls: 'head' }, [
+          el('div', { cls: 't' }, [
+            el('div', { cls: 'chip-row' }, [
+              el('h3', { text: f.label }),
+              el('span', { cls: 'chip ok', text: '포함' })
+            ]),
+            f.desc ? el('p', { cls: 'desc', text: f.desc }) : null
           ])
-        ]);
-        self.mount.appendChild(card);
-        self.cards[f.id] = card; self.boxes[f.id] = input; self.amts[f.id] = amt;
-      });
-    }
+        ])
+      ]));
+    });
+  }
 
-    /* 기능 체크 줄 (구매 폼) */
-    function buildRows() {
-      clear(self.mount);
-      FEATURES.forEach(function (f) {
-        var id = 'buy-' + f.id;
-        var input = el('input', {
-          type: 'checkbox', id: id, name: 'feature', value: f.id,
-          checked: self.ids.indexOf(f.id) >= 0 ? true : null,
-          onchange: function () { toggle(f.id, input.checked); }
-        });
-        var amt = el('span', { cls: 'amt' });
-        var wrap = el('label', { cls: 'chk', for: id }, [
-          input,
-          el('span', { cls: 'box', 'aria-hidden': 'true' }),
-          el('span', { cls: 't' }, [
-            el('span', { cls: 'nm', text: featName(f.id) }),
-            el('span', { cls: 'tiny dim ds', text: f.desc })
-          ]),
-          amt
-        ]);
-        self.mount.appendChild(wrap);
-        self.cards[f.id] = wrap; self.boxes[f.id] = input; self.amts[f.id] = amt;
-      });
-    }
+  /* 구매 폼의 포함 기능 줄 (#planFeats) — /my 의 기능 줄과 같은 모양 */
+  function renderFeatRows(mount) {
+    if (!mount) return;
+    clear(mount);
+    featList().forEach(function (f) {
+      mount.appendChild(el('div', { cls: 'feat-row' }, [
+        el('div', { cls: 'r1' }, [
+          el('h3', { text: f.label }),
+          el('span', { cls: 'chip ok', text: '포함' })
+        ]),
+        f.desc ? el('p', { cls: 'tiny dim', text: f.desc }) : null
+      ]));
+    });
+  }
 
-    function toggle(id, on) {
-      var i = self.ids.indexOf(id);
-      if (on && i < 0) self.ids.push(id);
-      if (!on && i >= 0) self.ids.splice(i, 1);
-      paint(); self.onChange(self);
-    }
-
-    /* 합계 박스 */
-    function buildSum() {
-      if (!self.sumMount) return;
-      clear(self.sumMount);
-      self.sumMount.className = 'sum';
-      self.sumNudge = el('div', { cls: 'nudge', hidden: true });
-      self.sumSaved = el('div', { cls: 'saved', hidden: true });
-      self.sumLines = el('div', { cls: 'lines' });
-      self.sumBtn = self.cta.kind === 'submit'
-        ? el('button', { type: 'submit', cls: 'btn primary wide lg' }, self.cta.text)
-        : el('button', { type: 'button', cls: 'btn primary wide lg', onclick: goBuy }, self.cta.text);
-      self.sumMount.appendChild(self.sumNudge);
-      self.sumMount.appendChild(self.sumSaved);
-      self.sumMount.appendChild(self.sumLines);
-      self.sumMount.appendChild(self.sumBtn);
-    }
-
-    function goBuy() {
-      if (!self.ids.length) { toast('기능을 1개 이상 선택하십시오', 'bad'); return; }
-      location.href = buyUrl(self.ids, self.plan, '');
-    }
-
-    function paint() {
-      /* 카드 선택 표시 + 단가 */
-      FEAT_IDS.forEach(function (id) {
-        var card = self.cards[id];
-        if (!card) return;
-        var on = self.ids.indexOf(id) >= 0;
-        if (self.boxes[id]) self.boxes[id].checked = on;
-        card.classList.toggle('sel', on);
-        var u = unitPrice(id, self.plan);
-        if (self.amts[id]) setWon(self.amts[id], u, '');
-        /* 랜딩 카드: 현재 플랜 가격 강조 + 가격 채우기 */
-        $$('.pr', card).forEach(function (row) {
-          var p = row.getAttribute('data-plan');
-          row.setAttribute('data-on', p === self.plan ? '1' : '0');
-          var v = unitPrice(id, p);
-          var pv = $('.pv', row);
-          if (pv) setWon(pv, v, '—');
-        });
-      });
-
-      if (!self.sumMount) return;
-      var c = calc(self.ids, self.plan);
-      clear(self.sumLines);
-
-      if (!self.ids.length) {
-        self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { text: '선택된 기능 없음' }),
-          el('span', { cls: 'v dim', text: '0원' })
-        ]));
-      } else if (!c.ok) {
-        self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { cls: 'v crit-t', text: MSG_PRICE_FAIL })
-        ]));
-      } else {
-        var who = self.ids.length === FEATURES.length
-          ? '전체 ' + FEATURES.length + '종'
-          : self.ids.map(featName).join(' · ');
-        self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { text: who + ' · ' + planName(self.plan) }),
-          el('span', { cls: 'v mono' }, wonKids(c.subtotal))
-        ]));
-        if (c.bundled) {
-          self.sumLines.appendChild(el('div', { cls: 'ln off' }, [
-            el('span', { text: FEATURES.length + '종 묶음 할인 ' + Math.round(c.rate * 100) + '%' }),
-            el('span', { cls: 'v mono' }, wonKids(c.discount, '-'))
-          ]));
-        }
-        self.sumLines.appendChild(el('div', { cls: 'ln total' }, [
-          el('span', { text: '결제 금액' }),
-          el('span', { cls: 'v mono' }, [
-            c.bundled ? el('s', { cls: 'was' }, wonKids(c.subtotal)) : null
-          ].concat(wonKids(c.total)))
-        ]));
-      }
-
-      /* 할인 유도 / 할인 적용 표시 */
-      var need = c.min - self.ids.length;
-      if (c.bundled) {
-        self.sumSaved.hidden = false;
-        self.sumSaved.textContent = FEATURES.length + '종 묶음 ' + Math.round(c.rate * 100) + '% 할인 적용 · ' + won(c.discount) + ' 할인';
-        self.sumNudge.hidden = true;
-      } else {
-        self.sumSaved.hidden = true;
-        if (self.ids.length > 0 && need > 0 && need <= FEATURES.length) {
-          self.sumNudge.hidden = false;
-          self.sumNudge.textContent = need + '개 추가 선택 시 ' + FEATURES.length + '종 묶음 ' +
-            Math.round(c.rate * 100) + '% 할인 적용';
-        } else self.sumNudge.hidden = true;
-      }
-
-      if (self.sumBtn) {
-        var dis = !self.ids.length || !c.ok;
-        self.sumBtn.disabled = dis;
-        self.sumBtn.setAttribute('aria-disabled', dis ? 'true' : 'false');
-      }
-    }
-
-    self.paint = paint;
-    self.build = function () {
-      buildPlan();
-      if (self.variant === 'rows') buildRows(); else buildCards();
-      buildSum();
-      paint();
-    };
-    return self;
+  /* 합계 상자 (#sum). cta = { kind:'link', href, text } (랜딩) | { kind:'submit', text } (구매 폼).
+     금액 뒷자리 설명을 미리 붙인다 — 주문 후 몇 원이 더 붙은 금액을 보고 놀라지 않게. */
+  function renderSum(mount, cta) {
+    clear(mount);
+    mount.className = 'sum';
+    var d = PRICE.days;
+    mount.appendChild(el('div', { cls: 'lines' }, [
+      el('div', { cls: 'ln' }, [
+        el('span', { text: planTitle() + (d ? ' · ' + d + '일' : '') }),
+        el('span', { cls: 'v mono' }, wonKids(PRICE.price))
+      ]),
+      el('div', { cls: 'ln' }, [
+        el('span', { text: '포함 기능' }),
+        el('span', { cls: 'v', text: featList().length + '종 전체' })
+      ]),
+      el('div', { cls: 'ln total' }, [
+        el('span', { text: '결제 금액' }),
+        el('span', { cls: 'v mono' }, wonKids(PRICE.price))
+      ])
+    ]));
+    /* 예시 뒷자리 47원은 설명용이다. 실제 뒷자리는 주문마다 서버가 1~99원 중 비어 있는 값을 고른다 */
+    mount.appendChild(el('div', { cls: 'nudge',
+      text: '주문 시 금액 뒷자리에 확인용 1~99원이 더해집니다 (예: ' + won(PRICE.price + 47) + ').' }));
+    var btn = cta.kind === 'submit'
+      ? el('button', { type: 'submit', cls: 'btn primary wide lg' }, cta.text)
+      : el('a', { cls: 'btn primary wide lg', href: cta.href || '/buy' }, cta.text);
+    mount.appendChild(btn);
+    return btn;
   }
 
   /* ══════════════════ 5. 랜딩 (/) ══════════════════ */
 
   /* 가격 조회 중 상품 카드 자리표시 — 스켈레톤.
      빈 '—' 나 단독 스피너 대신 카드 골격을 먼저 보여줘 '가격이 비어 보이는' 인상을 줄인다.
-     색·간격은 기존 토큰(--bg2,--line)만 쓴다. 장식이라 스크린리더에는 숨기고 aria-busy 로 상태를 알린다. */
+     색·간격은 기존 토큰(--bg2,--line)만 쓴다. 장식이라 스크린리더에는 숨기고 aria-busy 로 상태를 알린다.
+     모양은 renderPlanCard 와 같다: 상품 줄(금액 칸 있음) 1개 + 기능 줄. */
   function skeletonCards(mount) {
     clear(mount);
     mount.setAttribute('aria-busy', 'true');
+    mount.appendChild(el('article', { cls: 'card prod one sel skel', 'aria-hidden': 'true' }, [
+      el('div', { cls: 'head' }, [
+        el('div', { cls: 't', style: 'flex:1' }, [
+          el('div', { cls: 'sk sk-ln w40', style: 'margin-bottom:9px' }),
+          el('div', { cls: 'sk sk-ln w90' })
+        ])
+      ]),
+      el('div', { style: 'display:grid;gap:8px' }, [
+        el('div', { cls: 'sk sk-ln w70' }),
+        el('div', { cls: 'sk sk-ln w90' })
+      ]),
+      el('div', { cls: 'prices' }, [0, 1].map(function () {
+        return el('div', { cls: 'pr' }, [el('span', { cls: 'sk sk-pl' }), el('span', { cls: 'sk sk-pv' })]);
+      }))
+    ]));
     FEATURES.forEach(function () {
-      var priceRows = PLANS.map(function () {
-        return el('div', { cls: 'pr' }, [
-          el('span', { cls: 'sk sk-pl' }),
-          el('span', { cls: 'sk sk-pv' })
-        ]);
-      });
-      mount.appendChild(el('article', { cls: 'card prod skel', 'aria-hidden': 'true' }, [
+      mount.appendChild(el('article', { cls: 'card prod one skel', 'aria-hidden': 'true' }, [
         el('div', { cls: 'head' }, [
           el('div', { cls: 't', style: 'flex:1' }, [
             el('div', { cls: 'sk sk-ln w40', style: 'margin-bottom:9px' }),
-            el('div', { cls: 'sk sk-ln w90' })
+            el('div', { cls: 'sk sk-ln w70' })
           ])
-        ]),
-        el('div', { style: 'display:grid;gap:8px' }, [
-          el('div', { cls: 'sk sk-ln w70' }),
-          el('div', { cls: 'sk sk-ln w90' })
-        ]),
-        el('div', { cls: 'prices' }, priceRows)
+        ])
       ]));
     });
   }
 
   function pageHome() {
-    var mount = $('#prods'), planMount = $('#planSeg'), sumMount = $('#sum');
+    var mount = $('#prods'), sumMount = $('#sum');
     skeletonCards(mount);
 
-    var q = qs();
     loadPrice().then(function () {
       mount.removeAttribute('aria-busy');
-      clear(mount);
-      var pk = Picker({
-        ids: qFeatures(q), plan: qPlan(q) || 'month',
-        variant: 'cards', mount: mount, planMount: planMount, sumMount: sumMount,
-        cta: { text: '선택한 기능으로 구매 신청', kind: 'link' }
-      });
-      pk.build();
+      renderPlanCard(mount);
+      if (sumMount) renderSum(sumMount, { kind: 'link', href: '/buy', text: '구매 신청' });
       var bank = $('#bankLine');
       if (bank && PRICE.bank) bank.textContent = '입금 계좌 · ' + PRICE.bank;
     }).catch(function (e) {
@@ -869,8 +615,7 @@
           el('button', { cls: 'btn', type: 'button', onclick: function () { location.reload(); } }, '다시 시도')
         ])
       ]));
-      if (sumMount) sumMount.hidden = true;
-      if (planMount) planMount.hidden = true;
+      /* 합계 상자는 HTML 에 있던 [구매 신청] 버튼만 남긴다 — 금액은 구매 페이지에서 다시 조회한다 */
     });
 
     /* 홈 모션 (UI_V5 3.6-6) — 가격을 기다리지 않는다 */
@@ -1175,18 +920,20 @@
     });
   }
 
-  /* ══════════════════ 6. 구매 신청 (/buy) ══════════════════ */
+  /* ══════════════════ 6. 구매 신청 (/buy) ══════════════════
+     상품은 하나라 입력은 입금자명(필수) · 연락처 · 메모 · 기존 키(연장 시)뿐이다.
+     금액은 서버가 정한다 (기본가 + 뒷자리 1~99원). 화면은 응답 금액을 그대로 보여준다. */
 
   function pageBuy() {
     var q = qs();
     var form = $('#orderForm');
-    var mount = $('#featRows'), planMount = $('#planSeg'), sumMount = $('#sum');
+    var featMount = $('#planFeats'), sumMount = $('#sum');
     var keyIn = $('#key'), depIn = $('#depositor'), conIn = $('#contact'), memoIn = $('#memo');
-    var androidIn = $('#androidOk');   // 안드로이드 확인 (필수 — iOS 는 아예 동작 안 함)
+    var submitBtn = null;
 
-    /* 앱에서 넘어온 딥링크 값 채우기 */
+    /* /my [연장 구매] 에서 넘어온 키 채우기 */
     var preKey = normKey(q.get('key') || '');
-    if (preKey) keyIn.value = preKey;      // 앱 [구매하기] 딥링크로 들어온 키
+    if (preKey) keyIn.value = preKey;
 
     keyIn.addEventListener('input', function () {
       var atEnd = keyIn.selectionStart === keyIn.value.length;
@@ -1195,26 +942,16 @@
     });
     keyIn.addEventListener('blur', function () { keyIn.value = normKey(keyIn.value); });
 
-    if (androidIn) androidIn.addEventListener('change', function () {
-      if (androidIn.checked) setErr('android', '');
-    });
-
-    var pk = null;
-
-    /* 가격표를 못 받으면 금액을 계산할 수 없다 → 폼을 그대로 두고 [다시 시도] 만 내준다.
+    /* 가격표를 못 받으면 금액을 보여줄 수 없다 → 폼을 그대로 두고 [다시 시도] 만 내준다.
        페이지 새로고침(location.reload)은 사용자가 적어둔 입금자명·메모를 날려먹으니 쓰지 않는다. */
     function initPricing() {
-      clear(mount);
-      mount.appendChild(el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 조회 중…']));
-      if (sumMount) sumMount.hidden = false;
+      submitBtn = null;
+      clear(sumMount);
+      sumMount.className = 'sum';
+      sumMount.appendChild(el('div', { cls: 'state' }, [el('div', { cls: 'spin' }), '가격 조회 중…']));
       loadPrice().then(function () {
-        clear(mount);
-        pk = Picker({
-          ids: pk ? pk.ids : qFeatures(q), plan: (pk && pk.plan) || qPlan(q) || 'month',
-          variant: 'rows', mount: mount, planMount: planMount, sumMount: sumMount,
-          cta: { text: '주문 접수', kind: 'submit' }
-        });
-        pk.build();
+        renderFeatRows(featMount);
+        submitBtn = renderSum(sumMount, { kind: 'submit', text: '주문 접수' });
         var bank = $('#bankHint');
         if (bank) {
           bank.textContent = PRICE.bank
@@ -1222,13 +959,12 @@
             : '입금 계좌는 주문 접수 후 안내됩니다';
         }
       }).catch(function (e) {
-        pk = null;
-        clear(mount);
-        mount.appendChild(el('p', { cls: 'err', text: (e && e.message) || MSG_PRICE_FAIL }));
-        mount.appendChild(el('p', { cls: 'hint', style: 'margin:6px 0 10px',
-                                    text: '입력한 내용은 그대로 유지됩니다. 아래 버튼을 선택하십시오.' }));
-        mount.appendChild(el('button', { type: 'button', cls: 'btn sm', onclick: initPricing }, '다시 시도'));
-        if (sumMount) sumMount.hidden = true;
+        clear(sumMount);
+        sumMount.appendChild(el('p', { cls: 'err', text: (e && e.message) || MSG_PRICE_FAIL }));
+        sumMount.appendChild(el('p', { cls: 'hint', text: '입력한 내용은 그대로 유지됩니다. 아래 버튼을 선택하십시오.' }));
+        sumMount.appendChild(el('div', null, [
+          el('button', { type: 'button', cls: 'btn sm', onclick: initPricing }, '다시 시도')
+        ]));
       });
     }
     initPricing();
@@ -1242,28 +978,18 @@
 
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      if (!pk) { toast(MSG_PRICE_FAIL, 'bad'); return; }
+      if (!submitBtn) { toast(MSG_PRICE_FAIL, 'bad'); return; }
 
-      ['feature', 'depositor', 'contact', 'key', 'android'].forEach(function (k) { setErr(k, ''); });
+      ['depositor', 'contact', 'key'].forEach(function (k) { setErr(k, ''); });
+      var errBox = $('#submitErr');
+      if (errBox) errBox.hidden = true;
 
-      var ids = pk.ids.slice();
-      var plan = pk.plan;
       var dep = str(depIn.value), con = str(conIn.value), memo = str(memoIn.value);
       var key = normKey(keyIn.value);
       var bad = null;
 
-      if (!ids.length)  { setErr('feature', '기능을 1개 이상 선택하십시오'); bad = bad || mount; }
-      if (!dep)         { setErr('depositor', '입금자명을 입력하십시오'); bad = bad || depIn; }
-      if (!con)         { setErr('contact', '연락처(카카오톡 ID 또는 전화번호)를 입력하십시오'); bad = bad || conIn; }
+      if (!dep) { setErr('depositor', '입금자명을 입력하십시오'); bad = bad || depIn; }
       if (key && !KEY_RE.test(key)) { setErr('key', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력하십시오'); bad = bad || keyIn; }
-      /* 아이폰 구매 → 환불 분쟁으로 이어진다. 확인 체크 없으면 접수 자체를 막는다 */
-      if (androidIn && !androidIn.checked) {
-        setErr('android', '아이폰에서는 동작하지 않습니다. 안드로이드 기기 사용 여부를 확인한 후 체크하십시오');
-        bad = bad || androidIn;
-      }
-
-      var c = calc(ids, plan);
-      if (ids.length && !c.ok) { setErr('feature', MSG_PRICE_FAIL); bad = bad || mount; }
 
       if (bad) {
         toast('미입력 항목이 있습니다', 'bad');
@@ -1272,53 +998,45 @@
         return;
       }
 
-      var btn = pk.sumBtn;
+      var btn = submitBtn;
       btn.disabled = true;
       btn.textContent = '접수 중…';
 
+      /* 기능·기간은 보내지 않는다 — 서버가 항상 기능 3종 + 현재 플랜으로 받는다 */
       api('/api/order', {
         method: 'POST',
         body: {
-          features: ids,            // 배열로 보낸다 (서버가 쉼표 문자열로 저장)
-          plan: plan,
-          amount: c.total,          // 참고용 — 최종 금액은 서버 응답을 믿는다
           depositor: dep,
           buyer_name: dep,
           contact: con,
           memo: memo,
-          target_key: key || null,
-          /* 안드로이드 확인 체크 — 서버가 주문에 같이 저장한다 (환불 분쟁 증거).
-             위 검증에서 체크 안 된 주문은 여기까지 못 오니 항상 true 다. */
-          android_ok: true
+          target_key: key || null
         }
       }).then(function (res) {
-        showResult(res, ids, plan, key, c);
+        showResult(res, key);
       }).catch(function (e) {
         btn.disabled = false;
         btn.textContent = '주문 접수';
         var msg = e.message || '주문 접수에 실패했습니다';
         toast(msg, 'bad');
         /* 어느 칸이 문제인지 서버 reason 으로 짚어준다 */
-        if (e.code === 'invalid_key') { setErr('key', msg); keyIn.focus(); }
+        if (e.code === 'invalid_key' || e.code === 'key_blocked') { setErr('key', msg); keyIn.focus(); }
         else if (e.code === 'no_depositor') { setErr('depositor', msg); depIn.focus(); }
-        else if (e.code === 'bad_feature') { setErr('feature', msg); }
-        else {
-          var box = $('#submitErr');
-          if (box) { box.textContent = msg; box.hidden = false; }
-        }
+        else if (errBox) { errBox.textContent = msg; errBox.hidden = false; }
       });
     });
 
-    function showResult(res, ids, plan, key, c) {
+    function showResult(res, key) {
       applyAutoCopy(res && res.auto_approve);    // 접수 직후 안내 문구도 자동/수동을 맞춘다
       var id     = str(pick(res, ['id', 'order_id', 'orderId']));
       var token  = str(pick(res, ['token', 't']));
       var amt    = amount(pick(res, ['amount', 'total']));
-      if (amt === null) amt = c.total;
       var base   = amount(pick(res, ['base_amount', 'baseAmount']));
       var suffix = num(pick(res, ['suffix']));
       var review = !!pick(res, ['needs_review', 'needsReview']);
       var acct   = str(pick(res, ['account', 'bank', 'bank_info', 'bankInfo'])) || (PRICE && PRICE.bank) || '';
+      var labels = Array.isArray(res && res.feature_labels) ? res.feature_labels.map(str).filter(Boolean)
+                 : (Array.isArray(res && res.features) ? res.features.map(featName) : featList().map(function (f) { return f.label; }));
       var link   = id ? orderUrl(id, token) : '';
       var full   = link ? (location.origin + link) : '';
       if (id && token) saveToken(id, token);
@@ -1378,8 +1096,9 @@
 
         el('div', { style: 'height:16px' }),
         el('dl', { cls: 'kv' }, [
-          el('div', { cls: 'r' }, [el('dt', { text: '기능' }), el('dd', { text: ids.map(featName).join(' · ') })]),
-          el('div', { cls: 'r' }, [el('dt', { text: '기간' }), el('dd', { text: planName(plan) + ' (' + planDays(plan) + '일)' })]),
+          el('div', { cls: 'r' }, [el('dt', { text: '상품' }),
+            el('dd', { text: productText(str(pick(res, ['plan'])), pick(res, ['plan_label', 'planLabel']), pick(res, ['days'])) })]),
+          el('div', { cls: 'r' }, [el('dt', { text: '포함 기능' }), el('dd', { text: labels.join(' · ') || '-' })]),
           key ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: key })]) : null
         ])
       ]));
@@ -1414,25 +1133,34 @@
 
   function pageMy() {
     var form = $('#lookupForm'), keyIn = $('#key'), out = $('#result');
+    var renew = $('#renewLink');
+
+    /* [연장 구매] 링크는 입력된 키를 /buy 로 넘긴다 (형식이 맞을 때만) */
+    function syncRenew() {
+      if (!renew) return;
+      var k = normKey(keyIn.value);
+      renew.setAttribute('href', buyUrl(KEY_RE.test(k) ? k : ''));
+    }
 
     keyIn.addEventListener('input', function () {
       var atEnd = keyIn.selectionStart === keyIn.value.length;
       var v = normKey(keyIn.value);
       if (v !== keyIn.value && atEnd) keyIn.value = v;
+      syncRenew();
     });
-    keyIn.addEventListener('blur', function () { keyIn.value = normKey(keyIn.value); });
+    keyIn.addEventListener('blur', function () { keyIn.value = normKey(keyIn.value); syncRenew(); });
 
     var preKey = normKey(qs().get('key') || '');
     if (preKey) keyIn.value = preKey;
+    syncRenew();
 
     /* 관리자 연락처를 서버가 주면 안내 카드에 채운다 (없으면 기본 문구 그대로).
-       /my 는 '키 1개 = 기기 1대' 의 유일한 탈출구라서, 설명만 있고 연락할 방법이 없으면 안 된다.
        링크/이메일/전화번호는 한 번 눌러서 바로 연락되게 만든다. */
     loadPrice().then(function () {
       var c = $('#adminContact');
       if (c && PRICE.contact) {
         clear(c);
-        c.className = 'tiny sub';
+        c.className = 'tiny sub para-t';
         c.appendChild(el('b', { text: '관리자 연락처 · ' }));
         linkify(PRICE.contact).forEach(function (n) {
           c.appendChild(typeof n === 'string' ? document.createTextNode(n) : n);
@@ -1440,26 +1168,11 @@
       }
     }).catch(function () {});
 
-    /* 초기화 요청 문구를 만들어준다 — 그대로 관리자에게 보내면 된다 */
-    var resetBtn = $('#resetCopy');
-    if (resetBtn) resetBtn.addEventListener('click', function () {
-      var k = normKey(keyIn.value);
-      if (!KEY_RE.test(k)) {
-        toast('키를 먼저 입력하십시오. 요청 문구에 키가 포함되어야 처리됩니다', 'bad');
-        keyIn.focus();
-        return;
-      }
-      copy('[기기 초기화 요청]\n키: ' + k +
-           '\n사유: (기기 교체 / 초기화 / 수리 중 선택하여 기재)' +
-           '\n연락처: (구매 시 기재한 연락처)' +
-           '\n새 기기에서 재활성화하기 위해 기기 초기화를 요청합니다.',
-           '요청 문구가 복사되었습니다');
-    });
-
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var key = normKey(keyIn.value);
       keyIn.value = key;
+      syncRenew();
       var errBox = $('#err-key');
       errBox.hidden = true;
 
@@ -1486,13 +1199,13 @@
     });
 
     if (preKey && KEY_RE.test(preKey)) {
-      /* 딥링크로 키가 들어왔으면 바로 조회 */
+      /* 주문 상태 화면 [내 키 보기] 로 키가 들어왔으면 바로 조회 */
       if (typeof form.requestSubmit === 'function') form.requestSubmit();
       else form.dispatchEvent(new Event('submit', { cancelable: true }));
     }
   }
 
-  /* /api/lookup 응답 정규화 → 기능맵 */
+  /* /api/lookup 응답 정규화 → 기능맵 { id: {on, expiresAt, plan, planLabel, label, daysLeft} } */
   function pickFeatures(res) {
     var src = pick(res, ['feature_list', 'featureList', 'features', 'feature', 'entitlements', 'ents']);
     if (!src) {
@@ -1500,22 +1213,28 @@
       if (lic) src = pick(lic, ['features', 'entitlements']);
     }
     var map = {};
-    FEAT_IDS.forEach(function (id) { map[id] = { on: false, expiresAt: 0, plan: '' }; });
+    FEAT_IDS.forEach(function (id) { map[id] = { on: false, expiresAt: 0, plan: '', planLabel: '', label: '', daysLeft: null }; });
     if (!src) return map;
+
+    function entry(e) {
+      var exp = ts(pick(e, ['expires_at', 'expiresAt', 'expire_at']));
+      var on = pick(e, ['on', 'active', 'enabled']);
+      return {
+        on: on === undefined ? exp > Date.now() : !!on,
+        expiresAt: exp,
+        plan: str(pick(e, ['plan', 'plan_id'])),
+        planLabel: str(pick(e, ['plan_label', 'planLabel'])),
+        label: str(pick(e, ['label', 'name'])),
+        daysLeft: num(pick(e, ['days_left', 'daysLeft']))
+      };
+    }
 
     if (Array.isArray(src)) {
       src.forEach(function (e) {
         if (!e || typeof e !== 'object') return;
         var id = str(pick(e, ['feature', 'id', 'key', 'code']));
         if (!map[id]) return;
-        map[id] = {
-          on: pick(e, ['on', 'active', 'enabled']) === undefined
-                ? ts(pick(e, ['expires_at', 'expiresAt', 'expire_at'])) > Date.now()
-                : !!pick(e, ['on', 'active', 'enabled']),
-          expiresAt: ts(pick(e, ['expires_at', 'expiresAt', 'expire_at'])),
-          plan: str(pick(e, ['plan', 'plan_id'])),
-          daysLeft: num(pick(e, ['days_left', 'daysLeft']))
-        };
+        map[id] = entry(e);
       });
       return map;
     }
@@ -1523,19 +1242,9 @@
       FEAT_IDS.forEach(function (id) {
         var e = src[id];
         if (e === undefined || e === null) return;
-        if (typeof e === 'object') {
-          map[id] = {
-            on: pick(e, ['on', 'active', 'enabled']) === undefined
-                  ? ts(pick(e, ['expires_at', 'expiresAt'])) > Date.now()
-                  : !!pick(e, ['on', 'active', 'enabled']),
-            expiresAt: ts(pick(e, ['expires_at', 'expiresAt'])),
-            plan: str(pick(e, ['plan', 'plan_id']))
-          };
-        } else if (typeof e === 'number') {
-          map[id] = { on: ts(e) > Date.now(), expiresAt: ts(e), plan: '' };
-        } else if (typeof e === 'boolean') {
-          map[id] = { on: e, expiresAt: 0, plan: '' };
-        }
+        if (typeof e === 'object') map[id] = entry(e);
+        else if (typeof e === 'number') map[id] = { on: ts(e) > Date.now(), expiresAt: ts(e), plan: '', planLabel: '', label: '', daysLeft: null };
+        else if (typeof e === 'boolean') map[id] = { on: e, expiresAt: 0, plan: '', planLabel: '', label: '', daysLeft: null };
       });
     }
     return map;
@@ -1544,87 +1253,101 @@
   function renderLookup(out, key, res) {
     var now = ts(pick(res, ['now', 'ts', 'server_time'])) || Date.now();
     var feats = pickFeatures(res);
-    var devRaw = pick(res, ['device_registered', 'deviceRegistered', 'device_bound',
-                            'has_device', 'activated', 'device_id', 'device']);
-    var devOn = !!devRaw && devRaw !== '0' && devRaw !== 'false';
-    var devName = str(pick(res, ['device_name', 'deviceName']));
     var revoked = !!pick(res, ['revoked']);
-    var blockedOn = !!pick(res, ['blocked', 'blocked_reason', 'blockedReason']);
-    /* 사유 문자열이 있으면 보여주고, boolean 이면 사유 없이 차단 표시만 */
-    var blockedWhy = str(pick(res, ['blocked_reason', 'blockedReason']));
-    if (blockedWhy === 'true' || blockedWhy === 'false') blockedWhy = '';
-    var resets  = num(pick(res, ['reset_count', 'resetCount']));
+    var blockedOn = !!pick(res, ['blocked']);
+    var stopped = revoked || blockedOn;
+    var activated = ts(pick(res, ['activated_at', 'activatedAt']));
+    var srvExp = ts(pick(res, ['expires_at', 'expiresAt']));   // 기능 중 가장 늦은 만료 (서버 계산)
+    var maxExp = 0;
+
+    /* 키 전체 상태 — 기능 하나라도 쓰는 중이면 사용 중. 산 기능이 아직 시작 전이면 사용 대기
+       (기간은 콘솔 첫 로그인 때 시작된다) */
+    var anyOn = false, anyWait = false, anyOwned = false;
+    FEAT_IDS.forEach(function (id) {
+      var st = feats[id];
+      if (st.expiresAt > maxExp) maxExp = st.expiresAt;
+      if (st.on && st.expiresAt > now) anyOn = true;
+      if (!st.expiresAt && st.plan) anyWait = true;
+      if (st.expiresAt || st.plan) anyOwned = true;
+    });
+    if (srvExp) maxExp = srvExp;
+    var leftAll = daysLeft(maxExp, now);
+
+    var stateChip;
+    if (revoked) stateChip = el('span', { cls: 'chip bad', text: '사용 중지' });
+    else if (blockedOn) stateChip = el('span', { cls: 'chip bad', text: '차단됨' });
+    else if (anyOn) stateChip = el('span', { cls: 'chip ' + (leftAll <= 7 ? 'warn' : 'ok'),
+                                             text: (leftAll <= 7 ? '만료 임박 · ' : '사용 중 · ') + 'D-' + leftAll });
+    else if (anyWait) stateChip = el('span', { cls: 'chip info', text: '사용 대기' });
+    else stateChip = el('span', { cls: 'chip', text: anyOwned ? '만료됨' : '미구매' });
+
+    var metaLine = '';
+    if (anyOn && maxExp) metaLine = '만료 ' + dateKr(maxExp, true) + (activated ? ' · 사용 시작 ' + dateKr(activated, true) : '');
+    else if (anyWait) metaLine = '콘솔에 이 키로 처음 로그인하는 시점부터 사용 기간이 시작됩니다.';
+    else if (maxExp) metaLine = '만료 ' + dateKr(maxExp, true);
 
     clear(out);
 
-    var head = el('div', { cls: 'card' }, [
+    out.appendChild(el('div', { cls: 'card' }, [
       el('div', { cls: 'chip-row' }, [
         el('span', { cls: 'chip info', text: '라이선스 키' }),
-        devOn ? el('span', { cls: 'chip ok', text: '기기 등록됨' }) : el('span', { cls: 'chip', text: '기기 미등록' }),
-        revoked ? el('span', { cls: 'chip bad', text: '사용 중지' }) : null,
-        blockedOn ? el('span', { cls: 'chip bad', text: '차단됨' }) : null
+        stateChip
       ]),
       el('div', { cls: 'v keyline', text: key }),
-      el('div', { cls: 'btn-row' }, [copyBtn(function () { return key; }, '키')]),
-      devName ? el('p', { cls: 'tiny dim', style: 'margin:12px 0 0', text: '등록 기기 · ' + devName }) : null,
-      (resets !== null && resets > 0) ? el('p', { cls: 'tiny dim', style: 'margin:4px 0 0', text: '기기 초기화 이력 ' + resets + '회' }) : null,
-      blockedWhy ? el('p', { cls: 'err', style: 'margin:10px 0 0', text: '차단 사유 · ' + blockedWhy })
-                 : (blockedOn ? el('p', { cls: 'err', style: 'margin:10px 0 0',
-                                          text: '관리자가 차단한 키입니다. 관리자에게 문의하십시오.' }) : null)
-    ]);
-    out.appendChild(head);
+      el('div', { cls: 'btn-row' }, [
+        copyBtn(function () { return key; }, '키'),
+        stopped ? null : el('a', { cls: 'btn sm' + (anyOn || anyWait ? ' primary' : ''), href: '/panel' }, '콘솔 열기'),
+        stopped ? null : el('a', { cls: 'btn sm' + (anyOn || anyWait ? '' : ' primary'), href: buyUrl(key) }, '연장 구매')
+      ]),
+      metaLine ? el('p', { cls: 'tiny dim', style: 'margin:12px 0 0', text: metaLine }) : null,
+      revoked ? el('p', { cls: 'err', style: 'margin:10px 0 0', text: '사용이 중지된 키입니다. 관리자에게 문의하십시오.' })
+              : (blockedOn ? el('p', { cls: 'err', style: 'margin:10px 0 0',
+                                       text: '관리자가 차단한 키입니다. 관리자에게 문의하십시오.' }) : null)
+    ]));
 
-    /* 기능별 남은 기간 */
+    /* 기능별 남은 기간 — 새 키는 세 기능이 같은 날 끝난다. 예전에 기능별로 산 키는 다를 수 있다 */
     var list = el('div', { cls: 'card' }, [
       el('p', { cls: 'eyebrow', style: 'margin-bottom:2px', text: '기능별 남은 기간' })
     ]);
 
-    FEATURES.forEach(function (f) {
-      var st = feats[f.id];
+    FEAT_IDS.forEach(function (id) {
+      var st = feats[id];
+      var name = st.label || featName(id);
       /* 서버가 days_left 를 주면 그걸 믿는다 (시계 차이로 하루 어긋나는 걸 막음) */
       var left = (st.daysLeft === null || st.daysLeft === undefined) ? daysLeft(st.expiresAt, now) : st.daysLeft;
       var on = st.on && left > 0;
-      var denom = planDays(st.plan) || Math.max(30, left);
-      var pct = on ? clamp(Math.round(left / denom * 100), 3, 100) : 0;
-      if (!on && !st.expiresAt && st.plan) pct = 100;   // 활성화 대기: 기간 안 깎임
+      var notStarted = !on && !st.expiresAt && !!st.plan;   // 구매했지만 콘솔에 아직 로그인 안 함
+      var denom = planDays(st.plan) || Math.max(DAYS_FALLBACK, left);
+      var pct = on ? clamp(Math.round(left / denom * 100), 3, 100) : (notStarted ? 100 : 0);
       var barCls = 'bar' + (!on ? ' off' : (left <= 3 ? ' bad' : (left <= 7 ? ' warn' : '')));
 
-      var notStarted = !on && !st.expiresAt && !!st.plan;   // 구매했지만 앱에서 아직 활성화 안 함
       var chip = on
         ? el('span', { cls: 'chip ' + (left <= 7 ? 'warn' : 'ok'), text: (left <= 7 ? '만료 임박 · ' : '사용 중 · ') + 'D-' + left })
-        : (notStarted ? el('span', { cls: 'chip info', text: '활성화 대기' })
+        : (notStarted ? el('span', { cls: 'chip info', text: '사용 대기' })
                       : el('span', { cls: 'chip', text: st.expiresAt ? '만료됨' : '미구매' }));
 
       var bar = el('div', {
-        cls: barCls, role: 'progressbar', 'aria-label': f.name + ' 남은 기간',
+        cls: barCls, role: 'progressbar', 'aria-label': name + ' 남은 기간',
         'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct)
       }, [el('i')]);
 
-      var row = el('div', { cls: 'feat-row' }, [
+      list.appendChild(el('div', { cls: 'feat-row' }, [
         el('div', { cls: 'r1' }, [
-          el('h3', { text: featName(f.id) }),
+          el('h3', { text: name }),
           chip
         ]),
         bar,
         el('div', { cls: 'meta' }, [
-          el('span', { text: st.plan ? planName(st.plan) + ' 플랜' : (on ? '' : '미활성') }),
+          el('span', { text: st.plan ? planName(st.plan, st.planLabel) + ' 플랜' : (on ? '' : '미구매') }),
           el('span', { cls: 'left', text: st.expiresAt ? '만료 ' + dateKr(st.expiresAt, true)
-                                                       : (notStarted ? '앱에 키 입력 시 기간 개시' : '') })
-        ]),
-        el('div', { cls: 'btn-row' }, [
-          el('a', { cls: 'btn sm' + (on || notStarted ? '' : ' primary'), href: buyUrl([f.id], 'month', key) },
-             (on || notStarted) ? '연장' : '구매')
+                                                       : (notStarted ? '콘솔 첫 로그인 시 기간 시작' : '') })
         ])
-      ]);
-      list.appendChild(row);
+      ]));
       /* 진행바는 그린 다음에 채워서 전환이 보이게 (reduced-motion 이면 CSS가 껀다) */
       setTimeout(function () { $('i', bar).style.width = pct + '%'; }, 30);
     });
 
     out.appendChild(list);
-
-    out.appendChild(el('p', { cls: 'tiny dim center', style: 'margin:14px 0 0',
-      text: '보안상 기기 ID 등 민감 정보는 표시되지 않습니다.' }));
   }
 
   /* ══════════════════ 8. 주문 상태 (/order/:id) ══════════════════ */
@@ -1644,8 +1367,10 @@
       id: str(pick(o, ['id', 'order_id', 'orderId'])),
       status: (str(pick(o, ['status', 'state'])) || 'pending').toLowerCase(),
       features: featIds(pick(o, ['features', 'feature', 'items'])),
+      featLabels: (Array.isArray(o.feature_labels) ? o.feature_labels : []).map(str).filter(Boolean),
       plan: str(pick(o, ['plan', 'plan_id'])),
       planLabel: str(pick(o, ['plan_label', 'planLabel'])),
+      days: num(pick(o, ['days'])),
       amount: amount(pick(o, ['amount', 'total', 'price'])),
       base: amount(pick(o, ['base_amount', 'baseAmount'])),
       needsReview: !!pick(o, ['needs_review', 'needsReview']),
@@ -1657,7 +1382,7 @@
       created: ts(pick(o, ['created_at', 'createdAt', 'created'])),
       handled: ts(pick(o, ['handled_at', 'handledAt'])),
       issued: str(pick(o, ['issued_key', 'issuedKey'])),
-      target: str(pick(o, ['target_key', 'targetKey'])),
+      target: str(pick(o, ['target_key', 'targetKey'])),       // 연장 주문이면 기존 키 (가려진 형태)
       depositor: str(pick(o, ['depositor', 'buyer_name', 'buyerName', 'buyer'])),
       contact: str(pick(o, ['contact'])),
       memo: str(pick(o, ['memo', 'note'])),
@@ -1905,6 +1630,9 @@
          끝나는 건 done / canceled 뿐. (모르는 상태도 일단 지켜본다 — 30분 상한이 있다) */
       var live = !(done || canceled);
       var autoCanceled = canceled && o.autoCanceled;
+      /* 연장 주문은 새 키 대신 기존 키가 늘어난다 — 발급 칸에는 그 기존 키가 그대로 나온다 */
+      var extend = !!o.target;
+      var days = planDays(o.plan, o.days);
       var enter = !!shownStatus && shownStatus !== o.status && !reducedMotion();
       shownStatus = o.status;
 
@@ -1922,13 +1650,16 @@
 
         /* 발급된 키 — 가장 먼저, 크게, 모노스페이스 + 복사 */
         o.issued ? el('div', { cls: 'big keybox', style: 'margin-top:13px' }, [
-          el('div', { cls: 'k', text: '발급된 라이선스 키' }),
+          el('div', { cls: 'k', text: extend ? '연장된 라이선스 키' : '발급된 라이선스 키' }),
           el('div', { cls: 'v key', text: o.issued }),
           el('div', { cls: 'btn-row' }, [
             copyBtn(function () { return o.issued; }, '키'),
+            el('a', { cls: 'btn sm primary', href: '/panel' }, '콘솔 열기'),
             el('a', { cls: 'btn sm', href: '/my?key=' + encodeURIComponent(o.issued) }, '내 키 보기')
           ]),
-          el('div', { cls: 'tiny warnline', text: '앱에서 이 키를 입력하십시오. 입력한 기기 1대에 고정됩니다.' })
+          el('div', { cls: 'tiny warnline', text: extend
+            ? '기존 키의 기간이 연장되었습니다. 콘솔에서 그대로 사용하십시오.'
+            : '이 키로 콘솔에 로그인합니다. 키를 아는 사람은 누구나 콘솔에 들어갈 수 있으므로 외부에 공유하지 마십시오.' })
         ]) : null,
         o.issued ? el('div', { style: 'height:10px' }) : null,
 
@@ -1951,10 +1682,11 @@
 
         el('div', { style: 'height:16px' }),
         el('dl', { cls: 'kv' }, [
-          el('div', { cls: 'r' }, [el('dt', { text: '기능' }),
-            el('dd', { text: o.features.length ? o.features.map(featName).join(' · ') : '-' })]),
-          el('div', { cls: 'r' }, [el('dt', { text: '기간' }),
-            el('dd', { text: o.plan ? (o.planLabel || planName(o.plan)) + ' (' + planDays(o.plan) + '일)' : '-' })]),
+          el('div', { cls: 'r' }, [el('dt', { text: '상품' }),
+            el('dd', { text: productText(o.plan, o.planLabel, o.days) })]),
+          el('div', { cls: 'r' }, [el('dt', { text: '포함 기능' }),
+            el('dd', { text: o.featLabels.length ? o.featLabels.join(' · ')
+                           : (o.features.length ? o.features.map(featName).join(' · ') : '-') })]),
           !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono' }, wonKids(o.amount))]) : null,
           o.depositor ? el('div', { cls: 'r' }, [el('dt', { text: '입금자명' }), el('dd', { text: o.depositor })]) : null,
           o.target ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: o.target })]) : null,
@@ -2003,7 +1735,9 @@
           ? '입금이 확인되었습니다. 자동 확인이 중단된 상태이므로 [상태 새로고침] 을 실행하십시오.'
           : '입금이 확인되었습니다. 키 발급을 대기하십시오. 이 화면은 자동 갱신되므로 열어 두십시오.';
       } else if (done) {
-        tip = '발급된 키를 앱에 입력하면 즉시 사용 가능합니다. 키 1개는 기기 1대에만 등록됩니다.';
+        tip = extend
+          ? '연장된 만료일은 [내 키 보기] 에서 확인할 수 있습니다.'
+          : '발급된 키로 콘솔에 로그인하면 바로 사용할 수 있습니다.';
       } else if (autoCanceled) {
         tip = TTL_CANCELED_MSG;
       } else if (canceled) {
@@ -2019,15 +1753,18 @@
       /* 48시간 미입금 자동취소를 미리 알려준다 (입금 대기 중일 때만) */
       if (pending) out.appendChild(ttlNote());
 
-      /* 발급 완료 — 앱 받는 법까지 이어서 안내한다 */
-      if (done && o.issued) {
+      /* 발급 완료 — 콘솔 로그인까지 이어서 안내한다. 설치할 것은 없다 (웹 콘솔 /panel) */
+      if (done && o.issued && !extend) {
         out.appendChild(el('div', { cls: 'card', style: 'margin-top:12px' }, [
           el('p', { cls: 'eyebrow', style: 'margin-bottom:6px', text: '다음 할 일' }),
           el('ol', { cls: 'steps' }, [
-            el('li', null, ['앱을 설치하십시오. APK 링크는 관리자가 안내합니다. ',
-                            el('a', { href: '/#install' }, '설치 순서 보기')]),
-            el('li', null, ['앱을 실행하여 위 키를 입력하십시오 (', el('b', { text: '안드로이드 전용' }), ').']),
-            el('li', { text: '알림 접근 권한을 허용하면 발송이 시작됩니다. 이미지 발송에는 접근성 권한이 추가로 필요합니다.' })
+            el('li', null, ['위 키를 복사하여 ', el('b', { text: '콘솔' }), '에 로그인하십시오. PC와 휴대폰 브라우저 모두 사용할 수 있습니다.']),
+            el('li', { text: '사용 기간은 첫 로그인 시점부터 ' + (days ? days + '일간 ' : '') + '적용됩니다.' }),
+            el('li', { text: '카카오 계정을 등록하십시오. 휴대폰 카카오톡에 표시된 입력란에 확인 번호를 입력하면 등록이 끝납니다.' }),
+            el('li', { text: '계정마다 매크로, 입장·퇴장 로그, 금지어 검열 등 필요한 기능을 켜고 적용할 방을 고르십시오.' })
+          ]),
+          el('div', { cls: 'btn-row' }, [
+            el('a', { cls: 'btn primary', href: '/panel' }, '콘솔 열기')
           ])
         ]));
       }

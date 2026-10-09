@@ -1,8 +1,10 @@
-// 카톡 매크로/봇 — 라이선스 서버 + 구매 웹사이트 (Neon Postgres)
+// K bot — 라이선스 서버 + 구매 웹사이트 + 웹 콘솔 (Neon Postgres)
 // 이 파일은 부트스트랩만 한다. 실제 로직은 lib/ 와 routes/ 에 있다.
-//   routes/license.js  : 사용자앱 API (/verify /heartbeat /entitlements /config /pubkey)
-//   routes/admin.js    : 관리자 API (/admin/*)
-//   routes/purchase.js : 구매 웹 API (/api/*)
+//   routes/admin.js    : 관리자 API (/admin/*) — 관리자 화면 /manage 가 부른다
+//   routes/purchase.js : 구매 웹 API (/api/*) — 주문 · 키 조회 · 자동 입금확인 웹훅
+//   routes/panel.js    : 웹 콘솔 API (/panel/api/*) — 라이선스 키로 로그인
+//   lib/sender-child.js: 서버 쪽 카카오 발송 자식 프로세스
+// 안드로이드 앱(사용자앱·관리자앱)은 단종됐다. 앱 전용 API(/verify /heartbeat ...)도 같이 뺐다.
 'use strict';
 
 const express = require('express');
@@ -12,7 +14,6 @@ const path = require('path');
 const db = require('./lib/db');
 const rl = require('./lib/ratelimit');
 const senderChild = require('./lib/sender-child');
-const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
 const purchaseRoutes = require('./routes/purchase');
 const panelRoutes = require('./routes/panel');
@@ -32,7 +33,7 @@ app.disable('x-powered-by');
 // express.json 보다 먼저 둔다. 자식이 죽어 있으면 503 만 반환하고 부모는 계속 산다.
 senderChild.install(app);
 
-// 본문 크기 제한 (설정 백업 blob 256KB + 여유). /v1 은 위에서 이미 프록시한다.
+// 본문 크기 제한. /v1 은 위에서 이미 프록시한다.
 // 관리 화면의 이미지 저장만 더 받는다. 그 외 경로는 512kb 그대로다.
 const jsonSmall = express.json({ limit: '512kb' });
 const jsonSettings = express.json({ limit: '16mb' });
@@ -42,8 +43,8 @@ app.use((req, res, next) => {
 });
 
 // ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
-// 버킷은 종류별로 나뉘어 있다(verify 30 / order-read 180 / order-write 20 / deposit 60 / admin 120,
-// 전부 분당·환경변수로 덮어쓰기 가능 — lib/ratelimit.js 의 KIND_LIMITS 참고).
+// 버킷은 종류별로 나뉘어 있다(order-read 180 / order-write 20 / deposit 60 / admin 120 /
+// panel-login 8 / panel 180, 전부 분당·환경변수로 덮어쓰기 가능 — lib/ratelimit.js 의 KIND_LIMITS 참고).
 // NAT(사무실) 뒤에서 여러 명이 같이 써도 폴링이 결제 대기자끼리 서로를 막지 않게 하려는 분리다.
 // IP 는 rl.ipOf() 로만 뽑는다 — req.ip 는 Express 의 해석이라 우리 의도(XFF 맨 뒤)와 달라질 수 있다.
 // 관리자 비밀번호 연속 실패 차단은 routes/admin.js 의 guard 가 기록하고, 여기서 막는다(기본 15분).
@@ -85,7 +86,7 @@ app.use(express.static(PUBLIC_DIR, {
   extensions: ['html'],
   maxAge: '1h',
   setHeaders: (res, filePath) => {
-    if (/panel\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+    if (/(panel|manage)\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
 
@@ -93,7 +94,7 @@ function page(name) {
   return (req, res, next) => {
     const f = path.join(PUBLIC_DIR, name);
     if (!fs.existsSync(f)) return next();
-    if (name === 'panel.html') res.setHeader('Cache-Control', 'no-cache');
+    if (name === 'panel.html' || name === 'manage.html') res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(f);
   };
 }
@@ -103,14 +104,15 @@ app.get('/buy', page('buy.html'));
 app.get('/my', page('my.html'));
 app.get('/order/:id', page('order.html'));
 app.get('/panel', page('panel.html'));
+// 관리자 화면. /admin 은 비밀번호로 막힌 API 접두사라 페이지는 /manage 에 둔다.
+app.get('/manage', page('manage.html'));
 
 // ── API 라우터
-app.use(licenseRoutes);
 app.use(adminRoutes);
 app.use(purchaseRoutes);
 app.use(panelRoutes);
 
-// 루트: 브라우저면 랜딩 페이지, 그 외(앱/curl 연결확인)는 기존 JSON 그대로
+// 루트: 브라우저면 랜딩 페이지, 그 외(curl 연결확인)는 기존 JSON 그대로
 app.get('/', (req, res) => {
   const wantsHtml = String(req.headers.accept || '').indexOf('text/html') >= 0;
   const idx = path.join(PUBLIC_DIR, 'index.html');
@@ -185,8 +187,10 @@ function warnEnv() {
     console.error('ADMIN_PASSWORD 가 짧아 (' + String(process.env.ADMIN_PASSWORD).length +
                   '자) → 20자 이상 무작위 값으로 바꿔라');
   }
-  if (!process.env.SIGNING_PRIVATE_KEY) console.error('SIGNING_PRIVATE_KEY 가 없어 → 재시작마다 서명키가 바뀐다. 로그의 키를 환경변수에 박아라');
-  if (!String(process.env.ALLOWED_APP_SIGS || '').trim()) console.log('ALLOWED_APP_SIGS 비어있음 → 앱 서명 검사 건너뜀 (리패키징 방어 꺼짐)');
+  // 웹 콘솔(/panel) 로그인 쿠키 서명 키. 16자 미만이면 lib/panel-auth.js 가 /panel 을 503 으로 닫는다.
+  if (String(process.env.CONFIG_SECRET || '').trim().length < 16) {
+    console.error('CONFIG_SECRET 이 비었거나 16자 미만이야 → /panel 로그인이 503 으로 막힌다. 긴 무작위 값을 넣어라');
+  }
   if (!String(process.env.DEPOSIT_TOKEN || '').trim()) console.log('DEPOSIT_TOKEN 비어있음 → 자동 입금확인 웹훅 비활성');
   if (!fs.existsSync(PUBLIC_DIR)) console.log('public/ 폴더가 없어 → 구매 웹사이트는 아직 안 올라간 상태야 (API는 정상)');
   // 레이트리밋 설정을 부팅 로그에 남긴다 (429 신고가 들어왔을 때 이 줄부터 본다)

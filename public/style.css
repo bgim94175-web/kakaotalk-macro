@@ -352,15 +352,6 @@ b, strong { font-weight: 600; }
 .how-fig .st-crit { fill: var(--crit); }
 .faq-side { justify-self: end; display: grid; gap: 14px; justify-items: end; }
 
-/* install rows (#install) — label left, description right */
-.ins { border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--bg-1); overflow: hidden; }
-.ins-row { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; padding: 16px 20px; border-top: 1px solid var(--line); }
-.ins-row:first-child { border-top: 0; }
-.ins-row b { font-weight: 500; color: var(--fg); }
-.ins-row p { color: var(--fg-2); font-size: var(--t-13); line-height: 1.65; }
-.ins-row.foot-row { background: var(--bg); }
-.ins-row.foot-row b { color: var(--fg-2); }
-
 /* feature explorer panes: small copies of console screens (decoration only, no controls) */
 .fx-c { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .fx-note { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--fg-3); font-size: var(--t-13); }
@@ -502,6 +493,10 @@ legend.lb + * { clear: both; }
 .prods .prod > .chk { grid-area: chk; position: absolute; inset: 0; border: 0; background: transparent; padding: 22px; min-height: 0; align-items: flex-start; border-radius: 0; }
 .prods .prod > .chk:hover { background: transparent; }
 .prods .prod > .chk .t, .prods .prod > .chk .amt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* 단일 상품 (K bot 1개월): 선택 칸 없이 상품 줄 1개 + 포함 기능 줄. 상품 줄만 .sel 로 강조 */
+.prods .card.prod.one, .pricing-body .prods .card.prod.one { grid-template-columns: minmax(0, 1fr) 196px; grid-template-areas: "head prices" "bul prices"; }
+.prods .card.prod.one:hover { background: transparent; }
+.prods .card.prod.one.sel, .prods .card.prod.one.sel:hover { background: var(--bg-2); }
 .chip.tagx { height: 20px; font-size: var(--t-11); }
 .chip.tagx::before { display: none; }
 /* sum */
@@ -572,7 +567,6 @@ legend.lb + * { clear: both; }
 
 /* app.js markup: classes that replace the V4 inline styles */
 .pub-page { min-width: 0; }
-.buy-ios { margin-bottom: 24px; }
 .para { margin-bottom: 10px; }
 .para-t { margin-top: 10px; }
 #adminContact { margin-bottom: 0; }
@@ -580,10 +574,8 @@ legend.lb + * { clear: both; }
 .find-btn { margin-top: 12px; }
 .chk .t .nm { display: block; color: var(--fg); font-size: var(--t-14); }
 .chk .t .ds { display: block; line-height: 1.45; }
-#featRows { gap: 8px; }
 .fld > label.chk { display: flex; margin-bottom: 0; font-weight: 400; }
-#featRows .chk, #fld-android .chk { align-items: flex-start; }
-#featRows .chk .box, #fld-android .chk .box { margin-top: 2px; }
+#planFeats .feat-row { gap: 4px; padding: 12px 0; }
 .card > h2 { font-size: var(--t-18); font-weight: 600; letter-spacing: -0.02em; line-height: 1.4; }
 .keyline { margin: 12px 0 4px; font-family: var(--f-mono); font-size: clamp(18px, 4.6vw, 24px); font-weight: 500; letter-spacing: .02em; word-break: break-all; }
 .big .v.lnk { font-size: var(--t-13); }
@@ -658,7 +650,6 @@ legend.lb + * { clear: both; }
   .how-steps li { border-right: 0; border-bottom: 1px solid var(--line); padding: 18px 16px; }
   .how-steps li:last-child { border-bottom: 0; }
   .faq-a p { padding-right: 0; }
-  .ins-row { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 14px 16px; }
   .fx-pane .srow { padding: 14px 16px; gap: 12px; }
   .fx-pane .sentence { padding: 14px 16px; }
   .fx-pane .alerts li { grid-template-columns: 12px minmax(0, 1fr); padding: 12px 16px; }
@@ -686,12 +677,14 @@ legend.lb + * { clear: both; }
   .prod .bul { grid-template-columns: minmax(0, 1fr); }
   .prod .prices { margin-top: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
   .prod .pr { flex-direction: column; gap: 0; padding: 6px 8px; }
+  .prods .card.prod.one, .pricing-body .prods .card.prod.one { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "bul" "prices"; }
+  .prod.one .prices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .seg label span { padding: 0 10px; }
   .kv .r { grid-template-columns: 96px minmax(0, 1fr); }
   .lookup { grid-template-columns: minmax(0, 1fr); }
   .fld input[type="text"], .fld textarea { font-size: 16px; }
 }
-/* 360px 대: 1년(6자리) 금액이 한 줄에 들어가게 칸 여백과 글자를 줄인다 */
+/* 360px 대: 금액이 한 줄에 들어가게 칸 여백과 글자를 줄인다 */
 @media (max-width: 380px) {
   .prod .prices { gap: 2px; }
   .prod .pr { padding: 6px 4px; }

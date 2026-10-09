@@ -1,4 +1,5 @@
-// 관리자 API — 헤더 x-admin-password 로 보호. 관리자 응답은 서명하지 않는다.
+// 관리자 API — 헤더 x-admin-password 로 보호. 관리자 화면(/manage)이 이걸 부른다.
+// 키 발급·연장 / 조회 / 회수·차단·삭제 / 주문 승인·취소 / 입금 내역.
 'use strict';
 
 const express = require('express');
@@ -8,7 +9,6 @@ const keys = require('../lib/keys');
 const features = require('../lib/features');
 const audit = require('../lib/audit');
 const pricing = require('../lib/pricing');
-const license = require('./license');
 const rl = require('../lib/ratelimit');
 
 const router = express.Router();
@@ -75,7 +75,7 @@ async function guard(req, res, next) {
       detail: '비밀번호 입력 실패 횟수를 초과했습니다. ' + mins + '분 후 다시 시도하십시오' });
   }
 
-  // ── 인증 실패는 기록한다 (관리자앱 [기록] 탭에서 공격을 눈으로 볼 수 있게)
+  // ── 인증 실패는 기록한다 (관리자 화면 [기록] 탭에서 공격을 눈으로 볼 수 있게)
   if (!pwOk(req.header('x-admin-password'))) {
     const st = rl.noteAdminFail(ip);
     console.log('[admin] 비밀번호 틀림 ' + ip + ' ' + req.method + ' ' + req.path +
@@ -199,6 +199,7 @@ router.get('/admin/license', wrap(async (req, res) => {
   if (!row) return res.json({ ok: false, error: '등록되지 않은 키입니다' });
   const shaped = (await attachFeatures([db.shapeLicense(row)]))[0];
   const a = await db.q('SELECT * FROM audit_log WHERE key=$1 ORDER BY at DESC, id DESC LIMIT 20', [key]);
+  // configs 는 단종된 사용자앱의 설정 백업이다. 새로 쌓이지 않지만 응답 형태는 그대로 둔다(없으면 null).
   const cfg = await db.one('SELECT rev, updated_at FROM configs WHERE key=$1', [key]);
   res.json({
     ok: true, now: Date.now(), license: shaped,
@@ -288,29 +289,11 @@ router.post('/admin/block', wrap(async (req, res) => {
   res.json({ ok: r.rowCount > 0, key: key, blocked_reason: reason });
 }));
 
-// 기기 고정 해제. 기간(entitlements)은 건드리지 않는다 — 이미 산 기간은 계속 흐른다.
-router.post('/admin/reset-device', wrap(async (req, res) => {
-  const b = req.body || {};
-  const key = keys.normKey(b.key);
-  if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
-  const now = Date.now();
-  const r = await db.q(
-    `UPDATE licenses SET device_id=NULL, device_name=NULL, device_fp=NULL,
-            session_token=NULL, session_at=NULL,
-            reset_count=COALESCE(reset_count,0)+1, last_reset_at=$1::bigint
-      WHERE key=$2
-      RETURNING reset_count`, [now, key]);
-  if (!r.rowCount) return res.json({ ok: false, error: '등록되지 않은 키입니다' });
-  const cnt = Number(r.rows[0].reset_count) || 0;
-  await audit.record(req, 'reset', { key: key, detail: '관리자 기기 초기화 (누적 ' + cnt + '회)' });
-  res.json({ ok: true, key: key, reset_count: cnt });
-}));
-
 router.post('/admin/delete', wrap(async (req, res) => {
   const key = keys.normKey((req.body || {}).key);
   if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const removed = await db.tx(async (client) => {
-    await db.q('DELETE FROM configs WHERE key=$1', [key], client);
+    await db.q('DELETE FROM configs WHERE key=$1', [key], client);   // 예전 앱 설정 백업이 남아 있으면 같이 지운다
     const r = await db.q('DELETE FROM licenses WHERE key=$1', [key], client); // entitlements 는 CASCADE
     return r.rowCount;
   });
@@ -330,7 +313,6 @@ router.get('/admin/orders', wrap(async (req, res) => {
   params.push(limit);
   const r = await db.q(
     'SELECT * FROM orders' + where + ' ORDER BY created_at DESC LIMIT $' + params.length, params);
-  // shapeOrder 가 android_ok(아이폰 확인 체크 여부)까지 실어준다 → 관리자앱이 환불 분쟁 때 본다
   res.json({ ok: true, now: Date.now(), bank: pricing.bankInfo(), orders: r.rows.map(db.shapeOrder) });
 }));
 
@@ -418,45 +400,6 @@ router.post('/admin/deposit-ignore', wrap(async (req, res) => {
   if (!isFinite(depositId) || depositId <= 0) return res.json({ ok: false, error: 'deposit_id 값이 필요합니다' });
   const r = await db.q("UPDATE deposits SET status='ignored' WHERE id=$1", [depositId]);
   res.json({ ok: r.rowCount > 0, deposit_id: depositId });
-}));
-
-// ─────────────────────────────────────────────────────────────
-// 앱 서명 허용목록
-// ─────────────────────────────────────────────────────────────
-router.get('/admin/sigs', wrap(async (req, res) => {
-  const r = await db.q('SELECT sha256,label,allowed,created_at FROM app_signatures ORDER BY created_at DESC NULLS LAST');
-  const env = String(process.env.ALLOWED_APP_SIGS || '')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  res.json({
-    ok: true,
-    env_sigs: env,
-    min_app_version: Number(process.env.MIN_APP_VERSION) || 0,
-    sigs: r.rows.map((x) => ({
-      sha256: x.sha256, label: x.label || null,
-      allowed: x.allowed === null || x.allowed === undefined ? true : !!x.allowed,
-      created_at: db.num0(x.created_at),
-    })),
-  });
-}));
-
-router.post('/admin/sig-add', wrap(async (req, res) => {
-  const b = req.body || {};
-  const sha = String(b.sha256 || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
-  if (sha.length !== 64) return res.json({ ok: false, error: 'sha256 은 64자 hex 형식이어야 합니다' });
-  await db.q(
-    `INSERT INTO app_signatures (sha256,label,allowed,created_at) VALUES ($1,$2,TRUE,$3)
-     ON CONFLICT (sha256) DO UPDATE SET label=COALESCE(EXCLUDED.label, app_signatures.label), allowed=TRUE`,
-    [sha, b.label ? String(b.label).slice(0, 120) : null, Date.now()]);
-  license.bustSigCache();
-  res.json({ ok: true, sha256: sha });
-}));
-
-router.post('/admin/sig-del', wrap(async (req, res) => {
-  const sha = String((req.body || {}).sha256 || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
-  if (!sha) return res.json({ ok: false, error: 'sha256 값이 필요합니다' });
-  const r = await db.q('DELETE FROM app_signatures WHERE sha256=$1', [sha]);
-  license.bustSigCache();
-  res.json({ ok: r.rowCount > 0, sha256: sha });
 }));
 
 module.exports = router;

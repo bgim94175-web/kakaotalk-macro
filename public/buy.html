@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>구매 신청 · K bot</title>
-<meta name="description" content="기능을 선택하여 구매 신청하면 주문번호와 입금 계좌가 즉시 안내됩니다.">
+<meta name="description" content="K bot 1개월 구매 신청 시 주문번호와 입금 계좌가 즉시 안내됩니다.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#09090b">
 <meta name="color-scheme" content="dark">
@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=5">
-<script src="/app.js?v=5" defer></script>
+<link rel="stylesheet" href="/style.css?v=6">
+<script src="/app.js?v=6" defer></script>
 </head>
 <body data-page="buy">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -72,14 +72,8 @@
   <div class="wrap pub-page">
     <div class="pub-head">
       <p class="eyebrow">구매 신청</p>
-      <h1>기능과 기간을 선택합니다</h1>
+      <h1>입금자명을 입력하고 신청합니다</h1>
       <p class="lead">접수 시 주문번호와 입금 계좌가 즉시 표시됩니다. <span data-manual="안내된 &lt;b&gt;정확한 금액&lt;/b&gt;을 입금하면 관리자가 확인 후 키를 발급합니다.">안내된 <b>정확한 금액</b>을 입금하면 통상 1~2분 내 키가 자동 발급됩니다.</span></p>
-    </div>
-
-    <!-- 아이폰 미지원 — 구매 버튼 위. 환불 분쟁 방지용이니 지우지 않는다 -->
-    <div class="note warn buy-ios" id="iosWarn">
-      <span class="ic" aria-hidden="true">!</span>
-      <span>이 앱은 <b>안드로이드 전용</b>입니다. 아이폰에서는 다른 앱이 카카오톡 알림을 읽고 답장하는 것이 불가능하여(iOS 제약) 기술적으로 동작하지 않습니다. 구매 전 반드시 사용 기기를 확인하십시오.</span>
     </div>
 
     <!-- 접수 결과 (제출 성공하면 여기에 그려짐) -->
@@ -89,23 +83,22 @@
       <div id="formWrap" class="pub-grid">
         <div class="form">
           <div class="fsec">
-            <fieldset id="fld-feature">
-              <legend class="lb">기능 선택 <span class="req" aria-hidden="true">*</span><span class="sr">필수, 1개 이상</span></legend>
-              <div id="featRows" class="grid"></div>
-              <p class="err" id="err-feature" role="alert" hidden></p>
-              <p class="hint">만료일은 기능별로 별도 적용됩니다. 3종 동시 선택 시 묶음 할인이 적용됩니다.</p>
-            </fieldset>
-            <fieldset>
-              <legend class="lb">결제 기간 <span class="req" aria-hidden="true">*</span></legend>
-              <div id="planSeg"></div>
-              <p class="hint">사용 기간은 앱에서 키를 <b>최초 활성화한 시점</b>부터 시작됩니다.</p>
-            </fieldset>
+            <div id="fld-plan">
+              <p class="lb"><span data-bind="plan">K bot 1개월</span> · 포함 기능</p>
+              <!-- 상품은 하나다 (기능 3종 전부 포함). 아래는 스크립트가 꺼진 경우의 대체 문구 — app.js 가 /api/price 로 다시 그린다 -->
+              <div id="planFeats">
+                <div class="feat-row"><div class="r1"><h3>자동발송 매크로</h3><span class="chip ok">포함</span></div><p class="tiny dim">대화방 주기 발송 · 이미지 첨부 · 갠톡 자동응답 · 저격 규칙</p></div>
+                <div class="feat-row"><div class="r1"><h3>대화방 관리봇</h3><span class="chip ok">포함</span></div><p class="tiny dim">입장·퇴장 로그 · 프로필 변경 감지 · 금지어·링크 가림 · 올킥 감지</p></div>
+                <div class="feat-row"><div class="r1"><h3>미니게임봇</h3><span class="chip ok">포함</span></div><p class="tiny dim">끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹</p></div>
+              </div>
+              <p class="hint">기능 3종이 모두 포함되며 따로 고르지 않습니다. 사용 기간은 발급된 키로 <b>콘솔에 처음 로그인한 시점</b>부터 시작됩니다.</p>
+            </div>
           </div>
           <div class="fsec">
             <div class="fld" id="fld-key">
               <label for="key">기존 키 · 연장 시에만 입력</label>
               <input type="text" id="key" name="key" class="keyin" inputmode="text" placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-describedby="key-hint">
-              <p class="hint" id="key-hint">사용 중인 키의 기간을 연장하거나 기능을 추가하는 경우 해당 키를 입력하십시오. 신규 구매인 경우 <b>비워 두십시오</b>.</p>
+              <p class="hint" id="key-hint">사용 중인 키의 기간을 연장하는 경우 해당 키를 입력하십시오. 기능 3종이 모두 <span data-bind="days">30일</span> 연장됩니다. 신규 구매인 경우 <b>비워 두십시오</b>.</p>
               <p class="err" id="err-key" role="alert" hidden></p>
             </div>
             <div class="fld" id="fld-depositor">
@@ -115,9 +108,9 @@
               <p class="err" id="err-depositor" role="alert" hidden></p>
             </div>
             <div class="fld" id="fld-contact">
-              <label for="contact">연락처 <span class="req" aria-hidden="true">*</span></label>
+              <label for="contact">연락처 · 선택</label>
               <input type="text" id="contact" name="contact" placeholder="카카오톡 ID 또는 전화번호" autocomplete="tel" maxlength="60" aria-describedby="con-hint">
-              <p class="hint" id="con-hint">키 전달 및 문제 발생 시 연락에 사용됩니다.</p>
+              <p class="hint" id="con-hint">입금 확인이 지연되거나 문제가 발생한 경우 연락에 사용됩니다.</p>
               <p class="err" id="err-contact" role="alert" hidden></p>
             </div>
             <div class="fld" id="fld-memo">
@@ -125,21 +118,12 @@
               <textarea id="memo" name="memo" maxlength="500" placeholder="요청사항 입력 (예: 저녁 시간대 연락 요청)"></textarea>
             </div>
           </div>
-          <!-- 안드로이드 확인 — 체크 안 하면 제출을 막는다 -->
-          <div class="fld" id="fld-android">
-            <label class="chk" for="androidOk">
-              <input type="checkbox" id="androidOk" name="android_ok" aria-describedby="android-hint">
-              <span class="box" aria-hidden="true"></span>
-              <span class="t"><span class="nm">안드로이드 기기 사용을 확인했습니다<span class="req" aria-hidden="true">*</span><span class="sr">필수</span></span><span class="tiny dim ds" id="android-hint">아이폰(iOS)에서는 동작하지 않습니다. 필수 확인 항목입니다.</span></span>
-            </label>
-            <p class="err" id="err-android" role="alert" hidden></p>
-          </div>
           <p class="hint" id="bankHint"></p>
           <p class="err" id="submitErr" role="alert" hidden></p>
         </div>
         <aside>
-          <!-- 실시간 금액 + 제출 -->
-          <div id="sum" class="sum"></div>
+          <!-- 결제 금액 + 제출 -->
+          <div id="sum" class="sum"><button type="submit" class="btn primary wide lg">주문 접수</button></div>
           <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>수집된 정보는 키 발급과 입금 확인에만 사용됩니다. 비밀번호 또는 카드번호는 어떠한 경우에도 요구하지 않습니다. 해당 정보를 요구하는 연락은 응하지 마십시오.</span></div>
         </aside>
       </div>
