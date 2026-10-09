@@ -19,7 +19,7 @@
 
   var FEATURES = [
     {
-      id: 'macro', name: '자동발송 매크로', icon: '⚡', color: 'var(--accent)', tag: '추천',
+      id: 'macro', name: '자동발송 매크로', tag: '추천',
       desc: '대화방별 주기 자동발송 + 이미지 첨부 + 메시지 추적 + 오픈프로필 자동응답',
       bullets: [
         '대화방별로 주기(분 단위)와 메시지를 따로 지정',
@@ -30,7 +30,7 @@
       ]
     },
     {
-      id: 'roombot', name: '대화방 관리봇', icon: '🛡', color: 'var(--accent2)', tag: '',
+      id: 'roombot', name: '대화방 관리봇', tag: '',
       desc: '입/퇴장 인사, 금지어·도배 감지, 공지 자동안내',
       bullets: [
         '입장 / 퇴장 인사 자동 발송',
@@ -41,7 +41,7 @@
       ]
     },
     {
-      id: 'minigame', name: '미니게임봇', icon: '🎲', color: 'var(--violet)', tag: '',
+      id: 'minigame', name: '미니게임봇', tag: '',
       desc: '끝말잇기 · 숫자야구 · 주사위 · 퀴즈 · 랭킹',
       bullets: [
         '끝말잇기 (사전 내장, 두음법칙 처리)',
@@ -199,6 +199,17 @@
     var v = num(n);
     if (v === null) return '-';
     return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '원';
+  }
+  /* 모노 글꼴 칸에 넣는 금액: 숫자는 모노, '원'은 산세리프 span (docs/UI_V5.md 2.1·7 — 모노에 한글 금지). 글자는 won() 과 같다. */
+  function wonKids(n, pre) {
+    var t = won(n);
+    if (t.slice(-1) !== '원') return [(pre || '') + t];
+    return [(pre || '') + t.slice(0, -1), el('span', { cls: 'sans', text: '원' })];
+  }
+  function setWon(node, n, empty) {
+    clear(node);
+    if (num(n) === null) { node.textContent = empty; return; }
+    wonKids(n).forEach(function (k) { node.appendChild(typeof k === 'string' ? document.createTextNode(k) : k); });
   }
 
   /* 초 단위 타임스탬프로 와도 ms로 맞춘다 */
@@ -370,7 +381,7 @@
         '. 금액이 일치하지 않으면 자동 확인이 불가합니다.';
     return el('div', { cls: 'big hi' }, [
       el('div', { cls: 'k', text: '입금 금액' }),
-      el('div', { cls: 'v xl mono', text: won(v) }),
+      el('div', { cls: 'v xl mono' }, wonKids(v)),
       el('div', { cls: 'tiny warnline', text: msg }),
       suffix !== null
         ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(v - suffix) + ' + 주문 확인용 ' + suffix + '원' })
@@ -610,7 +621,7 @@
         });
         var lab = el('label', { for: 'plan-' + p.id }, [
           input,
-          el('span', null, [ (PRICE && PRICE.planLabel[p.id]) || p.name, el('em', { text: planDays(p.id) + '일' }) ])
+          el('span', null, [ (PRICE && PRICE.planLabel[p.id]) || p.name, el('em', null, [String(planDays(p.id)), el('span', { cls: 'sans', text: '일' })]) ])
         ]);
         box.appendChild(lab);
       });
@@ -638,14 +649,10 @@
 
         var card = el('article', { cls: 'card prod' }, [
           el('div', { cls: 'head' }, [
-            el('div', {
-              cls: 'ico', 'aria-hidden': 'true',
-              style: 'background:#f4f6f8;border:1px solid var(--line);color:' + f.color
-            }, f.icon),
             el('div', { cls: 't' }, [
-              el('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
-                el('h3', { text: (PRICE && PRICE.feats[f.id] && PRICE.feats[f.id].label) || f.name }),
-                f.tag ? el('span', { cls: 'chip ok', text: f.tag }) : null
+              el('div', { cls: 'chip-row' }, [
+                el('h3', { text: featName(f.id) }),
+                f.tag ? el('span', { cls: 'chip tagx', text: f.tag }) : null
               ]),
               el('p', { cls: 'desc', text: f.desc })
             ])
@@ -655,7 +662,8 @@
           el('label', { cls: 'chk', for: id }, [
             input,
             el('span', { cls: 'box', 'aria-hidden': 'true' }),
-            el('span', { cls: 't' }, '선택'),
+            /* 화면 낭독기가 어떤 카드의 선택인지 읽도록 이름을 붙인다 (보이는 글자는 '선택') */
+            el('span', { cls: 't' }, [el('span', { cls: 'sr', text: featName(f.id) + ' ' }), '선택']),
             amt
           ])
         ]);
@@ -675,12 +683,12 @@
           onchange: function () { toggle(f.id, input.checked); }
         });
         var amt = el('span', { cls: 'amt' });
-        var wrap = el('label', { cls: 'chk', for: id, style: 'align-items:flex-start;padding:12px' }, [
+        var wrap = el('label', { cls: 'chk', for: id }, [
           input,
-          el('span', { cls: 'box', 'aria-hidden': 'true', style: 'margin-top:2px' }),
+          el('span', { cls: 'box', 'aria-hidden': 'true' }),
           el('span', { cls: 't' }, [
-            el('span', { style: 'display:block;color:var(--text);font-size:14.5px', text: (PRICE && PRICE.feats[f.id] && PRICE.feats[f.id].label) || f.name }),
-            el('span', { cls: 'tiny dim', style: 'display:block;font-weight:600;line-height:1.45', text: f.desc })
+            el('span', { cls: 'nm', text: featName(f.id) }),
+            el('span', { cls: 'tiny dim ds', text: f.desc })
           ]),
           amt
         ]);
@@ -705,8 +713,8 @@
       self.sumSaved = el('div', { cls: 'saved', hidden: true });
       self.sumLines = el('div', { cls: 'lines' });
       self.sumBtn = self.cta.kind === 'submit'
-        ? el('button', { type: 'submit', cls: 'btn primary wide' }, self.cta.text)
-        : el('button', { type: 'button', cls: 'btn primary wide', onclick: goBuy }, self.cta.text);
+        ? el('button', { type: 'submit', cls: 'btn primary wide lg' }, self.cta.text)
+        : el('button', { type: 'button', cls: 'btn primary wide lg', onclick: goBuy }, self.cta.text);
       self.sumMount.appendChild(self.sumNudge);
       self.sumMount.appendChild(self.sumSaved);
       self.sumMount.appendChild(self.sumLines);
@@ -727,14 +735,14 @@
         if (self.boxes[id]) self.boxes[id].checked = on;
         card.classList.toggle('sel', on);
         var u = unitPrice(id, self.plan);
-        if (self.amts[id]) self.amts[id].textContent = u === null ? '' : won(u);
+        if (self.amts[id]) setWon(self.amts[id], u, '');
         /* 랜딩 카드: 현재 플랜 가격 강조 + 가격 채우기 */
         $$('.pr', card).forEach(function (row) {
           var p = row.getAttribute('data-plan');
           row.setAttribute('data-on', p === self.plan ? '1' : '0');
           var v = unitPrice(id, p);
           var pv = $('.pv', row);
-          if (pv) pv.textContent = v === null ? '—' : won(v);
+          if (pv) setWon(pv, v, '—');
         });
       });
 
@@ -749,7 +757,7 @@
         ]));
       } else if (!c.ok) {
         self.sumLines.appendChild(el('div', { cls: 'ln' }, [
-          el('span', { cls: 'v', style: 'margin:0;color:var(--red)', text: MSG_PRICE_FAIL })
+          el('span', { cls: 'v crit-t', text: MSG_PRICE_FAIL })
         ]));
       } else {
         var who = self.ids.length === FEATURES.length
@@ -757,20 +765,19 @@
           : self.ids.map(featName).join(' · ');
         self.sumLines.appendChild(el('div', { cls: 'ln' }, [
           el('span', { text: who + ' · ' + planName(self.plan) }),
-          el('span', { cls: 'v mono', text: won(c.subtotal) })
+          el('span', { cls: 'v mono' }, wonKids(c.subtotal))
         ]));
         if (c.bundled) {
           self.sumLines.appendChild(el('div', { cls: 'ln off' }, [
             el('span', { text: FEATURES.length + '종 묶음 할인 ' + Math.round(c.rate * 100) + '%' }),
-            el('span', { cls: 'v mono', text: '-' + won(c.discount) })
+            el('span', { cls: 'v mono' }, wonKids(c.discount, '-'))
           ]));
         }
         self.sumLines.appendChild(el('div', { cls: 'ln total' }, [
           el('span', { text: '결제 금액' }),
           el('span', { cls: 'v mono' }, [
-            c.bundled ? el('s', { cls: 'was', text: won(c.subtotal) }) : null,
-            document.createTextNode(won(c.total))
-          ])
+            c.bundled ? el('s', { cls: 'was' }, wonKids(c.subtotal)) : null
+          ].concat(wonKids(c.total)))
         ]));
       }
 
@@ -778,7 +785,7 @@
       var need = c.min - self.ids.length;
       if (c.bundled) {
         self.sumSaved.hidden = false;
-        self.sumSaved.textContent = '✓ ' + FEATURES.length + '종 묶음 ' + Math.round(c.rate * 100) + '% 할인 적용 · ' + won(c.discount) + ' 할인';
+        self.sumSaved.textContent = FEATURES.length + '종 묶음 ' + Math.round(c.rate * 100) + '% 할인 적용 · ' + won(c.discount) + ' 할인';
         self.sumNudge.hidden = true;
       } else {
         self.sumSaved.hidden = true;
@@ -823,7 +830,6 @@
       });
       mount.appendChild(el('article', { cls: 'card prod skel', 'aria-hidden': 'true' }, [
         el('div', { cls: 'head' }, [
-          el('div', { cls: 'sk sk-ico' }),
           el('div', { cls: 't', style: 'flex:1' }, [
             el('div', { cls: 'sk sk-ln w40', style: 'margin-bottom:9px' }),
             el('div', { cls: 'sk sk-ln w90' })
@@ -865,6 +871,307 @@
       ]));
       if (sumMount) sumMount.hidden = true;
       if (planMount) planMount.hidden = true;
+    });
+
+    /* 홈 모션 (UI_V5 3.6-6) — 가격을 기다리지 않는다 */
+    initNav(); initDemo(); initFx(); initHow(); initFaq(); initReveal();
+  }
+
+  /* ══════════════════ 5-1. 홈 모션 (docs/UI_V5.md 5.2 · 5.3) ══════════════════
+     전부 transform/opacity 만 움직인다. 동작 줄이기면 결과만 즉시 보여 준다.
+     요소가 없으면 조용히 끝난다 (다른 페이지에서 불려도 안전). */
+
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  var ICON_PLAY  = '<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-play"></use></svg>';
+  var ICON_PAUSE = '<svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-pause"></use></svg>';
+
+  /* 헤더: 스크롤하면 아래 선, 홈 안 앵커는 부드럽게 이동 */
+  var navReady = false;
+  function initNav() {
+    if (navReady) return;
+    navReady = true;
+    var nav = $('#lnav');
+    if (nav) {
+      var onScroll = function () { nav.classList.toggle('scrolled', (window.scrollY || window.pageYOffset || 0) > 8); };
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    }
+    if ((document.body.getAttribute('data-page') || '') !== 'home') return;   // 다른 페이지는 /#… 로 그냥 이동
+    document.addEventListener('click', function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || a.classList.contains('skip')) return;
+      var m = (a.getAttribute('href') || '').match(/^\/?#([A-Za-z][\w-]*)$/);
+      if (!m) return;
+      var target = document.getElementById(m[1]);
+      if (!target || target.id === 'main') return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
+      try { history.replaceState(null, '', '#' + m[1]); } catch (er) { /* 주소 표시만 못 바꾼다 */ }
+    });
+  }
+
+  /* 시연 창 — requestAnimationFrame 타임라인 (5.2).
+     마크업 기본 상태가 마지막 장면이라 JS 없이도, 동작 줄이기여도 완성된 화면이 보인다. */
+  function initDemo() {
+    var demo = $('#demo'), playBtn = $('#demoPlay');
+    if (!demo || !playBtn) return;
+    var chaps = $$('.chap');
+    var OUT = '현재 1만 로벅스 기준 13,500원입니다. 거래방 공지 확인 부탁드립니다.';
+    var CH = [0, 3200, 6800, 9800, 12800, 16400], END = 18200, TYPE0 = 3400, TYPE1 = 5700;
+    var D = { t: END, playing: false, last: 0, raf: 0, user: false, started: false, auto: false, inView: true };
+    var byId = function (id) { return document.getElementById(id); };
+    function on() { for (var i = 0; i < arguments.length; i++) { var e = byId(arguments[i]); if (e) e.classList.remove('is-off'); } }
+    function off() { for (var i = 0; i < arguments.length; i++) { var e = byId(arguments[i]); if (e) e.classList.add('is-off'); } }
+    function badge(n, bump) {
+      var b = byId('dBadge'); if (!b) return;
+      b.textContent = String(n);
+      if (bump && !demo.classList.contains('instant') && !reducedMotion()) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+    }
+    function setText(id, t) { var e = byId(id); if (e) e.textContent = t; }
+    var DYN = ['dNew', 'dHead', 'dInMeta', 'dIn', 'dInT', 'dOut', 'dOutT', 'lgJoin', 'lgLeave', 'lgProf', 'lgKick', 'dAlert'];
+    var EV = [
+      [0, function () {
+        DYN.forEach(function (id) { off(id); }); on('dEmpty');
+        byId('dNewRow').classList.remove('sel'); badge(2);
+        setText('dPv', '안녕하세요, 로벅스 1만 개 시세 문의드립니다.'); setText('dType', '');
+        byId('dKicks').classList.remove('go');
+      }],
+      [260, function () {
+        on('dNew');
+        var r = byId('dNewRow'); r.classList.remove('flash');
+        if (!demo.classList.contains('instant')) { void r.offsetWidth; r.classList.add('flash'); }
+      }],
+      [420, function () { badge(3, true); }],
+      [1200, function () { byId('dNewRow').classList.add('sel'); off('dEmpty'); on('dHead', 'dInMeta', 'dIn', 'dInT'); badge(2, true); }],
+      [5900, function () { byId('dSend').classList.add('press'); }],
+      [6060, function () { byId('dSend').classList.remove('press'); setText('dType', ''); on('dOut', 'dOutT'); setText('dPv', '나: ' + OUT); }],
+      [7000, function () { on('lgJoin'); }],
+      [7900, function () { on('lgLeave'); }],
+      [10000, function () { on('lgProf'); }],
+      [13000, function () { on('dAlert'); }],
+      [13200, function () { byId('dKicks').classList.add('go'); }],
+      [13600, function () { on('lgKick'); }]
+    ];
+    function run(from, to) { EV.forEach(function (ev) { if (ev[0] >= from && ev[0] < to) ev[1](); }); }
+    function typing(t) {
+      if (t >= TYPE0 && t < TYPE1 + 200) setText('dType', OUT.slice(0, Math.floor((t - TYPE0) / ((TYPE1 - TYPE0) / OUT.length))));
+    }
+    function chapters(t, cur) {
+      chaps.forEach(function (c, i) {
+        var p = clamp((t - CH[i]) / (CH[i + 1] - CH[i]), 0, 1);
+        var bar = c.querySelector('.bar i');
+        if (bar) bar.style.transform = 'scaleX(' + p.toFixed(3) + ')';
+        var isOn = cur === undefined ? (t >= CH[i] && (t < CH[i + 1] || (i === CH.length - 2 && t >= CH[i]))) : i === cur;
+        c.classList.toggle('on', isOn);
+        if (isOn) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current');
+      });
+    }
+    /* 0부터 CH[k] 직전까지 사건을 전환 없이 한꺼번에 적용 */
+    function jump(k) {
+      D.started = true;
+      demo.classList.add('instant');
+      var to = CH[k] === 0 ? 1 : CH[k];
+      run(0, to);
+      void demo.offsetWidth;
+      demo.classList.remove('instant');
+      D.t = to;
+      chapters(D.t);
+    }
+    function frame(now) {
+      if (!D.playing) return;
+      var dt = Math.min(64, now - (D.last || now));
+      D.last = now;
+      var prev = D.t;
+      D.t += dt;
+      if (D.t >= END) { jump(0); D.last = now; D.raf = requestAnimationFrame(frame); return; }
+      run(prev, D.t); typing(D.t); chapters(D.t);
+      D.raf = requestAnimationFrame(frame);
+    }
+    function setPlay(onNow) {
+      D.playing = onNow; D.last = 0;
+      playBtn.innerHTML = onNow ? ICON_PAUSE : ICON_PLAY;
+      playBtn.setAttribute('aria-label', onNow ? '시연 일시정지' : '시연 재생');
+      var caret = byId('dCaret'); if (caret) caret.style.visibility = onNow ? '' : 'hidden';
+      cancelAnimationFrame(D.raf);
+      if (onNow) D.raf = requestAnimationFrame(frame);
+    }
+
+    chapters(END);
+    var caret0 = byId('dCaret'); if (caret0) caret0.style.visibility = 'hidden';
+
+    if (reducedMotion()) {
+      /* 재생하지 않는다. 장을 누르면 그 장이 끝난 정지 화면 */
+      playBtn.disabled = true;
+      playBtn.setAttribute('aria-label', '동작 줄이기 설정으로 시연이 정지되어 있습니다');
+      chaps.forEach(function (c) {
+        c.addEventListener('click', function () {
+          var k = +c.getAttribute('data-ch');
+          jump(k);
+          demo.classList.add('instant'); run(CH[k], CH[k + 1]); void demo.offsetWidth; demo.classList.remove('instant');
+          setText('dType', '');
+          D.t = CH[k + 1] - 1;
+          chapters(D.t, k);
+        });
+      });
+      return;
+    }
+
+    playBtn.addEventListener('click', function () {
+      D.user = true; D.auto = false;
+      if (!D.playing && (!D.started || D.t >= END)) jump(0);
+      setPlay(!D.playing);
+    });
+    chaps.forEach(function (c) {
+      c.addEventListener('click', function () { D.user = false; D.auto = false; jump(+c.getAttribute('data-ch')); setPlay(true); });
+    });
+
+    /* 화면 밖이면 멈추고, 돌아오면 사용자가 직접 멈춘 경우가 아닐 때만 다시 재생 */
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (es) {
+        D.inView = es[es.length - 1].isIntersecting;
+        if (!D.inView && D.playing) { D.auto = true; setPlay(false); }
+        else if (D.inView && D.auto && !D.user) {
+          D.auto = false;
+          if (!D.started) jump(0);
+          setPlay(true);
+        }
+      }, { threshold: 0.25 }).observe(demo);
+    }
+    /* 첫 1.6초는 완성된 장면을 보여 주고, 아무것도 누르지 않았으면 처음부터 재생 */
+    setTimeout(function () {
+      if (D.user || D.started) return;
+      if (!D.inView) { D.auto = true; return; }
+      jump(0); setPlay(true);
+    }, 1600);
+  }
+
+  /* 세그먼트 표시 면을 눌린 버튼 위치로 */
+  function segPlace(seg, instant) {
+    if (!seg) return;
+    var ind = $('.seg-ind', seg), b = $('button[aria-pressed="true"]', seg);
+    if (!ind || !b) return;
+    if (instant || reducedMotion()) ind.style.transition = 'none';
+    ind.style.width = b.offsetWidth + 'px';
+    ind.style.transform = 'translateX(' + (b.offsetLeft - 3) + 'px)';
+    if (instant) { void ind.offsetWidth; ind.style.transition = ''; }
+  }
+
+  /* 기능 탐색기 — 탭 목록 + 축소판 화면 (5.2) */
+  function initFx() {
+    var list = $('#fxList'), pane = $('#fxPane'), ind = $('#fxInd'), crumb = $('#fxCrumb');
+    if (!list || !pane) return;
+    var tabs = $$('.fx-item', list), panes = $$('.fx-c', pane);
+    if (!tabs.length) return;
+    var cur = 0, swapT = null;
+    tabs.forEach(function (b, i) { if (b.getAttribute('aria-selected') === 'true') cur = i; });
+
+    function place(instant) {
+      var b = tabs[cur];
+      if (!ind || !b || !b.offsetParent || !ind.offsetParent) return;
+      if (instant || reducedMotion()) ind.style.transition = 'none';
+      ind.style.transform = 'translateY(' + b.offsetTop + 'px)';
+      ind.style.height = b.offsetHeight + 'px';
+      if (instant) { void ind.offsetWidth; ind.style.transition = ''; }
+    }
+    function show(i) { panes.forEach(function (p, k) { p.hidden = k !== i; }); }
+    function select(i) {
+      if (i === cur) return;
+      cur = i;
+      tabs.forEach(function (b, k) { b.setAttribute('aria-selected', k === i ? 'true' : 'false'); b.tabIndex = k === i ? 0 : -1; });
+      if (crumb) crumb.textContent = tabs[i].getAttribute('data-crumb') || '';
+      pane.setAttribute('aria-labelledby', tabs[i].id);
+      clearTimeout(swapT);
+      if (reducedMotion()) { show(i); pane.classList.remove('out'); }
+      else {
+        pane.classList.add('out');
+        swapT = setTimeout(function () { show(i); pane.classList.remove('out'); }, 170);
+      }
+      /* 설명 줄이 펼쳐지며 탭 높이가 바뀌므로 420ms 동안 위치를 따라간다 */
+      var t0 = performance.now();
+      (function track() { place(false); if (performance.now() - t0 < 420) requestAnimationFrame(track); })();
+      /* 폰: 가로 스크롤 줄에서 새 탭이 보이게 */
+      var b = tabs[i];
+      if (list.scrollWidth > list.clientWidth + 1) {
+        try { list.scrollTo({ left: Math.max(0, b.offsetLeft - 16), behavior: reducedMotion() ? 'auto' : 'smooth' }); }
+        catch (e) { list.scrollLeft = Math.max(0, b.offsetLeft - 16); }
+      }
+    }
+    list.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.fx-item') : null;
+      if (b) select(tabs.indexOf(b));
+    });
+    list.addEventListener('keydown', function (e) {
+      var n = null, last = tabs.length - 1;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') n = cur === last ? 0 : cur + 1;
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') n = cur === 0 ? last : cur - 1;
+      else if (e.key === 'Home') n = 0;
+      else if (e.key === 'End') n = last;
+      if (n === null) return;
+      e.preventDefault();
+      select(n);
+      tabs[n].focus();
+    });
+    place(true);
+    window.addEventListener('resize', function () { place(true); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { place(true); });
+  }
+
+  /* 동작 방식 구조도 — 화면에 있을 때만 점이 흐른다 (SMIL) */
+  function initHow() {
+    var box = $('#howBox');
+    if (!box) return;
+    var svgs = $$('svg', box);
+    function pause() { svgs.forEach(function (s) { if (s.pauseAnimations) s.pauseAnimations(); }); }
+    function play() { svgs.forEach(function (s) { if (s.unpauseAnimations) s.unpauseAnimations(); }); }
+    pause();
+    if (reducedMotion() || !('IntersectionObserver' in window)) return;
+    new IntersectionObserver(function (es) {
+      if (es[es.length - 1].isIntersecting) play(); else pause();
+    }, { threshold: 0.2 }).observe(box);
+  }
+
+  /* 질문 — 열고 닫기, 분류 */
+  function initFaq() {
+    var list = $('#faqList'), seg = $('#faqSeg');
+    if (!list) return;
+    list.addEventListener('click', function (e) {
+      var q = e.target.closest ? e.target.closest('.faq-q') : null;
+      if (!q) return;
+      var it = q.parentNode, open = !it.classList.contains('open');
+      it.classList.toggle('open', open);
+      q.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    if (!seg) return;
+    seg.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button[data-c]') : null;
+      if (!b || b.getAttribute('aria-pressed') === 'true') return;
+      $$('button[data-c]', seg).forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      segPlace(seg);
+      var cat = b.getAttribute('data-c'), n = 0, anim = !reducedMotion();
+      $$('.faq-i', list).forEach(function (it) {
+        var show = !cat || it.getAttribute('data-cat') === cat;
+        it.hidden = !show;
+        it.classList.remove('in');
+        if (show && anim) { it.style.setProperty('--i', String(n++)); void it.offsetWidth; it.classList.add('in'); }
+      });
+    });
+    segPlace(seg, true);
+    window.addEventListener('resize', function () { segPlace(seg, true); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { segPlace(seg, true); });
+  }
+
+  /* 스크롤 진입 — 화면 아래 블록만 24px 아래에서 제자리로. 투명도는 바꾸지 않는다 */
+  function initReveal() {
+    if (reducedMotion() || !('IntersectionObserver' in window)) return;
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (en) { if (en.isIntersecting) { en.target.classList.remove('armed'); io.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.06 });
+    $$('.rv').forEach(function (n) {
+      if (n.getBoundingClientRect().top > window.innerHeight) { n.classList.add('armed'); io.observe(n); }
     });
   }
 
@@ -1087,7 +1394,7 @@
           ]),
           el('div', { cls: 'big' }, [
             el('div', { cls: 'k', text: '주문 상태 링크' }),
-            el('div', { cls: 'v sm mono', style: 'font-size:13px;font-weight:600', text: full }),
+            el('div', { cls: 'v sm mono lnk', text: full }),
             el('div', { cls: 'btn-row' }, [
               copyBtn(function () { return full; }, '링크'),
               el('a', { cls: 'btn sm primary', href: link }, '열기' )
@@ -1251,13 +1558,13 @@
     clear(out);
 
     var head = el('div', { cls: 'card' }, [
-      el('div', { style: 'display:flex;align-items:center;gap:9px;flex-wrap:wrap' }, [
+      el('div', { cls: 'chip-row' }, [
         el('span', { cls: 'chip info', text: '라이선스 키' }),
         devOn ? el('span', { cls: 'chip ok', text: '기기 등록됨' }) : el('span', { cls: 'chip', text: '기기 미등록' }),
         revoked ? el('span', { cls: 'chip bad', text: '사용 중지' }) : null,
         blockedOn ? el('span', { cls: 'chip bad', text: '차단됨' }) : null
       ]),
-      el('div', { cls: 'v mono', style: 'font-size:clamp(17px,5vw,22px);font-weight:800;margin:11px 0 4px;word-break:break-all', text: key }),
+      el('div', { cls: 'v keyline', text: key }),
       el('div', { cls: 'btn-row' }, [copyBtn(function () { return key; }, '키')]),
       devName ? el('p', { cls: 'tiny dim', style: 'margin:12px 0 0', text: '등록 기기 · ' + devName }) : null,
       (resets !== null && resets > 0) ? el('p', { cls: 'tiny dim', style: 'margin:4px 0 0', text: '기기 초기화 이력 ' + resets + '회' }) : null,
@@ -1295,7 +1602,6 @@
 
       var row = el('div', { cls: 'feat-row' }, [
         el('div', { cls: 'r1' }, [
-          el('span', { 'aria-hidden': 'true', text: f.icon }),
           el('h3', { text: featName(f.id) }),
           chip
         ]),
@@ -1411,6 +1717,7 @@
     var lastError = null;      // 마지막 실패 { msg, gone } — 아직 한 번도 못 불러온 동안 화면을 유지한다
     var everLoaded = false;    // 주문을 한 번이라도 받아왔나
     var waitBox = null;        // 살아있는 표시 (점 애니메이션)
+    var shownStatus = '';      // 화면에 그려 둔 상태 — 상태가 바뀌어 다시 그릴 때만 카드가 올라온다 (UI_V5 3.4)
 
     function orderPath(oid) {
       return '/api/order/' + encodeURIComponent(oid) + (token ? '?t=' + encodeURIComponent(token) : '');
@@ -1598,6 +1905,8 @@
          끝나는 건 done / canceled 뿐. (모르는 상태도 일단 지켜본다 — 30분 상한이 있다) */
       var live = !(done || canceled);
       var autoCanceled = canceled && o.autoCanceled;
+      var enter = !!shownStatus && shownStatus !== o.status && !reducedMotion();
+      shownStatus = o.status;
 
       if (live && !timedOut) {
         if (!polling) { polling = true; }
@@ -1605,8 +1914,8 @@
         stopPoll();
       }
 
-      out.appendChild(el('div', { cls: 'card' }, [
-        el('div', { style: 'display:flex;align-items:center;gap:9px;flex-wrap:wrap' }, [
+      out.appendChild(el('div', { cls: 'card' + (enter ? ' in' : '') }, [
+        el('div', { cls: 'chip-row' }, [
           el('span', { cls: 'chip ' + st.cls, text: autoCanceled ? '자동 취소됨 · 미입금' : st.kr }),
           o.created ? el('span', { cls: 'tiny dim', text: dateKr(o.created, true) + ' 접수' }) : null
         ]),
@@ -1646,7 +1955,7 @@
             el('dd', { text: o.features.length ? o.features.map(featName).join(' · ') : '-' })]),
           el('div', { cls: 'r' }, [el('dt', { text: '기간' }),
             el('dd', { text: o.plan ? (o.planLabel || planName(o.plan)) + ' (' + planDays(o.plan) + '일)' : '-' })]),
-          !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono', text: won(o.amount) })]) : null,
+          !pending ? el('div', { cls: 'r' }, [el('dt', { text: '금액' }), el('dd', { cls: 'mono' }, wonKids(o.amount))]) : null,
           o.depositor ? el('div', { cls: 'r' }, [el('dt', { text: '입금자명' }), el('dd', { text: o.depositor })]) : null,
           o.target ? el('div', { cls: 'r' }, [el('dt', { text: '연장할 키' }), el('dd', { cls: 'mono', text: o.target })]) : null,
           o.memo ? el('div', { cls: 'r' }, [el('dt', { text: '메모' }), el('dd', { text: o.memo })]) : null,
@@ -1756,6 +2065,7 @@
     });
 
     try {
+      if (page !== 'home')  initNav();
       if (page === 'home')  pageHome();
       if (page === 'buy')   pageBuy();
       if (page === 'my')    pageMy();
