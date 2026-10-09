@@ -72,7 +72,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 .btn.wide { width: 100%; }
 .btn[disabled], .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
 /* 8개를 채운 '계정 추가'는 흐리게 두되 눌리게 해서 한도 안내 토스트를 보여 준다(4.6) */
-#acc-add[aria-disabled="true"], #ov-add[aria-disabled="true"] { pointer-events: auto; cursor: not-allowed; }
+.btn[id="acc-add"][aria-disabled="true"], .btn[id="ov-add"][aria-disabled="true"] { pointer-events: auto; cursor: not-allowed; }
 .btn .spin { display: none; }
 .btn.busy .spin { display: inline-block; }
 .btn.busy .lbl-idle { opacity: .6; }

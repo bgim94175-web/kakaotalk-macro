@@ -44,7 +44,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 전송 주소:
 ```
-https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=<DEPOSIT_TOKEN>
+https://kmacro.cloud/api/deposit-hook?t=<DEPOSIT_TOKEN>
 ```
 
 ---
@@ -61,7 +61,7 @@ https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=<DEPOSIT_TOKEN>
    - 포함할 텍스트: `입금`
 5. **액션** → `연결` → `HTTP 요청`
    - 방식: **POST**
-   - URL: `https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
+   - URL: `https://kmacro.cloud/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
    - Content-Type: `application/json`
    - 본문:
      ```json
@@ -97,7 +97,7 @@ Pushbullet API 를 폴링해야 하므로 속도와 복잡도에서 불리합니
    - 또는 **메시지에 포함**: `입금`
    - **즉시 실행** 선택 + **실행 전에 묻기 끄기** → [묻지 않음] 확인
 3. 동작 추가 → **URL의 콘텐츠 가져오기**
-   - URL: `https://kakaotalk-macro-u5u2.onrender.com/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
+   - URL: `https://kmacro.cloud/api/deposit-hook?t=여기에_DEPOSIT_TOKEN`
    - [화살표 펼치기] → 방식: **POST**
    - 본문: **JSON**
      - 키 `text` (텍스트) → 값에 **단축어 입력**(= 수신 메시지 내용) 변수 삽입
