@@ -874,8 +874,8 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 #rooms-tbl td:first-child { max-width: 320px; }
 #rooms-tbl td:first-child b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #rooms-tbl td:first-child .mono { display: block; font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#rooms-tbl td[data-l="상품"] { line-height: 2; }
-#rooms-tbl td[data-l="K bot 계정"] .mono { font-size: var(--t-12); color: var(--fg-2); }
+#rooms-tbl td[data-l="봇"] { line-height: 2; }
+#rooms-tbl td[data-l="K bot"] .mono { font-size: var(--t-12); color: var(--fg-2); }
 #rooms-tbl td.go { width: 40px; text-align: right; color: var(--fg-3); }
 #rooms-tbl tr.rowx:hover td.go { color: var(--fg); }
 #rooms-attn .srow-r { flex-wrap: nowrap; }

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>실시간 상담 · K bot</title>
-<meta name="description" content="K bot 실시간 상담. 오류나 결제 문의를 채팅으로 상담합니다.">
+<title>문의하기 · K bot</title>
+<meta name="description" content="K bot 문의하기. 오류나 결제에 관한 궁금한 점을 채팅으로 물어볼 수 있습니다.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#09090b">
 <meta name="color-scheme" content="dark">
@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=7">
+<link rel="stylesheet" href="/style.css?v=8">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=7" defer></script>
+<script src="/app.js?v=9" defer></script>
 </head>
 <body data-page="support">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -66,7 +66,7 @@
   <div class="wrap lnav-in">
     <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true"></span>K bot</a>
     <nav class="lnav-links" aria-label="페이지 안 이동">
-      <a href="/#features">기능</a><a href="/#how">동작 방식</a><a href="/#products">가격</a><a href="/#faq">질문</a>
+      <a href="/#features">기능</a><a href="/#how">이용 방법</a><a href="/#products">가격</a><a href="/#faq">자주 묻는 질문</a>
     </nav>
     <nav class="top-nav" aria-label="주요 메뉴">
       <a class="btn ghost hide-s" href="/login" data-nav="login" data-auth="out">로그인</a>
@@ -74,7 +74,7 @@
       <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
       <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
       <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
-      <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
+      <a class="btn primary" href="/panel" data-nav="panel">패널 열기</a>
     </nav>
   </div>
 </header>
@@ -82,9 +82,9 @@
 <main id="main" tabindex="-1">
   <div class="wrap pub-page">
     <div class="pub-head">
-      <p class="eyebrow">문의</p>
-      <h1>실시간 상담</h1>
-      <p class="lead">오류나 결제 문의를 채팅으로 상담합니다. 주문번호나 방 번호를 함께 보내면 확인이 빠릅니다.</p>
+      <p class="eyebrow">고객 지원</p>
+      <h1>문의하기</h1>
+      <p class="lead">오류나 결제에 관한 궁금한 점을 채팅으로 물어봐 주세요. 주문번호나 방 링크를 함께 보내 주시면 더 빨리 확인할 수 있습니다.</p>
     </div>
     <div class="support-wrap">
       <div class="card stack" id="supportBody" tabindex="-1" aria-live="polite"><div class="state"><span class="spin" aria-hidden="true"></span>상담 창을 준비하는 중…</div></div>
@@ -98,7 +98,7 @@
       <span class="brand"><span class="brand-mark" aria-hidden="true"></span>K bot</span>
       <span>카카오톡은 (주)카카오의 상표이며, K bot은 (주)카카오와 관련이 없습니다.</span>
     </div>
-    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/account">내 계정</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a><button type="button" data-support data-support-ctx="사이트 문의">실시간 상담</button></nav>
+    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매</a><a href="/account">내 계정</a><a href="/order">주문 조회</a><a href="/panel">패널</a><button type="button" data-support data-support-ctx="홈페이지 문의">문의하기</button></nav>
   </div>
 </footer>
 </body>

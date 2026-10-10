@@ -4,6 +4,8 @@
 `docs/SPEC.md` 와 어긋나면 이 문서가 이긴다. 구현이 끝나면 SPEC.md 를 이 문서에 맞춰 고친다(작업 2 담당).
 디자인 규칙은 `docs/UI_V5.md`·`docs/TONE.md`·`docs/BRAND.md` 를 그대로 따른다. `docs/DARK_V1.md` 는 폐기 문서다.
 
+> **문구 정리(v7) 뒤의 기준.** 화면·서버 응답·방 메시지의 최종 문장은 코드가 단일 소스다(`lib/installs.js`·`routes/*.js`·`lib/*-text`·`public/*`·`sender/src/roomfeat.mjs`·`features.mjs`). 용어는 `docs/TONE.md` 용어집을 따른다: 콘솔 → **패널**(`K bot 패널`), 관리 콘솔 → **판매 관리**, `~하십시오` → `~해 주세요`, 강퇴 → 내보내기, 로그 → 기록, 가리기 → 글 가리기, 올킥 방지 → 올킥 감지, 나갔을 때 내보내기 → 나간 사람 재입장 차단, `부방장 대기` → `부방장 지정 대기`, 방에서는 짧은 해요체. 0.1·3.4.2·5.6·7.2·7.8·7.9 와 부록의 fa4 는 v7 문구로 고쳤다. 다른 장의 따옴표 문구 가운데 `~하십시오` 체로 남은 것은 v7 이전 표기이며, 어긋나면 코드와 TONE.md 가 이긴다.
+
 읽는 법: 1장은 결정과 이유, 2~5장은 서버 계약, 6~7장은 화면과 방 관리 기능, 8장은 보안, 9장은 작업 분담과 시험, 10장은 실측·운영자 확인, 부록 A 는 사이트 문구 표, 부록 B 는 채널톡 로더다.
 각 작업 담당은 1장 전부와 자기 작업이 쓰는 장을 읽는다. 다른 작업과 맞닿는 부분은 9.2 의 인터페이스만 믿는다. 구현에 필요한 내용(Google 흐름 3.2, 아이콘 6.11, 콘솔 마크업 6.9, 로더 부록 B)은 모두 이 문서 안에 있다. 이 문서 밖의 연구 보고를 근거로 삼지 않는다.
 
@@ -33,7 +35,7 @@
 |---|---|---|---|
 | `pending` | 입금 대기 | `phase='pending_payment'` | warn |
 | `joining` | 입장 중 | `phase='installed'` 이고 `state` 가 `queued` 또는 `joining` | warn |
-| `waiting` | 부방장 대기 | `state='waiting_host'` (방 관리봇이 있고 봇 권한이 `perm & 5` 아님) | warn |
+| `waiting` | 부방장 지정 대기 | `state='waiting_host'` (방 관리봇이 있고 봇 권한이 `perm & 5` 아님. `state='active'` 라도 방 관리봇이 있고 `perm & 5` 가 아니면 이 값) | warn |
 | `active` | 사용 중 | `state='active'` | live |
 | `error` | 오류 · {짧은 사유} | `state='error'`, 사유는 `error_code` (5.6 표) | crit |
 
@@ -59,12 +61,12 @@
 | D9 | 방 상품 구매 흐름 | 구매 화면에서 링크 붙여넣기 → 서버가 봇으로 링크를 조회해 방 이름·참여코드 필요 여부를 보여 줌(`POST /api/room-preview`) → 주문 접수 때 그 회원의 설치 행을 `입금 대기` 로 예약 → 입금 매칭(자동 또는 관리자) 때 같은 트랜잭션에서 `installed` + 봇 배정 → sender 가 입장. **미입금 예약은 다른 회원을 막지 않는다**: 같은 방을 여러 회원이 동시에 주문할 수 있고 **먼저 입금된 주문이 갖는다.** 늦게 입금된 주문은 `needs_review`(관리자가 나머지만 적용하고 그 방 금액을 환불, 4.2) | 미입금 주문으로 남의 방을 48시간씩 막는 것을 없앤다. 같은 회원 안에서는 예약이 중복 방지다 |
 | D10 | 조회 실패 시 | 봇이 하나도 연결되어 있지 않거나 조회 예산(5.3)이 바닥나 링크를 조회하지 못하면 주문은 받되 `link_id` 를 비워 둔다(링크 주소로 중복 검사). 그 방 줄은 **고객이 확인란에 동의해야** 주문된다(6.6). 입장할 때 처음 조회한 방에 묶인다. 설치할 수 없는 링크로 밝혀지면(`link_gone`·`not_group`) 관리자가 `room-rebind` 로 링크를 바꾸거나 환불한다 | sender 장애가 판매를 막지 않게. 확인하지 못한 방에 돈을 받는다는 사실을 고객이 알고 산다 |
 | D11 | 봇 계정 풀 | `/manage` 에서 운영자가 봇 카카오 계정을 지금 등록 흐름(휴대폰 확인 포함)으로 여러 개 등록. 배정은 **가장 적게 맡은 봇**, 봇마다 상한 `room_cap`(기본 20). 상한이 다 찼거나 봇이 없으면 `입장 중 · 순서 대기` 로 두고 1분마다 다시 배정 | 방이 늘면 계정 1개가 감당 못 한다(방마다 20초 점검 부하). 사용 가능한 봇이 생기면 자동으로 이어진다 |
-| D12 | 봇 프로필 | 방이 카카오톡 기본 프로필 참여를 허용하면(`ol.pv & 32`, ANY_PROFILE_ALLOWED) 봇 계정의 **기본 프로필**(`ptp:1`)로, 허용하지 않으면(`profile_only`) 닉네임만 정한 익명 프로필(`ptp:2`, `nn`=봇 닉네임, 10.1 #9 실측 전)로 입장한다. 둘 다 막히면 `profile_blocked`. 고객에게 보이는 봇 이름 = 봇 닉네임. **봇마다 닉네임이 달라야 한다**(`K bot 1`, `K bot 2` …). `/manage` 가 겹치는 닉네임을 경고한다 | 기본 프로필 참여를 막은 방이 흔하다. 모든 봇이 `K bot` 이면 방장이 봇과 이름을 바꾼 사람을 구분하지 못해 엉뚱한 사람을 부방장으로 지정할 수 있다 |
+| D12 | 봇 프로필 | 봇은 고객 방에 카카오톡 기본 프로필이 아니라 **그 봇 계정의 오픈프로필**로만 입장한다(`JOINLINK {ptp:16, pli: 오픈프로필 링크 id}`, 방의 `ol.pv` 와 관계없이). 오픈프로필이 없으면 입장하지 않고(`bot_no_open_profile`) 기본 프로필(`ptp:1`)·닉네임 프로필(`ptp:2`)로 대신 들어가는 일은 없다. 이미 기본 프로필로 들어가 있는 방은 나가지 않고 `UPLINKPROF` 로 바꾼다(5.8). 고객·방장에게 보이는 봇 이름 = 그 방에서 보이는 이름(오픈프로필 이름). **봇마다 오픈프로필 이름이 달라야 한다**(`K bot 1`, `K bot 2` …). `/manage` 가 겹치는 이름을 경고한다 | 기본 프로필은 운영자 개인 카카오톡 프로필이 고객 방에 드러나고, 방장이 봇을 눌렀을 때 개인 프로필이 보인다. 모든 봇이 `K bot` 이면 방장이 봇과 이름을 바꾼 사람을 구분하지 못해 엉뚱한 사람을 부방장으로 지정할 수 있다 |
 | D13 | 부방장 감지 | 봇 자신의 권한은 `CHATONROOM` 응답의 `olu.lmt`(클라이언트 자신의 오픈링크 사용자 정보)를 먼저 읽고, `olu` 가 없으면 `MEMBER{chatId,[self]}`(=`getMembersByIds`)로 읽는다(node-kakao 와 같은 순서). 부방장 대기 방은 **60초(±15초)**, 사용 중 방은 **10분**마다. 푸시(`SYNCMEMT`, 피드 11·12·15)와 재접속은 즉시 확인의 신호로만 쓴다 | 푸시 모양이 실측되지 않았다. 폴링은 방 1개당 작은 패킷 1개라 싸다. 감지까지 최대 75초 + 콘솔 폴링 10초라 화면 문구는 "**1~2분 안에** 감지"로 정직하게 쓴다 |
-| D14 | 강등 | 사용 중에 부방장이 해제되면 `부방장 대기` 로 돌아간다. 방 관리 기능은 멈추고 미니게임은 계속한다 | 소유자 요구 3 |
+| D14 | 강등 | 사용 중에 부방장이 해제되면 `부방장 지정 대기` 로 돌아간다. 방 관리 기능은 멈추고 미니게임은 계속한다 | 소유자 요구 3 |
 | D15 | 설정 시점 | 방 관리봇 설정은 `사용 중` 일 때만 저장된다(서버가 409). 미니게임과 명령어 앞글자는 설치되면 언제든 저장된다. 방 관리 기능의 기본값은 전부 꺼짐이므로, 부방장 지정 안내는 "콘솔에서 켠 기능이 동작한다"고 말하고(7.9), 사용 중인데 켜진 기능이 없으면 화면이 `사용 중 · 켜진 기능 없음` 과 `입장·퇴장 로그` 바로가기를 보인다(RoomView `on_count`) | 소유자 요구 3 ("부방장을 얻으면 설정 가능"). 켜지 않은 기능을 "시작합니다"라고 말하지 않는다 |
 | D16 | 내보내짐·방 삭제 | 봇이 내보내지면 `오류 · 내보내짐`(배타권 해제, D8), 방이 삭제되면 `오류 · 방 삭제됨`. 권리는 그 방(link_id)에 남는다. 고객 `다시 시도` 는 설치마다 간격이 2분부터 두 배씩 늘고(최대 6시간) 연속 10번이면 관리자만 할 수 있다(3.4.3). 내보내짐은 방장이 내보내기 목록에서 해제한 뒤에만 의미가 있으므로 같은 규칙 + 그 사이 다른 회원이 그 방을 설치했으면 409. 방이 삭제된 경우는 관리자만 다른 링크로 옮길 수 있다(`room-rebind`, 감사 기록) | 영구 설치 권리지만 방이 사라지면 쓸 곳이 없다. 옮기기를 고객에게 열면 권리 1개로 방을 돌려 쓸 수 있다. 실패할 입장을 고객이 무한히 반복시키면 공용 봇 계정이 제재받는다 |
-| D17 | 봇 계정 장애 | 봇 계정이 끊기면(다른 기기 로그인 `KICKOUT` 사유 0·1, 토큰 만료) 그 봇의 방은 `오류 · K bot 계정 점검`. `KICKOUT` 사유 -2(CHANGE_SERVER)는 재접속일 뿐이다. `-444`(BLOCKED_IP)는 서버 IP 문제라 봇을 내리지 않고 **모든 입장을 멈춘다**(5.3). **자동으로 다른 봇에 옮기지 않는다.** 관리자가 같은 봇을 다시 등록하면 그대로 이어지고, 다른 봇으로 옮기면 방장이 새 봇을 부방장으로 다시 지정해야 한다 | 자동 이동은 모든 방장에게 부방장 재지정을 강요한다. 대부분은 재등록으로 복구된다 |
+| D17 | 봇 계정 장애 | 봇 계정이 끊기면(다른 기기 로그인 `KICKOUT` 사유 0·1, 토큰 만료) 그 봇의 방은 `오류 · K bot 점검`. `KICKOUT` 사유 -2(CHANGE_SERVER)는 재접속일 뿐이다. `-444`(BLOCKED_IP)는 서버 IP 문제라 봇을 내리지 않고 **모든 입장을 멈춘다**(5.3). **자동으로 다른 봇에 옮기지 않는다.** 관리자가 같은 봇을 다시 등록하면 그대로 이어지고, 다른 봇으로 옮기면 방장이 새 봇을 부방장으로 다시 지정해야 한다 | 자동 이동은 모든 방장에게 부방장 재지정을 강요한다. 대부분은 재등록으로 복구된다 |
 | D18 | 설치 해제·이전 | 고객은 설치를 지울 수 없다(영구 권리). 관리자만 해제(`room-remove`) — 봇은 방에서 나간다. 관리자는 설치를 다른 회원에게 넘길 수 있다(`room-transfer`, 방장 확인은 상담에서). 환불은 범위 밖(운영자가 계좌로 처리) | 단순하게. 남이 먼저 산 방의 방장이 상담으로 넘겨받을 길을 둔다 |
 | D19 | 기존 키 이관 | 회원이 `/account` 에서 기존 키를 입력해 1회 이관(`/api/auth/claim`). 매크로 남은 기간은 회원 매크로 기간에 **더한다**. 키에 묶인 콘솔 계정(`panel_accounts`)은 회원 것이 된다. 고객 스스로는 다른 회원에게 다시 이관할 수 없고, 잘못 이관된 키는 관리자가 `license-reassign` 으로 옮긴다(이관 IP·시각은 감사 기록에 남음). 이관된 키에 대한 옛 키 경로 지급(`/admin/grant`, 늦게 입금된 연장 주문)은 회원에게 적용하거나 409 로 막는다(4.2) | 소유자 요구 7. 키는 공유되던 물건이라 엉뚱한 사람이 먼저 이관할 수 있다 |
 | D20 | 기존 계정 기능 유예 | 예전에는 고객 계정 위에서 입장·퇴장 로그·프로필 로그·올킥 방지·금지어 검열이 돌았다(키만 있으면 무조건). 이관한 회원은 그 키의 가장 늦은 만료일(`legacy_room_until`)까지 이 4개 화면을 계정 단위로 계속 쓴다. 새 회원에게는 보이지 않는다 | 이미 돈을 낸 고객의 기능을 기간 중에 빼앗지 않는다 |
@@ -259,6 +261,14 @@ CREATE TABLE IF NOT EXISTS room_log (
   detail     JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_room_log ON room_log (install_id, at DESC);
+
+-- [봇 오픈프로필(D12, 5.8)] 단계 이름 accounts-v1:bot_accounts.open_profile. 칸 추가뿐, 모두 NULL 허용
+ALTER TABLE bot_accounts
+  ADD COLUMN IF NOT EXISTS open_profiles     JSONB,     -- sender: SYNCLINK 로 읽은 [{li,name,url}] (NULL = 읽은 적 없음, [] = 없음)
+  ADD COLUMN IF NOT EXISTS open_profile_pick TEXT,      -- 부모(관리자): 고른 오픈프로필 li. NULL = 자동
+  ADD COLUMN IF NOT EXISTS open_profile_li   TEXT,      -- sender: 지금 입장에 쓰는 오픈프로필 li(없으면 NULL)
+  ADD COLUMN IF NOT EXISTS open_profile_name TEXT,      -- sender: 그 이름(방장에게 보이는 봇 이름)
+  ADD COLUMN IF NOT EXISTS open_profile_at   BIGINT;    -- sender: 목록을 마지막으로 읽은 시각
 ```
 
 `room_state`·`room_log` 는 sender 의 `store.mjs` `SCHEMA` 에도 **글자 그대로** 넣는다(sender 단독 실행용, `IF NOT EXISTS` 라 겹쳐도 안전).
@@ -276,6 +286,8 @@ CREATE INDEX IF NOT EXISTS idx_room_log ON room_log (install_id, at DESC);
 | `room_leaves` | 부모가 INSERT(와 30일 지난 처리 행 삭제), sender 가 `done_at result` | sender 는 `WHERE id=$1 AND bot_device_id=$봇` |
 | `room_blocklist` | 부모 | sender 는 읽기만 |
 | `bot_accounts` 의 `nickname state state_at` | sender | 나머지 칸은 부모(관리자). 예외: sender 는 `bot.` 등록이 끝나면 `INSERT … (device_id, email, created_at, state) ON CONFLICT DO NOTHING` 으로 최소 행을 만든다(3.5, 봇이 고아가 되지 않게) |
+| `bot_accounts` 의 `open_profiles open_profile_li open_profile_name open_profile_at` | sender | 오픈프로필(D12, 5.8): SYNCLINK 로 읽은 목록 `[{li,name,url}]`(NULL = 읽은 적 없음, `[]` = 없음)과 지금 입장에 쓰는 것. 읽기에 실패하면 남긴 값을 지우지 않는다 |
+| `bot_accounts` 의 `open_profile_pick` | 부모(관리자) | 고른 오픈프로필 li. NULL = 자동(지금 쓰던 것 → 목록의 첫 번째). sender 는 읽기만 |
 | `room_state`, `room_log` | sender | 부모는 읽기 + 하루 1번 오래된 `room_log` 삭제 |
 | `kakao_sessions` | sender | 부모는 지금처럼 `/v1/*` 로만 바꾼다 |
 
@@ -362,7 +374,7 @@ CREATE INDEX IF NOT EXISTS idx_room_log ON room_log (install_id, at DESC);
 | POST `/api/auth/claim` | 회원 | `{key}` | `{ok, moved:{macro_until, legacy_room_until, accounts:n}}` | 404 `not_found`, 409 `claimed`(이미 이관됨), 403 `key_blocked`(회수·차단 키) |
 | GET `/api/me` | 회원 | — | 3.2.1 | — |
 | POST `/api/auth/google/unlink` | 회원 | `{password}` | `{ok}` | 401 `wrong_current`, 404 `not_linked` |
-| GET `/auth/google/start?mode=link\|login&next=/path` | link: 회원 | — | 302 Google | 302 `?g=off\|webview\|login_needed` |
+| GET `/auth/google/start?mode=link\|login&next=/path` | link: 회원(최근 비밀번호 로그인) | — | 302 Google | 302 `?g=off\|webview\|login_needed\|relogin` |
 | GET `/auth/google/callback` | 상태 쿠키 | — | 302 `next?g=linked` 또는 로그인 후 `next` | 302 `?g=expired\|denied\|error\|taken\|already\|not_linked\|blocked` |
 
 `member` 모양(어디서나 같음): `{ id, login_id, google_linked:bool, google_email_masked: 'ab***@gmail.com'|null }`.
@@ -388,6 +400,7 @@ CREATE INDEX IF NOT EXISTS idx_room_log ON room_log (install_id, at DESC);
 | `off` | 로그인 | Google 로그인을 지금 사용할 수 없습니다. 아이디로 로그인하십시오. |
 | `webview` | 로그인 | 카카오톡 안 브라우저에서는 Google 로그인이 제한됩니다. 외부 브라우저에서 여십시오. (+ `kakaotalk://web/openExternal?url=` 버튼 `외부 브라우저로 열기`) |
 | `login_needed` | 로그인 | Google 계정을 연결하려면 먼저 아이디로 로그인하십시오. |
+| `relogin` | 로그인 | Google 계정을 연결하기 전에 본인 확인이 필요합니다. 아이디와 비밀번호로 다시 로그인하십시오. |
 | `expired` | 둘 다 | 확인 시간이 지났습니다. 다시 시도하십시오. |
 | `denied` | 둘 다 | Google 계정 확인을 취소했습니다. |
 | `error` | 둘 다 | Google 계정을 확인하지 못했습니다. 잠시 뒤 다시 시도하십시오. |
@@ -411,7 +424,7 @@ B1 `GET /auth/google/start?mode=&next=`:
 1. Google 미설정(`GOOGLE_CLIENT_ID`·`GOOGLE_CLIENT_SECRET` 중 하나라도 없음) → 302 `/login?g=off`.
 2. UA 가 웹뷰(`/KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|; wv\)/i`) → 302 `/login?g=webview&next=…`(링크 모드는 `/account?g=webview`).
 3. 요청 호스트가 `purchaseBase` 의 호스트와 다르면 같은 경로·쿼리로 `purchaseBase` 에 302(쿠키가 콜백 호스트에 붙게).
-4. `mode=link` 는 회원 세션 필수(없으면 302 `/login?g=login_needed&next=/account`). `mode=login` 은 세션이 없어도 된다.
+4. `mode=link` 는 회원 세션 필수(없으면 302 `/login?g=login_needed&next=/account`). 그 세션이 아이디·비밀번호 로그인(`method='pw'`)이고 `auth_at` 이 `AUTH_RESET_WINDOW_MS` 안이어야 한다. 아니면 302 `/login?g=relogin&next=<encodeURIComponent('/auth/google/start?mode=link&next=' + encodeURIComponent(next))>` — 비밀번호로 다시 로그인하면 연결이 바로 이어진다. Google 연결은 "현재 비밀번호 없이 비밀번호를 정할 수 있는" 권한(`resetOpen`)을 주므로 비밀번호 변경만큼 엄격해야 한다: 훔친 세션 쿠키만으로 공격자 자신의 Google 을 연결해 두고 나중에 비밀번호를 바꿔 계정을 빼앗지 못하게. `mode=login` 은 세션이 없어도 된다.
 5. `state` = 32바이트, `code_verifier` = 32바이트(base64url 43자), `nonce` = 16바이트(모두 `crypto.randomBytes` → base64url). 쿠키 `kb_o` 를 쓴다(`e = now + 600000`).
 6. 302 `GOOGLE_AUTH_URL?client_id&redirect_uri&response_type=code&scope=openid%20email&state&nonce&code_challenge=base64url(sha256(code_verifier))&code_challenge_method=S256&prompt=select_account`.
 
@@ -425,7 +438,7 @@ B4 `id_token` 검사: 토큰 끝점에서 TLS 로 직접 받았으므로 서명 
 `iss ∈ {'https://accounts.google.com','accounts.google.com'}`, `aud === GOOGLE_CLIENT_ID`, `azp` 가 있으면 `=== GOOGLE_CLIENT_ID`, `exp*1000 > now - 60000`, `iat*1000 < now + 60000`, `nonce === 쿠키 n`, `sub` 는 1~255자 문자열. 하나라도 어긋나면 `error`. `email` 은 표시용(없어도 됨).
 
 B5 적용:
-- `md='link'`: 지금 세션이 있고 `member.id === m` 이며 세션 id 앞 16자 `=== sid` 여야 한다(아니면 `expired`). 이 회원에 다른 `sub` 가 이미 있으면 `already`, 이 `sub` 가 다른 회원에 있으면 `taken`, 같으면 `linked`(멱등). 새로 넣으면 `member_google` INSERT + 감사 `member google_link` → `nx?g=linked`.
+- `md='link'`: 지금 세션이 있고 `member.id === m` 이며 세션 id 앞 16자 `=== sid` 여야 한다(아니면 `expired`). B1-4 의 최근 비밀번호 로그인 조건을 다시 본다(Google 화면에 머문 시간만큼 상태 쿠키 수명 600초를 더 봐준다, 아니면 B1-4 와 같은 `relogin` 주소). 이 회원에 다른 `sub` 가 이미 있으면 `already`, 이 `sub` 가 다른 회원에 있으면 `taken`, 같으면 `linked`(멱등). 새로 넣으면 `member_google` INSERT + 감사 `member google_link` → `nx?g=linked`.
 - `md='login'`: `member_google.sub` 로 회원을 찾는다. 없으면 `/login?g=not_linked&next=nx`, 차단이면 `/login?g=blocked`. 있으면 `startSession(req, res, id, 'google')`(`auth_at=now`), `member_google.email` 갱신, `last_login_at` 갱신 → 302 `nx`. 로그인 실패 계수기는 건드리지 않는다.
 - "비밀번호를 잊은 경우" 링크 = `/auth/google/start?mode=login&next=%2Faccount%3Fg%3Drecover%23password`.
 
@@ -464,7 +477,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 ```
 
 - `mine` 은 이 회원의 살아 있는 설치(같은 link_id 또는 링크 주소, `phase` installed·pending_payment)가 있을 때만. `available.X=false` 이유: 이미 설치됨 또는 이 회원의 처리 대기 주문(`status IN ('pending','paid')`)에 들어 있음.
-- `profile_only` = `!(ol.pv & 32)`(방이 카카오톡 기본 프로필 참여를 막음). 화면은 `.hint` `이 방은 기본 프로필 참여를 허용하지 않아 K bot 계정이 닉네임 프로필로 입장합니다.` 를 보인다(D12).
+- `profile_only` 는 호환용으로 남기고 **늘 `false`** 다. K bot 은 방의 프로필 설정(`ol.pv & 32`)과 관계없이 오픈프로필로 입장한다(D12). sender `/v1/bot/resolve` 는 원래 값(`!(ol.pv & 32)`)을 그대로 주지만 부모 미리 보기가 `false` 로 내보내 옛 `.hint`(닉네임 프로필 입장 안내)가 나오지 않게 한다.
 - 실패: 404 `not_found` `링크가 만료되었거나 없는 방입니다.`, 422 `not_group` `그룹 오픈채팅방 링크가 아닙니다. 1:1 오픈채팅과 오픈프로필 링크에는 설치할 수 없습니다.`, 409 `taken` `이 방에는 다른 회원이 설치한 K bot이 있습니다. 방장이라면 K bot 계정을 방에서 내보낸 뒤 다시 확인하거나 문의하십시오.`
 - `taken` 은 **다른 회원의 결제된 설치**(`phase='installed'`, `error_code` 가 `kicked` 아님)가 같은 link_id·링크 주소에 있을 때만이다. 다른 회원의 미입금 주문은 막지 않는다(D9).
 - sender 가 없거나, 연결된 봇이 없거나, 조회 예산이 바닥났으면(`sender_down`·`no_bot`·`budget`): `{ok:true, verified:false, room:{link_url, link_id:null, name:null, needs_passcode:null, profile_only:null}, mine:null, available:{roombot:true, minigame:true}}` (D10). URL 기준 `taken`·`blocked_room` 은 이 경우에도 검사한다.
@@ -506,6 +519,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 처리:
 1. 트랜잭션 밖: `install_id` 줄의 소유·phase 확인. 링크 행마다 `installs.preview`(10분 메모리 저장을 쓰므로 화면에서 확인한 방은 카카오를 다시 부르지 않음). 링크가 **이 회원의 기존 설치**와 같은 방(link_id, 미확인이면 URL)이면 그 행을 `{install_id, products}` 줄로 바꾼다. `ROOM_HOLD_WORDS` 에 방 이름이 걸리면 그 줄에 `hold:true` 를 표시한다(D28).
+   트랜잭션 밖 미입금 상한 사전 검사(빠른 429) **앞에서** 48시간 지난 미입금 주문을 먼저 자동 취소한다(`keys.expireStalePending`, 짧은 트랜잭션 하나, D22). 그러지 않으면 방치된 주문만으로 상한에 걸린 회원·IP 가 자기 주문으로 그 주문들을 치우지 못하고(만료는 `pickAmount` 안에서 돈다) 계속 `too_many_pending` 을 받는다.
 2. 한 트랜잭션: `pricing.quote` → `keys.pickAmount(client, total)`(전역 advisory lock 이라 주문 접수 자체가 직렬화됨) → 미입금 상한 검사(`SELECT count(*) … WHERE status='pending' AND (member_id=$me OR ip=$ip)`, 이 회원의 `pending_payment` 방 줄 수) → `uniqueOrderId` → 새 방마다 `installs.reserveForOrder(client, memberId, orderId, room)` → 기존 설치에 상품을 더하는 줄은 같은 설치·같은 상품이 처리 대기 주문(`status IN ('pending','paid')`, `orders.items` JSON 검사)에 있는지 확인 → `INSERT orders(… member_id, kind='member', items, ip, terms_at …)` → `audit('order', {member_id})`.
 3. 충돌 검사(`reserveForOrder`·`grantRoom`·`rebind`·`retry`·`applyOrder` 공통 SQL): INSERT·UPDATE 전에 SELECT 로 확인한다(트랜잭션 안의 UNIQUE 위반은 트랜잭션 전체를 깨뜨리므로).
    - 다른 회원의 결제된 설치: `WHERE phase='installed' AND error_code IS DISTINCT FROM 'kicked' AND id <> $self AND (link_id = $L OR link_url = $U)` (`$L` 이 NULL 이면 `link_url = $U` 만) → `room_taken`.
@@ -572,8 +586,8 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 { "id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임",
   "products": { "roombot": true, "minigame": true },
   "pending_products": { "roombot": false, "minigame": false },
-  "display": "waiting", "label": "부방장 대기",
-  "detail": "방장이 오픈채팅방의 부방장 관리에서 K bot 계정 「K bot 3」을 부방장으로 지정하십시오. 지정되면 1~2분 안에 자동으로 감지합니다.",
+  "display": "waiting", "label": "부방장 지정 대기",
+  "detail": "오픈채팅방의 부방장 관리에서 「K bot 3」을 부방장으로 지정해 주세요. 방장만 지정할 수 있으며, 지정하면 1~2분 안에 자동으로 확인됩니다.",
   "error_code": null, "can_retry": false, "retry_after": 0, "retry_admin_only": false, "needs_passcode": false,
   "bot": { "nickname": "K bot 3" },
   "on_count": 0,
@@ -582,10 +596,10 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 ```
 
 - `pending_products` = 이 설치를 가리키는 처리 대기 주문 줄(`pending`·`paid`). 콘솔은 상품 칩 옆에 `입금 대기` 를 붙인다.
-- `bot.nickname` 이 비어 있으면 `K bot 계정`. 고객 화면에는 봇의 카카오계정 이메일·device_id 를 절대 내보내지 않는다.
-- `on_count` = 켜진 방 관리 기능 수(`visit churn leaveKick profile promo cover guard` 의 `enabled`, 방 관리봇이 없으면 0). `display==='active'` 이고 방 관리봇이 있는데 0 이면 `label` = `사용 중 · 켜진 기능 없음`, `detail` = `방 관리 기능이 모두 꺼져 있습니다. 입장·퇴장 로그부터 켜십시오.`(D15).
+- `bot.nickname` 이 비어 있으면 `K bot`. 고객 화면에는 봇의 카카오 계정 이메일·device_id 를 절대 내보내지 않는다.
+- `on_count` = 켜진 방 관리 기능 수(`visit churn leaveKick profile promo cover guard` 의 `enabled`, 방 관리봇이 없으면 0). `display==='active'` 이고 방 관리봇이 있는데 0 이면 `label` = `사용 중 · 켜진 기능 없음`, `detail` = `방 관리 기능이 모두 꺼져 있습니다. 필요한 기능을 켜 주세요.`(D15).
 - `order` = `phase='pending_payment'` 일 때 `{id, url}`(토큰 포함 주문 화면 주소), 그 밖에는 null. 콘솔은 `입금 안내` 링크로 보인다.
-- `can_retry` = 오류 코드가 고객 다시 시도 대상(5.6)이고 `retry_admin_only` 가 아님. `retry_after` = 다음 다시 시도 가능 시각(ms, 0 이면 지금). `retry_admin_only` = `retry_n >= 10`(이때 `detail` 끝에 `다시 시도 횟수를 넘었습니다. 문의하십시오.`).
+- `can_retry` = 오류 코드가 고객 다시 시도 대상(5.6)이고 `retry_admin_only` 가 아님. `retry_after` = 다음 다시 시도 가능 시각(ms, 0 이면 지금). `retry_admin_only` = `retry_n >= 10`(이때 `detail` 끝에 `다시 시도 횟수를 넘었습니다. 문의해 주세요.`).
 
 #### 3.4.3 내 방 경로
 
@@ -642,7 +656,9 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | POST `/admin/room-unblock` | `{block_id}` | 금지 목록에서 지움 |
 | GET `/admin/room-blocks` | | `{ok, blocks:[{id, link_id, link_url, reason, created_at}]}` |
 | POST `/admin/room-release` | `{id}` | 한 트랜잭션: `hold_reason=NULL` + `assignBot` → 커밋 뒤 nudge(D28 확인 대기 풀기). audit `install` `release` |
-| GET `/admin/bots` | | `{ok, bots:[{device_id, email, label, nickname, nickname_dup:bool, room_cap, enabled, state, state_at, rooms_n, live:{connected}\|null}]}` (`nickname_dup` = 다른 봇과 닉네임이 같음, D12) |
+| GET `/admin/bots` | | `{ok, bots:[{device_id, email, label, nickname, room_name, nickname_dup:bool, open_profile:{li,name,url}\|null, open_profiles:[…]\|null, open_profile_pick, open_profile_state:'ok'\|'none'\|'gone'\|'unknown', open_profile_at, profile_rooms:{open,main,other,failed,unknown}\|null, room_cap, enabled, state, state_at, rooms_n, live:{connected}\|null}]}` (`room_name` = 방장에게 보이는 이름 = 오픈프로필 이름(없으면 닉네임), `nickname_dup` = 다른 봇과 그 이름이 같음, D12) |
+| POST `/admin/bot-open-profile` | `{device_id, li?: string\|null, refresh?: true, url?: 'https://open.kakao.com/me/…'}` | `{ok, bot, picked, read_ok}`. `li` = 고르기(목록에 없으면 400 `bad_profile`, null = 자동, 감사 `bot`), `refresh` = SYNCLINK 다시 읽기, `url` = SYNCLINK 가 오픈프로필을 보여 주지 않을 때 그 링크를 JOININFO 로 확인해 더하기(이 봇 계정 것만, 조회 예산). 409 `not_connected`·`budget`, 400 `not_profile`·`not_mine`·`not_found`, 503 `sender_down` (5.8) |
+| POST `/admin/room-profile` | `{id, how:'switch'\|'rejoin'}` | `{ok, queued, room}`. 들어가 있는 방의 봇 프로필을 오픈프로필로: `switch` = `UPLINKPROF`(나가지 않음), `rejoin` = 나갔다가 오픈프로필로 다시 입장(방장이 부방장을 다시 지정). 409 `not_joined`·`no_open_profile`·`not_connected`·`already_open`, 감사 `install` (5.8) |
 | POST `/admin/bot-register/begin` | `{email, password, label?, room_cap?, device_id?, forced?}` | `device_id` 가 오면 `isBotId()` 이고 `bot_accounts` 에 있는 행이어야 한다(아니면 400 `K bot 계정 id 가 아닙니다`) — 고객 `w…` id 에 봇 자격 증명이 들어가지 않게. 없으면 `'bot.' + 16hex` 새로. sender `/v1/register/begin` 결과를 콘솔과 같은 `publicLogin` 모양으로. `confirm_on_phone` 이면 `bot_pending` 저장. `ok` 면 `bot_accounts` upsert |
 | POST `/admin/bot-register/confirm` | `{pending_id}` | 콘솔 confirm 과 같은 흐름이되, 준비 판정(콘솔의 `sessionReady()` 자리)은 `/v1/snapshot` 이 아니라 **`GET /v1/status?device_id=`** 의 `linked && !needs_register` 로 한다(`/v1/snapshot` 은 `bot.` 에 404, 3.6). 20초 호출 시간 초과·pending 만료·sender 의 `expired` 응답 어느 경우든 이 판정이 참이면 `bot_accounts` upsert 후 `ok`. sender 도 등록이 끝나면 최소 `bot_accounts` 행을 만든다(2.2) |
 | POST `/admin/bot-register/cancel` | `{pending_id}` | |
@@ -658,9 +674,11 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 |---|---|---|
 | POST `/v1/grants` | `{grants:{<device_id>:{v:2, macro_until, legacy_room_until}}, full?:bool, as_of?:ms}` | `{ok, applied:n, stopped:n}`. 각 고객 기록의 `features` 를 바꾸고 저장. 만료면 슬롯을 멈추고, 살아나면 붙인다. `full:true` 가 아니면 목록에 없는 device 는 무시. **`full:true`** 면 목록에 없는 `bot.` 아닌 모든 기록 중 `grants_at`(마지막으로 권리를 받은 시각)과 등록 시각이 둘 다 `as_of` 보다 이른 것을 `{v:2, macro_until:0, legacy_room_until:0}` 으로 바꾸고 멈춘다(`panel_accounts` 행이 없는 고아 기록이 옛 v1 의미로 영원히 도는 것을 막는다) |
 | POST `/v1/bot/resolve` | `{url}` | `{ok:true, link_id, name, url, type, needs_passcode, profile_only, max_users}` 또는 `{ok:false, error:'no_bot'\|'budget'\|'not_found'\|'not_group'\|'kakao_error', status?}` (HTTP 200). 조회 예산(5.3)을 쓴다 |
+| POST `/v1/bot/open-profile` | `{device_id, refresh?, url?}` | 고른 오픈프로필(`open_profile_pick`)을 DB 에서 다시 읽어 반영하고, `refresh` 면 SYNCLINK, `url` 이면 JOININFO 로 확인 → `{ok, read_ok, open_profile, open_profile_state, open_profiles}` 또는 `{ok:false, error}` (5.8) |
+| POST `/v1/bot/room-profile` | `{install_id, how}` | 봇의 작업 줄에 프로필 바꾸기(`switch`)·다시 입장(`rejoin`)을 넣는다 → `{ok, queued}` 또는 `{ok:false, error}` (5.8) |
 | POST `/v1/bot/sync` | `{install_id?}` | `{ok}`. 없으면 전체 재조정. DB 에서 설치·나가기 대기열을 다시 읽어 반영(5.2) |
-| GET `/v1/bot/status` | — | `{ok, bots:[{device_id, connected, nickname, rooms:n, budget:{join_h, join_d, resolve_m}}], rooms:[{install_id, connected, perm, state}], join_paused_until}` |
-| GET `/v1/bot/room?install_id=` | — | `{ok, live:{connected, perm}, ranking:[{name, score}]}` |
+| GET `/v1/bot/status` | — | `{ok, bots:[{device_id, connected, nickname, rooms:n, budget:{join_h, join_d, resolve_m, switch_h}, open_profile:{li,name,url}\|null, open_profile_state, open_profiles, open_profile_read_at, profile_rooms:{open,main,other,failed,unknown}, profile_convert:'off'\|'auto'}], rooms:[{install_id, connected, perm, state, profile:'open'\|'main'\|'other'\|'failed'\|'unknown'\|null}], join_paused_until}` |
+| GET `/v1/bot/room?install_id=` | — | `{ok, live:{connected, perm, profile?:{state, name, fail, fail_at, switched_at, queued, target, convert}}, ranking:[{name, score}]}` |
 | GET `/v1/bot/logs?install_id=` | — | `{ok, visit, profile, guard}` (지금 `logsView` 모양, 그 방만. 방 관리봇이 없으면 빈 배열) |
 | GET `/v1/bot/people?install_id=` | — | `{ok, people:[{user_id, name, count}]}` 또는 `{ok:false, error:'no_roombot'\|'not_active'}` |
 | POST `/v1/bot/hide` | `{install_id, last?, user_id?, by}` | `{ok, job}` 또는 `{ok:false, error:'no_roombot'\|'not_active'\|'busy'\|'cooldown', retry_at?}`. sender 가 `v.products.roombot && (v.perm & 5) && v.state==='active'` 를 다시 확인한다 |
@@ -740,9 +758,9 @@ SELECT b.device_id
   LEFT JOIN room_installs r ON r.bot_device_id = b.device_id AND r.phase = 'installed'
  WHERE b.enabled AND b.removed_at IS NULL AND b.state <> 'needs_register'
    AND NOT (b.device_id = ANY($exclude))
- GROUP BY b.device_id, b.room_cap, b.created_at
+ GROUP BY b.device_id, b.room_cap, b.created_at, b.open_profile_li
 HAVING count(r.id) < b.room_cap
- ORDER BY count(r.id) ASC, b.created_at ASC
+ ORDER BY (b.open_profile_li IS NULL) ASC, count(r.id) ASC, b.created_at ASC   -- 오픈프로필을 아는 봇 먼저(D12)
  LIMIT 1;
 UPDATE room_installs SET bot_device_id=$2, state='queued', error_code=NULL, error_detail=NULL,
        next_try_at=NULL, perm=NULL, perm_at=NULL, state_at=$now WHERE id=$1;
@@ -802,7 +820,8 @@ UPDATE room_installs SET bot_device_id=$2, state='queued', error_code=NULL, erro
 - 접속하면 `client.getProfile()` 로 닉네임을 읽어 `UPDATE bot_accounts SET nickname=$2, state='connected', state_at=$now WHERE device_id=$1`. 끊기면 `state='down'`, `markDead` 면 `state='needs_register'` + 그 봇의 모든 `installed` 행 `state='error', error_code='bot_down'`. 등록 직후에는 관리자 쪽 `bot_accounts` INSERT 가 아직 없을 수 있으므로 sender 가 최소 행을 만들고(2.2) 5분 재조정 때마다 `nickname`·`state` 를 다시 쓴다.
 - `markDead` 는 진짜 세션 종료에만: `patch-kakao.mjs` 가 agent-messenger 의 `dispatchPush` 를 고쳐 `KICKOUT` 본문의 `reason` 을 세션 이벤트(`{type:'kicked', reason}`)에 실어 보낸다. runner·botpool 은 `reason` 이 0(LOGIN_ANOTHER)·1(ACCOUNT_DELETED)·없음일 때만 `markDead('kicked')`, -2(CHANGE_SERVER)와 그 밖의 값은 재접속으로 처리한다(고객 계정 슬롯에도 같은 규칙).
 - 봇이 다시 붙으면(재등록·재접속) `error_code='bot_down'` 인 자기 방을 오류로 두지 않고 바로 5.4 의 생존·권한 점검을 돌려 `active`/`waiting_host` 로 되돌린다.
-- 설치 읽기(부팅·`/v1/bot/sync`·5분마다):
+- 접속할 때마다(닉네임을 읽은 뒤, 방 점검 전에) 그 계정의 오픈프로필을 `SYNCLINK {ltk:0}` 1회로 읽는다(5.8). 오픈프로필이 준비되면 `error_code='bot_no_open_profile'` 인 자기 방을 `queued` 로 되돌려 입장 줄에 넣는다(재조정 때도 같다).
+- 설치 읽기(부팅·`/v1/bot/sync`·5분마다, 관리자가 고른 오픈프로필 `open_profile_pick` 도 함께 읽는다):
 
 ```sql
 SELECT r.*, m.blocked_reason AS member_blocked
@@ -822,23 +841,24 @@ SELECT * FROM room_leaves WHERE done_at IS NULL AND bot_device_id = ANY($1) ORDE
 
 **예산**(sender 가 강제, D29, 메모리 + 재시작 시 0): 봇마다 입장 시도(아래 1~4 한 묶음 = JOININFO·CHECKJOIN·JOINLINK) `BOT_JOIN_PER_HOUR`(기본 20)·`BOT_JOIN_PER_DAY`(기본 80), 조회(`/v1/bot/resolve` 의 JOININFO) 봇마다 `BOT_RESOLVE_PER_MIN`(기본 10)·`BOT_RESOLVE_PER_DAY`(기본 300) — 조회는 맡은 방이 가장 적은 연결된 봇이 한다. 예산이 없으면 입장은 `next_try_at` = 예산이 돌아오는 시각(`error_detail='rate_limited'`), 조회는 `{ok:false, error:'budget'}`(부모는 `verified:false`). 전역 입장 정지(`join_paused_until`, 아래 -444)도 모든 봇에 적용한다.
 
-0. 사전 확인: 그 봇의 `getChats({all:true})`(patch-kakao 가 `link_id` 를 채움)에 이 설치의 `link_id` 와 같은 방이 있으면 JOINLINK 없이 5 로 간다(이미 들어가 있음: 관리자 다시 시도, 재시작 뒤 `joining` 행, 앞선 응답 유실). `hold_reason` 이 있거나 `room_blocklist` 에 있으면 시작하지 않는다(금지면 `error/blocked`).
+0. 사전 확인: 그 봇의 `getChats({all:true})`(patch-kakao 가 `link_id` 를 채움)에 이 설치의 `link_id` 와 같은 방이 있으면 JOINLINK 없이 5 로 간다(이미 들어가 있음: 관리자 다시 시도, 재시작 뒤 `joining` 행, 앞선 응답 유실. 5.8 의 다시 입장 직후는 건너뛴다). `hold_reason` 이 있거나 `room_blocklist` 에 있으면 시작하지 않는다(금지면 `error/blocked`).
+   그다음 오픈프로필(D12): 이 봇의 오픈프로필을 아직 모르면(접속 직후·SYNCLINK 실패, 남긴 값도 없음) 행을 그대로 두고 `BOT_TRANSIENT_WAIT_MS` 뒤 다시 본다(오류 아님, 읽히면 바로). 없거나(`none`) 고른 것이 사라졌으면(`gone`) `error/bot_no_open_profile`(`error_detail` = `none`·`gone`)이고 카카오에 아무 패킷도 보내지 않는다.
 1. `UPDATE … SET state='joining', attempts=attempts+1, state_at`.
 2. `JOININFO {lu: link_url, ref:'EW'}` → `ol`. 실패: -324 등 링크 없음 → `link_gone`. `ol.lt !== 2` → `not_group`.
    `link_id` 가 비어 있으면 `ol.li` 를 저장(UNIQUE 위반 23505 → `duplicate_room`). 있는데 다르면 → `link_changed`. `link_name = ol.ln`. 저장한 `link_id` 가 금지 목록이면 → `blocked`. 0 의 사전 확인을 이 `li` 로 한 번 더.
 3. `ol.pv & 64`(참여코드 필요): `passcode_ct` 가 없으면 `passcode_needed`. 있으면 `secretbox.open` → `CHECKJOIN {li, pc}` → 실패면 `passcode_wrong`, 성공이면 `tk`.
-4. 프로필(D12): `ol.pv & 32` 면 `JOINLINK {li, ref:'EW:', ptp:1, tk?}`, 아니면 `JOINLINK {li, ref:'EW:', ptp:2, nn: 봇 닉네임, pp:'', tk?}`(10.1 #9 실측 전 가정).
-5. 성공: `chat_id = chatRoom.chatId`, `link_id = ol.li`, `joined_at`. `CHATONROOM {chatId, …}` 1회 — 응답 `olu.lmt` 가 봇 권한(없으면 JOINLINK 응답 `olu.lmt`, 그것도 없으면 `MEMBER(self)`, 5.4). 방 관리봇이 있으면 `perm & 5 ? 'active' : 'waiting_host'`, 없으면 `active`. 처음 들어간 방이면 입장 안내 1회(7.9). `error_code` 가 `kicked` 였던 행을 지우다 23505(그 사이 다른 회원이 설치)면 `leaveChat` 후 `error/room_taken`.
+4. 프로필(D12): 늘 `JOINLINK {li, ref:'EW:', ptp:16, pli: 오픈프로필 li, tk?}`(`nn`·`pp` 없음). 방의 `ol.pv & 32`(기본 프로필 참여 허용)는 보지 않는다(트레이스에만 남긴다).
+5. 성공: `chat_id = chatRoom.chatId`, `link_id = ol.li`, `joined_at`. `CHATONROOM {chatId, …}` 1회 — 응답 `olu.lmt` 가 봇 권한(없으면 JOINLINK 응답 `olu.lmt`, 그것도 없으면 `MEMBER(self)`, 5.4). 같은 `olu` 의 `ptp`·`pli`·`nn` 을 그 방의 봇 프로필로 남긴다(`room_state.runtime.prof`, 5.8). 방 관리봇이 있으면 `perm & 5 ? 'active' : 'waiting_host'`, 없으면 `active`. 처음 들어간 방이면 입장 안내 1회(7.9). `error_code` 가 `kicked` 였던 행을 지우다 23505(그 사이 다른 회원이 설치)면 `leaveChat` 후 `error/room_taken`.
 6. 실패 처리:
    - -312·-805·-819(속도·시간 제한): `state` 는 `joining` 유지, `error_detail='rate_limited'`, `next_try_at = now + [10분, 30분, 2시간][min(n,2)]`.
    - -444(BLOCKED_IP, 서버 IP 차단): 봇을 내리지 않는다. 이 행은 `joining` 유지 + `rate_limited`, **전역** `join_paused_until = now + [30분, 2시간, 6시간][min(연속 횟수,2)]`, 모든 봇의 입장·조회를 그때까지 멈춘다. 관리자 화면에 `카카오가 서버 IP 의 입장을 막았습니다` 띠(`/v1/bot/status.join_paused_until`).
    - -815(OPENCHAT_REJOIN_REQUIRED)와 내보내진 방 재입장 status(10.1 #2): `kicked`.
    - -501: `room_full`(실측 전 가정).
-   - 위 코드에 해당하지 않는 실패이고 4 가 `ptp:2` 였으면 `profile_blocked`(실측 전에는 알 수 없는 status 도 여기로).
+   - `BOT_PROFILE_BLOCK_STATUS`(기본 `-804`, 실측 전 가정, 10.1 #9)에 든 status: `profile_blocked`(카카오가 오픈프로필 입장을 거절). 다른 프로필로 다시 보내지 않는다.
    - 응답 유실(`statusCode:-1`·시간 초과) 또는 알 수 없는 0 아닌 status: 다시 접속하지 않는다. 지금 세션(-1 이면 다음 `acquireSession()` 이 새로 연 세션)의 `getChats({all:true})` 로 `li` 가 같은 방을 찾는다. 있으면 성공 처리. 없으면 `kakao_error`, `error_detail = '카카오 상태 ' + status`.
    - -997: 봇 계정 자체 문제 → `bot_down` 처리와 같다(그 봇 전체).
 
-`SENDER_TRACE_PUSH=1` 이면 처음 보는 `packet.method` 마다 본문 키 목록을 1회 로그로 남긴다(실측용, 10.1).
+`SENDER_TRACE_PUSH=1` 이면 처음 보는 `packet.method` 마다 본문 키 목록을 1회 로그로 남긴다(실측용, 10.1). 또 `SYNCLINK`·`JOININFO`·`CHECKJOIN`·`JOINLINK`·`UPLINKPROF` 의 요청·응답 모양 전체와 `CHATONROOM.olu`·`INFOLINK.ols[0]`(봇마다 처음 5번)을 `raw <방법> req … → statusCode … body …` 한 줄로 남긴다(Long 은 글자, `pc`·`tk` 는 `<hidden>`).
 
 ### 5.4 권한·생존 점검
 
@@ -848,11 +868,12 @@ SELECT * FROM room_leaves WHERE done_at IS NULL AND bot_device_id = ANY($1) ORDE
 | `active` | `BOT_ACTIVE_CHECK_MS` 600000 | `getChat(chatId)`(나감·없음 판정) → 권한 읽기 |
 | 재접속 직후 | 즉시(방마다 2초 간격) | 위 둘 |
 | 푸시 `SYNCMEMT` 에 self, 피드 11·12·15 | 3초 뒤 1회 | 권한 읽기 |
+| 들어가 있는 방의 `roombot` 이 바뀜(상품 추가·관리자 상품 변경, 4.2), 또는 상태가 상품·권한과 어긋남(`roombot` 인데 `active`·`perm & 5` 아님, `roombot` 없는데 `waiting_host`) | 3초 뒤 1회 | 권한 읽기 |
 | 강퇴·삭제 푸시 | 즉시 | 아래 표 |
 
 **권한 읽기**(D13): `CHATONROOM {chatId, …}` 응답의 `olu.lmt`(클라이언트 자신의 오픈링크 사용자 정보) → 없으면 `MEMBER {chatId, memberIds:[self]}` 의 `members[0].mt` → 둘 다 없으면 이번 점검은 판정 보류(상태 유지). 원시 패킷은 5.3 과 같은 방식으로 보낸다.
 
-규칙: 방 관리봇이 있는 방에서 `perm & 5` 면 `active`, 아니면 `waiting_host`(강등이면 `room_log 'perm'` + 방 안내 없음). 미니게임만 있는 방은 권한을 보지 않는다.
+규칙: 방 관리봇이 있는 방에서 `perm & 5` 면 `active`, 아니면 `waiting_host`(강등이면 `room_log 'perm'` + 방 안내 없음). 미니게임만 있는 방은 권한을 보지 않는다. 미니게임만 쓰던 방(`active`, `perm & 5` 아님)에 방 관리봇을 더해 `waiting_host` 가 되는 것은 강등이 아니다: `perm` 기록을 남기지 않고, 그 방에 방 관리봇 안내를 아직 하지 않았으면 7.9 의 `방 관리봇 추가` 안내를 1회 한다. RoomView(`displayOf`)·관리자 필터도 sender 가 다시 계산하기 전의 `active` + `roombot` + `perm & 5` 아님을 `waiting` 으로 본다(0.1).
 
 | 신호 | 상태 |
 |---|---|
@@ -887,26 +908,27 @@ hide(view, logId, type)          // REWRITE {logId, t}
 
 | error_code | 짧은 사유 | 긴 문구 | 고객 다시 시도 |
 |---|---|---|---|
-| `passcode_needed` | 참여코드 필요 | 참여코드가 필요한 방입니다. 참여코드를 입력한 뒤 다시 시도하십시오. | 예(참여코드 입력) |
-| `passcode_wrong` | 참여코드 불일치 | 참여코드가 맞지 않아 입장하지 못했습니다. 참여코드를 고친 뒤 다시 시도하십시오. | 예(참여코드 입력) |
-| `room_full` | 인원 초과 | 방 인원이 가득 차 입장하지 못했습니다. 자리가 생긴 뒤 다시 시도하십시오. | 예 |
-| `kicked` | 내보내짐 | K bot 계정 「{닉네임}」이 방에서 내보내졌습니다. 방장이 내보내기 목록에서 이 계정을 해제한 뒤 다시 시도하십시오. | 예 |
-| `left` | 방 나감 | K bot 계정이 방에서 나갔습니다. 다시 시도하면 다시 입장합니다. | 예 |
-| `profile_blocked` | 프로필 제한 | 이 방은 기본 프로필 참여를 허용하지 않아 입장하지 못했습니다. 방장이 오픈채팅방 설정에서 기본 프로필 참여를 허용한 뒤 다시 시도하십시오. | 예 |
-| `kakao_error` | 입장 거부 | 카카오 서버가 입장을 거부했습니다. 잠시 뒤 다시 시도하십시오. | 예 |
-| `link_gone` | 링크 만료 | 링크가 만료되었거나 삭제된 방입니다. 새 링크로 바꾸려면 문의하십시오. | 아니오(관리자 rebind) |
-| `room_deleted` | 방 삭제됨 | 방장이 오픈채팅방을 삭제했습니다. 문의하십시오. | 아니오 |
-| `not_group` | 설치 불가 링크 | 그룹 오픈채팅방 링크가 아닙니다. 새 링크로 바꾸려면 문의하십시오. | 아니오 |
-| `link_changed` | 링크 불일치 | 링크가 처음 등록한 방과 다른 방을 가리킵니다. 문의하십시오. | 아니오 |
-| `duplicate_room` | 중복 설치 | 이 방에는 이미 다른 설치가 있습니다. 문의하십시오. | 아니오 |
-| `room_taken` | 다른 회원 설치 | K bot이 내보내진 동안 다른 회원이 이 방에 설치했습니다. 문의하십시오. | 아니오 |
-| `blocked` | 설치 불가 방 | 이 방에는 K bot을 설치할 수 없습니다. 문의하십시오. | 아니오 |
-| `bot_down` | K bot 계정 점검 | 이 방을 맡은 K bot 계정의 연결이 끊겼습니다. 운영자가 복구하면 자동으로 이어집니다. | 아니오 |
+| `passcode_needed` | 참여코드 필요 | 참여코드가 필요한 방입니다. 참여코드를 입력한 뒤 다시 시도해 주세요. | 예(참여코드 입력) |
+| `passcode_wrong` | 참여코드 불일치 | 참여코드가 맞지 않아 입장하지 못했습니다. 참여코드를 고친 뒤 다시 시도해 주세요. | 예(참여코드 입력) |
+| `room_full` | 인원 초과 | 방 인원이 가득 차 입장하지 못했습니다. 자리가 생긴 뒤 다시 시도해 주세요. | 예 |
+| `kicked` | 내보내짐 | K bot 「{닉네임}」이 방에서 내보내졌습니다. 오픈채팅방의 내보내기 목록에서 K bot을 해제한 뒤 [다시 시도]를 눌러 주세요. | 예 |
+| `left` | 방 나감 | K bot이 방에서 나갔습니다. [다시 시도]를 누르면 K bot이 다시 들어갑니다. | 예 |
+| `profile_blocked` | 프로필 제한 | 카카오가 K bot의 오픈프로필 입장을 거부했습니다. 오픈채팅방의 참여 프로필 설정을 확인한 뒤 다시 시도해 주세요. | 예 |
+| `kakao_error` | 입장 거부 | 카카오 서버가 입장을 거부했습니다. 잠시 뒤 다시 시도해 주세요. | 예 |
+| `link_gone` | 링크 만료 | 링크가 만료되었거나 방이 삭제되었습니다. 새 링크로 바꾸려면 문의해 주세요. | 아니오(관리자 rebind) |
+| `room_deleted` | 방 삭제됨 | 오픈채팅방이 삭제되었습니다. 다른 방으로 옮기려면 문의해 주세요. | 아니오 |
+| `not_group` | 설치 불가 링크 | 그룹 오픈채팅방 링크가 아닙니다. 새 링크로 바꾸려면 문의해 주세요. | 아니오 |
+| `link_changed` | 링크 불일치 | 처음 등록한 방과 다른 방의 링크입니다. 문의해 주세요. | 아니오 |
+| `duplicate_room` | 중복된 방 | 이 방에는 이미 K bot이 있습니다. 문의해 주세요. | 아니오 |
+| `room_taken` | 다른 회원 사용 중 | K bot이 내보내진 동안 다른 회원이 이 방에 K bot을 설치했습니다. 문의해 주세요. | 아니오 |
+| `blocked` | 설치 불가 | 이 방에는 K bot을 설치할 수 없습니다. 문의해 주세요. | 아니오 |
+| `bot_down` | K bot 점검 | 이 방의 K bot 연결이 끊겼습니다. 복구되면 자동으로 다시 동작합니다. | 아니오 |
+| `bot_no_open_profile` | K bot 준비 중 | K bot을 준비하고 있습니다. 준비가 끝나면 K bot이 자동으로 입장합니다. | 아니오(오픈프로필이 생기면 sender 가 스스로 `queued` 로, D12) |
 
-"예" 인 코드도 3.4.3 의 간격·횟수 규칙을 따른다(`retry_after`, 10번 넘으면 관리자만). 긴 문구의 "문의하십시오." 옆에는 화면이 `[data-support]` 버튼을 붙인다(3.1).
+"예" 인 코드도 3.4.3 의 간격·횟수 규칙을 따른다(`retry_after`, 10번 넘으면 관리자만). 긴 문구의 "문의해 주세요." 옆에는 화면이 `[data-support]` 버튼을 붙인다(3.1).
 
-`입장 중` 의 보조 문구: 기본 `K bot 계정이 이 방에 입장하고 있습니다.` / `no_bot` → `입장 순서를 기다리고 있습니다. 순서가 되면 자동으로 입장합니다.` / `rate_limited` → `카카오 입장 제한으로 {HH:MM}에 다시 입장합니다.` / `hold_reason` → `운영자 확인 뒤 입장합니다.`
-이 표는 `lib/installs.js` `ERRORS` 가 단일 소스다(작업 2). 콘솔·사이트·관리 화면은 서버가 준 `label`·`detail` 을 그대로 쓴다.
+`입장 중` 의 보조 문구: 기본 `K bot이 이 방에 들어가고 있습니다.` / `no_bot` → 라벨 `입장 중 · 순서 대기`, `입장 순서를 기다리고 있습니다. 순서가 되면 자동으로 입장합니다.` / `rate_limited` → `카카오 입장 제한으로 {HH:MM}에 다시 입장을 시도합니다.` / `hold_reason` → `운영자가 확인한 뒤 K bot이 들어갑니다.` `kicked` 의 `「{닉네임}」` 은 방에 보이는 봇 이름(오픈프로필 이름)으로 바뀌고, 모르면 그 부분을 뺀다.
+이 표는 `lib/installs.js` `ERRORS` 가 단일 소스다(작업 2). 패널·사이트·판매 관리 화면은 서버가 준 `label`·`detail` 을 그대로 쓴다.
 
 ### 5.7 방별 처리 (봇 슬롯의 메시지 경로)
 
@@ -923,6 +945,19 @@ if (!v || !v.licensed || v.state === 'error') return
 - 기존 `features.mjs` 함수들은 **방 어댑터 기록**으로 부른다(7.6). 새 기능은 순수 함수 모듈 `roomfeat.mjs`.
 - 실행 상태는 방마다 `room_state.runtime` 에 둔다. 저장은 더러움 표시 + 5초마다 일괄(메시지마다 저장 금지). 정지 때 한 번 더 저장.
 - 송신은 방별 대기열 + 봇 전체 페이서. 한 방의 지연(`VISIT_GAP_MS` 등)이 다른 방을 막지 않는다.
+
+### 5.8 봇 오픈프로필 (D12)
+
+봇은 고객 방에 카카오톡 기본 프로필이 아니라 그 계정의 **오픈프로필**로 들어간다. 프로토콜 근거는 node-kakao 4.5.0(`OpenProfileType.OPEN_PROFILE = 16`, `OpenLinkProfile.serializeLinkProfile`, `joinChannel`, `changeProfile`, `getLatestLinkList`)이고 실측 전이다(10.1 #9, `DEPLOY.md` 의 실측 순서).
+
+- **찾기**: 접속할 때마다·`SYNCLINK*` 푸시(맡은 방 링크가 아닌 것, 5초 뒤·1분에 1번)·관리자 `[오픈프로필 다시 읽기]`·`BOT_PROFILE_READ_MS`(기본 6시간)마다 `SYNCLINK {ltk:0}` 을 보낸다. `ols` 가운데 `lt === 1` 이고 오픈프로필 표지 `op` 가 있거나 `lu` 가 `open.kakao.com/me/` 인 것만 오픈프로필이다(`lt 2` = 이 계정이 만든 방, `/o/` 1:1 오픈채팅 링크는 뺀다). 이름 = `olu.nn || ln`. 결과를 `bot_accounts.open_profiles` 에 남긴다. 읽기에 실패하면 남긴 값을 그대로 쓴다(실패를 "없음"으로 보지 않는다). SYNCLINK 가 오픈프로필을 보여 주지 않으면 관리자가 그 링크를 넣는다(`url`): `JOININFO {lu}` 로 `lt === 1` 이고 `olu.userId` 가 이 봇일 때만 목록에 더한다.
+- **고르기**: 관리자가 고른 것(`open_profile_pick`) → 지난번에 쓰던 것 → 목록의 첫 번째. 상태 `ok`·`none`(없음)·`gone`(고른 것이 목록에 없음, 다시 고를 때까지 입장 멈춤)·`unknown`(아직 못 읽음). 지금 쓰는 것을 `open_profile_li`·`open_profile_name` 에 쓴다(`none`·`gone` 이면 비운다). 배정(4.4)은 `open_profile_li` 가 있는 봇을 먼저 고른다.
+- **입장**: 5.3 의 0'·4. `ok` 가 아니면 카카오에 아무것도 보내지 않는다. 오픈프로필이 준비되면 `bot_no_open_profile` 방을 스스로 다시 입장 줄에 넣는다.
+- **방마다 기록**: 입장·점검 때 `CHATONROOM.olu`(`ptp`·`pli`·`nn`, 없으면 `MEMBER(self)` — 오픈채팅 멤버의 `pli` 는 오픈프로필일 때만 있다)를 `room_state.runtime.prof = {open, pli, nn, chat, by, at, fail?, failAt?, sw?}` 로 남긴다(이 봇·이 방일 때만 유효). 미니게임만 있는 방도 모를 때 한 번 읽는다. `/v1/bot/status.rooms[].profile` = `open`(고른 오픈프로필)·`other`(다른 오픈프로필)·`main`(기본·닉네임 프로필)·`failed`(바꾸기 거절)·`unknown`.
+- **방장에게 보이는 이름**: 입장 안내·`방 관리봇 추가` 안내(7.9)는 그 방에서 읽은 이름(`olu.nn`, 오픈프로필 이름). 부모의 RoomView 이름(`waitingDetail`·`kicked` 의 「{닉네임}」·`bot.nickname`)은 `installs.BOT_NAME_SQL` = `room_state.runtime.prof.nn`(지금 봇·지금 방) → `bot_accounts.open_profile_name` → `nickname`. 오픈프로필로 바꾸기 전의 방은 방에 보이는 기본 프로필 이름이 그대로 나온다.
+- **이미 들어간 방 바꾸기**: 나갔다 다시 들어가지 않는다(부방장·입장 알림 때문에). `UPLINKPROF {li, ptp:16, pli}` 1회(`c` 없음)를 봇의 작업 줄에서 입장 다음 순서로, 입장과 같은 간격·`BOT_PROFILE_SWITCH_PER_HOUR`(기본 6) 예산으로 보낸다. 보내기 전에 지금 프로필을 다시 읽어 이미 바뀌었으면 보내지 않는다. 뒤에 `CHATONROOM` 으로 확인한다. 성공: `runtime.prof` 갱신, 권한을 다시 판정(부방장 유지 확인), 부방장 대기 방이면 방 안내 `[K bot]\nK bot 계정의 프로필이 「{이름}」(으)로 바뀌었습니다.\n방장이 이 계정을 부방장으로 지정하면 동작합니다.` 1회. 거절: 방 상태는 그대로, `runtime.prof.fail = status`·`failAt`, 자동으로는 `BOT_PROFILE_RETRY_MS`(기본 24시간) 안에 다시 보내지 않는다. `room_log` 는 남기지 않는다(콘솔 기록에 `입장` 으로 잘못 보이지 않게, 결과는 `/admin/room` 의 `live.profile` 과 sender 로그).
+  - 언제: `BOT_PROFILE_CONVERT=off`(기본)면 관리자가 방 상세의 `[오픈프로필로 바꾸기]`(`/admin/room-profile how=switch`)를 누를 때만, `auto` 면 점검 때 `main`·`other` 인 방을 차례로.
+  - `[다시 입장(오픈프로필)]`(`how=rejoin`): 바꾸기가 거절된 방의 마지막 수단. 입장 예산이 있을 때만 행을 먼저 `queued`(perm 비움)로 쓰고 → 7.9 안내 기록을 지우고 → `leaveChat` → 사전 확인 없이 `JOINLINK ptp:16`. 방장이 부방장을 다시 지정해야 하고 입장 안내가 다시 나간다(`room_log 'state'` `{state:'queued', event:'rejoin'}`).
 
 ---
 
@@ -943,7 +978,7 @@ if (!v || !v.licensed || v.state === 'error') return
 | `/panel` | panel.html | — | 5 |
 | `/manage` | manage.html | — | 6 |
 
-캐시 무효화: `style.css?v=7`, `app.js?v=7`, `support.js?v=1`, `panel.css?v=14`, `panel.js?v=17`, `manage.js?v=2`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
+캐시 무효화: `style.css?v=8`, `app.js?v=9`, `support.js?v=1`, `panel.css?v=15`, `panel.js?v=18`, `manage.js?v=4`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
 
 **보안 헤더**(작업 1, server.js 의 HTML 응답 전부 — `page(...)` 와 정적 `.html`): `X-Frame-Options: DENY` + `Content-Security-Policy: frame-ancestors 'none'`. `/panel`·`/manage` 에는 여기에 `script-src 'self'; object-src 'none'; base-uri 'self'` 를 더한다(두 화면은 제3자 스크립트를 싣지 않는다, D25). 사이트 화면은 채널톡 SDK 가 여러 호스트를 쓰므로 `script-src` 를 걸지 않는다.
 
@@ -1150,7 +1185,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 <tr class="rowx" data-room="12" tabindex="0" role="link" aria-label="동네모임 방 상태 열기">
   <td data-l="대화방"><b>동네모임</b> <span class="mono dim">open.kakao.com/o/gAbCdEf</span></td>
   <td data-l="상품"><span class="tag line">방 관리봇</span> <span class="tag warn">미니게임봇 · 입금 대기</span></td>
-  <td data-l="상태"><span class="state" data-state="waiting"><i class="dot warn"></i>부방장 대기</span></td>
+  <td data-l="상태"><span class="state" data-state="waiting"><i class="dot warn"></i>부방장 지정 대기</span></td>
   <td data-l="K bot 계정"><span class="mono">K bot 3</span></td>
   <td class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></td>
 </tr>
@@ -1178,7 +1213,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - 상품 묶음: 상품 2줄(설치됨 `.tag.line` / 미설치는 `상품 추가` → `/buy?add=<id>`).
 - `room-form`: `.srow.inline` `명령어 앞글자` `.seg#r-prefix`(`!` `/` `.` `#`), 설명 `방 관리봇과 미니게임봇 명령어가 같은 앞글자를 씁니다.`
 - 조치 기록 `table#r-log-tbl`(최근 100, `actions`): 시각 · 종류 · 대상 · 결과.
-- 강등 감지(폴링 비교로 `active`→`waiting`): `notify('부방장 권한이 해제되었습니다.', '{방} · 다시 지정하면 자동으로 이어집니다.', {kind:'warn'})`. 승격 감지(`waiting`→`active`): `notify('부방장 지정을 확인했습니다.', '{방} · 이제 방 관리 기능을 설정할 수 있습니다.')`.
+- 강등 감지(폴링 비교로 `active`→`waiting`, 직전 폴링에서도 `products.roombot` 이던 방만 — 미니게임만 쓰던 방에 방 관리봇을 더해 부방장 대기가 된 것은 강등이 아니다): `notify('부방장 권한이 해제되었습니다.', '{방} · 다시 지정하면 자동으로 이어집니다.', {kind:'warn'})`. 승격 감지(`waiting`→`active`): `notify('부방장 지정을 확인했습니다.', '{방} · 이제 방 관리 기능을 설정할 수 있습니다.')`.
 
 #### 방 관리봇 화면 공통
 
@@ -1232,8 +1267,8 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - `/v1/bot/status.join_paused_until` 이 미래면 화면 맨 위 crit 띠 `카카오가 서버 IP 의 입장을 막았습니다. {HH:MM}까지 모든 방 입장을 멈춥니다.`
 - 주문 항목: 회원 주문이면 `keyLine` 대신 회원 아이디와 줄 요약(확인하지 못한 방 줄은 `.tag.warn` `미확인`), 승인 대화상자에 키 입력 없음, 결과 `적용 완료`. 승인이 `room_taken` 이면 대화상자가 충돌 방 목록과 `환불할 금액 n원` 을 보이고 `충돌한 방을 빼고 승인`(`skip_conflicts:true`) 버튼을 준다.
 - 회원 항목: 아이디(mono) · `Google 연결` tag · chip `정상`/`차단`. `.mg-line` `매크로 D-n · 방 관리봇 n · 미니게임봇 n`. `.mg-meta` `가입 … · 최근 로그인 …`. 동작: `상세`·`기간 추가`·`차단`/`차단 해제`·`로그아웃`·`임시 비밀번호`. 상세는 `modal({wide:true})`. 상세의 `이관한 키` 줄마다 이관 시각·IP 와 `다른 회원으로 옮기기`(`license-reassign`, 회원 아이디 입력, `confirmAct`).
-- 봇 항목: 닉네임 · mono 이메일 · chip(`접속 중` ok / `연결 대기` warn / `등록 필요` bad) · `nickname_dup` 이면 `.tag.warn` `닉네임 중복`(hint `방장이 구분할 수 있게 봇마다 다른 닉네임을 쓰십시오`). 부하 막대 `.bar > i`(80% 이상 `.warn`) + `방 n / 상한`. 동작: `재등록`·`배정 중지`/`배정 재개`·`상한 변경`·`해제`. 등록은 콘솔 계정 등록 마법사와 같은 단계(휴대폰 확인 코드 표시, `.big` + `.v.key` 숫자 + `.wait` 점).
-- 방 항목: 방 이름 · 상품 tag · 상태 chip(0.1 의 5단계, 사이트 chip 색) · `.mg-line` mono 링크 · 회원 아이디 · `.mg-meta` 봇 · 사유 · 시도 횟수 · 고객 다시 시도 횟수. 동작: `다시 시도`·`다른 봇으로 이동`·`링크 바꾸기`·`상품 변경`·`다른 회원에게 넘기기`(`room-transfer`)·`확인 후 입장`(`hold_reason` 있을 때, `room-release`)·`설치 해제`·`방 금지`(`room-block`, 사유 입력) — 해제·금지는 `confirmAct` danger. 필터: 전체 · 확인 필요 · 확인 대기(hold) · 부방장 대기 · 사용 중 · 입금 대기. 방 탭 아래 `금지한 방` 목록(`room-blocks`, 행마다 `금지 해제`).
+- 봇 항목: 닉네임 · mono 이메일 · chip(`접속 중` ok / `연결 대기` warn / `등록 필요` bad) · `nickname_dup` 이면 `.tag.warn` `이름 중복`(hint `방장이 구분할 수 있게 봇마다 다른 오픈프로필 이름을 쓰십시오`). 오픈프로필(D12, 5.8) 줄 `오픈프로필 「{이름}」 · open.kakao.com/me/…`, 없으면 `.tag.crit` `오픈프로필 없음` + crit 줄 `이 봇 계정에 오픈프로필이 없습니다. 카카오톡에서 이 계정으로 오픈프로필을 만든 뒤 [오픈프로필 다시 읽기]를 누르십시오. 기본 프로필로는 입장하지 않습니다.`, `gone` 이면 `.tag.warn` `오픈프로필 선택 필요`, 모르면 `.tag.line` `오픈프로필 확인 전`. 오픈프로필이 여럿이고 고르지 않았으면 hint `오픈프로필이 n개입니다. 지금은 「…」로 입장합니다.`, 오픈프로필이 아닌 프로필로 들어가 있는 방이 있으면 hint 로 그 수. 부하 막대 `.bar > i`(80% 이상 `.warn`) + `방 n / 상한`. 동작: `오픈프로필 선택`(라디오: 자동 + 목록, `다시 읽기`, 링크로 확인)·`오픈프로필 다시 읽기`·`재등록`·`배정 중지`/`배정 재개`·`상한 변경`·`해제`. 등록은 콘솔 계정 등록 마법사와 같은 단계(휴대폰 확인 코드 표시, `.big` + `.v.key` 숫자 + `.wait` 점).
+- 방 항목: 방 이름 · 상품 tag · (봇이 그 방에 오픈프로필이 아닌 프로필로 들어가 있으면 tag `기본 프로필`·`다른 오픈프로필`·`프로필 바꾸기 거절`) · 상태 chip(0.1 의 5단계, 사이트 chip 색) · `.mg-line` mono 링크 · 회원 아이디 · `.mg-meta` 봇 · 사유 · 시도 횟수 · 고객 다시 시도 횟수. 동작: `다시 시도`·`다른 봇으로 이동`·`링크 바꾸기`·`상품 변경`·`다른 회원에게 넘기기`(`room-transfer`)·`확인 후 입장`(`hold_reason` 있을 때, `room-release`)·`설치 해제`·`방 금지`(`room-block`, 사유 입력) — 해제·금지는 `confirmAct` danger. 필터: 전체 · 확인 필요 · 확인 대기(hold) · 부방장 대기 · 사용 중 · 입금 대기. 방 탭 아래 `금지한 방` 목록(`room-blocks`, 행마다 `금지 해제`). 방 상세의 정보에 `봇 프로필`(`live.profile`), 오픈프로필이 아니면 `봇 프로필` 칸에 `오픈프로필로 바꾸기`(primary)·`다시 입장(오픈프로필)`(danger, 부방장 다시 지정 경고) — 5.8.
 - `manage.js` 의 `FEATS`·`FEAT_LABEL`·`PRODUCT` 상수는 `/api/price` 로 대체.
 
 ---
@@ -1296,7 +1331,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 [들낙 감지]
 이름 : @{이름}
 입장 : {M}분 동안 {횟수}회
-조치 : 경고 | 내보냄 | 내보내지 못함
+조치 : 경고 | 내보내기 | 내보내기 실패
 ```
 
 #### (b) 나갔을 때 내보내기
@@ -1305,21 +1340,21 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - `leaveKickPlan`: id 없음 → `kick_fail` `id 없음`. 제외·방장·부방장(캐시 권한 1·4) → 건너뜀. 그 외 → `KICKMEM`.
 - `KICKMEM` 이 실패하면(이미 나간 사람에 대한 강퇴 허용 여부는 **실측 전**) `state.bans[userId] = {at, name}`(최대 1000, 30일). 그 id 가 다시 들어오면 바로 강퇴(그때는 방 안에 있으므로 성공하고 카카오 내보내기 목록에 올라 재입장이 막힌다). 이 경우 잠깐 들어왔다가 나가지고, 30일이 지나면 막지 못한다 — 화면 문구가 이를 그대로 말한다(7.4).
 - 화면의 `내보낸 사람` 표에서 `내보내기 해제` → `KLDELITEM` + `bans` 삭제. 표와 해제 대상은 **K bot 이 내보낸 사람**(이 설치의 `room_log` `kick`·`kick_fail`, `bans`)뿐이다. 방장이 직접 내보낸 사람은 풀지 않는다(3.4.3 `not_kicked`).
-- 안내(`notice` 켰을 때, 멘션 없음): `[퇴장 후 내보냄]\n이름 : {이름}`
+- 안내(`notice` 켰을 때, 멘션 없음): `[재입장 차단]\n이름 : {이름}` (화면 이름 `나간 사람 재입장 차단`)
 
 #### (c) 프로필 로그
 
 - 관찰 원천: MSG 푸시 `authorNickname`(실측 전), `SYNCLINKPF` 푸시(실측 전), 입장 때 `memberCard`, 방마다 60초에 최대 1회 `getMembersByIds(≤20명)`로 30분 넘게 안 본 작성자 다시 읽기.
 - `profileObserve(state, cfg, {userId, name, photo, status})`: 사진 서명 = `original_profile_image_url || profile_image_url` 의 경로(쿼리 제거). 상태 메시지는 null 이면 무시. 첫 관찰은 기준만 저장. 변경은 `changes` 에 `{at, kind:'name'|'photo'|'status', from?, to?}`(최근 30개).
-- 안내: 이름 변경은 지금 `profileNotice` 문구 그대로. 사진 `[프로필 변경 감지]\n이름 : @{현재}\n항목 : 프로필 사진\n변경 : YYYY-MM-DD HH:MM`. 상태 메시지는 `항목 : 상태 메시지` + `이전 : …` 줄.
-- 조회 명령 `{앞글자}프로필 @닉네임` 또는 `{앞글자}프로필 닉네임`: 대상은 멘션 user_id → 현재 이름 유일 일치. 여러 명이면 `같은 이름이 {n}명입니다. @멘션으로 지정하십시오.` 권한 `staff`(기본: 방장·부방장만) / `all` / `off`. 답(멘션 없음):
+- 안내: 이름 변경은 지금 `profileNotice` 문구 그대로. 사진 `[프로필 변경 감지]\n이름 : @{현재}\n항목 : 프로필 사진\n시각 : YYYY-MM-DD HH:MM`. 상태 메시지는 `항목 : 상태 메시지` + `이전 : …` 줄.
+- 조회 명령 `{앞글자}프로필 @닉네임` 또는 `{앞글자}프로필 닉네임`: 대상은 멘션 user_id → 현재 이름 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 기록이 없으면 `이 사람의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만) / `all` / `off`. 답(멘션 없음):
 
 ```
 [프로필 기록]
 이름 : {현재}
 이전 이름 : {A} (MM-DD HH:MM), …
 사진 변경 : {n}회
-입장 {n}회 · 퇴장 {n}회 (14일)
+최근 14일 : 입장 {n}회 · 퇴장 {n}회
 ```
 
 - 오픈채팅에서 상태 메시지가 늘 null 이면(실측) 화면의 `상태 메시지` 스위치를 숨기고 `오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.` 를 보인다. `presentRoomConfig` 가 상수 `status_supported`(기본 `true`, 실측 뒤 필요하면 `false`)를 같이 내보내고, 작업 5 는 `false` 일 때 스위치를 숨긴다.
@@ -1332,19 +1367,19 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 ```
 [홍보 금지]
 이름 : @{이름}
-경고 : {n}/{kickAt}회
-조치 : 글 가림 | 내보냄
+경고 : {n}회 ({kickAt}회가 되면 내보내요)
+조치 : 경고 | 글 가리기 | 내보내기
 ```
 
-(`kickAt=0` 이면 경고 줄 `경고 : {n}회`)
+(`kickAt=0` 이거나 이미 내보냈으면 경고 줄은 `경고 : {n}회`. 분수 표기 `1/3회` 는 쓰지 않는다)
 
 #### (e) 가리기
 
 - 링 버퍼: 방 관리봇이 있는 방마다 최근 300개 글 `{logId, type, authorId, name, at}`(본문 없음, 메모리만, 5.7). 재시작 뒤 첫 가리기 요청 때 `getMessagePage` 로 최대 3쪽 채움.
-- 방 안 명령(방장·부방장만, `hide.command` 켰을 때): `{앞글자}가리기 N`(1~300, 범위 밖이면 `「{앞글자}가리기 30」 형식으로 입력하십시오. (1~300)`) / `{앞글자}가리기 @닉네임`(그 사람의 버퍼 안 글 전부).
+- 방 안 명령(방장·부방장만, `hide.command` 켰을 때): `{앞글자}가리기 N`(1~300, 범위 밖이면 `「{앞글자}가리기 30」처럼 가릴 글 수(1~300)를 입력해 주세요. 한 사람의 글은 「{앞글자}가리기 @이름」으로 가릴 수 있어요.`) / `{앞글자}가리기 @닉네임`(그 사람의 버퍼 안 글 전부).
 - 콘솔: 최근 N개 가리기, 사람별 가리기(`people` 에서 고름). 둘 다 인라인 2단계 확인.
 - `hidePlan`: 방장·부방장·봇·피드·이미 가린 글·명령 글 제외, 300개 상한. 실행은 방별 작업 1개(진행 중이면 `busy`), 콘솔 작업은 방마다 끝난 뒤 10분 간격(`cooldown`), 300ms 간격, 방 300/30분·봇 600/10분(5.5). 방 안 명령도 같은 방 한도를 쓴다.
-- 결과 안내: `[가리기]\n최근 글 {n}개를 가렸습니다.` + 실패가 있으면 `({m}개는 가리지 못했습니다)`. `room_log 'hide'` 에 개수·실패·누가(`panel`/user_id).
+- 결과 안내: `[글 가리기]\n글 {n}개를 가렸어요.` + 실패가 있으면 `\n({m}개는 가리지 못했어요)`. `room_log 'hide'` 에 개수·실패·누가(`panel`/user_id).
 - 금지어 상한 300(방 설정만. 계정 단위 옛 금지어는 200 그대로).
 
 #### 올킥 방지·입장·퇴장 로그·금지어 검열 (기존 기능을 봇 위에서)
@@ -1357,7 +1392,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
 - 점수는 `authorId` 로 저장하고 `{id: name}` 표로 이름을 보인다(이름 빈 사람 둘이 섞이지 않게).
-- `{앞글자}도움` 은 켜진 게임과 켜진 방 관리 명령(가리기·프로필)을 합쳐 한 줄로.
+- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `방 관리 : …`(켜진 가리기·프로필) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
 - 미니게임만 있는 방에서는 입장·퇴장·홍보·가리기가 조용하다.
 
 ### 7.4 콘솔 칸 (작업 5, id 고정)
@@ -1417,7 +1452,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 13. 미니게임: 방 A 하루 한도가 방 B 를 막지 않음. 끈 게임 → 사용 중지 문구. 이름 빈 두 사람 점수 분리. 미니게임만 있는 방 → `!주사위` 답, 입장 안내·홍보·가리기 조용.
 14. 격리: 방 A 어댑터의 `logsView` 에 방 B 기록 없음.
 15. v2 권리: `macro_until` 지난 고객 기록 → `onInbound` 매크로 없음. `legacy_room_until` 0 → `visitRoom` null.
-16. 입장 오류 매핑: -324 → `link_gone`, -312 → `joining`+`rate_limited`, -815 → `kicked`, -444 → 행은 `rate_limited` + 전역 `join_paused_until`(봇은 `bot_down` 아님), `ptp:2` 실패 → `profile_blocked`, 참여코드 실패 → `passcode_wrong`(9.4 의 가짜 연결로, 실제 `sendPacket` 경로를 탄다).
+16. 입장 오류 매핑: -324 → `link_gone`, -312 → `joining`+`rate_limited`, -815 → `kicked`, -444 → 행은 `rate_limited` + 전역 `join_paused_until`(봇은 `bot_down` 아님), 오픈프로필 입장(`ptp:16`) 거절(`noopen`) → `profile_blocked` 이고 다른 프로필로 다시 보내지 않음, 기본 프로필을 막은 방(`noprof`)도 `ptp:16` 으로 들어감, 모든 JOINLINK 가 `ptp:16`, 참여코드 실패 → `passcode_wrong`(9.4 의 가짜 연결로, 실제 `sendPacket` 경로를 탄다).
 17. 게이트: 미니게임만 산 방(perm 4, `active`)에서 `/v1/bot/hide`·`/v1/bot/unkick`·`/v1/bot/people` → `no_roombot`. 방 관리봇 방이 `waiting_host` 면 `not_active`. unkick 대상이 `bans`·kick 기록에 없으면 `not_kicked`.
 18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐).
 19. 권한 읽기: CHATONROOM 응답 `{olu:{lmt:4}}` → `active`, `olu` 없음 + MEMBER `{members:[{mt:2}]}` → `waiting_host`, 둘 다 없음 → 상태 유지.
@@ -1426,36 +1461,42 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 22. 다시 접속 금지: JOINLINK 가 알 수 없는 status → `client.close`/새 로그인 없이 `getChats` 확인만. 이미 그 `li` 의 방에 있으면 JOINLINK 를 보내지 않음.
 23. 예산: 봇 시간 예산 20 을 다 쓰면 21번째 입장은 `rate_limited` + `next_try_at` = 예산 복귀 시각. 조회 예산이 없으면 `/v1/bot/resolve` 가 `budget`.
 24. 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다. 방 A 강퇴 11번째(1시간 안) → `skip`.
+27. 오픈프로필(D12, 5.8): SYNCLINK 걸러내기(lt 1 + `op`/`/me/` 만, 남의 것·lt 2·`/o/` 뺌). (1) 오픈프로필 1개 → JOINLINK `ptp:16` + 그 `pli`, 방 구성원 이름·입장 안내 = 오픈프로필 이름, `bot_accounts` 칸 기록, `/v1/bot/status`·`/v1/bot/room` 의 `profile:'open'`, 트레이스(`raw SYNCLINK`·`CHATONROOM.olu`, `pc`·`tk` 가림). (2) 오픈프로필 없음 → `bot_no_open_profile`(`none`), JOININFO·JOINLINK 없음. (3) 오픈프로필을 만들면(SYNCLINKCR) 스스로 다시 입장. (4) 2개 → 고르지 않으면 첫 번째, 고르면 그것(이미 들어간 방은 `other`), 고른 것이 사라지면 `gone`(입장 멈춤), 자동으로 돌리면 지난번 것으로 다시 입장. (5) 기본 프로필로 들어가 있는 방 → `off` 면 스스로 바꾸지 않음, 관리자 요청에 `UPLINKPROF` 1번(권한·상태 유지, LEAVE·JOINLINK 없음), `auto` 면 부방장 대기 방을 바꾸고 새 이름 안내. (6) `UPLINKPROF` 거절(`noopen`) → 방 그대로, `fail` 기록, 24시간 안에 다시 보내지 않음, 나가지 않음. 관리자 `rejoin` → LEAVE → JOININFO → JOINLINK `ptp:16`, 새 이름으로 입장 안내. (8) SYNCLINK 실패 + 남긴 값 없음 → 행은 `queued`(오류 아님), 관리자 다시 읽기에 성공하면 입장. 남긴 값이 있으면 실패해도 `ok`. 링크 확인은 이 계정 오픈프로필만. (9) `ptp:16` 응답 유실 → 방 목록으로 성공 처리, 방 프로필 `open`.
 
-### 7.8 `room_log.kind` 와 콘솔 한 줄
+### 7.8 `room_log.kind` 와 패널 한 줄
 
 | kind | 한 줄 (`text`) |
 |---|---|
 | `join` `leave` | (기록 표가 따로 그림, 조치 기록에는 넣지 않음) |
-| `churn` | 들낙 감지 · {이름} {M}분 {n}회 · {경고/내보냄} |
-| `kick` | 내보냄 · {이름} · {사유: 들낙/퇴장/홍보/수동} |
-| `kick_fail` | 내보내지 못함 · {이름} · {사유} |
+| `churn` | 들낙 감지 · {이름} {M}분 {n}회 · {경고/내보내기/내보내기 실패} |
+| `kick` | 내보내기 · {이름} · {사유: 들낙/퇴장/홍보/수동} |
+| `kick_fail` | 내보내기 실패 · {이름} · {사유} |
 | `unkick` | 내보내기 해제 · {이름} |
 | `promo` | 홍보 금지 · {이름} · 경고 {n}회 |
-| `hide` | 가리기 · {n}개 (실패 {m}개) · {콘솔/방장} |
+| `hide` | 글 가리기 · {n}개 (실패 {m}개) · {패널/방장} |
 | `cover` | 금지어 가림 · {이름} |
 | `perm` | 부방장 지정 감지 / 부방장 해제 감지 |
 | `wave` | 올킥 감지 · {n}명 |
-| `state` | 입장 · 오류({짧은 사유}) · 다시 시도 |
-| `skip` | 한도 초과로 건너뜀 · {종류} |
+| `state` | K bot 입장 완료 · 오류({짧은 사유}) · K bot 입장 다시 시도 |
+| `skip` | {K bot 한도 초과로 건너뜀 / 올킥 감지 중이라 건너뜀 / 실패가 이어져 잠시 멈춤 / 늦어져서 건너뜀} · {종류} |
 
 ### 7.9 입장 안내 (방에 처음 들어갔을 때 1회)
 
-- 방 관리봇 포함: `[K bot]\n방 관리봇이 입장했습니다.\n방장이 이 계정(「{봇 닉네임}」)을 부방장으로 지정하면 동작합니다.` (+ 미니게임도 있으면 `\n미니게임은 {앞글자}도움 으로 확인하십시오.`)
-- 미니게임만: `[K bot]\n미니게임봇이 입장했습니다.\n{앞글자}도움 으로 명령어를 확인하십시오.` (games 기본 켜짐이라 바로 답한다, 7.1. 고객이 games 를 끈 뒤에 들어간 방이면 둘째 줄 대신 `콘솔에서 미니게임을 켜면 동작합니다.`)
-- 부방장 지정 감지 때(처음 1회): `[K bot]\n부방장 지정을 확인했습니다. 콘솔에서 켠 방 관리 기능이 동작합니다.` (D15. 켜지 않은 기능을 "시작합니다"라고 말하지 않는다)
-- 닉네임은 봇마다 달라야 방장이 진짜 봇을 고를 수 있다(D12). 닉네임을 아직 못 읽었으면 `「…」` 부분을 뺀다.
+방 메시지는 짧은 해요체다(docs/TONE.md 「K bot 방 메시지」). 방 사람들은 계정·패널·회원을 모르므로 봇은 이름으로, 설정하는 사람은 방장님·관리자로 쓴다. 문구의 단일 소스는 `sender/src/roomfeat.mjs`(`joinNotice`·`roombotAddedNotice`·`PROMOTED_NOTICE`·`profileChangedNotice`)이고, 조사는 `josa()` 가 이름의 끝소리로 고른다.
+
+- 방 관리봇 포함: `[K bot]\n방 관리봇이 입장했어요.\n방장님이 「{봇 이름}」을(를) 부방장으로 지정하면 방 관리 기능이 시작돼요.` (+ 미니게임도 있으면 `\n「{앞글자}도움」을 입력하면 미니게임 명령어를 볼 수 있어요.`). `{봇 이름}` 은 그 방에서 보이는 이름 = 오픈프로필 이름(D12, 5.8). 이름을 모르면 `K bot을`.
+- 미니게임만: `[K bot]\n미니게임봇이 입장했어요.\n「{앞글자}도움」을 입력하면 명령어를 볼 수 있어요.` (games 기본 켜짐이라 바로 답한다, 7.1. 고객이 games 를 끈 뒤에 들어간 방이면 둘째 줄 대신 `관리자가 미니게임을 켜면 바로 쓸 수 있어요.`)
+- 부방장 지정 감지 때(처음 1회): `[K bot]\n부방장으로 지정되었어요. 이제 켜 둔 방 관리 기능이 작동해요.` (D15. 켜지 않은 기능을 "시작합니다"라고 말하지 않는다)
+- 미니게임봇으로 들어가 있는 방에 방 관리봇을 더했을 때(5.4, 그 봇이 그 방에서 방 관리봇 안내를 한 적이 없으면 1회): `[K bot]\n방 관리봇이 추가되었어요.\n방장님이 「{봇 이름}」을(를) 부방장으로 지정하면 방 관리 기능이 시작돼요.`
+- 부방장 지정 대기 방에서 봇 프로필을 오픈프로필로 바꾼 뒤(5.8, 1회): `[K bot]\nK bot 프로필이 「{이름}」(으)로 바뀌었어요.\n방장님이 「{이름}」을(를) 부방장으로 지정하면 방 관리 기능이 시작돼요.`
+- "처음 1회"는 **그 봇 계정이 그 방(chat)에서** 처음일 때다. `room_state.runtime` 에 `welcomed:{chat, by: 봇 device_id, roombot}`·`promoted:{chat, by}` 로 남겨, 다른 봇으로 옮긴 뒤(D17)나 링크를 바꿔 다른 방에 들어간 뒤에는 새 봇이 입장 안내(닉네임)와 부방장 지정 확인을 다시 한다. 미니게임봇으로만 안내한 방에 방 관리봇을 더한 뒤 다시 들어가면 방 관리봇 입장 안내를 한다.
+- 이름(오픈프로필 이름)은 봇마다 달라야 방장이 진짜 봇을 고를 수 있다(D12). 이름을 아직 못 읽었으면 `「…」` 부분을 뺀다.
 
 ---
 
 ## 8. 보안
 
-1. **비밀번호**: `crypto.scrypt` N=2^15·r=8·p=1·32바이트, salt 16바이트, `maxmem: 256*N*r` 명시, 저장 형식 `$scrypt$ln=15,r=8,p=1$<salt b64url>$<dk b64url>`, 매개변수가 다르면 성공 로그인 때 재해시. NFKC 정규화. 동시 해시 2개 세마포어 + **대기열 상한 20**(넘으면 503 `busy` `잠시 뒤 다시 시도하십시오.`, 512MB 인스턴스에서 대기 요청이 쌓이지 않게). 해시 전에 레이트리밋·`loginBlockedMs`·`loginSlowMs` 를 먼저 본다(3.1). 없는 아이디도 더미 해시로 같은 시간. `AUTH_SCRYPT_LOG_N`(10~17, 시험 10).
+1. **비밀번호**: `crypto.scrypt` N=2^15·r=8·p=1·32바이트, salt 16바이트, `maxmem: 256*N*r` 명시, 저장 형식 `$scrypt$ln=15,r=8,p=1$<salt b64url>$<dk b64url>`, 매개변수가 다르면 성공 로그인 때 재해시. NFKC 정규화. 동시 해시 2개 세마포어 + **대기열 상한 20**(넘으면 503 `busy` `요청이 많아 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.`, 512MB 인스턴스에서 대기 요청이 쌓이지 않게). 해시 전에 레이트리밋·`loginBlockedMs`·`loginSlowMs` 를 먼저 본다(3.1). 없는 아이디도 더미 해시로 같은 시간. `AUTH_SCRYPT_LOG_N`(10~17, 시험 10).
 2. **세션**: 토큰 32바이트 무작위(base64url), DB 에는 sha256 만. 쿠키 `kb_s` `Path=/; HttpOnly; SameSite=Lax; Secure(https); Max-Age=30일`. 읽기는 30초 메모리 저장(종료·차단 때 그 회원 항목 지움), `last_seen_at` 은 10분에 1번만 갱신, 남은 기간 15일 미만이면 30일로 연장 + 쿠키 재발급. 비밀번호 변경·Google 재설정·관리자 차단 = 다른 세션 전부 종료.
 3. **CSRF**: `sameOriginWrites` — GET/HEAD/OPTIONS 외 요청이 3.1 의 경로면 (가) `application/json` 아니면 415 (나) `Origin` 이 있으면 요청 origin 또는 `purchaseBase` origin 과 같아야 함(`null` 거절) (다) `Sec-Fetch-Site` 가 있으면 `same-origin` 이어야 함. `/api/deposit-hook`·`/admin/*` 제외(`/v1/*` 는 공개되지 않는다). 부작용 있는 GET 없음(로그아웃도 POST, 링크 조회도 POST `/api/room-preview`).
 4. **소유 검사**: 콘솔·구매의 모든 `device_id`·`install_id`·주문 id 는 회원 소유를 서버가 확인. `bot.` id 는 고객 경로에서 404, sender 도 고객용 `/v1` 읽기에서 404(이중).
@@ -1610,19 +1651,23 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 - `sendPacket(method, body)` 응답(node-kakao 응답 모양, `{statusCode, body:{status, …}}`):
   - `JOININFO {lu}` → 코드에 `gone` → `status:-324`; `dm` → `ol.lt=1`; 그 밖 `{ol:{li: Long, ln, lu, lt:2, pv: (pass ? 64 : 0) | (noprof ? 0 : 32)}}`.
   - `CHECKJOIN {li, pc}` → `pc==='0000'` 이면 `{tk:'t'}`, 아니면 `status:-802`(가정 값, 10.1 #2 와 같게).
-  - `JOINLINK {li, ptp, nn?, tk?}` → 코드에 `full` → `status:-501`; `rate` → 처음 1번 `-312`; `noprof` 이고 `ptp===1` → `status:-804`(가정 값); `bans` 에 봇 → `-815`; 성공 `{chatRoom:{chatId: Long}, olu:{lmt:2}}` 그리고 멤버 추가. `FAKE_JOIN_MS`(기본 1500) 뒤 응답.
-  - `CHATONROOM {chatId}` → `{olu:{lmt: 지금 봇 mt}}`(`/v1/fake/perm` 이 `drop_olu:true` 면 `olu` 를 빼서 MEMBER 경로를 시험).
-  - `MEMBER {chatId, memberIds}` → `{members:[{userId, mt}]}`.
+  - `JOINLINK {li, ptp, pli?, nn?, tk?}` → 코드에 `full` → `status:-501`; `rate` → 처음 1번 `-312`; `noprof` 이고 `ptp===1` → `status:-804`(가정 값); `noanon` 이고 `ptp!==16` → `-804`; `noopen` 이고 `ptp===16` → `-804`; `ptp===16` 인데 `pli` 가 그 계정의 오픈프로필이 아니면 `-804`; `bans` 에 봇 → `-815`; 성공 `{chatRoom:{chatId: Long}, olu:{userId, lmt:2, ptp, pli?, nn}}` 그리고 멤버 추가(이름 = 오픈프로필 이름). `FAKE_JOIN_MS`(기본 1500) 뒤 응답.
+  - `CHATONROOM {chatId}` → `{olu:{userId, lmt: 지금 봇 mt, ptp, pli?, nn}}`(`ptp` 없는 옛 멤버는 1, `/v1/fake/perm` 이 `drop_olu:true` 면 `olu` 를 빼서 MEMBER 경로를 시험).
+  - `MEMBER {chatId, memberIds}` → `{members:[{userId, type:1000, mt, pli?(오픈프로필일 때만), nickName}]}`.
+  - `SYNCLINK {ltk}` → 그 계정의 오픈프로필(`lt:1`, `lu` = `open.kakao.com/me/…`, `op`, `olu{userId, nn, ptp:2}`) + 걸러져야 할 링크 2개(이 계정이 만든 방 `lt:2`, 1:1 오픈채팅 `lt:1` `/o/`). 봇 계정은 따로 정하지 않으면 오픈프로필 1개(`K봇 오픈 <4 hex>`, 닉네임과 다름). `syncFail` 이면 `status:-500`.
+  - `UPLINKPROF {li, ptp, pli}` → 방에 없으면 `-403`, `noopen` 이고 `ptp===16` 이거나 `pli` 가 그 계정 것이 아니면 `-804`, 성공이면 멤버 `ptp`·`pli`·이름을 바꾸고 방에 SYNCLINKPF `{c, li, olu}` 푸시 + `{olu}`.
+  - `JOININFO {lu: open.kakao.com/me/…}` → 그 오픈프로필 링크(`lt:1`, `olu.userId` = 주인), 없으면 `-324`.
   - `KICKMEM`·`KLDELITEM`·`REWRITE`·`KICKLEAVE` → 봇 `mt & 5` 가 아니면 `status:-203`(가정 값), 아니면 성공하고 상태를 바꾼다(나간 사람 KICKMEM 은 `FAKE_KICK_LEFT=0` 이면 실패 — 7.2(b) 의 대체 경로 시험).
   - `getChats({all:true})` → 봇이 들어간 방들 `{chat_id, link_id, type:'OM'}`.
 - 푸시(`onPush` 처리기로 진짜 모양을 보냄):
   - `/v1/fake/perm {install_id, perm, drop_olu?}` → 그 방의 봇 `mt` 를 바꾸고 SYNCMEMT `{c, li, mids:[봇], mts:[perm]}` + 피드 11(승격)·12(강등) MSG `{chatLog:{type:0, message: JSON.stringify({feedType, members:[{userId:봇}]})}}` 를 보낸다. 상태 전환은 sender 의 실제 처리(3초 뒤 권한 읽기)로 일어난다.
+  - `/v1/fake/profiles {device_id|user_id, profiles?:[{name, li?, url?}], fail?}` → 그 계정의 오픈프로필 목록을 바꾸고(새 것 SYNCLINKCR `{ol}`, 없어진 것 SYNCLINKDL `{li}` 푸시) `fail` 이면 SYNCLINK 를 실패시킨다.
   - `/v1/fake/event {install_id, kind}`: `kicked` → LINKKICKED `{c, li, chatLog:{type:0, message:'{"feedType":6,"members":[{"userId":<봇>}]}'}}` + 봇을 `bans` 에 넣음; `deleted` → LNKDELETED `{li}`; `join`/`leave`(user_id, name) → NEWMEM / DELMEM `{chatLog:{logId, sendAt, type:0, message: 피드 4 / 2 JSON}}`; `message`(user_id, name, text, type, attachment?) → MSG `{chatLog:{logId, authorId, type, message, attachment, sendAt}, authorNickname}`; `kickout`(reason) → KICKOUT `{reason}`.
 - 고객 계정: `/v1/register/begin` — 이메일에 `phone` 이 있으면 `confirm_on_phone`(passcode `4829`, 300초) 후 confirm 에서 `ok`, 비밀번호 `wrong` 이면 `bad_credentials`, 그 외 즉시 `ok`. 붙은 슬롯은 `connected:true`, `/v1/chats` 는 가짜 오픈채팅방 2개, 발송은 가짜 log_id 로 성공.
 - 봇 계정: 같은 등록 규칙. 등록되면 `bot_accounts.state='connected'`, 닉네임 `K bot 테스트 <n>`(봇마다 다르게).
 - `/v1/bot/resolve`: 위 JOININFO 응답을 그대로 쓴다(진짜 해석 코드). `link_id` = 코드의 sha256 앞 12 hex 를 10진으로, `name` = `테스트방 ` + 코드.
 - 가짜 모드에서도 DB 쓰기·`room_log`·설정 반영은 진짜와 같다. 예산(5.3)도 같게 적용하되 `BOT_JOIN_PER_HOUR` 등은 시험이 환경변수로 늘린다.
-- selfcheck 의 7.7 #16·#19~#23 은 이 가짜 연결을 프로세스 안에서 만들어 쓴다(HTTP 없이).
+- selfcheck 의 7.7 #16·#19~#23·#27 은 이 가짜 연결을 프로세스 안에서 만들어 쓴다(HTTP 없이).
 
 ### 9.5 시험 계획
 
@@ -1673,8 +1718,12 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `BOT_ROOM_CAP` | 20 | 새 봇 기본 상한 |
 | `BOT_JOIN_GAP_MS` `BOT_PERM_POLL_MS` `BOT_ACTIVE_CHECK_MS` | 45000 / 60000 / 600000 | sender |
 | `BOT_JOIN_PER_HOUR` `BOT_JOIN_PER_DAY` `BOT_RESOLVE_PER_MIN` `BOT_RESOLVE_PER_DAY` | 20 / 80 / 10 / 300 | sender, 봇마다(5.3) |
+| `BOT_PROFILE_CONVERT` | `off` | 기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸기. `off` = 관리자 버튼만, `auto` = 점검 때 자동(5.8) |
+| `BOT_PROFILE_SWITCH_PER_HOUR` `BOT_PROFILE_RETRY_MS` | 6 / 86400000 | 봇마다 시간당 프로필 바꾸기 상한, 거절된 방을 자동으로 다시 바꿔 보기까지 |
+| `BOT_PROFILE_BLOCK_STATUS` | `-804` | 오픈프로필 입장 거절로 볼 카카오 status(쉼표 목록, `none` = 없음). 실측 뒤 고친다(10.1 #9) |
+| `BOT_PROFILE_READ_MS` `BOT_PROFILE_READ_GAP_MS` `BOT_PROFILE_PUSH_DELAY_MS` | 21600000 / 60000 / 5000 | 오픈프로필 목록 다시 읽기 주기, 다시 읽기 최소 간격, 푸시 뒤 기다림 |
 | `ROOM_LOG_KEEP_DAYS` | 30 | |
-| `SENDER_TRACE_PUSH` | — | 실측용 |
+| `SENDER_TRACE_PUSH` | — | 실측용(오픈프로필 관련 패킷 모양도, 5.3 끝) |
 | `SENDER_FAKE` `FAKE_JOIN_MS` `FAKE_KICK_LEFT` | — | **시험 전용** |
 
 DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설명(15·31·59·106~139 줄)도 작업 1 이 고친다. `RATE_PANEL_LOGIN_PER_MIN` 줄은 "쓰지 않음"으로 표시한다.
@@ -1695,7 +1744,7 @@ DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설�
 6. 두 봇 계정이 같은 방에서 본 `chat_id`·`li` 가 같은지.
 7. 오픈채팅 멤버의 `status_message` 가 오는지, MSG 푸시의 `authorNickname` 유무, 카드 타입 번호(71·17·9 외).
 8. 방장 화면의 실제 메뉴 이름(`부방장 관리`, `내보내기 목록`/`내보낸 사람` 등) — 7.9·RoomView `detail`·5.6 `kicked` 문구를 거기에 맞춘다.
-9. 기본 프로필 참여를 막은 방(`ol.pv & 32 == 0`)에서 `JOINLINK ptp:1` 의 status, `ptp:2` + `nn` + `pp:''` 로 입장되는지와 필요한 다른 칸. 안 되면 `profile_only` 방은 미리 보기에서 막고(`profile_blocked` 를 주문 전 오류로) 이 문서를 고친다.
+9. 오픈프로필(D12, 5.8, `DEPLOY.md` 의 실측 순서): SYNCLINK 응답에서 오픈프로필 항목의 모양(`lt`·`lu` 가 `/me/`·`op`·`olu.nn`·`olu.ptp`, 1:1 오픈채팅 링크와 구분되는지), `JOINLINK ptp:16 + pli` 의 status·`olu`(`ptp:16`, `pli`, `nn`, `userId` = 봇), 기본 프로필 참여를 막은 방(`ol.pv & 32 == 0`)과 연 방 모두에서 오픈프로필로 입장되는지(32 비트의 뜻), 거절될 때의 status(→ `BOT_PROFILE_BLOCK_STATUS`), `UPLINKPROF` 의 status·`olu`·부방장 권한 유지·방에 보이는 변경 알림, 오픈프로필을 지우면 들어가 있는 방이 어떻게 되는지, 한 계정이 가질 수 있는 오픈프로필 수.
 10. KICKOUT 본문의 `reason` 값(다른 기기 로그인 0, 서버 변경 -2)과 agent-messenger 패치 뒤 세션 이벤트에 실리는지.
 11. 내보내진 뒤 JOINLINK 가 -815 인지 다른 값인지(5.3 6 매핑), CHATONROOM 응답에 `olu.lmt` 가 오는지(D13).
 
@@ -1747,7 +1796,7 @@ DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설�
 | 286 FAQ desc | 그 밖의 문의는 구매 신청 시 남긴 연락처로 안내합니다. | 그 밖의 궁금한 점은 문의하십시오. + `<button type="button" class="btn sm" data-support>문의하기</button>` |
 | fa1 | …키가 발급됩니다… 그 키로 콘솔에 로그인하면… | 대부분 바로 사용합니다. 주문 때 안내된 **정확한 금액**(뒷자리까지)을 입금하면 `<span data-manual="관리자 확인 후">통상 1~2분 안에 자동으로</span>` 상품이 회원 계정에 적용됩니다. 카카오톡 매크로는 콘솔에서 카카오 계정을 등록하면 바로 발송하고, 방 상품은 K bot 계정이 방에 입장한 뒤 동작합니다. 입금 금액이 다르거나 같은 금액의 대기 주문이 겹치면 관리자가 확인하며, 수 시간이 걸릴 수 있습니다. |
 | fq2·fa2 | 키 1개로 카카오 계정을 몇 개까지… 최대 8개… 계정마다… | Q `카카오 계정은 몇 개까지 등록합니까?` A 카카오톡 매크로를 이용하는 동안 회원 1명당 3개까지 등록합니다. 설정과 기록은 등록한 계정별로 저장되고, 주요 알림은 등록한 모든 계정의 1:1 대화를 한 목록으로 보여 줍니다. 답장은 그 대화를 받은 계정으로 발송됩니다. |
-| fa4 | 선택한 방에… 기록은 두 기능을 켠 방에서만… | 방 관리봇이 설치된 방에 누군가 들어오거나 나가면 K bot 계정이 **[입장안내]** 또는 **[퇴장안내]**를 보냅니다. 그 사람을 한 번 멘션하고, 오픈프로필 링크와 시각을 적습니다. 프로필 로그를 켜면 닉네임이나 프로필 사진을 바꾼 사람에 대해 **[프로필 변경 감지]** 안내를 보냅니다. K bot 계정이 부방장일 때 동작합니다. |
+| fa4 | 선택한 방에… 기록은 두 기능을 켠 방에서만… | 방 관리봇을 설치한 방에 누군가 들어오거나 나가면 K bot이 **[입장 안내]** 또는 **[퇴장 안내]**를 보냅니다. 그 사람을 한 번 멘션하고, 오픈프로필 링크와 시각을 적습니다. 프로필 기록을 켜면 닉네임이나 프로필 사진을 바꾼 사람이 있을 때 방에 **[프로필 변경 감지]** 안내가 올라갑니다. K bot이 부방장일 때 동작합니다. |
 | fa5 | …계정마다 설정합니다… | 막지 않습니다. 정해진 시간 안에 정해진 수 이상 강퇴가 일어나면 올킥으로 감지하여 기록합니다. 감지 시간(5~300초)과 강퇴 수(3~30건)는 방별로 설정합니다. 강퇴된 사람을 다시 초대하지 않습니다. |
 | fa6 | 이 계정이… 최대 200개… 사람을 내보내지 않습니다. | K bot 계정이 그 방의 부방장일 때 동작합니다. 기본 욕설 목록과 직접 추가한 단어(최대 300개, 단어당 30자), 선택 시 링크가 들어간 글을 가립니다. 방장과 부방장이 올린 글은 가리지 않습니다. 방 관리봇은 들낙 감지·나갔을 때 내보내기·홍보 금지에서 내보내기를 켠 경우에만 사람을 내보내며, 방장·부방장·제외할 사람은 내보내지 않습니다. |
 | fq8·fa8 | 키 1개로 여러 곳에서… 같은 키로… | Q `여러 기기에서 콘솔에 들어갈 수 있습니까?` A 들어갈 수 있습니다. 콘솔 로그인은 기기에 묶이지 않으며, 회원 아이디로 동시에 기기 3대까지 로그인합니다. 4번째 기기에서 로그인하면 가장 오래 쓰지 않은 기기가 로그아웃됩니다. 비밀번호를 다른 사람과 공유하지 마십시오. |

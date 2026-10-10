@@ -8,13 +8,17 @@
 //   gone   JOININFO status -324(링크 없음)
 //   dm     JOININFO ol.lt = 1(그룹 방 아님)
 //   pass   참여코드 필요(pv & 64), 참여코드는 '0000'
-//   noprof 기본 프로필 참여 막음(pv & 32 없음) — ptp:1 이면 -804
-//   noanon 기본 프로필도 닉네임 프로필도 막음 — ptp:2 도 -804
+//   noprof 기본 프로필 참여 막음(pv & 32 없음) — ptp:1 이면 -804(오픈프로필 ptp:16 은 받는다)
+//   noanon 기본 프로필도 닉네임 프로필도 막음 — ptp:2 도 -804(오픈프로필 ptp:16 은 받는다)
+//   noopen 오픈프로필(ptp:16) 입장·프로필 바꾸기(UPLINKPROF ptp:16)를 -804 로 거절
 //   full   JOINLINK -501
 //   rate   JOINLINK 처음 1번 -312
 //   ipblock JOINLINK -444
 //   weird  JOINLINK 알 수 없는 status -9999
 //   lost   JOINLINK 응답 유실(statusCode -1) — 실제로는 들어가 있다
+// 봇 계정(users[id].bot)은 기본으로 오픈프로필 1개를 갖는다(users[id].profiles, /v1/fake/profiles 로 바꿈).
+// SYNCLINK 는 그 오픈프로필(lt 1, /me/ 주소, op 표지) + 걸러져야 할 링크 2개(이 계정이 만든 방 lt 2, 1:1 오픈채팅 /o/)를 준다.
+// users[id].syncFail 이면 SYNCLINK 가 -500. 방 구성원은 ptp(1 기본·2 닉네임·16 오픈프로필)·pli 를 갖는다(없으면 ptp 1).
 // 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -40,6 +44,11 @@ export function fakeUserId(deviceId) {
 
 export function fakeNick(userId) {
   return 'K bot 테스트 ' + sha('nick:' + userId).slice(0, 6)
+}
+
+/** 가짜 봇 계정의 기본 오픈프로필 이름(카카오톡 닉네임과 다르다). */
+export function fakeProfileName(userId) {
+  return 'K봇 오픈 ' + sha('open-name:' + userId).slice(0, 4)
 }
 
 function str(v) {
@@ -169,12 +178,63 @@ class FakeServer {
     return this.users[id]
   }
 
+  /** 그 계정의 오픈프로필 [{li,name,url}]. 봇 계정은 따로 정하지 않았으면 1개. */
+  profilesOf(userId) {
+    const id = str(userId)
+    const u = this.user(id)
+    if (Array.isArray(u.profiles)) return u.profiles
+    if (!u.bot) return []
+    const h = sha('open:' + id)
+    return [{ li: decimalOf(h.slice(0, 12)), name: fakeProfileName(id), url: 'https://open.kakao.com/me/kb' + h.slice(0, 8) }]
+  }
+
+  /** /v1/fake/profiles: 오픈프로필 목록 바꾸기(null 이면 그대로) + 이 계정에 SYNCLINKCR·SYNCLINKDL 푸시. */
+  setProfiles(userId, list, fail) {
+    const id = str(userId)
+    const u = this.user(id)
+    const before = this.profilesOf(id)
+    if (Array.isArray(list)) {
+      u.profiles = list.map((p, i) => {
+        const h = sha('open:' + id + ':' + i + ':' + String((p && p.name) || ''))
+        return {
+          li: p && /^[1-9][0-9]*$/.test(String(p.li || '')) ? String(p.li) : decimalOf(h.slice(0, 12)),
+          name: String((p && p.name) || ('오픈프로필 ' + (i + 1))),
+          url: p && typeof p.url === 'string' && p.url ? p.url : 'https://open.kakao.com/me/kb' + h.slice(0, 8),
+        }
+      })
+    }
+    if (fail !== undefined) u.syncFail = !!fail
+    this.save()
+    const after = this.profilesOf(id)
+    for (const p of after) if (!before.some((q) => q.li === p.li)) this.pushTo(id, resp('SYNCLINKCR', { ol: this.profileLink(id, p) }))
+    for (const p of before) if (!after.some((q) => q.li === p.li)) this.pushTo(id, resp('SYNCLINKDL', { li: L(p.li) }))
+    return { ok: true, profiles: after }
+  }
+
+  profileLink(userId, p) {
+    return {
+      li: L(p.li), ln: p.name, lu: p.url, lt: 1, ac: true, pv: L('2'), dcl: 100,
+      olu: { userId: L(str(userId)), nn: p.name, ptp: 2, lmt: 1 },
+      op: { desc: '', tags: [] },
+    }
+  }
+
+  /** 방 구성원 m 의 오픈링크 사용자 모양(olu) */
+  oluOf(r, userId) {
+    const m = r.members[str(userId)]
+    const ptp = m && m.ptp ? Number(m.ptp) : 1
+    const out = { userId: L(str(userId)), lmt: m ? Number(m.mt) : 2, ptp, nn: m ? m.nick : '' }
+    if (ptp === 16 && m && m.pli) out.pli = L(m.pli)
+    return out
+  }
+
   record(client, method, body, out) {
     const row = { at: Date.now(), user: client ? client.userId : '', method, status: out ? (out.statusCode !== 0 ? out.statusCode : (out.body && out.body.status) || 0) : null }
     const c = body && (body.c || body.chatId)
     if (c) row.chat = str(c)
     if (body && body.li) row.li = str(body.li)
     if (body && body.ptp) row.ptp = body.ptp
+    if (body && body.pli) row.pli = str(body.pli)
     if (body && body.mid) row.mid = str(body.mid)
     if (body && body.kid) row.kid = str(body.kid)
     this.packets.push(row)
@@ -198,6 +258,47 @@ class FakeServer {
 
   async handle(client, method, b) {
     const me = client.userId
+    if (method === 'JOININFO' && /open\.kakao\.com\/me\//.test(String(b.lu || ''))) {
+      // 오픈프로필 링크(관리자가 붙여 넣은 /me/ 주소 확인용)
+      for (const [uid, u] of Object.entries(this.users)) {
+        if (!u) continue
+        const p = this.profilesOf(uid).find((x) => x.url === String(b.lu))
+        if (p) return resp(method, { status: 0, ol: this.profileLink(uid, p) })
+      }
+      return resp(method, { status: -324 })
+    }
+    if (method === 'SYNCLINK') {
+      const u = this.user(me)
+      if (u.syncFail) return resp(method, { status: -500 })
+      const h = sha('own:' + me)
+      const ols = this.profilesOf(me).map((p) => this.profileLink(me, p))
+      // 걸러져야 하는 링크: 이 계정이 만든 오픈채팅방(lt 2), 1:1 오픈채팅 링크(lt 1, /o/, 표지 없음)
+      ols.push({ li: L(decimalOf(h.slice(0, 12))), ln: '내가 만든 방', lu: 'https://open.kakao.com/o/own' + h.slice(0, 6), lt: 2, ac: true, ml: 300,
+        olu: { userId: L(me), nn: u.nick, ptp: 1, lmt: 1 } })
+      ols.push({ li: L(decimalOf(h.slice(12, 24))), ln: '1:1 문의', lu: 'https://open.kakao.com/o/dm' + h.slice(6, 12), lt: 1, ac: true, dcl: 10,
+        olu: { userId: L(me), nn: u.nick, ptp: 1, lmt: 1 } })
+      return resp(method, { status: 0, ols, ltk: 1 })
+    }
+    if (method === 'UPLINKPROF') {
+      const r = this.byLi(b.li)
+      if (!r || r.deleted || !this.isMember(r, me)) return resp(method, { status: -403 })
+      const m = r.members[me]
+      const ptp = Number(b.ptp)
+      if (ptp === 16) {
+        if (has(r.code, 'noopen')) return resp(method, { status: -804 })
+        const p = this.profilesOf(me).find((x) => x.li === str(b.pli))
+        if (!p) return resp(method, { status: -804 })
+        Object.assign(m, { ptp: 16, pli: p.li, nick: p.name })
+      } else if (ptp === 2) {
+        Object.assign(m, { ptp: 2, pli: null, nick: String(b.nn || m.nick) })
+      } else {
+        Object.assign(m, { ptp: 1, pli: null, nick: this.user(me).nick })
+      }
+      this.save()
+      const olu = this.oluOf(r, me)
+      this.pushRoom(r, resp('SYNCLINKPF', { c: L(r.chatId), li: L(r.li), olu }))
+      return resp(method, { status: 0, olu })
+    }
     if (method === 'JOININFO') {
       const code = codeOf(b.lu)
       const r = this.room(code)
@@ -226,21 +327,29 @@ class FakeServer {
       }
       if (has(code, 'ipblock')) return resp(method, { status: -444 })
       if (has(code, 'weird')) return resp(method, { status: -9999 })
-      if (has(code, 'noprof') && b.ptp === 1) return resp(method, { status: -804 })
-      if (has(code, 'noanon')) return resp(method, { status: -804 })
+      const ptp = Number(b.ptp) || 1
+      if (has(code, 'noprof') && ptp === 1) return resp(method, { status: -804 })
+      if (has(code, 'noanon') && ptp !== 16) return resp(method, { status: -804 })
+      if (has(code, 'noopen') && ptp === 16) return resp(method, { status: -804 })
+      let prof = null
+      if (ptp === 16) {
+        prof = this.profilesOf(me).find((x) => x.li === str(b.pli)) || null
+        if (!prof) return resp(method, { status: -804 })
+      }
       if (r.bans.includes(me)) return resp(method, { status: -815 })
       if (r.passcode && b.tk !== 't') return resp(method, { status: -802 })
       if (this.joinMs) await new Promise((ok) => setTimeout(ok, this.joinMs))
       const u = this.user(me)
-      r.members[me] = { mt: 2, nick: b.nn ? String(b.nn) : u.nick, photo: '', status: null }
+      const nick = prof ? prof.name : (ptp === 2 && b.nn ? String(b.nn) : u.nick)
+      r.members[me] = { mt: 2, nick, ptp, pli: prof ? prof.li : null, photo: '', status: null }
       this.save()
       if (has(code, 'lost')) return resp(method, {}, -1)
-      return resp(method, { status: 0, chatRoom: { chatId: L(r.chatId), type: 'OM' }, olu: { lmt: 2 } })
+      return resp(method, { status: 0, chatRoom: { chatId: L(r.chatId), type: 'OM' }, ol: { li: L(r.li), lt: 2 }, olu: this.oluOf(r, me) })
     }
     if (method === 'CHATONROOM') {
       const r = this.byChat(b.chatId)
       if (!r || !this.isMember(r, me)) return resp(method, { status: -403 })
-      return resp(method, r.dropOlu ? { status: 0, chatId: L(r.chatId) } : { status: 0, chatId: L(r.chatId), olu: { lmt: this.mtOf(r, me) } })
+      return resp(method, r.dropOlu ? { status: 0, chatId: L(r.chatId) } : { status: 0, chatId: L(r.chatId), olu: this.oluOf(r, me) })
     }
     if (method === 'MEMBER') {
       const r = this.byChat(b.chatId)
@@ -277,7 +386,19 @@ class FakeServer {
           continue
         }
         const r = this.byLi(s)
-        if (r && !r.deleted) ols.push({ li: L(r.li), ln: r.ln, lu: r.lu })
+        if (r && !r.deleted) {
+          ols.push({ li: L(r.li), ln: r.ln, lu: r.lu, lt: 2, pv: L(String((r.passcode ? 64 : 0) | (has(r.code, 'noprof') || has(r.code, 'noanon') ? 0 : 32))) })
+          continue
+        }
+        // 오픈프로필 링크(방 구성원 pli → 1:1 링크, 입장 로그)
+        for (const [uid, u] of Object.entries(this.users)) {
+          if (!u) continue
+          const p = this.profilesOf(uid).find((x) => x.li === s)
+          if (p) {
+            ols.push({ li: L(p.li), ln: p.name, lu: p.url, lt: 1 })
+            break
+          }
+        }
       }
       return resp(method, { status: 0, ols })
     }
@@ -319,7 +440,9 @@ class FakeServer {
     const m = r.members[id]
     return {
       userId: L(id),
+      type: 1000,
       nickName: m.nick,
+      pli: Number(m.ptp) === 16 && m.pli ? L(m.pli) : undefined,
       mt: Number(m.mt),
       pi: m.photo ? m.photo + '?s=small' : '',
       opi: m.photo ? m.photo + '?s=orig' : '',
@@ -498,9 +621,9 @@ function formatMember(m) {
     original_profile_image_url: m.opi || null,
     status_message: m.statusMessage == null ? null : String(m.statusMessage),
     country_iso: null,
-    user_type: null,
+    user_type: m.type == null ? null : Number(m.type),
     open_token: null,
-    open_profile_link_id: null,
+    open_profile_link_id: m.pli ? str(m.pli) : null,
     open_permission: m.mt == null ? null : Number(m.mt),
   }
 }
@@ -890,6 +1013,29 @@ export class MemStore {
 
   async ensureBotAccount(botId, email) {
     if (!this.bots.has(botId)) this.bots.set(botId, { device_id: botId, email, state: 'connected' })
+  }
+
+  async botProfileRows(botIds) {
+    return botIds.filter((id) => this.bots.has(id)).map((id) => {
+      const b = this.bots.get(id)
+      return {
+        device_id: id,
+        open_profiles: b.open_profiles == null ? null : JSON.parse(JSON.stringify(b.open_profiles)),
+        open_profile_pick: b.open_profile_pick || null,
+        open_profile_li: b.open_profile_li || null,
+        open_profile_name: b.open_profile_name || null,
+        open_profile_at: b.open_profile_at || null,
+      }
+    })
+  }
+
+  async botOpenProfile(botId, f) {
+    const b = this.bots.get(botId) || { device_id: botId }
+    if (f && Array.isArray(f.list)) b.open_profiles = JSON.parse(JSON.stringify(f.list))
+    if (f && f.li !== undefined) b.open_profile_li = f.li || null
+    if (f && f.name !== undefined) b.open_profile_name = f.name || null
+    if (f && f.at) b.open_profile_at = Number(f.at)
+    this.bots.set(botId, b)
   }
 
   async saveRecord(id, record) {

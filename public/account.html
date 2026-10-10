@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=7">
+<link rel="stylesheet" href="/style.css?v=8">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=7" defer></script>
+<script src="/app.js?v=9" defer></script>
 </head>
 <body data-page="account">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -66,7 +66,7 @@
   <div class="wrap lnav-in">
     <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true"></span>K bot</a>
     <nav class="lnav-links" aria-label="페이지 안 이동">
-      <a href="/#features">기능</a><a href="/#how">동작 방식</a><a href="/#products">가격</a><a href="/#faq">질문</a>
+      <a href="/#features">기능</a><a href="/#how">이용 방법</a><a href="/#products">가격</a><a href="/#faq">자주 묻는 질문</a>
     </nav>
     <nav class="top-nav" aria-label="주요 메뉴">
       <a class="btn ghost hide-s" href="/login" data-nav="login" data-auth="out">로그인</a>
@@ -74,7 +74,7 @@
       <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
       <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
       <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
-      <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
+      <a class="btn primary" href="/panel" data-nav="panel">패널 열기</a>
     </nav>
   </div>
 </header>
@@ -101,7 +101,7 @@
           </section>
 
           <section class="card" id="acc-orders" aria-labelledby="accOrdersH">
-            <div class="card-h"><h2 id="accOrdersH"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-receipt"></use></svg>구매 내역</h2><a class="btn sm" href="/buy">구매 신청</a></div>
+            <div class="card-h"><h2 id="accOrdersH"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-receipt"></use></svg>구매 내역</h2><a class="btn sm" href="/buy">구매</a></div>
             <div id="accOrders" class="acc-list"><div class="state"><span class="spin" aria-hidden="true"></span>조회 중…</div></div>
           </section>
 
@@ -121,7 +121,7 @@
             <div class="card-h"><h2 id="accPwH"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-lock"></use></svg>비밀번호 변경</h2></div>
             <form id="pwForm" class="form" novalidate>
               <input type="text" id="pwUser" name="username" autocomplete="username" class="sr" tabindex="-1" aria-hidden="true" readonly>
-              <div class="note" id="pwRecover" hidden><span class="ic" aria-hidden="true">i</span><span>Google 계정으로 확인되었습니다. 15분 안에 새 비밀번호를 정하십시오.</span></div>
+              <div class="note" id="pwRecover" hidden><span class="ic" aria-hidden="true">i</span><span>Google 계정으로 확인되었습니다. 15분 안에 새 비밀번호를 정해 주세요.</span></div>
               <div class="fld" id="fld-cur">
                 <label for="pwCur">현재 비밀번호</label>
                 <input type="password" id="pwCur" autocomplete="current-password" maxlength="128">
@@ -149,7 +149,7 @@
               <div class="fld" id="fld-claim">
                 <label for="claimKey">라이선스 키</label>
                 <div class="inrow"><input type="text" id="claimKey" name="key" class="keyin" placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-describedby="claim-hint err-claim"><button type="submit" class="btn primary" id="claimBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">등록</span></button></div>
-                <p class="hint" id="claim-hint">이전에 발급받은 키를 이 계정으로 옮깁니다. 남은 매크로 기간은 지금 기간에 더해지고, 키에 등록된 카카오 계정도 함께 옮겨집니다. 등록한 키는 다른 계정에 다시 등록할 수 없습니다.</p>
+                <p class="hint" id="claim-hint">예전에 받은 라이선스 키를 이 계정으로 옮깁니다. 남은 매크로 기간은 현재 기간에 더해지고, 키에 등록된 카카오 계정도 함께 옮겨집니다. 등록한 키는 다른 아이디에 다시 등록할 수 없습니다.</p>
                 <p class="err" id="err-claim" role="alert" hidden></p>
               </div>
             </form>
@@ -157,7 +157,7 @@
           </section>
         </div>
         <aside>
-          <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>오류가 발생하면 문의하십시오. 주문번호를 함께 전달하면 확인이 빠릅니다. <button type="button" class="btn sm" data-support data-support-ctx="내 계정 문의"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></span></div>
+          <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>오류가 생기면 문의해 주세요. 주문번호를 함께 알려 주시면 더 빨리 확인할 수 있습니다. <button type="button" class="btn sm" data-support data-support-ctx="내 계정 문의"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></span></div>
         </aside>
       </div>
     </div>
@@ -170,7 +170,7 @@
       <span class="brand"><span class="brand-mark" aria-hidden="true"></span>K bot</span>
       <span>카카오톡은 (주)카카오의 상표이며, K bot은 (주)카카오와 관련이 없습니다.</span>
     </div>
-    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매 신청</a><a href="/account">내 계정</a><a href="/order">주문 조회</a><a href="/panel">콘솔</a><button type="button" data-support data-support-ctx="사이트 문의">실시간 상담</button></nav>
+    <nav class="links" aria-label="바닥 메뉴"><a href="/buy">구매</a><a href="/account">내 계정</a><a href="/order">주문 조회</a><a href="/panel">패널</a><button type="button" data-support data-support-ctx="홈페이지 문의">문의하기</button></nav>
   </div>
 </footer>
 </body>

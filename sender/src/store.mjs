@@ -373,7 +373,7 @@ export const dbStore = {
     )
   },
 
-  // 2.2: bot_accounts 는 nickname state state_at 만. 등록 직후 최소 행은 ensureBotAccount.
+  // 2.2: bot_accounts 는 nickname state state_at(+ 오픈프로필 칸, 아래)만. 등록 직후 최소 행은 ensureBotAccount.
   async botState(botId, fields) {
     const sets = ['state_at = $2']
     const params = [botId, Date.now()]
@@ -391,6 +391,42 @@ export const dbStore = {
   async botNickname(botId) {
     const r = await q('SELECT nickname FROM bot_accounts WHERE device_id = $1', [botId])
     return r.rows[0] && r.rows[0].nickname ? String(r.rows[0].nickname) : ''
+  },
+
+  // 오픈프로필(D12, 2.2): sender 는 open_profiles·open_profile_li·open_profile_name·open_profile_at 을 쓰고,
+  // 관리자가 고른 open_profile_pick(부모 칸)은 읽기만 한다.
+  async botProfileRows(botIds) {
+    if (!botIds || !botIds.length) return []
+    const r = await q(
+      `SELECT device_id, open_profiles, open_profile_pick, open_profile_li, open_profile_name, open_profile_at
+         FROM bot_accounts WHERE device_id = ANY($1)`,
+      [botIds],
+    )
+    return r.rows
+  },
+
+  // f = {list?: [{li,name,url}]|null, li?: string|null, name?: string|null, at?: ms|null}. 없는 키·list null 은 그대로 둔다.
+  async botOpenProfile(botId, f) {
+    const sets = []
+    const params = [botId]
+    if (f && Array.isArray(f.list)) {
+      params.push(JSON.stringify(f.list.slice(0, 50)))
+      sets.push(`open_profiles = $${params.length}::jsonb`)
+    }
+    if (f && f.li !== undefined) {
+      params.push(f.li ? String(f.li) : null)
+      sets.push(`open_profile_li = $${params.length}`)
+    }
+    if (f && f.name !== undefined) {
+      params.push(f.name ? String(f.name).slice(0, 60) : null)
+      sets.push(`open_profile_name = $${params.length}`)
+    }
+    if (f && f.at) {
+      params.push(Number(f.at))
+      sets.push(`open_profile_at = $${params.length}`)
+    }
+    if (!sets.length) return
+    await q(`UPDATE bot_accounts SET ${sets.join(', ')} WHERE device_id = $1`, params)
   },
 
   async ensureBotAccount(botId, email) {

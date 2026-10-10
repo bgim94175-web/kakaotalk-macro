@@ -20,7 +20,7 @@ const router = express.Router();
 
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   console.error('[' + req.method + ' ' + req.originalUrl + '] ' + (e && e.stack ? e.stack : e));
-  if (!res.headersSent) res.status(500).json({ ok: false, reason: 'server_error', error: '서버 오류가 발생했습니다. 잠시 뒤 다시 시도하십시오.' });
+  if (!res.headersSent) res.status(500).json({ ok: false, reason: 'server_error', error: '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
 });
 
 function cut(v, n) {
@@ -142,7 +142,7 @@ router.post('/api/room-preview', wrap(async (req, res) => {
   const lim = previewAllowed(memberId);
   if (!lim.ok) {
     res.set('Retry-After', String(lim.retryAfter));
-    return bad(res, 429, 'rate_limited', '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오');
+    return bad(res, 429, 'rate_limited', '요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.');
   }
   const r = await installs.preview(memberId, (req.body || {}).link);
   if (!r.ok) return sendFail(res, r);
@@ -174,7 +174,7 @@ function roomFail(res, status, reason, error, room, extra) {
 function maxPendingOrders() { return envNum('MEMBER_MAX_PENDING_ORDERS', 3); }
 function maxPendingRooms() { return envNum('MEMBER_MAX_PENDING_ROOMS', 10); }
 function maxPendingPerIp() { return envNum('IP_MAX_PENDING_ORDERS', 10); }
-const TOO_MANY_PENDING = '입금 대기 중인 주문이 너무 많습니다. 입금하거나 내 계정에서 주문을 취소한 뒤 다시 신청하십시오';
+const TOO_MANY_PENDING = '입금 대기 중인 주문이 너무 많습니다. 기존 주문을 입금하거나 내 계정에서 취소한 뒤 다시 주문해 주세요.';
 
 async function pendingCaps(client, memberId, ip, newRooms) {
   const a = await db.one("SELECT count(*)::int AS n FROM orders WHERE status='pending' AND member_id=$1", [memberId], client);
@@ -203,7 +203,7 @@ router.post('/api/order', wrap(async (req, res) => {
   const b = req.body || {};
 
   const depositor = cut(b.depositor, 60);
-  if (!depositor) return bad(res, 400, 'no_depositor', '입금자명을 입력하십시오');
+  if (!depositor) return bad(res, 400, 'no_depositor', '입금자명을 입력해 주세요.');
 
   // 방 행 정리. 링크도 설치 번호도 상품도 없는 행은 버린다(오류 아님). room = 보낸 배열의 위치.
   const rawRooms = Array.isArray(b.rooms) ? b.rooms : [];
@@ -220,10 +220,14 @@ router.post('/api/order', wrap(async (req, res) => {
   // 상품 수준 검사(empty·bad_months·too_many_rooms). 방별 상품 없음은 방 검사에서 본다.
   const q0 = pricing.quote({ macro_months: b.macro_months, rooms: rows.map((r) => ({ products: r.products })) });
   if (!q0.ok && q0.reason !== 'no_products') return bad(res, 400, q0.reason, q0.error);
-  if (rows.length && b.terms !== true) return bad(res, 400, 'no_terms', '방 설치 이용 조건을 확인하고 동의하십시오');
+  if (rows.length && b.terms !== true) return bad(res, 400, 'no_terms', '이용 조건에 동의해 주세요.');
 
   const ipRaw = rl.ipOf(req);
   const ip = ipRaw && ipRaw !== 'unknown' ? cut(ipRaw, 64) : null;
+  // 48시간 지난 미입금 주문을 먼저 자동 취소한다(4.3). 만료는 pickAmount 안에서도 돌지만 그건 아래 사전 검사 뒤라,
+  // 방치된 주문만으로 상한에 걸린 회원·IP 가 자기 주문으로 그 주문들을 치우지 못하고 429 에 갇힌다.
+  const expired = await db.tx((client) => keys.expireStalePending(client, Date.now()));
+  if (expired) console.log('[purchase] 미입금으로 방치된 pending 주문 ' + expired + '건을 자동 취소했습니다');
   // 미입금 상한 사전 검사(트랜잭션 안에서 한 번 더 본다)
   const newRoomGuess = rows.filter((r) => r.install_id === null).length;
   if (!(await pendingCaps(null, memberId, ip, newRoomGuess))) return bad(res, 429, 'too_many_pending', TOO_MANY_PENDING);
@@ -237,15 +241,15 @@ router.post('/api/order', wrap(async (req, res) => {
       const row = Number.isSafeInteger(id) && id > 0
         ? await db.one('SELECT * FROM room_installs WHERE id=$1 AND member_id=$2', [id, memberId]) : null;
       if (!row || row.phase !== 'installed') {
-        return roomFail(res, 404, 'not_found', '없는 방입니다. 내 방 목록에서 다시 고르십시오', room);
+        return roomFail(res, 404, 'not_found', '방을 찾을 수 없습니다. 내 방 목록에서 다시 골라 주세요.', room);
       }
-      if (!r.products.length) return roomFail(res, 400, 'no_products', '방마다 설치할 상품을 1개 이상 선택하십시오', room);
+      if (!r.products.length) return roomFail(res, 400, 'no_products', '이 방에 설치할 봇을 1개 이상 골라 주세요.', room);
       lines.push({ kind: 'existing', room: room, row: row, products: r.products });
       continue;
     }
     const url = openchat.normLink(r.link);
     if (!url) return roomFail(res, 400, 'bad_link', installs.TEXT.bad_link, room);
-    if (!r.products.length) return roomFail(res, 400, 'no_products', '방마다 설치할 상품을 1개 이상 선택하십시오', room);
+    if (!r.products.length) return roomFail(res, 400, 'no_products', '이 방에 설치할 봇을 1개 이상 골라 주세요.', room);
     const pc = r.passcode === null || r.passcode === undefined ? '' : String(r.passcode).trim();
     if (pc.length > 20) return roomFail(res, 400, 'bad_passcode', installs.TEXT.bad_passcode, room);
 
@@ -264,7 +268,7 @@ router.post('/api/order', wrap(async (req, res) => {
       continue;
     }
     if (!pv.verified && !r.unverified_ok) {
-      return roomFail(res, 400, 'unverified', '방을 확인하지 못했습니다. 확인란에 동의하거나 잠시 뒤 다시 확인하십시오', room);
+      return roomFail(res, 400, 'unverified', '방 정보를 불러오지 못했습니다. 이대로 주문하려면 위 확인란을 선택하고, 아니면 잠시 뒤 다시 확인해 주세요.', room);
     }
     lines.push({
       kind: 'new', room: room, products: r.products,
@@ -280,7 +284,7 @@ router.post('/api/order', wrap(async (req, res) => {
       ? ['i:' + l.row.id, 'u:' + l.row.link_url].concat(l.row.link_id ? ['l:' + l.row.link_id] : [])
       : ['u:' + l.link_url].concat(l.link_id ? ['l:' + l.link_id] : []);
     for (const k of ks) {
-      if (seen.has(k)) return roomFail(res, 400, 'duplicate_room', '이미 추가한 방입니다', l.room);
+      if (seen.has(k)) return roomFail(res, 400, 'duplicate_room', '이미 추가한 방입니다.', l.room);
     }
     ks.forEach((k) => seen.set(k, true));
   }
@@ -290,7 +294,7 @@ router.post('/api/order', wrap(async (req, res) => {
     if (l.kind !== 'existing') continue;
     const have = l.products.filter((p) => !!l.row[p]);
     if (have.length) {
-      return roomFail(res, 409, 'already_installed', '이 방에는 이미 ' + productsText(have) + '이 설치되어 있습니다', l.room);
+      return roomFail(res, 409, 'already_installed', '이 방에는 이미 ' + productsText(have) + '이 설치되어 있습니다.', l.room);
     }
     for (const p of l.products) {
       if (await installs.pendingHas(null, l.row.id, p)) {
@@ -362,7 +366,7 @@ router.post('/api/order', wrap(async (req, res) => {
     if (e && e.code === '23505') return bad(res, 409, 'room_taken', installs.TEXT.taken);
     if (e && /CONFIG_SECRET/.test(String(e.message || ''))) {
       console.error('[order] 참여코드 봉인 실패 → ' + e.message);
-      return bad(res, 503, 'no_secret', '참여코드를 저장할 수 없습니다. 문의하십시오.');
+      return bad(res, 503, 'no_secret', '참여코드를 저장할 수 없습니다. 문의해 주세요.');
     }
     throw e;
   }
@@ -411,9 +415,9 @@ async function orderRooms(items) {
 
 router.get('/api/order/:id', wrap(async (req, res) => {
   const id = keys.normOrderId(req.params.id);
-  if (!id) return bad(res, 400, 'bad_request', '주문번호 형식이 올바르지 않습니다');
+  if (!id) return bad(res, 400, 'bad_request', '주문번호 형식이 올바르지 않습니다.');
   const row = await db.one('SELECT * FROM orders WHERE id=$1', [id]);
-  const notFound = () => bad(res, 404, 'not_found', '존재하지 않는 주문입니다');
+  const notFound = () => bad(res, 404, 'not_found', '주문을 찾을 수 없습니다.');
   if (!row) return notFound();
 
   const o = db.shapeOrder(row);
@@ -511,12 +515,12 @@ router.post('/api/my/orders/cancel', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.post('/api/lookup', wrap(async (req, res) => {
   const key = keys.normKey((req.body || {}).key);
-  if (!key) return res.json({ ok: false, reason: 'bad_request', error: '키를 입력하십시오' });
+  if (!key) return res.json({ ok: false, reason: 'bad_request', error: '키를 입력해 주세요.' });
 
   const lic = await db.one(
     'SELECT key, revoked, blocked_reason, activated_at, member_id FROM licenses WHERE key=$1',
     [key]);
-  if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '등록되지 않은 키입니다. 키를 확인하십시오' });
+  if (!lic) return res.json({ ok: false, reason: 'invalid_key', error: '등록되지 않은 키입니다. 키를 확인해 주세요.' });
 
   const now = Date.now();
   const ents = await db.entitlements(key);

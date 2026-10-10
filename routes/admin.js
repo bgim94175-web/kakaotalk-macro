@@ -28,20 +28,22 @@ const ROOM_LIST_MAX = 500;
 const LOG_LIMIT = 100;
 
 const TEXT = {
-  not_ready: '아직 준비 중인 기능입니다. 잠시 뒤 다시 시도하십시오.',
-  sender_down: '발송 프로세스가 지금 멈춰 있습니다. 잠시 뒤 다시 시도하십시오.',
+  not_ready: '아직 준비 중인 기능입니다. 잠시 뒤 다시 시도해 주세요.',
+  sender_down: '발송 서버가 멈춰 있습니다. 잠시 뒤 다시 시도해 주세요.',
   no_member: '회원을 찾을 수 없습니다.',
-  no_room: '설치를 찾을 수 없습니다.',
-  no_order: '존재하지 않는 주문입니다.',
+  no_room: '방을 찾을 수 없습니다.',
+  no_order: '주문을 찾을 수 없습니다.',
   no_bot: 'K bot 계정을 찾을 수 없습니다.',
-  bad_bot_id: 'K bot 계정 id 가 아닙니다',
-  member_key: '회원 주문에는 키를 지정할 수 없습니다',
-  claimed_key: '회원으로 이관된 키입니다. 회원 화면에서 기간을 조정하십시오.',
-  already_matched: '이미 매칭된 입금입니다',
-  bot_busy: '맡은 방을 다른 K bot 계정으로 옮긴 뒤 해제하십시오',
-  bot_exists: '이미 등록된 K bot 계정입니다. 그 계정의 재등록을 사용하십시오.',
+  bad_bot_id: 'K bot 계정 ID가 아닙니다.',
+  member_key: '회원 주문에는 키를 지정할 수 없습니다.',
+  claimed_key: '회원에게 등록된 키입니다. 회원 상세에서 기간을 조정해 주세요.',
+  already_matched: '이미 주문과 연결된 입금입니다.',
+  bot_busy: '이 K bot 계정이 들어가 있는 방을 다른 K bot 계정으로 옮긴 뒤 다시 시도해 주세요.',
+  bot_exists: '이미 등록된 K bot 계정입니다. 그 계정의 [재등록]을 눌러 주세요.',
+  bad_profile: '이 K bot 계정의 오픈프로필 목록에 없는 항목입니다. [오픈프로필 다시 읽기]를 누른 뒤 다시 골라 주세요.',
+  bad_profile_url: 'open.kakao.com/me/로 시작하는 오픈프로필 링크를 넣어 주세요.',
   kakao_down: '카카오 서버에 연결하지 못했습니다.',
-  failed: '처리하지 못했습니다.',
+  failed: '요청을 처리하지 못했습니다.',
 };
 
 // 등록 실패 문구에서 "다른 기기 끊기"를 권하지 않을 카카오 상태(routes/panel.js 와 같은 목록)
@@ -59,7 +61,7 @@ function fail(res, status, reason, error, extra) {
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   if (e && e.code === 'NOT_IMPLEMENTED') return fail(res, 503, 'not_ready', TEXT.not_ready);
   if (e && (e.code === 'sender_down' || e.message === 'timeout')) return fail(res, 503, 'sender_down', TEXT.sender_down);
-  if (e && e.code === 'busy') return fail(res, 503, 'busy', e.publicError || '잠시 뒤 다시 시도하십시오.');
+  if (e && e.code === 'busy') return fail(res, 503, 'busy', e.publicError || '요청이 많아 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   console.error('[' + req.method + ' ' + req.originalUrl + '] ' + (e && e.stack ? e.stack : e));
   if (!res.headersSent) res.status(500).json({ ok: false, error: 'server_error' });
 });
@@ -118,8 +120,8 @@ async function guard(req, res, next) {
     }
     return res.status(503).json({ ok: false, error: 'admin_disabled',
       reason: 'admin_password_unset',
-      detail: '서버에 관리자 비밀번호가 설정되지 않아 관리자 API 가 차단되었습니다. ' +
-              '서버 환경변수 ADMIN_PASSWORD 를 설정한 후 재배포하십시오' });
+      detail: '서버에 관리자 비밀번호가 설정되지 않아 관리자 API를 막았습니다. ' +
+              '서버 환경변수 ADMIN_PASSWORD를 설정한 뒤 다시 배포해 주세요.' });
   }
   warnedProblem = '';
 
@@ -131,7 +133,7 @@ async function guard(req, res, next) {
     const mins = Math.ceil(left / 60000);
     res.set('Retry-After', String(Math.ceil(left / 1000)));
     return res.status(429).json({ ok: false, error: 'too_many_attempts',
-      detail: '비밀번호 입력 실패 횟수를 초과했습니다. ' + mins + '분 후 다시 시도하십시오' });
+      detail: '비밀번호 입력 실패 횟수를 넘었습니다. ' + mins + '분 뒤 다시 시도해 주세요.' });
   }
 
   // ── 인증 실패는 기록한다 (관리자 화면 [기록] 탭에서 공격을 눈으로 볼 수 있게)
@@ -146,7 +148,7 @@ async function guard(req, res, next) {
     if (st.blocked) {
       res.set('Retry-After', String(Math.ceil(st.blockMs / 1000)));
       return res.status(429).json({ ok: false, error: 'too_many_attempts',
-        detail: '비밀번호 입력 실패 횟수를 초과했습니다. ' + Math.round(st.blockMs / 60000) + '분 후 다시 시도하십시오' });
+        detail: '비밀번호 입력 실패 횟수를 넘었습니다. ' + Math.round(st.blockMs / 60000) + '분 뒤 다시 시도해 주세요.' });
     }
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
@@ -187,9 +189,9 @@ async function memberFromBody(b) {
   if (str(b.login_id)) {
     const m = await findMember(b.login_id);
     return m ? { id: Number(m.id), login_id: m.login_id }
-      : { status: 404, error: '아이디가 ' + str(b.login_id).slice(0, 40) + ' 인 회원이 없습니다.' };
+      : { status: 404, error: '아이디가 「' + str(b.login_id).slice(0, 40) + '」인 회원을 찾을 수 없습니다.' };
   }
-  return { status: 400, error: '회원 아이디를 입력하십시오.' };
+  return { status: 400, error: '회원 아이디를 입력해 주세요.' };
 }
 
 async function loginsOf(memberIds) {
@@ -287,11 +289,12 @@ async function pendingMap(installIds) {
   return out;
 }
 
+// bot_nickname = 방장에게 보일 봇 이름(그 방에서 읽은 이름 → 오픈프로필 이름 → 닉네임, installs.BOT_NAME_SQL, D12)
 const ROOM_SELECT = `
-  SELECT r.*, b.nickname AS bot_nickname, b.label AS bot_label, b.email AS bot_email,
+  SELECT r.*, ` + installs.BOT_NAME_SQL + ` AS bot_nickname, b.label AS bot_label, b.email AS bot_email,
          m.login_id AS member_login, o.token AS order_token
     FROM room_installs r
-    LEFT JOIN bot_accounts b ON b.device_id = r.bot_device_id
+    LEFT JOIN bot_accounts b ON b.device_id = r.bot_device_id` + installs.BOT_NAME_JOIN + `
     LEFT JOIN members m ON m.id = r.member_id
     LEFT JOIN orders o ON o.id = r.order_id`;
 
@@ -329,7 +332,14 @@ function adminRoomView(row, pend, base) {
 async function roomViews(rows, req) {
   const pend = await pendingMap(rows.map((r) => r.id));
   const base = features.purchaseBase(req);
-  return rows.map((row) => adminRoomView(row, pend.get(Number(row.id)), base));
+  // 들어가 있는 방에서 봇이 어떤 프로필로 보이는지(open|main|other|failed|unknown, D12). sender 상태는 5초 메모리.
+  const prof = new Map();
+  if (rows.length) {
+    const st = await senderBotStatus();
+    if (st && Array.isArray(st.rooms)) for (const x of st.rooms) if (x && x.profile) prof.set(Number(x.install_id), String(x.profile));
+  }
+  return rows.map((row) => Object.assign(adminRoomView(row, pend.get(Number(row.id)), base),
+    { bot_profile: prof.get(Number(row.id)) || null }));
 }
 
 async function roomById(id, req) {
@@ -352,14 +362,55 @@ async function sendInstallResult(req, res, r, roomId, keep) {
   res.json(out);
 }
 
+// bot_accounts.open_profiles(JSONB) → [{li,name,url}] | null(읽은 적 없음)
+function profileListOf(v) {
+  const x = db.jsonOf(v);
+  if (!Array.isArray(x)) return null;
+  return x.filter((p) => p && /^[1-9][0-9]*$/.test(String(p.li || '')))
+    .map((p) => ({ li: String(p.li), name: str(p.name), url: str(p.url) || null }));
+}
+
+// ok | none(오픈프로필 없음) | gone(고른 오픈프로필이 사라짐) | unknown(아직 읽지 못함). sender 가 살아 있으면 그 판정을 쓴다.
+function profileStateOf(row, live) {
+  if (live && live.open_profile_state) return String(live.open_profile_state);
+  const list = profileListOf(row.open_profiles);
+  if (!list) return 'unknown';
+  if (!list.length) return 'none';
+  if (row.open_profile_pick && !list.some((p) => p.li === String(row.open_profile_pick))) return 'gone';
+  return 'ok';
+}
+
+// 방장에게 보일 이름 = 오픈프로필 이름(없으면 카카오톡 닉네임)
+function roomNameOf(row) { return str(row.open_profile_name) || str(row.nickname); }
+
 function shapeBot(row, live, dupSet) {
   const nick = str(row.nickname);
+  const list = (live && Array.isArray(live.open_profiles) ? live.open_profiles.map((p) => ({ li: String(p.li), name: str(p.name), url: str(p.url) || null }))
+    : null) || profileListOf(row.open_profiles);
+  const state = profileStateOf(row, live);
+  let prof = null;
+  if (live && live.open_profile && live.open_profile.li) {
+    prof = { li: String(live.open_profile.li), name: str(live.open_profile.name), url: str(live.open_profile.url) || null };
+  } else if (state === 'ok' && row.open_profile_li) {
+    const hit = (list || []).find((p) => p.li === String(row.open_profile_li));
+    prof = { li: String(row.open_profile_li), name: str(row.open_profile_name), url: hit ? hit.url : null };
+  }
+  const roomName = (prof && prof.name) || roomNameOf(row);
   return {
     device_id: row.device_id,
     email: row.email || null,
     label: row.label || null,
     nickname: nick || null,
-    nickname_dup: !!(nick && dupSet && dupSet.has(nick.toLowerCase())),
+    room_name: roomName || null,
+    // 방장이 구분할 이름(오픈프로필 이름)이 다른 봇과 겹침(D12)
+    nickname_dup: !!(roomName && dupSet && dupSet.has(roomName.toLowerCase())),
+    open_profile: prof,
+    open_profiles: list,
+    open_profile_pick: row.open_profile_pick || null,
+    open_profile_state: state,
+    open_profile_at: num(row.open_profile_at),
+    profile_rooms: live && live.profile_rooms ? live.profile_rooms : null,
+    profile_convert: live && live.profile_convert ? live.profile_convert : null,
     room_cap: Number(row.room_cap) || 0,
     enabled: row.enabled !== false,
     state: row.state || 'pending',
@@ -373,11 +424,11 @@ function shapeBot(row, live, dupSet) {
   };
 }
 
-// 닉네임이 겹치는 봇(대소문자·앞뒤 공백 무시, D12)
+// 방장에게 보일 이름(오픈프로필 이름, 없으면 닉네임)이 겹치는 봇(대소문자·앞뒤 공백 무시, D12)
 function dupNicknames(rows) {
   const seen = new Map();
   for (const r of rows) {
-    const n = str(r.nickname).toLowerCase();
+    const n = roomNameOf(r).toLowerCase();
     if (!n) continue;
     seen.set(n, (seen.get(n) || 0) + 1);
   }
@@ -445,7 +496,7 @@ async function claimedMember(key, client) {
 router.post('/admin/create', wrap(async (req, res) => {
   const b = req.body || {};
   const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택하십시오 (macro/roombot/minigame)' });
+  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택해 주세요 (macro/roombot/minigame)' });
   const plan = String(b.plan || 'month');
   const dur = keys.durationMs(plan, b.days);
   if (!dur) return res.json({ ok: false, error: '플랜(month/quarter/year/custom) 또는 days 값이 올바르지 않습니다' });
@@ -464,7 +515,7 @@ router.post('/admin/grant', wrap(async (req, res) => {
   const key = keys.normKey(b.key);
   if (!key) return res.json({ ok: false, error: 'key 값이 필요합니다' });
   const feats = features.normList(b.features);
-  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택하십시오' });
+  if (!feats.length) return res.json({ ok: false, error: '기능을 1개 이상 선택해 주세요' });
   const plan = String(b.plan || 'month');
   if (!keys.durationMs(plan, b.days)) return res.json({ ok: false, error: '플랜 또는 days 값이 올바르지 않습니다' });
 
@@ -483,7 +534,7 @@ router.post('/admin/revoke-feature', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
   const feature = String(b.feature || '').trim().toLowerCase();
-  if (!key || !features.isValid(feature)) return res.json({ ok: false, error: 'key / feature 값을 확인하십시오' });
+  if (!key || !features.isValid(feature)) return res.json({ ok: false, error: 'key / feature 값을 확인해 주세요' });
 
   const out = await db.tx(async (client) => {
     const mid = await claimedMember(key, client);
@@ -500,7 +551,7 @@ router.post('/admin/revoke-feature', wrap(async (req, res) => {
 router.post('/admin/license-reassign', wrap(async (req, res) => {
   const b = req.body || {};
   const key = keys.normKey(b.key);
-  if (!key) return fail(res, 400, 'bad_key', '키를 입력하십시오.');
+  if (!key) return fail(res, 400, 'bad_key', '키를 입력해 주세요.');
   let to = null;
   const wantsNull = (b.member_id === null || b.member_id === '') && !str(b.login_id);
   if (!wantsNull) {
@@ -636,7 +687,7 @@ router.get('/admin/stats', wrap(async (req, res) => {
   const rb = await db.q(
     `SELECT CASE WHEN phase = 'pending_payment' THEN 'pending'
                  WHEN hold_reason IS NOT NULL THEN 'joining'
-                 WHEN state = 'waiting_host' THEN 'waiting'
+                 WHEN state = 'waiting_host' OR (state = 'active' AND roombot AND COALESCE(perm, 0) & 5 = 0) THEN 'waiting'
                  WHEN state = 'active' THEN 'active'
                  WHEN state = 'error' THEN 'error'
                  ELSE 'joining' END AS d,
@@ -780,7 +831,7 @@ function appliedText(out) {
 router.post('/admin/order-approve', wrap(async (req, res) => {
   const b = req.body || {};
   const id = keys.normOrderId(b.id);
-  if (!id) return fail(res, 400, 'bad_id', '주문번호가 필요합니다');
+  if (!id) return fail(res, 400, 'bad_id', '주문번호가 필요합니다.');
   const askedKey = keys.normKey(b.key);
   const skip = b.skip_conflicts === true;
 
@@ -859,13 +910,13 @@ router.post('/admin/deposit-match', wrap(async (req, res) => {
   const b = req.body || {};
   const depositId = Math.floor(Number(b.deposit_id));
   const orderId = keys.normOrderId(b.order_id);
-  if (!isFinite(depositId) || depositId <= 0) return fail(res, 400, 'bad_deposit', 'deposit_id 값이 필요합니다');
-  if (!orderId) return fail(res, 400, 'bad_order', 'order_id 값이 필요합니다');
+  if (!isFinite(depositId) || depositId <= 0) return fail(res, 400, 'bad_deposit', '입금 기록 번호(deposit_id)가 필요합니다.');
+  if (!orderId) return fail(res, 400, 'bad_order', '주문번호(order_id)가 필요합니다.');
   const skip = b.skip_conflicts === true;
 
   const out = await db.tx(async (client) => {
     const dep = await db.one('SELECT * FROM deposits WHERE id=$1 FOR UPDATE', [depositId], client);
-    if (!dep) return { fail: [404, 'not_found', '존재하지 않는 입금 기록입니다'] };
+    if (!dep) return { fail: [404, 'not_found', '입금 기록을 찾을 수 없습니다.'] };
     if (dep.status === 'matched' || dep.status === 'duplicate') return { fail: [409, 'already_matched', TEXT.already_matched] };
     const ord = await db.one('SELECT id FROM orders WHERE id=$1', [orderId], client);
     if (!ord) return { fail: [404, 'not_found', TEXT.no_order] };
@@ -1031,7 +1082,7 @@ router.post('/admin/member-grant', wrap(async (req, res) => {
   const days = Math.floor(Number(b.macro_days));
   if (!id) return fail(res, 404, 'not_found', TEXT.no_member);
   if (!Number.isFinite(days) || days < 1 || days > 3650 || String(b.macro_days).indexOf('.') >= 0) {
-    return fail(res, 400, 'bad_days', '기간은 1~3650일로 입력하십시오.');
+    return fail(res, 400, 'bad_days', '기간은 1~3650일로 입력해 주세요.');
   }
   const until = await db.tx(async (client) => {
     const u = await entitle.extendMacro(client, id, days);
@@ -1049,7 +1100,7 @@ router.post('/admin/member-block', wrap(async (req, res) => {
   const id = toId(b.id);
   if (!id) return fail(res, 404, 'not_found', TEXT.no_member);
   const raw = b.reason === null || b.reason === undefined ? '' : String(b.reason).trim();
-  if (raw.length > 200) return fail(res, 400, 'bad_reason', '차단 사유는 200자 이하로 입력하십시오.');
+  if (raw.length > 200) return fail(res, 400, 'bad_reason', '차단 사유는 200자 이하로 입력해 주세요.');
   const reason = raw || null;
   const row = await db.tx(async (client) => {
     const r = await db.one('UPDATE members SET blocked_reason=$2 WHERE id=$1 RETURNING id, login_id', [id, reason], client);
@@ -1125,8 +1176,9 @@ const ROOM_FILTERS = {
   pending: "r.phase = 'pending_payment'",
   joining: "r.phase = 'installed' AND (r.hold_reason IS NOT NULL OR r.state IN ('queued','joining'))",
   hold: "r.phase = 'installed' AND r.hold_reason IS NOT NULL",
-  waiting: "r.phase = 'installed' AND r.hold_reason IS NULL AND r.state = 'waiting_host'",
-  active: "r.phase = 'installed' AND r.hold_reason IS NULL AND r.state = 'active'",
+  // installs.displayOf 와 같게: 방 관리봇이 있는데 perm & 5 가 아니면 사용 중이 아니라 부방장 대기(0.1)
+  waiting: "r.phase = 'installed' AND r.hold_reason IS NULL AND (r.state = 'waiting_host' OR (r.state = 'active' AND r.roombot AND COALESCE(r.perm, 0) & 5 = 0))",
+  active: "r.phase = 'installed' AND r.hold_reason IS NULL AND r.state = 'active' AND NOT (r.roombot AND COALESCE(r.perm, 0) & 5 = 0)",
   error: "r.phase = 'installed' AND r.hold_reason IS NULL AND r.state = 'error'",
   attention: "r.phase = 'installed' AND r.hold_reason IS NULL AND r.state = 'error'",
   removed: "r.phase = 'removed'",
@@ -1208,19 +1260,22 @@ router.get('/admin/room', wrap(async (req, res) => {
 
 // room_log 한 줄(7.8 표). 관리 화면은 원본 detail 도 함께 보인다.
 const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', rejoin: '퇴장' };
+// 건너뛴 동작·까닭(routes/panel.js 의 roomLogText 와 같은 말). note 가 없으면 K bot 자체 한도를 넘은 것이다.
+const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '글 가리기', rewrite: '글 가리기' };
+const SKIP_WHY = { wave: '올킥 감지 중이라 건너뜀', paused: '실패가 이어져 잠시 멈춤', stale: '늦어져서 건너뜀' };
 function logText(kind, who, d, ok) {
   const name = who || '알 수 없음';
   switch (kind) {
     case 'join': return '입장 · ' + name;
     case 'leave': return '퇴장 · ' + name;
     case 'churn': return '들낙 감지 · ' + name + (d.windowMin !== undefined ? ' ' + d.windowMin + '분' : '') +
-      (d.joins !== undefined ? ' ' + d.joins + '회' : '') + ' · ' + (d.action === 'kick' ? (ok ? '내보냄' : '내보내지 못함') : '경고');
-    case 'kick': return '내보냄 · ' + name + (KICK_WHY[d.why || d.reason] ? ' · ' + KICK_WHY[d.why || d.reason] : '');
-    case 'kick_fail': return '내보내지 못함 · ' + name + (KICK_WHY[d.why || d.reason] ? ' · ' + KICK_WHY[d.why || d.reason] : '');
+      (d.joins !== undefined ? ' ' + d.joins + '회' : '') + ' · ' + (d.action === 'kick' ? (ok ? '내보내기' : '내보내기 실패') : '경고');
+    case 'kick': return '내보내기 · ' + name + (KICK_WHY[d.why || d.reason] ? ' · ' + KICK_WHY[d.why || d.reason] : '');
+    case 'kick_fail': return '내보내기 실패 · ' + name + (KICK_WHY[d.why || d.reason] ? ' · ' + KICK_WHY[d.why || d.reason] : '');
     case 'unkick': return '내보내기 해제 · ' + name;
     case 'promo': return '홍보 금지 · ' + name + (d.n !== undefined ? ' · 경고 ' + d.n + '회' : '');
-    case 'hide': return '가리기 · ' + (Number(d.n || d.done || d.count) || 0) + '개' +
-      (Number(d.failed) ? ' (실패 ' + Number(d.failed) + '개)' : '') + ' · ' + (d.by === 'panel' ? '콘솔' : '방장');
+    case 'hide': return '글 가리기 · ' + (Number(d.n || d.done || d.count) || 0) + '개' +
+      (Number(d.failed) ? ' (실패 ' + Number(d.failed) + '개)' : '') + ' · ' + (d.by === 'panel' ? '패널' : '방장');
     case 'cover': return '금지어 가림 · ' + name;
     case 'perm': return (d.granted === true || d.to === 'active' || (Number(d.perm) & 5)) ? '부방장 지정 감지' : '부방장 해제 감지';
     case 'wave': return '올킥 감지' + (d.n !== undefined ? ' · ' + d.n + '명' : '');
@@ -1231,10 +1286,10 @@ function logText(kind, who, d, ok) {
         const e = installs.ERRORS && installs.ERRORS[code];
         return '오류(' + ((e && e.short) || code || '확인 필요') + ')';
       }
-      if (st === 'retry' || st === 'queued') return '다시 시도';
-      return '입장';
+      if (st === 'retry' || st === 'queued') return 'K bot 입장 다시 시도';
+      return 'K bot 입장 완료';
     }
-    case 'skip': return '한도 초과로 건너뜀' + (d.what || d.action ? ' · ' + (d.what || d.action) : '');
+    case 'skip': return (SKIP_WHY[d.note] || 'K bot 한도 초과로 건너뜀') + (d.what || d.action ? ' · ' + (SKIP_WHAT[d.what || d.action] || d.what || d.action) : '');
     default: return String(kind || '');
   }
 }
@@ -1246,7 +1301,7 @@ router.post('/admin/room-grant', wrap(async (req, res) => {
   const prods = [];
   if (b.roombot === true) prods.push('roombot');
   if (b.minigame === true) prods.push('minigame');
-  if (!prods.length) return fail(res, 400, 'no_products', '설치할 상품을 1개 이상 선택하십시오.');
+  if (!prods.length) return fail(res, 400, 'no_products', '설치할 봇을 1개 이상 골라 주세요.');
   const passcode = b.passcode === null || b.passcode === undefined ? '' : String(b.passcode);
   const r = await installs.grantRoom(m.id, str(b.link), passcode, prods, { req: req });
   await sendInstallResult(req, res, r, r && r.ok ? r.install_id : null, ['install_id', 'added', 'verified']);
@@ -1313,15 +1368,15 @@ router.post('/admin/room-block', wrap(async (req, res) => {
   const b = req.body || {};
   const id = toId(b.id);
   const reason = str(b.reason);
-  if (!reason || reason.length > 200) return fail(res, 400, 'bad_reason', '금지 사유를 1~200자로 입력하십시오.');
-  if (!id && !str(b.link)) return fail(res, 400, 'bad_link', '금지할 방(설치 번호 또는 링크)을 지정하십시오.');
+  if (!reason || reason.length > 200) return fail(res, 400, 'bad_reason', '차단 사유를 1~200자로 입력해 주세요.');
+  if (!id && !str(b.link)) return fail(res, 400, 'bad_link', '차단할 방(방 번호 또는 링크)을 지정해 주세요.');
   const r = await installs.block({ installId: id || null, link: id ? null : str(b.link), reason: reason }, { req: req });
   await sendInstallResult(req, res, r, id || null, ['block_id', 'link_url', 'link_id', 'removed']);
 }));
 
 router.post('/admin/room-unblock', wrap(async (req, res) => {
   const blockId = toId((req.body || {}).block_id);
-  if (!blockId) return fail(res, 404, 'not_found', '금지 목록에 없는 항목입니다.');
+  if (!blockId) return fail(res, 404, 'not_found', '차단 목록에 없는 항목입니다.');
   const r = await installs.unblock(blockId, { req: req });
   await sendInstallResult(req, res, r, null);
 }));
@@ -1378,7 +1433,7 @@ function cleanLabel(v) {
 function capOf(v) {
   if (v === null || v === undefined || v === '') return { cap: null };
   const n = Number(v);
-  if (!Number.isInteger(n) || n < 1 || n > 200) return { error: '방 상한은 1~200개로 입력하십시오.' };
+  if (!Number.isInteger(n) || n < 1 || n > 200) return { error: '최대 방 수는 1~200개로 입력해 주세요.' };
   return { cap: n };
 }
 
@@ -1443,7 +1498,7 @@ router.post('/admin/bot-register/begin', wrap(async (req, res) => {
   const b = req.body || {};
   const email = cleanEmail(b.email);
   const password = cleanPassword(b.password);
-  if (!email || !password) return fail(res, 400, 'bad_input', '카카오계정과 비밀번호를 입력하십시오.');
+  if (!email || !password) return fail(res, 400, 'bad_input', '카카오 계정과 비밀번호를 입력해 주세요.');
   const label = cleanLabel(b.label);
   const c = capOf(b.room_cap);
   if (c.error) return fail(res, 400, 'bad_cap', c.error);
@@ -1496,7 +1551,7 @@ function expiredView() {
 
 router.post('/admin/bot-register/confirm', wrap(async (req, res) => {
   const pendingId = str((req.body || {}).pending_id).slice(0, 100);
-  if (!pendingId) return fail(res, 400, 'bad_input', 'pending_id 값이 필요합니다');
+  if (!pendingId) return fail(res, 400, 'bad_input', '등록 대기 번호(pending_id)가 필요합니다.');
   const row = await db.one('SELECT * FROM bot_pending WHERE pending_id=$1', [pendingId]);
   if (!row) return res.json(expiredView());
   const ok = () => ({ ok: true, state: 'ok', text: '', device_id: row.device_id });
@@ -1570,7 +1625,7 @@ router.post('/admin/bot-update', wrap(async (req, res) => {
   }
   if (b.room_cap !== undefined) {
     const c = capOf(b.room_cap);
-    if (c.error || c.cap === null) return fail(res, 400, 'bad_cap', c.error || '방 상한은 1~200개로 입력하십시오.');
+    if (c.error || c.cap === null) return fail(res, 400, 'bad_cap', c.error || '최대 방 수는 1~200개로 입력해 주세요.');
     params.push(c.cap);
     sets.push('room_cap=$' + params.length);
     changed.push('room_cap=' + c.cap);
@@ -1590,6 +1645,89 @@ router.post('/admin/bot-update', wrap(async (req, res) => {
   res.json({ ok: true, bot: bot, nickname_dup: bot ? bot.nickname_dup : false });
 }));
 
+// 오픈프로필(D12): li 로 고르기(null = 자동: 지금 쓰는 것 → 첫 번째) · refresh 로 다시 읽기 · url(open.kakao.com/me/…) 로 확인해 더하기
+const OPEN_PROFILE_ERR = {
+  not_connected: 'K bot 계정이 지금 카카오에 연결되어 있지 않습니다. 연결된 뒤 다시 시도해 주세요.',
+  budget: '카카오 조회 한도에 걸렸습니다. 잠시 뒤 다시 시도해 주세요.',
+  not_found: '오픈프로필 링크를 찾을 수 없습니다. 링크를 다시 확인해 주세요.',
+  not_profile: '오픈프로필 링크가 아닙니다. open.kakao.com/me/로 시작하는 링크를 넣어 주세요.',
+  not_mine: '이 K bot 계정의 오픈프로필이 아닙니다. 이 계정으로 만든 오픈프로필의 링크를 넣어 주세요.',
+  kakao_error: '카카오 서버가 확인을 거부했습니다. 잠시 뒤 다시 시도해 주세요.',
+  bad_url: 'open.kakao.com/me/로 시작하는 오픈프로필 링크를 넣어 주세요.',
+};
+
+router.post('/admin/bot-open-profile', wrap(async (req, res) => {
+  const b = req.body || {};
+  const deviceId = str(b.device_id);
+  if (!ids.isBotId(deviceId)) return fail(res, 400, 'bad_bot_id', TEXT.bad_bot_id);
+  const row = await db.one(
+    'SELECT device_id, open_profiles, open_profile_pick FROM bot_accounts WHERE device_id=$1 AND removed_at IS NULL', [deviceId]);
+  if (!row) return fail(res, 404, 'not_found', TEXT.no_bot);
+  const url = str(b.url);
+  if (url && !/^https:\/\/open\.kakao\.com\/me\/[A-Za-z0-9_-]{1,100}$/.test(url)) return fail(res, 400, 'bad_url', TEXT.bad_profile_url);
+  const refresh = b.refresh === true;
+  let picked = false;
+  if (b.li !== undefined) {
+    const li = b.li === null || b.li === '' ? null : str(b.li);
+    if (li !== null && !(profileListOf(row.open_profiles) || []).some((p) => p.li === li)) return fail(res, 400, 'bad_profile', TEXT.bad_profile);
+    await db.q('UPDATE bot_accounts SET open_profile_pick=$2 WHERE device_id=$1', [deviceId, li]);
+    await audit.record(req, 'bot', { detail: 'open-profile ' + deviceId + ' pick=' + (li || 'auto') });
+    picked = true;
+  }
+  let out = null;
+  if (sender.up()) {
+    try {
+      const r = await sender.call('POST', '/v1/bot/open-profile', { device_id: deviceId, refresh: refresh, url: url || '' },
+        url || refresh ? 30000 : 10000);
+      out = r && r.json ? r.json : null;
+    } catch (e) {
+      out = null;
+    }
+  }
+  if ((url || refresh) && !out) return fail(res, 503, 'sender_down', TEXT.sender_down);
+  if ((url || refresh) && !out.ok) {
+    const code = String(out.error || 'failed');
+    return fail(res, code === 'not_connected' || code === 'budget' ? 409 : 400, code, OPEN_PROFILE_ERR[code] || TEXT.failed);
+  }
+  if (url) await audit.record(req, 'bot', { detail: 'open-profile ' + deviceId + ' url ' + url });
+  forgetBotStatus();
+  const shaped = await allBotsShaped();
+  const bot = shaped.bots.find((x) => x.device_id === deviceId) || null;
+  res.json({ ok: true, bot: bot, picked: picked, read_ok: out && out.ok ? !!out.read_ok : null });
+}));
+
+// 들어가 있는 방의 봇 프로필(D12): how 'switch' = 오픈프로필로 바꾸기(UPLINKPROF, 나가지 않음 · 부방장 유지 기대),
+// 'rejoin' = 나갔다가 오픈프로필로 다시 입장(방장이 부방장을 다시 지정해야 함). sender 가 봇의 입장 줄에서 차례로 처리한다.
+const ROOM_PROFILE_ERR = {
+  not_joined: 'K bot이 이 방에 들어가 있지 않습니다. 사용 중이거나 부방장 지정 대기인 방만 바꿀 수 있습니다.',
+  no_open_profile: '이 방의 K bot 계정에 쓸 오픈프로필이 없습니다. [K bot 계정] 탭에서 먼저 확인해 주세요.',
+  not_connected: '이 방의 K bot 계정이 지금 카카오에 연결되어 있지 않습니다. 연결된 뒤 다시 시도해 주세요.',
+  already_open: '이미 오픈프로필로 들어가 있습니다.',
+};
+
+router.post('/admin/room-profile', wrap(async (req, res) => {
+  const b = req.body || {};
+  const id = toId(b.id);
+  const how = b.how === 'rejoin' ? 'rejoin' : 'switch';
+  const row = id ? await db.one('SELECT id, member_id, phase FROM room_installs WHERE id=$1', [id]) : null;
+  if (!row || row.phase !== 'installed') return fail(res, 404, 'not_found', TEXT.no_room);
+  if (!sender.up()) return fail(res, 503, 'sender_down', TEXT.sender_down);
+  let j = null;
+  try {
+    const r = await sender.call('POST', '/v1/bot/room-profile', { install_id: id, how: how }, 10000);
+    j = r && r.json ? r.json : null;
+  } catch (e) {
+    return fail(res, 503, 'sender_down', TEXT.sender_down);
+  }
+  if (!j) return fail(res, 503, 'sender_down', TEXT.sender_down);
+  if (!j.ok) {
+    const code = String(j.error || 'failed');
+    return fail(res, 409, code, ROOM_PROFILE_ERR[code] || TEXT.failed);
+  }
+  await audit.record(req, 'install', { member_id: Number(row.member_id), detail: 'profile-' + how + ' #' + id });
+  res.json({ ok: true, queued: j.queued || how, room: await roomById(id, req) });
+}));
+
 router.post('/admin/bot-remove', wrap(async (req, res) => {
   const deviceId = str((req.body || {}).device_id);
   if (!ids.isBotId(deviceId)) return fail(res, 400, 'bad_bot_id', TEXT.bad_bot_id);
@@ -1604,7 +1742,7 @@ router.post('/admin/bot-remove', wrap(async (req, res) => {
   if (!sender.up()) return fail(res, 503, 'sender_down', TEXT.sender_down);
   try {
     const r = await sender.call('POST', '/v1/unlink', { device_id: deviceId }, 20000);
-    if (!r || r.status !== 200) return fail(res, 502, 'unlink_failed', 'K bot 계정 연결을 끊지 못했습니다. 잠시 뒤 다시 시도하십시오.');
+    if (!r || r.status !== 200) return fail(res, 502, 'unlink_failed', 'K bot 계정 연결을 끊지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   } catch (e) {
     return fail(res, 503, 'sender_down', TEXT.sender_down);
   }

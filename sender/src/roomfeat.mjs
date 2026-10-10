@@ -131,7 +131,7 @@ export function checkRoomConfig(cfg) {
     return { ok: false, reason: 'bad_cover.words', error: '금지어는 한 개에 30자까지 입력할 수 있습니다.' }
   }
   if (Array.isArray(src.exempt) && src.exempt.length > MAX_EXEMPT) {
-    return { ok: false, reason: 'bad_exempt', error: '제외할 사람은 50명까지 등록할 수 있습니다.' }
+    return { ok: false, reason: 'bad_exempt', error: '제외 대상은 50명까지 등록할 수 있습니다.' }
   }
   return { ok: true, config: normRoomConfig(src) }
 }
@@ -445,7 +445,7 @@ function lastOf(row) {
 /** result: 'warn' | 'kicked' | 'kick_failed' */
 export function churnNotice(plan, result) {
   const nm = mentionLine('이름', plan.name || '', plan.userId)
-  const act = result === 'kicked' ? '내보냄' : result === 'kick_failed' ? '내보내지 못함' : '경고'
+  const act = result === 'kicked' ? '내보내기' : result === 'kick_failed' ? '내보내기 실패' : '경고'
   const text = ['[들낙 감지]', nm.line, `입장 : ${plan.windowMin}분 동안 ${plan.count}회`, `조치 : ${act}`].join('\n')
   return { text, mention: withAt(text, nm.mention) }
 }
@@ -490,7 +490,7 @@ export function bannedNow(st, userId, now) {
 }
 
 export function leaveKickNotice(name) {
-  return `[퇴장 후 내보냄]\n이름 : ${oneLine(name, 40) || '이름 없음'}`
+  return `[재입장 차단]\n이름 : ${oneLine(name, 40) || '이름 없음'}`
 }
 
 // ── 7.2 (c) 프로필 로그 ────────────────────────────────────────────────────
@@ -552,7 +552,7 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
     if (on('name')) {
       const n = nameChanges(changes).length
       const nm = mentionLine('이름', name, userId)
-      const lines = ['[프로필 변경 감지]', nm.line, '이전 : ' + (cur.replace(/@/g, '') || '이름 없음'), '변경 : ' + kstStamp(now)]
+      const lines = ['[프로필 변경 감지]', nm.line, '이전 : ' + (cur.replace(/@/g, '') || '이름 없음'), '시각 : ' + kstStamp(now)]
       if (n >= 2) lines.push('누적 : ' + n + '회')
       const text = lines.join('\n')
       out.push({ text, mention: withAt(text, nm.mention), kind: 'name' })
@@ -562,7 +562,7 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
     changes.push({ at: now, kind: 'photo' })
     if (on('photo')) {
       const nm = mentionLine('이름', nowName, userId)
-      const text = ['[프로필 변경 감지]', nm.line, '항목 : 프로필 사진', '변경 : ' + kstStamp(now)].join('\n')
+      const text = ['[프로필 변경 감지]', nm.line, '항목 : 프로필 사진', '시각 : ' + kstStamp(now)].join('\n')
       out.push({ text, mention: withAt(text, nm.mention), kind: 'photo' })
     }
   }
@@ -570,7 +570,7 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
     changes.push({ at: now, kind: 'status', from: String(prev.status).slice(0, 200), to: status })
     if (on('status')) {
       const nm = mentionLine('이름', nowName, userId)
-      const text = ['[프로필 변경 감지]', nm.line, '항목 : 상태 메시지', '이전 : ' + (oneLine(prev.status, 60) || '없음'), '변경 : ' + kstStamp(now)].join('\n')
+      const text = ['[프로필 변경 감지]', nm.line, '항목 : 상태 메시지', '이전 : ' + (oneLine(prev.status, 60) || '없음'), '시각 : ' + kstStamp(now)].join('\n')
       out.push({ text, mention: withAt(text, nm.mention), kind: 'status' })
     }
   }
@@ -611,18 +611,18 @@ export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
   if (mentioned) target = String(mentioned)
   const want = oneLine(String(ask.arg || '').replace(/^@/, ''), 40)
   if (!target) {
-    if (!want) return `「${cfg.cmdPrefix}프로필 닉네임」 형식으로 입력하십시오.`
+    if (!want) return `「${cfg.cmdPrefix}프로필 닉네임」처럼 입력해 주세요.`
     const hits = []
     for (const k of Object.keys(p.people)) {
       if (!k.startsWith(chatId + SEP)) continue
       const row = p.people[k]
       if (row && String(row.name || '').trim() === want && row.userId && !hits.includes(String(row.userId))) hits.push(String(row.userId))
     }
-    if (hits.length > 1) return `같은 이름이 ${hits.length}명입니다. @멘션으로 지정하십시오.`
+    if (hits.length > 1) return sameNameReply(hits.length)
     target = hits[0] || ''
   }
   const row = target ? p.people[`${chatId}${SEP}${target}`] : null
-  if (!row) return `「${want || '대상'}」의 프로필 기록이 없습니다.`
+  if (!row) return want ? `「${want}」의 프로필 기록이 없어요.` : '이 사람의 프로필 기록이 없어요.'
   const changes = Array.isArray(row.changes) ? row.changes : []
   const olds = nameChanges(changes).slice(-5).map((c) => `${oneLine(c.name, 40) || '이름 없음'} (${kstShort(c.at)})`)
   const photos = changes.filter((c) => c && c.kind === 'photo').length
@@ -635,7 +635,7 @@ export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
     '이름 : ' + (oneLine(row.name, 40) || '이름 없음'),
     '이전 이름 : ' + (olds.length ? olds.join(', ') : '없음'),
     '사진 변경 : ' + photos + '회',
-    `입장 ${joins}회 · 퇴장 ${leaves}회 (14일)`,
+    `최근 14일 : 입장 ${joins}회 · 퇴장 ${leaves}회`,
   ].join('\n')
 }
 
@@ -694,8 +694,11 @@ export function promoCheck(st, cfg, ev, ctx, now) {
 /** result: {hidden, kicked} */
 export function promoNotice(plan, result) {
   const nm = mentionLine('이름', plan.name, plan.userId)
-  const warn = plan.kickAt > 0 ? `경고 : ${plan.n}/${plan.kickAt}회` : `경고 : ${plan.n}회`
-  const act = result.kicked ? '내보냄' : result.hidden ? '글 가림' : '경고'
+  // 분수 표기(1/3회) 대신 몇 회에 내보내는지 말로 적는다. 내보냈거나 기준에 닿은 뒤에는 횟수만.
+  const warn = plan.kickAt > 0 && !result.kicked && plan.n < plan.kickAt
+    ? `경고 : ${plan.n}회 (${plan.kickAt}회가 되면 내보내요)`
+    : `경고 : ${plan.n}회`
+  const act = result.kicked ? '내보내기' : result.hidden ? '글 가리기' : '경고'
   const text = ['[홍보 금지]', nm.line, warn, `조치 : ${act}`].join('\n')
   return { text, mention: withAt(text, nm.mention) }
 }
@@ -764,36 +767,46 @@ export function parseHideCommand(text, prefix, mentions) {
 }
 
 export function hideUsage(prefix) {
-  return `「${prefix}가리기 30」 형식으로 입력하십시오. (1~300)`
+  return `「${prefix}가리기 30」처럼 가릴 글 수(1~300)를 입력해 주세요. 한 사람의 글은 「${prefix}가리기 @이름」으로 가릴 수 있어요.`
 }
 
 export function hideDoneNotice(done, failed) {
-  return `[가리기]\n최근 글 ${done}개를 가렸습니다.` + (failed ? `\n(${failed}개는 가리지 못했습니다)` : '')
+  return `[글 가리기]\n글 ${done}개를 가렸어요.` + (failed ? `\n(${failed}개는 가리지 못했어요)` : '')
 }
 
 // ── 도움·입장 안내(7.3·7.9) ───────────────────────────────────────────────
-/** 켜진 게임과 켜진 방 관리 명령(가리기·프로필)을 한 줄로. 아무것도 없으면 ''. */
+// 방 메시지는 짧은 해요체(docs/TONE.md 「K bot 방 메시지」). 방 사람들은 계정·패널을 모르므로 봇은 이름으로, 설정하는 사람은 방장님·관리자로 쓴다.
+
+/**
+ * 켜진 게임과 켜진 방 관리 명령(가리기·프로필)의 목록. 아무것도 없으면 ''.
+ * [명령어]
+ * 미니게임 : !끝말잇기 … !랭킹
+ * 방 관리 : !가리기 !프로필
+ */
 export function helpLine(view) {
   const cfg = view.cfg
   const p = cfg.cmdPrefix
-  const out = []
+  const games = []
   if (gamesLive(view)) {
     const g = cfg.games
-    if (g.word) out.push(p + '끝말잇기')
-    if (g.baseball) out.push(p + '숫자야구')
-    if (g.dice) out.push(p + '주사위')
-    if (g.rps) out.push(p + '가위바위보')
-    if (g.quiz) out.push(p + '퀴즈', p + '힌트', p + '정답')
-    if (g.word || g.baseball || g.quiz) out.push(p + '포기')
-    out.push(p + '랭킹')
+    if (g.word) games.push(p + '끝말잇기')
+    if (g.baseball) games.push(p + '숫자야구')
+    if (g.dice) games.push(p + '주사위')
+    if (g.rps) games.push(p + '가위바위보')
+    if (g.quiz) games.push(p + '퀴즈', p + '힌트', p + '정답')
+    if (g.word || g.baseball || g.quiz) games.push(p + '포기')
+    games.push(p + '랭킹')
   }
+  const room = []
   if (roombotLive(view)) {
-    if (cfg.hide.command) out.push(p + '가리기')
-    if (cfg.profile.enabled && cfg.profile.lookup !== 'off') out.push(p + '프로필')
+    if (cfg.hide.command) room.push(p + '가리기')
+    if (cfg.profile.enabled && cfg.profile.lookup !== 'off') room.push(p + '프로필')
   }
-  if (!out.length) return ''
-  out.push(p + '도움')
-  return out.join(' ')
+  if (!games.length && !room.length) return ''
+  const lines = ['[명령어]']
+  if (games.length) lines.push('미니게임 : ' + games.join(' '))
+  if (room.length) lines.push('방 관리 : ' + room.join(' '))
+  return lines.join('\n')
 }
 
 export function isHelpCommand(text, prefix) {
@@ -801,20 +814,85 @@ export function isHelpCommand(text, prefix) {
   return t === prefix + '도움' || t === prefix + '명령'
 }
 
+// 방장에게 부방장 지정을 부탁하는 줄. 방장이 고를 수 있게 방에 보이는 봇 이름을 넣는다(D12).
+function promoteAsk(nick) {
+  const who = nick ? `「${nick}」${josa(nick, '을')}` : 'K bot을'
+  return `방장님이 ${who} 부방장으로 지정하면 방 관리 기능이 시작돼요.`
+}
+
 export function joinNotice(view, nickname) {
   const p = view.cfg.cmdPrefix
   const nick = oneLine(nickname, 40)
   if (view.products.roombot) {
-    const who = nick ? `이 계정(「${nick}」)을` : '이 계정을'
-    let t = `[K bot]\n방 관리봇이 입장했습니다.\n방장이 ${who} 부방장으로 지정하면 동작합니다.`
-    if (view.products.minigame) t += `\n미니게임은 ${p}도움 으로 확인하십시오.`
+    let t = `[K bot]\n방 관리봇이 입장했어요.\n${promoteAsk(nick)}`
+    if (view.products.minigame) t += `\n「${p}도움」을 입력하면 미니게임 명령어를 볼 수 있어요.`
     return t
   }
-  if (view.cfg.games.enabled) return `[K bot]\n미니게임봇이 입장했습니다.\n${p}도움 으로 명령어를 확인하십시오.`
-  return '[K bot]\n미니게임봇이 입장했습니다.\n콘솔에서 미니게임을 켜면 동작합니다.'
+  if (view.cfg.games.enabled) return `[K bot]\n미니게임봇이 입장했어요.\n「${p}도움」을 입력하면 명령어를 볼 수 있어요.`
+  return '[K bot]\n미니게임봇이 입장했어요.\n관리자가 미니게임을 켜면 바로 쓸 수 있어요.'
 }
 
-export const PROMOTED_NOTICE = '[K bot]\n부방장 지정을 확인했습니다. 콘솔에서 켠 방 관리 기능이 동작합니다.'
+// 미니게임봇으로 이미 들어가 있는 방에 방 관리봇을 더했을 때(입장 안내가 방 관리봇을 말하지 않았던 방) 1회.
+// 7.9 의 방 관리봇 입장 안내와 같은 지정 문장으로, 방장이 지정할 계정을 고를 수 있게 닉네임을 넣는다(D12).
+export function roombotAddedNotice(view, nickname) {
+  const nick = oneLine(nickname, 40)
+  return `[K bot]\n방 관리봇이 추가되었어요.\n${promoteAsk(nick)}`
+}
+
+// 끝소리: 'none' 받침 없음 | 'rieul' ㄹ 받침 | 'other' 다른 받침 | '' 모름(글자 없음).
+// 영문·숫자는 읽는 소리로 대강 고른다. 글자 하나로 끝나면(2B, K) 알파벳 이름(엘·알 → ㄹ, 엠·엔 → 받침)으로,
+// 낱말이면(bot, kim, bell) 끝소리로 읽는다.
+function finalSound(word) {
+  const s = String(word || '').replace(/[^0-9A-Za-z가-힣]+$/, '')
+  if (!s) return ''
+  const ch = s.charAt(s.length - 1)
+  const code = ch.charCodeAt(0)
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    const jong = (code - 0xAC00) % 28
+    return jong === 0 ? 'none' : jong === 8 ? 'rieul' : 'other'
+  }
+  if (/[0-9]/.test(ch)) return '178'.indexOf(ch) >= 0 ? 'rieul' : '036'.indexOf(ch) >= 0 ? 'other' : 'none'   // 일·칠·팔 / 영·삼·육 / 이·사·오·구
+  const c = ch.toLowerCase()
+  if (!/[A-Za-z]{2}$/.test(s)) return 'lr'.indexOf(c) >= 0 ? 'rieul' : 'mn'.indexOf(c) >= 0 ? 'other' : 'none'
+  if (c === 'l') return 'rieul'
+  return 'bcdgkmnpqt'.indexOf(c) >= 0 ? 'other' : 'none'
+}
+
+const JOSA = {
+  '을': ['을', '를', '을', '을(를)'],               // [다른 받침, 받침 없음, ㄹ 받침, 모름]
+  '은': ['은', '는', '은', '은(는)'],
+  '이': ['이', '가', '이', '이(가)'],
+  '으로': ['으로', '로', '로', '(으)로'],
+  '이에요': ['이에요', '예요', '이에요', '(이)에요'],
+  '이었어요': ['이었어요', '였어요', '이었어요', '(이)었어요'],
+}
+
+/** 낱말 뒤 조사를 받침에 맞춘다. kind: '을' | '은' | '이' | '으로' | '이에요' | '이었어요'. */
+export function josa(word, kind) {
+  const row = JOSA[kind]
+  if (!row) return ''
+  const f = finalSound(word)
+  return f === 'other' ? row[0] : f === 'none' ? row[1] : f === 'rieul' ? row[2] : row[3]
+}
+
+// 이름 뒤 '로'/'으로'(받침이 없거나 ㄹ 받침이면 '로').
+export function roJosa(word) {
+  return josa(word, '으로')
+}
+
+/** 같은 이름을 쓰는 사람이 여럿일 때(!프로필·!가리기 @이름). */
+export function sameNameReply(n) {
+  return `같은 이름을 쓰는 사람이 ${n}명 있어요. @멘션으로 골라 주세요.`
+}
+
+// 기본 프로필로 들어가 있던 방을 오픈프로필로 바꾼 뒤(부방장 대기 방에서만, D12). 방장이 새 이름으로 찾게 한다.
+export function profileChangedNotice(name) {
+  const nick = oneLine(name, 40)
+  if (!nick) return `[K bot]\nK bot 프로필이 바뀌었어요.\n${promoteAsk('')}`
+  return `[K bot]\nK bot 프로필이 「${nick}」${josa(nick, '으로')} 바뀌었어요.\n${promoteAsk(nick)}`
+}
+
+export const PROMOTED_NOTICE = '[K bot]\n부방장으로 지정되었어요. 이제 켜 둔 방 관리 기능이 작동해요.'
 
 /** 미니게임 랭킹(점수는 authorId, 이름은 names 표). */
 export function rankingOf(runtime, n) {

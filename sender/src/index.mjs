@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import express from 'express'
 
-import { fakeOn, fakeServer } from './fake.mjs'
+import { fakeOn, fakeServer, fakeUserId } from './fake.mjs'
 import { guardNotices, logsView } from './features.mjs'
 import { beginLogin, cancelLogin, confirmLogin } from './register.mjs'
 import { isBotId } from './roomfeat.mjs'
@@ -400,6 +400,27 @@ app.post('/v1/bot/games-reset', botRoute(async (req, res) => {
   return id ? hub.pool.gamesReset(id) : null
 }))
 
+// 오픈프로필(D12): 관리자가 고른 것 반영 · 다시 읽기(refresh) · 링크로 확인(url, 조회 예산)
+app.post('/v1/bot/open-profile', botRoute(async (req, res) => {
+  const b = req.body || {}
+  const id = deviceId(b.device_id)
+  if (!id || !isBotId(id)) {
+    res.status(400).json({ ok: false, error: 'bad_device' })
+    return null
+  }
+  const url = typeof b.url === 'string' ? b.url.trim() : ''
+  return hub.pool.openProfileCmd(id, { refresh: b.refresh === true, url })
+}))
+
+// 들어가 있는 방의 프로필 바꾸기: how 'switch'(UPLINKPROF, 나가지 않음) | 'rejoin'(나갔다가 오픈프로필로 다시 입장)
+app.post('/v1/bot/room-profile', botRoute(async (req, res) => {
+  const b = req.body || {}
+  const id = needInstall(res, b.install_id)
+  if (!id) return null
+  const how = b.how === 'rejoin' ? 'rejoin' : 'switch'
+  return hub.pool.roomProfileCmd(id, how)
+}))
+
 // ── 가짜 모드 전용(9.4). SENDER_FAKE=1 일 때만 등록한다(8.5) ───────────────────
 if (fakeOn()) {
   process.stderr.write('[sender] SENDER_FAKE=1 — fake Kakao connection, never use in production\n')
@@ -439,6 +460,18 @@ if (fakeOn()) {
   }))
 
   app.get('/v1/fake/packets', botRoute(async () => ({ ok: true, packets: fakeServer().packets.slice(-500) })))
+
+  // 봇 계정의 오픈프로필 바꾸기: {device_id | user_id, profiles:[{name, li?, url?}], fail?:true(SYNCLINK 실패)}
+  app.post('/v1/fake/profiles', botRoute(async (req, res) => {
+    const b = req.body || {}
+    const dev = deviceId(b.device_id)
+    const uid = dev ? fakeUserId(dev) : String(b.user_id || '')
+    if (!/^[1-9][0-9]*$/.test(uid)) {
+      res.status(400).json({ ok: false, error: 'bad_user' })
+      return null
+    }
+    return fakeServer().setProfiles(uid, Array.isArray(b.profiles) ? b.profiles : null, b.fail)
+  }))
 
   app.get('/v1/fake/room', botRoute(async (req, res) => {
     const id = needInstall(res, req.query.install_id)

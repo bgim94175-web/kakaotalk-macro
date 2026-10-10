@@ -39,10 +39,11 @@
   var DAYS_FALLBACK = 30;
 
   var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없습니다';
-  var MSG_LOGIN = '로그인이 필요합니다. 다시 로그인하십시오.';
-  var MSG_BAD_LINK = '오픈채팅방 링크 형식이 아닙니다. https://open.kakao.com/o/ 로 시작하는 링크를 입력하십시오.';
-  var MSG_UNVERIFIED = '방을 지금 확인하지 못했습니다. 결제 후 K bot이 입장할 때 확인합니다. 설치할 수 없는 링크로 확인되면 문의하기로 링크를 바꾸거나 환불을 안내합니다.';
-  var MSG_PROFILE_ONLY = '이 방은 기본 프로필 참여를 허용하지 않아 K bot 계정이 닉네임 프로필로 입장합니다.';
+  var MSG_BROKEN = '화면을 표시하지 못했습니다. 새로고침 후에도 같으면 문의해 주세요.';
+  var MSG_LOGIN = '로그인이 필요합니다.';
+  var MSG_BAD_LINK = '오픈채팅방 링크 형식이 아닙니다. https://open.kakao.com/o/로 시작하는 링크를 입력해 주세요.';
+  var MSG_UNVERIFIED = '방을 지금 확인하지 못했습니다. 결제 후 K bot이 들어갈 때 다시 확인하며, 들어갈 수 없는 방이면 링크 변경이나 환불을 안내합니다.';
+  var MSG_PROFILE_ONLY = 'K bot은 방의 프로필 설정과 관계없이 오픈프로필로 들어갑니다.';   // 미리 보기는 profile_only 를 늘 false 로 준다(D12). 호환용으로만 남긴다.
 
   /* ── 자동 입금확인이 꺼져 있으면(DEPOSIT_AUTO_APPROVE=0 또는 DEPOSIT_TOKEN 미설정)
         "자동으로 적용" 을 약속한 문구를 전부 "관리자 확인 후 적용" 으로 바꾼다([data-manual]).
@@ -63,18 +64,18 @@
 
   /** 입금 후 안내 한 줄 — 자동/수동, 회원 주문/예전 키 주문에 따라 갈린다 (6.7) */
   function issueMsg(review, member) {
-    if (review) return '입금 후 관리자가 확인합니다';
+    if (review) return '입금하면 관리자가 직접 확인합니다';
     if (member === false) {   // 예전 키 주문
-      return AUTO_APPROVE ? '입금 후 1~2분 내 키가 자동 발급됩니다' : '입금 후 관리자가 확인하여 키를 발급합니다';
+      return AUTO_APPROVE ? '입금하면 1~2분 안에 키가 자동으로 발급됩니다' : '입금하면 관리자가 확인한 뒤 키를 발급합니다';
     }
-    return AUTO_APPROVE ? '입금 후 1~2분 안에 자동으로 적용됩니다' : '입금 후 관리자가 확인하여 적용합니다';
+    return AUTO_APPROVE ? '입금하면 1~2분 안에 자동으로 확인됩니다' : '입금하면 관리자가 확인한 뒤 처리합니다';
   }
 
   /* 서버가 48시간 방치된 pending 주문을 자동 취소한다 (ORDER_PENDING_TTL_MS).
      접수 결과 화면과 주문 상태 페이지에서 같은 문구를 쓴다. */
-  var TTL_MSG = '48시간 내 미입금 시 주문이 자동 취소됩니다. 입금 전이면 내 계정의 구매 내역에서 직접 취소할 수 있습니다.';
-  var TTL_CANCELED_MSG = '미입금 48시간 경과로 자동 취소되었습니다. 이미 입금한 경우 주문번호를 전달하여 문의하십시오.';
-  var CANCEL_WARN = '입금한 뒤에는 취소하지 마십시오.';
+  var TTL_MSG = '48시간 안에 입금하지 않으면 주문이 자동으로 취소됩니다. 입금 전에는 내 계정의 구매 내역에서 직접 취소할 수 있습니다.';
+  var TTL_CANCELED_MSG = '48시간 안에 입금되지 않아 자동으로 취소되었습니다. 이미 입금했다면 주문번호를 적어 문의해 주세요.';
+  var CANCEL_WARN = '주문을 취소합니다. 이미 입금했다면 취소하지 말고 문의해 주세요.';
 
   /* 예전 키 주문(kind 없음)의 상태 칩 */
   var STATUS = {
@@ -87,40 +88,41 @@
   /* 회원 주문(kind='member')의 상태 칩 (6.7) */
   var STATUS_MEMBER = {
     pending:  { kr: '입금 대기',               cls: 'warn' },
-    paid:     { kr: '입금 확인됨 · 적용 준비',  cls: 'info' },
-    done:     { kr: '적용 완료',               cls: 'ok'   },
+    paid:     { kr: '입금 확인 · 처리 중',     cls: 'info' },
+    done:     { kr: '처리 완료',               cls: 'ok'   },
     canceled: { kr: '취소됨',                  cls: 'bad'  },
     cancelled:{ kr: '취소됨',                  cls: 'bad'  }
   };
 
   /* 서버 reason 코드 → 한국어 (서버가 error 문구를 주지 않은 경우의 대체) */
   var REASON_KR = {
-    bad_request:   '요청 형식이 올바르지 않습니다',
-    no_depositor:  '입금자명을 입력하십시오',
+    bad_request:   '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요',
+    no_depositor:  '입금자명을 입력해 주세요',
     not_found:     '조회 결과가 없습니다',
-    login_required:'로그인이 필요합니다. 다시 로그인하십시오.',
-    server_error:  '서버 오류가 발생했습니다. 잠시 후 다시 시도하십시오',
-    rate_limited:  '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오',
-    busy:          '잠시 뒤 다시 시도하십시오.',
+    login_required:'로그인이 필요합니다.',
+    server_error:  '서버 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요',
+    rate_limited:  '요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요',
+    busy:          '요청이 많아 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
     unauthorized:  '권한이 없습니다'
   };
 
   /* 결과 코드 ?g= (3.2.2). at: 그 문구를 보이는 화면 */
   var G_NOTES = {
     linked:       { at: 'account', t: 'Google 계정을 연결했습니다.' },
-    off:          { at: 'login',   t: 'Google 로그인을 지금 사용할 수 없습니다. 아이디로 로그인하십시오.', warn: true },
-    webview:      { at: 'both',    t: '카카오톡 안 브라우저에서는 Google 로그인이 제한됩니다. 외부 브라우저에서 여십시오.', warn: true, external: true },
-    login_needed: { at: 'login',   t: 'Google 계정을 연결하려면 먼저 아이디로 로그인하십시오.' },
-    expired:      { at: 'both',    t: '확인 시간이 지났습니다. 다시 시도하십시오.', warn: true },
+    off:          { at: 'login',   t: 'Google 로그인을 지금 사용할 수 없습니다. 아이디로 로그인해 주세요.', warn: true },
+    webview:      { at: 'both',    t: '카카오톡 안 브라우저에서는 Google 로그인이 제한됩니다. 외부 브라우저에서 열어 주세요.', warn: true, external: true },
+    login_needed: { at: 'login',   t: 'Google 계정을 연결하려면 먼저 아이디로 로그인해 주세요.' },
+    relogin:      { at: 'login',   t: 'Google 계정을 연결하기 전에 본인 확인이 필요합니다. 아이디와 비밀번호로 다시 로그인해 주세요.' },
+    expired:      { at: 'both',    t: '확인 시간이 지났습니다. 다시 시도해 주세요.', warn: true },
     denied:       { at: 'both',    t: 'Google 계정 확인을 취소했습니다.', warn: true },
-    error:        { at: 'both',    t: 'Google 계정을 확인하지 못했습니다. 잠시 뒤 다시 시도하십시오.', warn: true },
-    taken:        { at: 'account', t: '이 Google 계정은 다른 회원에게 연결되어 있습니다.', warn: true },
-    already:      { at: 'account', t: '이미 다른 Google 계정이 연결되어 있습니다. 연결을 해제한 뒤 다시 시도하십시오.', warn: true },
-    not_linked:   { at: 'login',   t: '연결된 회원이 없습니다. 아이디로 로그인한 뒤 내 계정에서 Google 계정을 연결하십시오.', warn: true },
-    blocked:      { at: 'login',   t: '이용이 정지된 계정입니다. 문의하십시오.', warn: true, support: true }
+    error:        { at: 'both',    t: 'Google 계정을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', warn: true },
+    taken:        { at: 'account', t: '이 Google 계정은 다른 아이디에 연결되어 있습니다.', warn: true },
+    already:      { at: 'account', t: '이미 다른 Google 계정이 연결되어 있습니다. 연결을 해제한 뒤 다시 시도해 주세요.', warn: true },
+    not_linked:   { at: 'login',   t: '이 Google 계정과 연결된 아이디가 없습니다. 아이디로 로그인한 뒤 내 계정에서 Google 계정을 연결해 주세요.', warn: true },
+    blocked:      { at: 'login',   t: '이용이 정지된 계정입니다. 문의해 주세요.', warn: true, support: true }
   };
-  var G_RECOVER_NONE = 'Google 계정이 연결된 회원이 없습니다. 비밀번호를 잊었고 Google 계정을 연결하지 않은 경우, 문의하기로 아이디를 전달하면 확인 뒤 임시 비밀번호를 안내합니다.';
-  var G_RECOVER = 'Google 계정으로 확인되었습니다. 15분 안에 새 비밀번호를 정하십시오.';
+  var G_RECOVER_NONE = '이 Google 계정과 연결된 아이디가 없습니다. Google 계정을 연결하지 않았다면 아이디를 적어 문의해 주세요. 확인 후 임시 비밀번호를 안내합니다.';
+  var G_RECOVER = 'Google 계정으로 확인되었습니다. 15분 안에 새 비밀번호를 정해 주세요.';
 
   function featName(id) {
     if (PRICE && PRICE.products[id] && PRICE.products[id].label) return PRICE.products[id].label;
@@ -312,7 +314,7 @@
   function copy(text, okMsg) {
     var s = String(text || '');
     if (!s) return;
-    var done = function () { toast(okMsg || '복사되었습니다', 'ok'); };
+    var done = function () { toast(okMsg || '복사했습니다', 'ok'); };
     var fallback = function () {
       try {
         var ta = el('textarea', { 'aria-hidden': 'true' });
@@ -322,9 +324,9 @@
         ta.select(); ta.setSelectionRange(0, s.length);
         var ok = document.execCommand('copy');
         document.body.removeChild(ta);
-        if (ok) done(); else toast('복사에 실패했습니다. 길게 눌러 직접 복사하십시오', 'bad');
+        if (ok) done(); else toast('복사하지 못했습니다. 길게 눌러 직접 복사해 주세요', 'bad');
       } catch (e) {
-        toast('복사에 실패했습니다. 길게 눌러 직접 복사하십시오', 'bad');
+        toast('복사하지 못했습니다. 길게 눌러 직접 복사해 주세요', 'bad');
       }
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -332,9 +334,15 @@
     } else fallback();
   }
 
+  /* 받침에 맞는 목적격 조사 (계좌번호를 · 주문번호를 · 키를) */
+  function objJosa(w) {
+    var c = String(w || '').charCodeAt(String(w || '').length - 1);
+    return (c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 === 0) ? '를' : '을';
+  }
+
   function copyBtn(getText, label) {
     return el('button', {
-      type: 'button', cls: 'btn sm', onclick: function () { copy(getText(), (label || '') + ' 복사되었습니다'); }
+      type: 'button', cls: 'btn sm', onclick: function () { copy(getText(), label ? label + objJosa(label) + ' 복사했습니다' : '복사했습니다'); }
     }, [icon('i-copy', 14), '복사']);
   }
 
@@ -398,7 +406,7 @@
         running = false;
         setBusy(act, false);
         clear(errP);
-        errP.appendChild(document.createTextNode((e && e.message) || '처리하지 못했습니다. 잠시 뒤 다시 시도하십시오.'));
+        errP.appendChild(document.createTextNode((e && e.message) || '처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'));
         errP.hidden = false;
       });
     });
@@ -415,22 +423,21 @@
     var b = num(base);
     var suffix = (b !== null && v !== null && v > b) ? (v - b) : null;
     var msg = review
-      ? '동일 금액의 대기 주문이 중복되어 금액만으로 식별이 불가합니다. 관리자가 직접 확인하며, 최대 수 시간이 소요됩니다. ' +
-        '입금 후 문의하기로 주문번호를 알리면 처리가 신속합니다.'
-      : '정확히 ' + won(v) + '을 입금하십시오' +
-        (suffix !== null ? ' · 뒷자리 ' + suffix + '원은 주문 확인용입니다' : '') +
-        '. 금액이 일치하지 않으면 자동 확인이 불가합니다.';
+      ? '같은 금액의 주문이 겹쳐 자동 확인이 어렵습니다. 관리자가 직접 확인하므로 몇 시간이 걸릴 수 있습니다.'
+      : won(v) + '을 1원 단위까지 정확히 입금해 주세요.' +
+        (suffix !== null ? ' 끝자리 ' + suffix + '원은 주문을 구분하는 금액입니다.' : '') +
+        (AUTO_APPROVE ? ' 금액이 다르면 자동으로 확인되지 않습니다.' : ' 금액이 다르면 확인이 늦어질 수 있습니다.');
     return el('div', { cls: 'big hi' }, [
       el('div', { cls: 'k', text: '입금 금액' }),
       el('div', { cls: 'v xl mono' }, wonKids(v)),
       el('div', { cls: 'tiny warnline', text: msg }),
       suffix !== null
-        ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(v - suffix) + ' + 주문 확인용 ' + suffix + '원' })
+        ? el('div', { cls: 'tiny dim', text: '상품 금액 ' + won(v - suffix) + ' + 주문 구분용 ' + suffix + '원' })
         : null,
       v === null ? null : el('div', { cls: 'btn-row' }, [
         el('button', {
           type: 'button', cls: 'btn sm',
-          onclick: function () { copy(digits(Math.round(v)), '금액이 복사되었습니다 (숫자만)'); }
+          onclick: function () { copy(digits(Math.round(v)), '금액을 숫자만 복사했습니다'); }
         }, [icon('i-copy', 14), '금액 복사'])
       ])
     ]);
@@ -463,7 +470,7 @@
     o.cache = 'no-store';
     o.credentials = 'same-origin';
     return fetch(path, o).catch(function () {
-      var e = new Error('서버에 연결할 수 없습니다. 네트워크 상태를 확인한 후 다시 시도하십시오.');
+      var e = new Error('서버에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
       e.net = true;
       throw e;
     }).then(function (res) {
@@ -478,7 +485,7 @@
           var msg = human || errKr(code) ||
                     (res.status === 401 ? MSG_LOGIN : '') ||
                     (res.status === 404 ? '조회 결과가 없습니다' : '') ||
-                    ('요청이 실패했습니다 (HTTP ' + res.status + ')');
+                    ('요청을 처리하지 못했습니다(오류 ' + res.status + '). 페이지를 새로고침한 뒤 다시 시도해 주세요.');
           var e2 = new Error(msg);
           e2.status = res.status;
           e2.code = code;
@@ -592,9 +599,9 @@
      카드 3개를 가로로 늘어놓지 않는다 — .prods 안의 행 3개(6.8). */
 
   var PROD_BULLETS = {
-    macro:    ['카카오 계정 최대 3개', '다시 구매하면 만료일 뒤로 연장'],
-    roombot:  ['방장이 K bot 계정을 부방장으로 지정하면 동작'],
-    minigame: ['입장하면 바로 동작']
+    macro:    ['카카오 계정 최대 3개', '다시 구매하면 현재 만료일에 이어서 연장'],
+    roombot:  ['방장이 K bot을 부방장으로 지정하면 동작'],
+    minigame: ['K bot이 방에 들어가면 바로 동작']
   };
 
   /* 모노 칸 안의 한글은 산세리프 span 으로 */
@@ -620,7 +627,7 @@
         ]),
         el('div', { cls: 'pr' }, room
           ? [el('span', { cls: 'pl', text: '기간' }), el('span', { cls: 'pv' }, [sans('제한 없음')])]
-          : [el('span', { cls: 'pl', text: '구매 단위' }), el('span', { cls: 'pv' }, [(p.min || 1) + '~' + (p.max || 12), sans('개월')])])
+          : [el('span', { cls: 'pl', text: '한 번에' }), el('span', { cls: 'pv' }, [(p.min || 1) + '~' + (p.max || 12), sans('개월')])])
       ])
     ]);
   }
@@ -660,8 +667,8 @@
     })));
     var ex = PRICE.products.macro ? PRICE.products.macro.price : PRICE.products[PRICE.order[0]].price;
     mount.appendChild(el('div', { cls: 'nudge',
-      text: '주문 시 금액 뒷자리에 확인용 1~99원이 더해집니다 (예: ' + won(ex + 47) + ').' }));
-    mount.appendChild(el('a', { cls: 'btn primary wide lg', href: '/buy' }, '구매 신청'));
+      text: '주문을 구분하려고 금액에 1~99원이 더해집니다 (예: ' + won(ex + 47) + ').' }));
+    mount.appendChild(el('a', { cls: 'btn primary wide lg', href: '/buy' }, '구매'));
   }
 
   function pageHome() {
@@ -987,8 +994,8 @@
      금액은 서버가 정한다 (상품 금액 + 뒷자리 1~99원). 화면 합계는 /api/price 로 계산한 안내값이다. */
 
   var ROOM_HINT = {
-    roombot:  '방장이 K bot 계정을 부방장으로 지정해야 동작합니다',
-    minigame: '입장하면 바로 게임 명령어를 쓸 수 있습니다'
+    roombot:  '방장이 K bot을 부방장으로 지정해야 동작합니다',
+    minigame: 'K bot이 방에 들어가면 바로 게임 명령어를 쓸 수 있습니다'
   };
   /* 미리 보기 오류 가운데 다시 확인해도 소용없는 것 — 주문을 막는다 */
   var PV_HARD = { bad_link: 1, not_found: 1, not_group: 1, taken: 1, room_taken: 1, blocked_room: 1 };
@@ -1036,7 +1043,7 @@
         ME = me;
         var m = me.macro || {};
         if (macroNow && m.active && ts(m.until)) {
-          macroNow.textContent = '지금 만료 ' + dateKr(m.until);
+          macroNow.textContent = '현재 만료일 ' + dateKr(m.until);
           macroNow.hidden = false;
         }
         var add = num(q.get('add'));
@@ -1061,7 +1068,7 @@
     function priceFail(e) {
       clear(sumLines);
       sumLines.appendChild(el('p', { cls: 'err', text: (e && e.message) || MSG_PRICE_FAIL }));
-      sumLines.appendChild(el('p', { cls: 'hint', text: '입력한 내용은 그대로 유지됩니다. 아래 버튼을 선택하십시오.' }));
+      sumLines.appendChild(el('p', { cls: 'hint', text: '입력한 내용은 그대로 남아 있습니다. [다시 시도]를 눌러 주세요.' }));
       sumLines.appendChild(el('div', null, [el('button', { type: 'button', cls: 'btn sm', onclick: function () {
         loadPrice().then(function () { bindPrice(); refreshRowPrices(); updateSum(); }, priceFail);
       } }, [icon('i-refresh', 14), '다시 시도'])]));
@@ -1079,8 +1086,8 @@
       loadPrice().then(function () {
         if (bank) {
           bank.textContent = PRICE.bank
-            ? '입금 계좌 · ' + PRICE.bank + ' · 주문 접수 후 다시 안내합니다'
-            : '입금 계좌는 주문 접수 후 안내합니다';
+            ? '입금 계좌 · ' + PRICE.bank + ' · 주문하면 다시 안내합니다'
+            : '입금 계좌는 주문하면 안내합니다';
         }
       }, function () { /* priceFail 이 알린다 */ });
     }
@@ -1133,7 +1140,7 @@
       r.pv = el('div', { cls: 'rpv', id: 'room' + i + '-pv' });
       r.linkErr = el('p', { cls: 'err', id: 'err-' + linkId, role: 'alert', hidden: true });
 
-      r.codeLblT = el('span', { text: '참여코드 · 선택' });
+      r.codeLblT = el('span', { text: '참여코드 (선택)' });
       r.codeReq = el('span', { cls: 'req', 'aria-hidden': 'true', text: '*', hidden: true });
       r.codeIn = el('input', { type: 'text', id: codeId, name: codeId, maxlength: '20', autocomplete: 'off', autocapitalize: 'off',
         spellcheck: 'false', placeholder: '참여코드가 있는 방만 입력', 'aria-describedby': codeId + '-hint err-' + codeId });
@@ -1161,7 +1168,7 @@
       r.prodErr = el('p', { cls: 'err', id: 'err-room' + i + '-prod', role: 'alert', hidden: true });
 
       r.title = el('span', { text: '방' });
-      r.delBtn = el('button', { type: 'button', cls: 'btn sm ghost' }, [icon('i-trash', 14), '방 삭제']);
+      r.delBtn = el('button', { type: 'button', cls: 'btn sm ghost' }, [icon('i-trash', 14), '빼기']);
       r.el = el('div', { cls: 'rrow' + (reducedMotion() ? '' : ' in'), 'data-i': String(i) }, [
         el('div', { cls: 'rrow-h' }, [el('span', { cls: 'rrow-t' }, [icon('i-link', 14), r.title]), r.delBtn]),
         el('div', { cls: 'fld', id: 'fld-' + linkId }, [
@@ -1170,7 +1177,7 @@
           r.pv, r.linkErr
         ]),
         r.codeFld,
-        el('div', { cls: 'fld', id: 'fld-room' + i + '-prod', role: 'group', 'aria-label': '설치할 상품' }, [
+        el('div', { cls: 'fld', id: 'fld-room' + i + '-prod', role: 'group', 'aria-label': '설치할 봇' }, [
           el('div', { cls: 'rprods' }, [r.prod.roombot.lab, r.prod.minigame.lab]),
           r.prodErr
         ])
@@ -1307,7 +1314,7 @@
           el('div', { cls: 'nt' }, [
             el('p', { text: MSG_UNVERIFIED }),
             el('label', { cls: 'chk', for: r.unvIn.id }, [r.unvIn, el('span', { cls: 'box', 'aria-hidden': 'true' }),
-              el('span', { cls: 't' }, [el('span', { cls: 'nm', text: '확인하지 못한 방으로 주문합니다' })])])
+              el('span', { cls: 't' }, [el('span', { cls: 'nm', text: '확인되지 않은 방이지만 이대로 주문합니다' })])])
           ])
         ]));
       } else {
@@ -1336,7 +1343,7 @@
       var needs = !!(p && p.room && p.room.needs_passcode) && !mine;
       r.needsCode = needs;
       r.codeFld.hidden = !!mine;
-      r.codeLblT.textContent = needs ? '참여코드 ' : '참여코드 · 선택';
+      r.codeLblT.textContent = needs ? '참여코드 ' : '참여코드 (선택)';
       r.codeReq.hidden = !needs;
       r.codeHint.hidden = !needs;
     }
@@ -1346,7 +1353,7 @@
       var list = (ME && Array.isArray(ME.rooms_list)) ? ME.rooms_list : [];
       var v = null;
       list.forEach(function (x) { if (x && Number(x.id) === id) v = x; });
-      if (!v) { toast('없는 방입니다. 내 방 목록에서 다시 고르십시오', 'bad'); return; }
+      if (!v) { toast('방을 찾을 수 없습니다. 내 방 목록에서 다시 골라 주세요', 'bad'); return; }
       var r = addRow();
       if (!r) return;
       r.installId = id;
@@ -1407,7 +1414,7 @@
       });
       if (!lines.length) sumLines.appendChild(el('div', { cls: 'ln off' }, [el('span', { text: '선택한 상품이 없습니다' }), el('span', { cls: 'v', text: '-' })]));
       sumLines.appendChild(el('div', { cls: 'ln total' }, [el('span', { text: '결제 금액' }), el('span', { cls: 'v mono' }, wonKids(total))]));
-      sumNudge.textContent = '주문 시 금액 뒷자리에 확인용 1~99원이 더해집니다' + (total ? ' (예: ' + won(total + 47) + ').' : '.');
+      sumNudge.textContent = '주문을 구분하려고 금액에 1~99원이 더해집니다' + (total ? ' (예: ' + won(total + 47) + ').' : '.');
     }
 
     /* ── 제출 ───────────────────────────────────────────── */
@@ -1438,9 +1445,9 @@
       var sent = sentRows();
       if (macroOn.checked) {
         var m = months();
-        if (!(m >= 1 && m <= macroMax())) { fieldErr('macro', '기간은 1~' + macroMax() + '개월로 입력하십시오'); mark(monthsIn); }
+        if (!(m >= 1 && m <= macroMax())) { fieldErr('macro', '기간은 1~' + macroMax() + '개월로 입력해 주세요'); mark(monthsIn); }
       }
-      if (!macroOn.checked && !sent.length) { fieldErr('macro', '상품을 1개 이상 선택하십시오'); mark(macroOn); }
+      if (!macroOn.checked && !sent.length) { fieldErr('macro', '상품을 1개 이상 선택해 주세요'); mark(macroOn); }
       if (sent.length > maxRooms()) { fieldErr('rooms', '방은 한 번에 ' + maxRooms() + '개까지 주문할 수 있습니다'); mark(addBtn); }
       var seen = {};
       sent.forEach(function (r) {
@@ -1449,7 +1456,7 @@
           if (seen['i' + r.installId]) { setRowErr(r, 'link', '이미 추가한 방입니다'); mark(r.delBtn); return; }
           seen['i' + r.installId] = 1;
           if (r.view && r.view.link_url) seen['u' + normLink(r.view.link_url)] = 1;
-          if (!prods.length) { setRowErr(r, 'prod', '방마다 설치할 상품을 1개 이상 선택하십시오'); mark(firstEnabledProd(r)); }
+          if (!prods.length) { setRowErr(r, 'prod', '이 방에 설치할 봇을 1개 이상 골라 주세요'); mark(firstEnabledProd(r)); }
           return;
         }
         var v = normLink(r.linkIn.value);
@@ -1464,14 +1471,14 @@
         if (seen['u' + v] || (lid && seen['l' + lid]) || (mineId && seen['i' + mineId])) { setRowErr(r, 'link', '이미 추가한 방입니다'); mark(r.linkIn); return; }
         seen['u' + v] = 1; if (lid) seen['l' + lid] = 1; if (mineId) seen['i' + mineId] = 1;
         if (r.preview && r.preview.verified === false && !(r.unvIn && r.unvIn.checked)) {
-          setRowErr(r, 'link', '방을 확인하지 못했습니다. 확인란에 동의하거나 잠시 뒤 다시 확인하십시오');
+          setRowErr(r, 'link', '방 정보를 불러오지 못했습니다. 이대로 주문하려면 위 확인란을 선택하고, 아니면 잠시 뒤 다시 확인해 주세요');
           mark(r.unvIn || r.linkIn);
         }
-        if (r.needsCode && !str(r.codeIn.value)) { setRowErr(r, 'code', '참여코드를 입력하십시오'); mark(r.codeIn); }
-        if (!prods.length) { setRowErr(r, 'prod', '방마다 설치할 상품을 1개 이상 선택하십시오'); mark(firstEnabledProd(r)); }
+        if (r.needsCode && !str(r.codeIn.value)) { setRowErr(r, 'code', '참여코드를 입력해 주세요'); mark(r.codeIn); }
+        if (!prods.length) { setRowErr(r, 'prod', '이 방에 설치할 봇을 1개 이상 골라 주세요'); mark(firstEnabledProd(r)); }
       });
-      if (sent.length && !termsIn.checked) { fieldErr('terms', '이용 조건을 확인하고 동의하십시오'); mark(termsIn); }
-      if (!str(depIn.value)) { fieldErr('depositor', '입금자명을 입력하십시오'); mark(depIn); }
+      if (sent.length && !termsIn.checked) { fieldErr('terms', '이용 조건에 동의해 주세요'); mark(termsIn); }
+      if (!str(depIn.value)) { fieldErr('depositor', '입금자명을 입력해 주세요'); mark(depIn); }
       return first;
     }
 
@@ -1503,7 +1510,7 @@
         var bad = validate();
         if (bad) {
           lock(false);
-          toast('입력 내용을 확인하십시오', 'bad');
+          toast('입력 내용을 확인해 주세요', 'bad');
           focusField(bad);
           return;
         }
@@ -1536,7 +1543,7 @@
     function orderFail(e, sent) {
       var d = e.data || {};
       var reason = e.code || '';
-      var msg = e.message || '주문 접수에 실패했습니다';
+      var msg = e.message || '주문하지 못했습니다';
       if (e.status === 401) {
         submitErr(MSG_LOGIN, el('a', { cls: 'btn sm', href: loginUrl('/buy') }, '로그인'));
         toast(msg, 'bad');
@@ -1559,7 +1566,7 @@
         submitErr(msg, sup);
         focusEl = $('#submitErr');
       }
-      toast('입력 내용을 확인하십시오', 'bad');
+      toast('입력 내용을 확인해 주세요', 'bad');
       if (focusEl) focusField(focusEl);
     }
 
@@ -1595,25 +1602,26 @@
       });
 
       out.appendChild(el('div', { cls: 'card stack' }, [
-        el('div', { cls: 'chip-row' }, [el('span', { cls: 'chip ok', text: '주문 접수됨' })]),
+        el('div', { cls: 'chip-row' }, [el('span', { cls: 'chip ok', text: '주문 완료' })]),
         el('h2', { cls: 'res-h', text: issueMsg(review, true) }),
-        el('p', { cls: 'sub small', text: '입금이 확인되면 상품이 회원 계정에 적용되고, K bot 계정이 방에 입장합니다.' }),
+        el('p', { cls: 'sub small', text: g.macro && g.rooms.length ? '입금이 확인되면 바로 매크로를 쓸 수 있고, K bot이 방에 들어갑니다.'
+          : (g.rooms.length ? '입금이 확인되면 K bot이 방에 들어갑니다.' : '입금이 확인되면 바로 매크로를 쓸 수 있습니다.') }),
         amountBlock(amt, base, review),
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '입금 계좌' }),
           el('div', { cls: 'v sm', text: acct || '관리자에게 문의' }),
-          acct ? el('div', { cls: 'btn-row' }, [copyBtn(function () { return acct; }, '계좌')]) : null
+          acct ? el('div', { cls: 'btn-row' }, [copyBtn(function () { return acct; }, '계좌번호')]) : null
         ]),
         el('div', { cls: 'big' }, [
           el('div', { cls: 'k', text: '주문번호' }),
           el('div', { cls: 'v mono sm', text: id || '-' }),
           el('div', { cls: 'btn-row' }, [
             id ? copyBtn(function () { return id; }, '주문번호') : null,
-            link ? el('a', { cls: 'btn sm primary', href: link }, '주문 상태 보기') : null
+            link ? el('a', { cls: 'btn sm primary', href: link }, '주문 조회') : null
           ])
         ]),
         noteEl('dim', [TTL_MSG]),
-        review ? noteEl('warn', ['대기 주문이 다수여서 금액만으로 식별이 불가합니다. 관리자가 직접 확인하며 최대 수 시간이 소요됩니다. 입금 후 문의하기로 주문번호를 알리면 처리가 신속합니다.',
+        review ? noteEl('warn', ['입금 후 주문번호를 적어 문의해 주시면 더 빨리 처리됩니다.',
           ' ', supportBtn('문의하기', '주문 ' + id + ' · 금액 확인')]) : null,
         el('dl', { cls: 'kv' }, [
           el('div', { cls: 'r' }, [el('dt', { text: '상품' }), el('dd', null, [el('ul', { cls: 'kv-list' }, prodLines)])]),
@@ -1626,7 +1634,7 @@
       ]));
 
       window.scrollTo(0, 0);
-      toast('주문이 접수되었습니다', 'ok');
+      toast('주문이 완료되었습니다', 'ok');
     }
   }
 
@@ -1657,12 +1665,12 @@
     return { macro: macro, rooms: rooms };
   }
 
-  /* 주문 줄 요약: `카카오톡 매크로 2개월 · 방 관리봇 1개` */
+  /* 주문 줄 요약: `카카오톡 매크로 2개월 · 방 관리봇 (방 1개)` */
   function itemsSummary(items) {
     var g = groupItems(items), parts = [], n = {};
     if (g.macro) parts.push(featName('macro') + ' ' + g.macro.months + '개월');
     g.rooms.forEach(function (rm) { rm.products.forEach(function (p) { n[p] = (n[p] || 0) + 1; }); });
-    ROOM_PRODUCTS.forEach(function (p) { if (n[p]) parts.push(featName(p) + ' ' + n[p] + '개'); });
+    ROOM_PRODUCTS.forEach(function (p) { if (n[p]) parts.push(featName(p) + ' (방 ' + n[p] + '개)'); });
     return parts.join(' · ') || '-';
   }
 
@@ -1713,8 +1721,8 @@
 
   /* order.html 오른쪽 안내 — HTML 기본은 회원 주문 문구. 예전 키 주문이면 그때 문구로 바꿔 끼운다(부록 A.3) */
   var LEGACY_ORDER_NOTE = {
-    auto: '입금 확인은 금액 매칭으로 자동 처리됩니다. 안내된 금액을 뒷자리까지 정확히 입금하면 통상 1~2분 내 키가 발급됩니다. 입금 금액이 다르거나 30분 경과 후에도 상태가 변경되지 않으면 주문번호와 입금자명을 전달하여 문의하십시오.',
-    manual: '입금 확인 후 관리자가 키를 발급합니다. 안내된 금액을 뒷자리까지 정확히 입금하십시오. 30분 경과 후에도 상태가 변경되지 않으면 주문번호와 입금자명을 전달하여 문의하십시오.'
+    auto: '입금은 금액으로 자동 확인됩니다. 안내된 금액을 1원 단위까지 정확히 입금하면 보통 1~2분 안에 키가 발급됩니다. 입금 금액이 다르거나 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.',
+    manual: '관리자가 입금을 확인한 뒤 키를 발급합니다. 안내된 금액을 1원 단위까지 정확히 입금해 주세요. 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.'
   };
 
   function pageOrder() {
@@ -1729,7 +1737,7 @@
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var v = str(idIn.value).toUpperCase().replace(/[^A-Z0-9-]/g, '');
-      if (!v) { toast('주문번호를 입력하십시오', 'bad'); idIn.focus(); return; }
+      if (!v) { toast('주문번호를 입력해 주세요', 'bad'); idIn.focus(); return; }
       var t = loadToken(v);
       location.href = '/order/' + encodeURIComponent(v) + (t ? '?t=' + encodeURIComponent(t) : '');
     });
@@ -1834,14 +1842,13 @@
         ])
       ]));
       if (retrying) {
-        out.appendChild(makeWait('재연결 시도 중'));
-        out.appendChild(noteEl('', ['네트워크가 끊긴 경우에도 이 탭을 열어 두면 연결 복구 시 자동으로 확인이 재개됩니다. ' +
-                                    '수동 새로고침은 필요하지 않습니다.']));
+        out.appendChild(makeWait('다시 연결하는 중'));
+        out.appendChild(noteEl('', ['인터넷이 다시 연결되면 자동으로 다시 확인합니다. 새로고침할 필요는 없습니다.']));
       } else if (!e.gone && timedOut) {
-        out.appendChild(noteEl('warn', ['30분간 연결되지 않아 자동 확인을 중단했습니다. [다시 시도] 를 실행하십시오. ' +
-          '같은 상태가 이어지면 주문번호와 입금자명을 전달하여 문의하십시오.', ' ', supportBtn('문의하기', '주문 ' + id)]));
+        out.appendChild(noteEl('warn', ['30분 동안 연결되지 않아 자동 확인을 멈췄습니다. [다시 시도]를 눌러 주세요. ' +
+          '같은 상태가 이어지면 주문번호와 입금자명을 적어 문의해 주세요.', ' ', supportBtn('문의하기', '주문 ' + id)]));
       } else if (e.gone) {
-        out.appendChild(noteEl('', ['회원 주문은 주문한 회원으로 로그인하면 확인코드 없이 볼 수 있습니다. ',
+        out.appendChild(noteEl('', ['주문한 아이디로 로그인하면 이 주문을 볼 수 있습니다. ',
           el('a', { cls: 'btn sm', href: loginUrl(location.pathname) }, '로그인')]));
       }
       $('#findWrap').hidden = false;
@@ -1898,7 +1905,7 @@
           else tickWait();
         } else if (fails >= FAIL_WARN && !failToasted) {
           failToasted = true;
-          toast('상태 확인이 반복 실패하고 있습니다. 네트워크 상태를 확인하십시오. 복구 시 자동으로 재개됩니다', 'bad');
+          toast('주문 상태를 계속 불러오지 못하고 있습니다. 인터넷 연결을 확인해 주세요. 연결되면 자동으로 다시 확인합니다', 'bad');
         }
       }).then(function () {
         inFlight = false;
@@ -1928,7 +1935,7 @@
       var host = el('div', { cls: 'cancel-host' });
       var btn = el('button', { type: 'button', cls: 'btn sm danger' }, [icon('i-x', 14), '주문 취소']);
       btn.addEventListener('click', function () {
-        inlineConfirm(host, CANCEL_WARN, '취소', function () {
+        inlineConfirm(host, CANCEL_WARN, '주문 취소', function () {
           return api('/api/my/orders/cancel', { method: 'POST', body: { id: o.id || id } }).then(function () {
             toast('주문을 취소했습니다', 'ok');
             lastSig = '';
@@ -1955,7 +1962,7 @@
     function headChips(o, st, autoCanceled) {
       return el('div', { cls: 'chip-row' }, [
         el('span', { cls: 'chip ' + st.cls, text: autoCanceled ? '자동 취소됨 · 미입금' : st.kr }),
-        o.created ? el('span', { cls: 'tiny dim', text: dateKr(o.created, true) + ' 접수' }) : null
+        o.created ? el('span', { cls: 'tiny dim', text: dateKr(o.created, true) + ' 주문' }) : null
       ]);
     }
 
@@ -1963,7 +1970,7 @@
       return el('div', { cls: 'big' }, [
         el('div', { cls: 'k', text: '입금 계좌' }),
         el('div', { cls: 'v sm', text: acct || '관리자에게 문의' }),
-        acct ? el('div', { cls: 'btn-row' }, [copyBtn(function () { return acct; }, '계좌')]) : null
+        acct ? el('div', { cls: 'btn-row' }, [copyBtn(function () { return acct; }, '계좌번호')]) : null
       ]);
     }
     function idBig(showId) {
@@ -2016,7 +2023,7 @@
       g.rooms.forEach(function (rm) {
         var v = views[rm.install_id] || null;
         var sk = rm.install_id !== null ? skipped[rm.install_id] : null;
-        var label = sk ? '적용하지 못함 · 환불 대상' : (v ? str(v.label) : st.kr);
+        var label = sk ? '설치하지 못함 · 환불 대상' : (v ? str(v.label) : st.kr);
         var disp = v ? v.display : '';
         var showDetail = !sk && v && v.detail && (disp === 'waiting' || disp === 'error' || disp === 'joining');
         var ctx = '주문 ' + showId + (rm.install_id !== null ? ' · 방 #' + rm.install_id : '') + ' · ' + label;
@@ -2042,7 +2049,7 @@
       var acts;
       if (done) {
         var cta = g.rooms.length ? ['내 방 보기', '/panel#rooms']
-          : (o.accountsN === 0 ? ['카카오 계정 등록', '/panel#account-add'] : ['콘솔 열기', '/panel']);
+          : (o.accountsN === 0 ? ['카카오 계정 등록', '/panel#account-add'] : ['패널 열기', '/panel']);
         acts = [
           el('a', { cls: 'btn primary', href: cta[1] }, cta[0]),
           el('a', { cls: 'btn', href: '/account' }, '내 계정'),
@@ -2066,39 +2073,43 @@
       ]));
 
       if (!done && live && polling && !timedOut) {
-        out.appendChild(makeWait(paid ? '적용 대기 중' : (o.needsReview ? '관리자 확인 대기 중' : '입금 확인 대기 중')));
+        out.appendChild(makeWait(paid ? '처리 대기 중' : (o.needsReview ? '관리자 확인 대기 중' : '입금 확인 대기 중')));
       }
       if (!done && live && timedOut) {
-        out.appendChild(noteEl('warn', ['30분 동안 적용되지 않아 자동 확인을 멈췄습니다. [상태 새로고침]으로 다시 확인하십시오. ' +
-          '같은 상태가 이어지면 주문번호를 전달하여 문의하십시오.', ' ', supportBtn('문의하기', '주문 ' + showId)]));
+        out.appendChild(noteEl('warn', ['30분이 지나 자동 확인을 멈췄습니다. [상태 새로고침]을 누르면 다시 확인합니다. ' +
+          '같은 상태가 이어지면 주문번호를 적어 문의해 주세요.', ' ', supportBtn('문의하기', '주문 ' + showId)]));
       }
 
       var tip, warn = false;
       if (pending) {
         warn = true;
+        /* 30분이 지나 멈춘 경우는 위 경고 한 줄로 충분하다 — 같은 말을 두 번 하지 않는다 */
         tip = timedOut
-          ? '자동 확인이 중단되었습니다. [상태 새로고침]으로 다시 확인할 수 있습니다.'
+          ? null
           : (o.needsReview
-              ? '이 주문은 금액만으로 자동 식별이 불가하여 관리자가 직접 확인합니다. 최대 수 시간이 소요되며, 이 화면은 상태를 계속 확인합니다.'
+              ? '이 화면은 상태를 계속 확인합니다. 열어 두면 처리 결과가 바로 표시됩니다.'
               : (AUTO_APPROVE
-                  ? '입금 후 통상 1~2분 안에 상품이 회원 계정에 적용됩니다. 이 화면이 5초 간격으로 상태를 확인하므로 열어 두십시오.'
-                  : '입금 후 관리자가 확인하여 적용합니다. 이 화면은 자동 갱신되므로 열어 두십시오.'));
+                  ? '입금하면 보통 1~2분 안에 자동으로 확인됩니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'
+                  : '관리자가 입금을 확인한 뒤 처리합니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'));
       } else if (paid) {
-        tip = '입금이 확인되었습니다. 적용을 기다리십시오. 이 화면은 자동 갱신됩니다.';
+        tip = '입금이 확인되었습니다. 처리가 끝나면 이 화면에 바로 표시됩니다.';
       } else if (done) {
-        tip = '방은 K bot 계정이 입장한 뒤 내 방에서 상태를 확인합니다. 카카오톡 매크로는 콘솔에 카카오 계정을 등록하면 바로 사용합니다.';
+        var macroTip = o.accountsN === 0 ? '패널에 카카오 계정을 등록하면 매크로를 바로 쓸 수 있습니다.' : '패널에서 매크로를 바로 쓸 수 있습니다.';
+        tip = g.rooms.length
+          ? 'K bot이 방에 들어간 뒤 패널의 내 방에서 상태를 볼 수 있습니다.' + (g.macro ? ' ' + macroTip : '')
+          : macroTip;
       } else if (autoCanceled) {
         warn = true;
         tip = TTL_CANCELED_MSG;
       } else if (canceled) {
-        tip = '취소된 주문입니다. 다시 신청하려면 구매 화면을 여십시오.';
+        tip = '취소된 주문입니다. 다시 구매하려면 구매 화면에서 주문해 주세요.';
       } else {
-        tip = '상태를 계속 확인하고 있습니다. 오래 바뀌지 않으면 주문번호를 전달하여 문의하십시오.';
+        tip = '상태를 계속 확인하고 있습니다. 오래 바뀌지 않으면 주문번호를 적어 문의해 주세요.';
       }
-      out.appendChild(noteEl(warn ? 'warn' : '', [tip, autoCanceled ? ' ' : null, autoCanceled ? supportBtn('문의하기', '주문 ' + showId + ' · 자동 취소') : null]));
+      if (tip) out.appendChild(noteEl(warn ? 'warn' : '', [tip, autoCanceled ? ' ' : null, autoCanceled ? supportBtn('문의하기', '주문 ' + showId + ' · 자동 취소') : null]));
       if (pending) out.appendChild(noteEl('dim', [TTL_MSG]));
       if (o.needsReview && pending) {
-        out.appendChild(noteEl('warn', ['입금 후 문의하기로 주문번호를 알리면 처리가 신속합니다. 금액은 안내된 그대로 입금하십시오.',
+        out.appendChild(noteEl('warn', ['입금 후 주문번호를 적어 문의해 주시면 더 빨리 처리됩니다. 금액은 안내된 그대로 입금해 주세요.',
           ' ', supportBtn('문의하기', '주문 ' + showId + ' · 금액 확인')]));
       }
     }
@@ -2144,7 +2155,7 @@
             copyBtn(function () { return o.issued; }, '키'),
             el('a', { cls: 'btn sm primary', href: '/account#claim' }, '내 계정에 등록')
           ]),
-          el('div', { cls: 'tiny warnline', text: '예전 라이선스 키입니다. 콘솔은 회원 계정으로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록하면 남은 기간이 회원 계정으로 옮겨집니다.' })
+          el('div', { cls: 'tiny warnline', text: '예전 라이선스 키입니다. 이제 패널은 아이디로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록하면 남은 기간이 그대로 옮겨집니다.' })
         ]) : null,
         pending ? amountBlock(o.amount, o.base, o.needsReview) : null,
         pending ? accountBig(acct) : null,
@@ -2169,32 +2180,32 @@
         out.appendChild(makeWait(paid ? '키 발급 대기 중' : (o.needsReview ? '관리자 확인 대기 중' : '입금 확인 대기 중')));
       }
       if (live && timedOut) {
-        out.appendChild(noteEl('warn', ['30분간 처리되지 않아 자동 확인을 중단했습니다. [상태 새로고침] 으로 재확인하십시오. ' +
-          '동일 상태가 지속되면 주문번호와 입금자명을 전달하여 문의하십시오.', ' ', supportBtn('문의하기', '주문 ' + showId)]));
+        out.appendChild(noteEl('warn', ['30분 동안 처리되지 않아 자동 확인을 멈췄습니다. [상태 새로고침]으로 다시 확인해 주세요. ' +
+          '같은 상태가 이어지면 주문번호와 입금자명을 적어 문의해 주세요.', ' ', supportBtn('문의하기', '주문 ' + showId)]));
       }
       var tip;
       if (pending) {
-        tip = timedOut ? '자동 확인이 중단되었습니다. [상태 새로고침] 으로 재확인할 수 있습니다.'
-          : (AUTO_APPROVE ? '입금 후 통상 1~2분 내 키가 자동 발급됩니다. 이 화면이 5초 간격으로 상태를 확인하므로 열어 두십시오.'
-                          : '입금 후 관리자가 확인하여 키를 발급합니다. 이 화면은 자동 갱신되므로 열어 두십시오.');
+        tip = timedOut ? null
+          : (AUTO_APPROVE ? '입금하면 보통 1~2분 안에 키가 자동으로 발급됩니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'
+                          : '관리자가 입금을 확인한 뒤 키를 발급합니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.');
       } else if (paid) {
-        tip = '입금이 확인되었습니다. 키 발급을 대기하십시오. 이 화면은 자동 갱신되므로 열어 두십시오.';
+        tip = '입금이 확인되었습니다. 키 발급을 기다리는 중입니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.';
       } else if (done) {
-        tip = '콘솔은 회원 계정으로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록하십시오.';
+        tip = '이제 패널은 아이디로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록해 주세요.';
       } else if (autoCanceled) {
         tip = TTL_CANCELED_MSG;
       } else if (canceled) {
-        tip = '취소된 주문입니다. 다시 신청하려면 구매 화면을 여십시오.';
+        tip = '취소된 주문입니다. 다시 구매하려면 구매 화면에서 주문해 주세요.';
       } else {
-        tip = '상태를 계속 확인하고 있습니다. 오래 바뀌지 않으면 주문번호를 전달하여 문의하십시오.';
+        tip = '상태를 계속 확인하고 있습니다. 오래 바뀌지 않으면 주문번호를 적어 문의해 주세요.';
       }
-      out.appendChild(noteEl(pending || autoCanceled ? 'warn' : '', [tip]));
+      if (tip) out.appendChild(noteEl(pending || autoCanceled ? 'warn' : '', [tip]));
       if (pending) out.appendChild(noteEl('dim', [TTL_MSG]));
       /* 확인코드(t) 없이 주문번호만으로 들어온 경우 — 발급된 키는 안 보인다 */
       if (o.authed === false) {
         out.appendChild(noteEl('', [
           '발급된 키와 입금자 정보는 ', el('b', { text: '구매 직후 받은 링크(주문번호 + 확인코드)' }),
-          '로 접속해야 확인할 수 있습니다. 링크를 잃어버린 경우 주문번호를 전달하여 문의하십시오.'
+          '로 접속해야 볼 수 있습니다. 링크를 잃어버렸다면 주문번호를 적어 문의해 주세요.'
         ]));
       }
     }
@@ -2268,13 +2279,13 @@
       fieldErr('login', ''); fieldErr('pw', ''); fieldErr('submit', '');
       var id = str(idIn.value), pw = pwIn.value || '';
       if (/^KAKA-/i.test(id)) {
-        fieldErr('login', '라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록하십시오');
+        fieldErr('login', '라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록해 주세요');
         idIn.focus();
         return;
       }
       var bad = null;
-      if (!id) { fieldErr('login', '아이디를 입력하십시오'); bad = idIn; }
-      if (!pw) { fieldErr('pw', '비밀번호를 입력하십시오'); bad = bad || pwIn; }
+      if (!id) { fieldErr('login', '아이디를 입력해 주세요'); bad = idIn; }
+      if (!pw) { fieldErr('pw', '비밀번호를 입력해 주세요'); bad = bad || pwIn; }
       if (bad) { bad.focus(); return; }
       sending = true;
       setBusy(btn, true);
@@ -2286,12 +2297,12 @@
         setBusy(btn, false);
         if (e.code === 'locked') {
           var sec = num(e.data && e.data.retry_after) || 900;
-          fieldErr('submit', '로그인 실패 횟수를 초과했습니다. ' + Math.max(1, Math.ceil(sec / 60)) + '분 후 다시 시도하십시오');
+          fieldErr('submit', '로그인 실패 횟수를 초과했습니다. ' + Math.max(1, Math.ceil(sec / 60)) + '분 뒤 다시 시도해 주세요');
         } else if (e.code === 'bad_credentials') {
-          fieldErr('submit', '아이디 또는 비밀번호가 일치하지 않습니다. 다시 입력하십시오');
+          fieldErr('submit', '아이디 또는 비밀번호가 일치하지 않습니다. 다시 입력해 주세요');
           try { pwIn.select(); } catch (er) { /* 무시 */ }
         } else if (e.code === 'blocked') {
-          fieldErr('submit', '이용이 정지된 계정입니다. 문의하십시오', supportBtn('문의하기', '로그인 · 이용 정지 · ' + id));
+          fieldErr('submit', '이용이 정지된 계정입니다. 문의해 주세요', supportBtn('문의하기', '로그인 · 이용 정지 · ' + id));
         } else {
           fieldErr('submit', e.message);
         }
@@ -2302,9 +2313,9 @@
   /* ══════════════════ 9. 회원가입 (/signup) — 6.4 ══════════════════ */
 
   var SIGNUP_ERR = {
-    bad_login_id: ['login', '아이디는 영문 소문자로 시작하는 소문자·숫자·밑줄 4~20자로 입력하십시오'],
-    reserved_id:  ['login', '사용할 수 없는 아이디입니다. 다른 아이디를 입력하십시오'],
-    taken:        ['login', '이미 사용 중인 아이디입니다. 다른 아이디를 입력하십시오'],
+    bad_login_id: ['login', '아이디는 영문 소문자로 시작하고, 영문 소문자·숫자·밑줄(_)로 4~20자를 입력해 주세요'],
+    reserved_id:  ['login', '사용할 수 없는 아이디입니다. 다른 아이디를 입력해 주세요'],
+    taken:        ['login', '이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요'],
     bad_password: ['pw', null],        // 서버 error 그대로
     bad_contact:  ['contact', null]
   };
@@ -2332,10 +2343,10 @@
       idIn.value = id;
       var pw = pwIn.value || '', pw2 = pw2In.value || '';
       var bad = null;
-      if (!id) { fieldErr('login', '아이디를 입력하십시오'); bad = idIn; }
+      if (!id) { fieldErr('login', '아이디를 입력해 주세요'); bad = idIn; }
       else if (!/^[a-z][a-z0-9_]{3,19}$/.test(id)) { fieldErr('login', SIGNUP_ERR.bad_login_id[1]); bad = idIn; }
-      if (!pw) { fieldErr('pw', '비밀번호를 입력하십시오'); bad = bad || pwIn; }
-      else if (pw.length < 8) { fieldErr('pw', '비밀번호는 8자 이상 입력하십시오'); bad = bad || pwIn; }
+      if (!pw) { fieldErr('pw', '비밀번호를 입력해 주세요'); bad = bad || pwIn; }
+      else if (pw.length < 8) { fieldErr('pw', '비밀번호는 8자 이상 입력해 주세요'); bad = bad || pwIn; }
       if (pw && pw2 !== pw) { fieldErr('pw2', '비밀번호가 일치하지 않습니다'); bad = bad || pw2In; }
       if (bad) { bad.focus(); return; }
       sending = true;
@@ -2452,8 +2463,8 @@
         el('div', { cls: 'r1' }, [el('h3', { text: featName('macro') }), chip]),
         bar,
         el('div', { cls: 'meta' }, [
-          el('span', { text: until ? '만료 ' + dateKr(until, true) : '구매한 기간이 없습니다' }),
-          el('span', { text: active ? DAYS_FALLBACK + '일 기준' : '' })
+          el('span', { text: until ? '만료 ' + dateKr(until, true) : '아직 구매하지 않았습니다' }),
+          el('span', { text: '' })
         ]),
         el('div', { cls: 'btn-row' }, [el('a', { cls: 'btn sm' + (active ? '' : ' primary'), href: '/buy?macro=1' }, until ? '연장 구매' : '구매')])
       ]));
@@ -2475,18 +2486,18 @@
           el('div', { cls: 'r1' }, [
             el('h3', { text: featName(k) }),
             n ? el('span', { cls: 'chip ok', text: '방 ' + n + '개' }) : el('span', { cls: 'chip', text: '미구매' }),
-            attn ? el('span', { cls: 'chip warn', text: '확인 필요 ' + attn }) : null,
-            pend ? el('span', { cls: 'chip info', text: '입금 대기 ' + pend }) : null
+            attn ? el('span', { cls: 'chip warn', text: '확인 필요한 방 ' + attn + '개' }) : null,
+            pend ? el('span', { cls: 'chip info', text: '입금 대기 ' + pend + '개' }) : null
           ]),
           el('div', { cls: 'btn-row' }, [
             n || pend ? el('a', { cls: 'btn sm', href: '/panel#rooms' }, [icon('i-link', 14), '내 방 보기']) : null,
-            el('a', { cls: 'btn sm' + (n ? '' : ' primary'), href: '/buy#rooms' }, [icon('i-plus', 14), '방 추가'])
+            el('a', { cls: 'btn sm' + (n ? '' : ' primary'), href: '/buy#rooms' }, [icon('i-plus', 14), '방 추가 구매'])
           ])
         ]));
       });
       var lr = ts(ME.legacy_room_until);
       if (lr > now) {
-        mount.appendChild(noteEl('dim', ['기존 키로 쓰던 계정 기능(입장·퇴장 로그 등)은 ' + dateKr(lr) + '까지 콘솔에서 계속 사용할 수 있습니다.']));
+        mount.appendChild(noteEl('dim', ['예전 키로 쓰던 입장·퇴장 기록 등은 ' + dateKr(lr) + '까지 패널에서 계속 쓸 수 있습니다.']));
       }
     }
 
@@ -2523,7 +2534,7 @@
         ]);
         var cb = row.querySelector('[data-cancel]');
         if (cb) cb.addEventListener('click', function () {
-          inlineConfirm(row, CANCEL_WARN, '취소', function () {
+          inlineConfirm(row, CANCEL_WARN, '주문 취소', function () {
             return api('/api/my/orders/cancel', { method: 'POST', body: { id: o.id } }).then(function () {
               toast('주문을 취소했습니다', 'ok');
               loadOrders();
@@ -2609,7 +2620,7 @@
       clear(mount);
       var m = ME.member || {};
       if (!m.google_linked) {
-        mount.appendChild(el('p', { cls: 'sub small', text: 'Google 계정을 연결하면 비밀번호를 잊은 경우 Google 계정으로 로그인하여 새 비밀번호를 정할 수 있습니다.' }));
+        mount.appendChild(el('p', { cls: 'sub small', text: 'Google 계정을 연결해 두면 비밀번호를 잊었을 때 Google 계정으로 로그인해 새 비밀번호를 정할 수 있습니다.' }));
         var a = $('#googleLinkTpl');
         var link = a ? a.cloneNode(true) : el('a', { cls: 'btn', href: '/auth/google/start?mode=link&next=%2Faccount' }, '연결');
         link.removeAttribute('id');
@@ -2628,10 +2639,10 @@
         if (old) { old.parentNode.removeChild(old); return; }
         var pw = el('input', { type: 'password', id: 'gUnlinkPw', autocomplete: 'current-password', maxlength: '128' });
         var errP = el('p', { cls: 'err', id: 'err-gunlink', role: 'alert', hidden: true });
-        var go = el('button', { type: 'submit', cls: 'btn sm danger solid' }, [el('span', { cls: 'spin' }), el('span', { cls: 'lbl-idle', text: '해제' })]);
+        var go = el('button', { type: 'submit', cls: 'btn sm danger solid' }, [el('span', { cls: 'spin' }), el('span', { cls: 'lbl-idle', text: '연결 해제' })]);
         var cancel = el('button', { type: 'button', cls: 'btn sm ghost' }, '닫기');
         var f = el('form', { cls: 'unlink confirm', novalidate: true }, [
-          el('div', { cls: 'fld', id: 'fld-gunlink' }, [el('label', { for: 'gUnlinkPw', text: '비밀번호를 입력하면 연결을 해제합니다' }), pw, errP]),
+          el('div', { cls: 'fld', id: 'fld-gunlink' }, [el('label', { for: 'gUnlinkPw', text: '현재 비밀번호' }), pw, errP]),
           el('div', { cls: 'confirm-a' }, [go, cancel])
         ]);
         cancel.addEventListener('click', function () { if (f.parentNode) f.parentNode.removeChild(f); });
@@ -2640,7 +2651,7 @@
           ev.preventDefault();
           if (busy) return;
           fieldErr('gunlink', '');
-          if (!pw.value) { fieldErr('gunlink', '비밀번호를 입력하십시오'); pw.focus(); return; }
+          if (!pw.value) { fieldErr('gunlink', '비밀번호를 입력해 주세요'); pw.focus(); return; }
           busy = true;
           setBusy(go, true);
           api('/api/auth/google/unlink', { method: 'POST', body: { password: pw.value } }).then(function () {
@@ -2681,9 +2692,9 @@
         ['cur', 'new', 'new2', 'pw'].forEach(function (k) { fieldErr(k, ''); });
         var cur = curIn.value || '', nx = newIn.value || '', nx2 = new2In.value || '';
         var bad = null;
-        if (!resetOpen && !cur) { fieldErr('cur', '현재 비밀번호를 입력하십시오'); bad = curIn; }
-        if (!nx) { fieldErr('new', '새 비밀번호를 입력하십시오'); bad = bad || newIn; }
-        else if (nx.length < 8) { fieldErr('new', '비밀번호는 8자 이상 입력하십시오'); bad = bad || newIn; }
+        if (!resetOpen && !cur) { fieldErr('cur', '현재 비밀번호를 입력해 주세요'); bad = curIn; }
+        if (!nx) { fieldErr('new', '새 비밀번호를 입력해 주세요'); bad = bad || newIn; }
+        else if (nx.length < 8) { fieldErr('new', '비밀번호는 8자 이상 입력해 주세요'); bad = bad || newIn; }
         if (nx && nx2 !== nx) { fieldErr('new2', '비밀번호가 일치하지 않습니다'); bad = bad || new2In; }
         if (bad) { bad.focus(); return; }
         pwBusy = true;
@@ -2731,8 +2742,8 @@
         fieldErr('claim', '');
         var key = normKey(keyIn.value);
         keyIn.value = key;
-        if (!key) { fieldErr('claim', '키를 입력하십시오'); keyIn.focus(); return; }
-        if (!KEY_RE.test(key)) { fieldErr('claim', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력하십시오'); keyIn.focus(); return; }
+        if (!key) { fieldErr('claim', '키를 입력해 주세요'); keyIn.focus(); return; }
+        if (!KEY_RE.test(key)) { fieldErr('claim', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력해 주세요'); keyIn.focus(); return; }
         claimBusy = true;
         setBusy(claimBtn, true);
         api('/api/auth/claim', { method: 'POST', body: { key: key } }).then(function (res) {
@@ -2785,21 +2796,21 @@
     Promise.resolve(ready || 'off').then(function (stt) {
       clear(body);
       if (stt === 'chat') {
-        body.appendChild(el('p', { cls: 'sub small', text: '상담 창이 열리지 않으면 아래 버튼을 누르십시오.' }));
+        body.appendChild(el('p', { cls: 'sub small', text: '상담 창이 열리지 않으면 아래 버튼을 눌러 주세요.' }));
         if (ctx) body.appendChild(el('dl', { cls: 'kv' }, [el('div', { cls: 'r' }, [el('dt', { text: '함께 보낼 내용' }), el('dd', { text: ctx })])]));
-        body.appendChild(el('div', { cls: 'btn-row' }, [supportBtn('상담 창 열기', ctx, 'btn primary')]));
+        body.appendChild(el('div', { cls: 'btn-row' }, [supportBtn('문의하기', ctx, 'btn primary')]));
         if (sup && sup.open) sup.open(ctx);
         return;
       }
       if (stt === 'contact') {
         return siteInfo().then(function (s) {
-          body.appendChild(el('p', { cls: 'sub small', text: '지금은 상담 창 대신 아래 연락처로 문의하십시오. 주문번호나 방 번호를 함께 보내면 확인이 빠릅니다.' }));
+          body.appendChild(el('p', { cls: 'sub small', text: '지금은 상담 창 대신 아래 연락처로 문의해 주세요. 주문번호나 방 링크를 함께 보내 주시면 더 빨리 확인할 수 있습니다.' }));
           body.appendChild(el('div', { cls: 'note' }, [el('span', { cls: 'ic', 'aria-hidden': 'true', text: 'i' }),
             el('span', { cls: 'contact-t', text: str(s.contact) })]));
           if (ctx) body.appendChild(el('dl', { cls: 'kv' }, [el('div', { cls: 'r' }, [el('dt', { text: '함께 보낼 내용' }), el('dd', { text: ctx })])]));
         });
       }
-      body.appendChild(noteEl('warn', ['지금은 상담 창을 열 수 없습니다. 잠시 뒤 다시 시도하십시오.']));
+      body.appendChild(noteEl('warn', ['지금은 상담 창을 열 수 없습니다. 잠시 뒤 다시 시도해 주세요.']));
     });
   }
 
@@ -2825,7 +2836,7 @@
     } catch (e) {
       /* 에러를 삼키지 않는다 — 사용자한테 보여준다 */
       console.error(e);
-      toast('화면 렌더링 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e), 'bad');
+      toast(MSG_BROKEN, 'bad');
     }
   }
 
@@ -2839,12 +2850,14 @@
     var f = String(ev.filename || '');
     if (f && f.indexOf(location.origin + '/') !== 0) return;
     if (/channel\.io/i.test(f)) return;
-    toast('오류: ' + ev.message, 'bad');
+    toast(MSG_BROKEN, 'bad');
   });
   window.addEventListener('unhandledrejection', function (ev) {
     var r = ev && ev.reason;
     var stack = String((r && r.stack) || '') + ' ' + String((r && r.message) || r || '');
     if (/channel\.io|ch-plugin/i.test(stack)) return;
-    toast('오류: ' + ((r && r.message) || r || '원인 미확인'), 'bad');
+    /* 서버가 준 한국어 문구면 그대로, 아니면(영문 예외 등) 손님용 안내로 */
+    var m = String((r && r.message) || '');
+    toast(/[\uAC00-\uD7A3]/.test(m) ? m : MSG_BROKEN, 'bad');
   });
 })();
