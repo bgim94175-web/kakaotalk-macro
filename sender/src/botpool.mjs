@@ -36,7 +36,7 @@ const MEMBER_FILL_GAP_MS = MIN
 const LEAVE_READ_MS = 2000
 const LEAVE_READ_GAP_MS = 10000
 const EMPTY_LINK_MS = 12 * 60 * MIN   // 옾링이 없다고 답한 pli 는 12시간 다시 묻지 않는다
-const LINK_SPLIT_MAX = 24            // 실패한 옾링 묶음을 반으로 나눠 다시 읽는 것은 한 번에 24번까지
+const LINK_RETRY_MAX = 60            // 실패한 옾링 묶음을 나눠 다시 읽는 것은 한 번에 60번까지
 const MEMBER_FAIL_MAX = 3             // 카드 채우기에서 세 번 못 읽은 사람은 목록에서 뺀다(다음 동기화가 다시 넣는다)
 const MEMBER_LOG_MS = 60 * MIN        // 명부 동기화 요약은 처음·수가 바뀔 때·1시간마다만 남긴다
 
@@ -2367,9 +2367,11 @@ export class BotSlot {
 
   // pli(사람의 오픈프로필 링크 id) → 옾링 주소. 봇마다 메모리에 둔다. 모르는 것만 20개씩 INFOLINK 로 읽는다.
   // 읽지 못한 묶음(실패 status·응답 없음)은 캐시에 넣지도 돌려주지도 않는다(모름) → 다음 동기화가 다시 읽는다.
-  // 묶음이 실패하면(속도 제한 아님) 반으로 나눠 다시 읽는다: 한 사람(지운 프로필 등) 때문에 묶음 전체가 거절되는 경우
-  //   나머지는 읽고, 다른 읽기가 된 상태에서 혼자 실패하는 사람만 옾링 없음으로 둔다(EMPTY_LINK_MS). 나누기는 한 번에 LINK_SPLIT_MAX 번까지.
-  //   나눈 두 쪽이 다 실패하고 이번에 된 읽기가 하나도 없으면 INFOLINK 자체가 안 되는 것으로 보고 멈춘다.
+  // 묶음이 실패하면(속도 제한 아님) 나눠 다시 읽는다: 읽지 못하는 사람(공개 옾링이 없는 프로필 등)이 하나라도 있으면
+  //   카카오가 묶음 전체를 거절한다. 반으로 나눠 한쪽만 실패하면 그쪽을 다시 나누고, 두 쪽 다 실패하면 하나씩 읽는다.
+  //   혼자서도 실패하는 사람은, INFOLINK 가 된다는 것을 안 뒤에만(이번에 된 읽기, 없으면 옾링을 아는 사람 하나로 확인)
+  //   옾링 없음으로 둔다(EMPTY_LINK_MS). 확인이 실패하면 INFOLINK 자체가 안 되는 것으로 보고 멈춘다(모름).
+  //   다시 읽기는 한 번에 LINK_RETRY_MAX 번까지(남은 사람은 다음 동기화가 이어서 읽는다).
   // 속도 제한(-312·-805·-819)이면 멈추고 rateWaits 첫 값 동안 INFOLINK 를 보내지 않는다.
   async linksFor(plis) {
     const out = new Map()
@@ -2384,23 +2386,25 @@ export class BotSlot {
     let sent = 0
     let extra = 0
     let okSeen = false
+    let probed = ''
     let status = null
     const bad = []
-    const read = async (part) => {
+    const send = async (lis) => {
       if (sent++ && this.opts.linkGapMs) await new Promise((ok) => setTimeout(ok, this.opts.linkGapMs))
-      const r = await this.raw('INFOLINK', { lis: part.map((x) => L(x)) })
-      if (!R.locoOk(r)) {
-        status = R.locoStatus(r)
-        if (RATE_STATUS.has(status)) {
-          this.ratePause(status)
-          return 'rate'
-        }
-        return 'fail'
+      const r = await this.raw('INFOLINK', { lis: lis.map((x) => L(x)) })
+      if (R.locoOk(r)) {
+        okSeen = true
+        return r
       }
-      okSeen = true
-      const body = r.body
+      status = R.locoStatus(r)
+      this.ratePause(status)
+      return null
+    }
+    const read = async (part) => {
+      const r = await send(part)
+      if (!r) return RATE_STATUS.has(status) ? 'rate' : 'fail'
       const got = new Map()
-      for (const row of (body && Array.isArray(body.ols) ? body.ols : [])) {
+      for (const row of (r.body && Array.isArray(r.body.ols) ? r.body.ols : [])) {
         const li = R.idText(row && row.li)
         if (li) got.set(li, R.profileUrl(row && row.lu))
       }
@@ -2412,31 +2416,59 @@ export class BotSlot {
       }
       return 'ok'
     }
-    // 실패한 묶음을 반으로 나눠 읽는다 → 'done' | 'rate' | 'down' | 'stop'(나누기 한도)
-    const split = async (part) => {
+    // 이번에 된 읽기가 없으면 옾링을 아는 사람 하나를 읽어 INFOLINK 가 되는지 본다
+    const works = async () => {
+      if (okSeen) return true
+      if (probed) return false
+      const li = this.linkProbe(want)
+      probed = li ? 'failed' : 'none'
+      if (li && await send([li])) probed = 'ok'
+      return okSeen
+    }
+    const unreadable = (li) => {
+      this.emptyLinks.set(li, this.now())
+      out.set(li, '')
+      bad.push(li)
+    }
+    const more = () => extra < LINK_RETRY_MAX && this.readPauseUntil <= this.now()
+    // 실패한 묶음을 다시 읽는다 → 'done' | 'rate' | 'down' | 'stop'(다시 읽기 한도)
+    const retry = async (part) => {
       if (part.length === 1) {
-        if (okSeen) {
-          this.emptyLinks.set(part[0], this.now())
-          out.set(part[0], '')
-          bad.push(part[0])
-        }
+        if (!(await works())) return this.readPauseUntil > this.now() ? 'rate' : 'down'
+        unreadable(part[0])
         return 'done'
       }
       const h = Math.ceil(part.length / 2)
       const halves = [part.slice(0, h), part.slice(h)]
       const res = []
       for (const x of halves) {
-        if (extra >= LINK_SPLIT_MAX) return 'stop'
-        if (this.readPauseUntil > this.now()) return 'rate'
+        if (!more()) return this.readPauseUntil > this.now() ? 'rate' : 'stop'
         extra++
         const st = await read(x)
         if (st === 'rate') return st
         res.push(st)
       }
-      if (!okSeen && res.every((x) => x === 'fail')) return 'down'
+      if (res[0] === 'fail' && res[1] === 'fail') {
+        if (!(await works())) return this.readPauseUntil > this.now() ? 'rate' : 'down'
+        // 두 쪽 다 실패: 읽지 못하는 사람이 많다 → 하나씩 읽는다
+        for (const x of halves) {
+          if (x.length === 1) {
+            unreadable(x[0])
+            continue
+          }
+          for (const li of x) {
+            if (!more()) return this.readPauseUntil > this.now() ? 'rate' : 'stop'
+            extra++
+            const st = await read([li])
+            if (st === 'rate') return st
+            if (st === 'fail') unreadable(li)
+          }
+        }
+        return 'done'
+      }
       for (let k = 0; k < 2; k++) {
         if (res[k] !== 'fail') continue
-        const st = await split(halves[k])
+        const st = await retry(halves[k])
         if (st !== 'done') return st
       }
       return 'done'
@@ -2453,8 +2485,8 @@ export class BotSlot {
         end = st
         break
       }
-      if (st === 'fail' && extra < LINK_SPLIT_MAX) {
-        const how = await split(part)
+      if (st === 'fail' && more()) {
+        const how = await retry(part)
         if (how === 'rate' || how === 'down') {
           end = how
           break
@@ -2467,9 +2499,20 @@ export class BotSlot {
     if (status !== null && (left || bad.length)) {
       const why = end === 'rate' ? ' (rate limited)' : end === 'down' ? ' (stopped)' : ''
       const skip = bad.length ? ` · ${bad.length} unreadable set to no link` : ''
-      log(this.id, `open link read failed: status ${status}${why} (${left} left unknown${skip}, ${sent} reads)`)
+      const check = probed ? ` · check read ${probed}` : ''
+      log(this.id, `open link read failed: status ${status}${why} (${left} left unknown${skip}${check}, ${sent} reads)`)
     }
     return out
+  }
+
+  // INFOLINK 가 되는지 볼 pli 하나: 옾링을 읽어 둔 사람(캐시, 없으면 명부). 지금 읽으려는 것(want)은 빼고.
+  linkProbe(want) {
+    for (const [li, lu] of this.linkCache) if (lu && !want.includes(li)) return li
+    for (const v of this.byInstall.values()) {
+      if (!v || !v.members) continue
+      for (const m of v.members.values()) if (m && m.pli && m.link && !want.includes(m.pli)) return m.pli
+    }
+    return ''
   }
 
   async memberIdByName(v, name) {
