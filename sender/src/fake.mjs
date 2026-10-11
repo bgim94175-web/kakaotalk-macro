@@ -306,7 +306,7 @@ class FakeServer {
       const pv = (r.passcode ? 64 : 0) | (has(code, 'noprof') || has(code, 'noanon') ? 0 : 32)
       return resp(method, {
         status: 0,
-        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : 2, pv, ml: 1500 },
+        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : has(code, 'comm') ? 3 : 2, pv, ml: 1500 },
       })
     }
     if (method === 'CHECKJOIN') {

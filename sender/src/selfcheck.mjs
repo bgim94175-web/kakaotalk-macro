@@ -101,6 +101,9 @@ const kinds = [
   [{ type: 13, link_id: '9', display_name: '김, 이', active_members: 3 }, 'open_room'],
   [{ type: 'OM', title: '김, 이, 박', display_name: '김, 이, 박' }, 'open_room'],
   [{ type: 15, link_id: '3', title: '별명방', display_name: '가, 나', active_members: 2 }, 'open_room'],
+  // 커뮤니티 타입 방(새 type 값): 오픈링크가 있으면 오픈 단체방
+  [{ type: 18, link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
+  [{ type: 'OC', link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
 ]
 for (const [ch, want] of kinds) {
   const got = roomListKind(ch)
@@ -606,6 +609,13 @@ if (roomTitle(stamped[0]) !== '검 Fam 1424') throw new Error('link name is the 
 if (stamped[1].title != null) throw new Error('open profile chat is not named here')
 if (stamped[2].title !== '검 Fam 1424' || roomListKind(stamped[2]) !== 'open_room') throw new Error('type 2 open multi uses the link name')
 if (stamped[3].title !== '가족' || roomListKind(stamped[3]) !== 'normal') throw new Error('a normal room stays out')
+// 커뮤니티 타입 방(카카오가 새 type 값을 보냄)도 오픈링크 이름을 받아 목록에 오른다
+const community = stampOpenLinkTitles([
+  { type: 18, link_id: '77', title: null, display_name: '김, 이, 박', active_members: 120 },
+  { type: 'MultiChat', title: null, display_name: '김, 이, 박', active_members: 5 },
+], new Map([['77', '주식 커뮤니티']]))
+if (community[0].title !== '주식 커뮤니티' || roomListKind(community[0]) !== 'open_room') throw new Error('community room gets its link name')
+if (community[1].title != null || roomListKind(community[1]) !== 'normal') throw new Error('a normal group without a link stays out')
 const unnamed = stampOpenLinkTitles(
   [{ type: 13, link_id: '1', title: null, display_name: '김, 이', active_members: 4 }],
   new Map(),
@@ -1212,8 +1222,10 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   const iPassNone = install('passx2')
   const iPassOk = install('passx3', { passcode_ct: passbox2.seal('0000'), roombot: false, minigame: true })
   const iDm = install('dmx1')
+  const iComm = install('commx1', { roombot: false, minigame: true })   // 커뮤니티 타입 방(오픈링크 종류 3)
   await pool.reconcile(null)
   await waitFor(() => [iGone, iBan, iAnon, iPassWrong, iPassNone, iDm].every((id) => rowOf(id).state === 'error') && rowOf(iPassOk).state === 'active' && rowOf(iRate).error_detail === 'rate_limited', 8000, '7.7#16 joins')
+  await waitFor(() => rowOf(iComm).state === 'active', 5000, 'community room joins like a group room')
   const codeOf = (id) => rowOf(id).error_code
   if (codeOf(iGone) !== 'link_gone') throw new Error('7.7#16 -324 → link_gone, got ' + codeOf(iGone))
   if (rowOf(iRate).state !== 'joining' || rowOf(iRate).error_detail !== 'rate_limited' || !(rowOf(iRate).next_try_at > Date.now() + 50000)) throw new Error('7.7#16 -312 → joining + rate_limited')
@@ -1316,7 +1328,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 8000, '#28 photo notice').catch((e) => {
+    // 봇 전체 발송 한도(분당 30)에 걸리면 다음 1분 창까지 기다린다
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 70000, '#28 photo notice').catch((e) => {
       const sl = botA.slot
       throw new Error(e.message + ' DIAG ' + JSON.stringify({ live: sl.live(), syncing: vb.memberSyncing, syncAt: vb.memberSyncAt, now: Date.now(), checking: vb.checking,
         sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m703: vb.members.get('703'), m702: vb.members.get('702') && vb.members.get('702').name }))
@@ -1835,6 +1848,10 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     const ok = await pool.resolve(url('passx9'))
     if (!ok.ok || !ok.needs_passcode || ok.profile_only || ok.name !== '테스트방 passx9' || !/^\d+$/.test(ok.link_id)) throw new Error('7.7#23 resolve ' + JSON.stringify(ok))
     if ((await pool.resolve(url('gonex9'))).error !== 'not_found' || (await pool.resolve(url('dmx9'))).error !== 'not_group') throw new Error('7.7#23 resolve errors')
+    // 커뮤니티 타입 방(오픈링크 종류 3)은 그룹방처럼 받는다
+    botA.slot.resolveM.list = []
+    const cm = await pool.resolve(url('commx9'))
+    if (!cm.ok || cm.type !== 3 || !/^\d+$/.test(cm.link_id)) throw new Error('7.7#23 community link resolves ' + JSON.stringify(cm))
   }
 
   // #24 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다

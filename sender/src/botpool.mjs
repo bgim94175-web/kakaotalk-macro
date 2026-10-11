@@ -399,7 +399,8 @@ export class BotPool {
     if (st !== 0) return { ok: false, error: 'kakao_error', status: st }
     const ol = r.body && r.body.ol
     if (!ol || typeof ol !== 'object') return { ok: false, error: 'kakao_error', status: 0 }
-    if (Number(ol.lt) !== 2) return { ok: false, error: 'not_group' }
+    if (!R.groupLinkType(ol.lt)) return { ok: false, error: 'not_group' }
+    if (Number(ol.lt) !== 2) log('pool', `link type ${ol.lt} treated as a group room: ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
     const li = R.idText(ol.li)
     if (!li) return { ok: false, error: 'kakao_error', status: 0 }
     const pv = Number(ol.pv) || 0
@@ -1525,7 +1526,7 @@ export class BotSlot {
       await this.joinFail(row, 0, { step: 'info', res: info, empty: true })
       return true
     }
-    if (Number(ol.lt) !== 2) {
+    if (!R.groupLinkType(ol.lt)) {
       await this.fail(row, 'not_group')
       return true
     }

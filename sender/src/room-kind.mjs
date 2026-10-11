@@ -45,11 +45,13 @@ export function roomListKind(ch) {
 }
 
 // 오픈 단체방. 오픈프로필 1:1 과 일반 채팅은 이름을 붙이지 않는다.
+// 오픈링크 id(li)가 있으면 type 값과 상관없이 오픈채팅이다. 2025-09 의 커뮤니티 타입 방처럼
+// 카카오가 새 type 값을 보내도 방 이름(오픈링크 이름)을 읽어야 목록에서 빠지지 않는다.
 export function openMultiCandidate(ch) {
   const s = ch && ch.type == null ? '' : String(ch.type)
   if (directType(s)) return false
   if (multiType(s)) return true
-  if (s !== '2' || !linkId(ch)) return false
+  if (!linkId(ch)) return false
   const members = Number(ch && ch.active_members)
   return !(members > 0 && members <= 2)
 }
