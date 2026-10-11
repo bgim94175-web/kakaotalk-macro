@@ -464,7 +464,9 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 부작용 있는 조회(실제 봇 계정이 JOININFO 를 보냄)라 GET 이 아니라 POST 다(다른 사이트의 최상위 이동으로 부를 수 없게).
 
-1. `openchat.normLink(text)` 로 `https://open.kakao.com/o/[A-Za-z0-9]+` 를 뽑는다. 없으면 400 `bad_link` `오픈채팅방 링크 형식이 아닙니다. https://open.kakao.com/o/ 로 시작하는 링크를 입력하십시오.`
+1. `openchat.parseLink(text)` 로 글에서 `https://open.kakao.com/o/<code>`(코드는 영문·숫자 1~40자)를 뽑는다(`installs.linkOf`). 방 제목이 링크 앞에 붙어 와도(`Tradehttps://…`) 받고, 보이지 않는 글자(U+200B 등)는 지운다. 코드 뒤에 `_`·`-` 가 이어지면 잘라 쓰지 않고 링크가 아닌 것으로 본다. 결과는 늘 `https://open.kakao.com/o/<code>` 한 모양이다.
+   방 링크가 없으면: 오픈프로필 링크(`/me/`)는 400 `profile_link` `오픈프로필 링크입니다. K bot을 설치할 오픈채팅방의 링크(https://open.kakao.com/o/…)를 붙여 넣어 주세요.`, 게시물 링크(`/p/`)는 400 `post_link` `오픈채팅 게시물 링크입니다. …`, 그 밖은 400 `bad_link` `오픈채팅방 링크를 찾지 못했습니다. 카카오톡에서 방 링크(https://open.kakao.com/o/…)를 복사해 붙여 넣어 주세요.`
+   구매 화면(`public/app.js` `normLink`)도 같은 식을 쓰고 `lib/purchase-check.js` 가 두 쪽 결과를 맞춰 본다. 구매 화면은 방 링크가 없어도 `open.kakao.com` 이 든 글이면 서버에 보내 위 이유 문구를 받는다.
 2. `room_blocklist` 에 링크 주소가 있으면 403 `blocked_room` `이 방에는 K bot을 설치할 수 없습니다.` (카카오 조회 전).
 3. 같은 URL 결과를 10분 메모리 저장(`installs.preview` 내부). sender `POST /v1/bot/resolve {url}`. 조회된 `link_id` 가 금지 목록에 있으면 403 `blocked_room`.
 4. 응답:
@@ -478,7 +480,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 - `mine` 은 이 회원의 살아 있는 설치(같은 link_id 또는 링크 주소, `phase` installed·pending_payment)가 있을 때만. `available.X=false` 이유: 이미 설치됨 또는 이 회원의 처리 대기 주문(`status IN ('pending','paid')`)에 들어 있음.
 - `profile_only` 는 호환용으로 남기고 **늘 `false`** 다. K bot 은 방의 프로필 설정(`ol.pv & 32`)과 관계없이 오픈프로필로 입장한다(D12). sender `/v1/bot/resolve` 는 원래 값(`!(ol.pv & 32)`)을 그대로 주지만 부모 미리 보기가 `false` 로 내보내 옛 `.hint`(닉네임 프로필 입장 안내)가 나오지 않게 한다.
-- 실패: 404 `not_found` `링크가 만료되었거나 없는 방입니다.`, 422 `not_group` `그룹 오픈채팅방 링크가 아닙니다. 1:1 오픈채팅과 오픈프로필 링크에는 설치할 수 없습니다.`, 409 `taken` `이 방에는 다른 회원이 설치한 K bot이 있습니다. 방장이라면 K bot 계정을 방에서 내보낸 뒤 다시 확인하거나 문의하십시오.`
+- 실패: 404 `not_found` `링크가 만료되었거나 없는 방입니다.`, 422 `not_group` `1:1 오픈채팅방 링크입니다. 그룹 오픈채팅방이나 커뮤니티 방의 링크를 붙여 넣어 주세요.`(JOININFO `lt` 가 1 일 때만), 409 `taken` `이 방에는 다른 회원이 설치한 K bot이 있습니다. 방장이라면 K bot 계정을 방에서 내보낸 뒤 다시 확인하거나 문의하십시오.`
 - `taken` 은 **다른 회원의 결제된 설치**(`phase='installed'`, `error_code` 가 `kicked` 아님)가 같은 link_id·링크 주소에 있을 때만이다. 다른 회원의 미입금 주문은 막지 않는다(D9).
 - sender 가 없거나, 연결된 봇이 없거나, 조회 예산이 바닥났으면(`sender_down`·`no_bot`·`budget`): `{ok:true, verified:false, room:{link_url, link_id:null, name:null, needs_passcode:null, profile_only:null}, mine:null, available:{roombot:true, minigame:true}}` (D10). URL 기준 `taken`·`blocked_room` 은 이 경우에도 검사한다.
 
@@ -505,7 +507,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | `too_many_rooms` | 400 | 방은 한 번에 10개까지 주문할 수 있습니다 |
 | `no_terms` | 400 | 방 설치 이용 조건을 확인하고 동의하십시오 (방 줄이 있을 때만) |
 | `too_many_pending` | 429 | 입금 대기 중인 주문이 너무 많습니다. 입금하거나 내 계정에서 주문을 취소한 뒤 다시 신청하십시오 (회원 3건·방 줄 10개·IP 10건, D22) |
-| `bad_link` (room) | 400 | (preview 와 같음) |
+| `bad_link`·`profile_link`·`post_link` (room) | 400 | (preview 와 같음) |
 | `no_products` (room) | 400 | 방마다 설치할 상품을 1개 이상 선택하십시오 |
 | `not_found` (room, `install_id` 줄) | 404 | 없는 방입니다. 내 방 목록에서 다시 고르십시오 — `install_id` 가 이 회원 소유(`member_id=$me`)이고 `phase='installed'` 가 아니면. 가격 계산 전에 검사 |
 | `duplicate_room` (room) | 400 | 이미 추가한 방입니다 |
@@ -844,7 +846,7 @@ SELECT * FROM room_leaves WHERE done_at IS NULL AND bot_device_id = ANY($1) ORDE
 0. 사전 확인: 그 봇의 `getChats({all:true})`(patch-kakao 가 `link_id` 를 채움)에 이 설치의 `link_id` 와 같은 방이 있으면 JOINLINK 없이 5 로 간다(이미 들어가 있음: 관리자 다시 시도, 재시작 뒤 `joining` 행, 앞선 응답 유실. 5.8 의 다시 입장 직후는 건너뛴다). `hold_reason` 이 있거나 `room_blocklist` 에 있으면 시작하지 않는다(금지면 `error/blocked`).
    그다음 오픈프로필(D12): 이 봇의 오픈프로필을 아직 모르면(접속 직후·SYNCLINK 실패, 남긴 값도 없음) 행을 그대로 두고 `BOT_TRANSIENT_WAIT_MS` 뒤 다시 본다(오류 아님, 읽히면 바로). 없거나(`none`) 고른 것이 사라졌으면(`gone`) `error/bot_no_open_profile`(`error_detail` = `none`·`gone`)이고 카카오에 아무 패킷도 보내지 않는다.
 1. `UPDATE … SET state='joining', attempts=attempts+1, state_at`.
-2. `JOININFO {lu: link_url, ref:'EW'}` → `ol`. 실패: -324 등 링크 없음 → `link_gone`. `ol.lt !== 2` → `not_group`.
+2. `JOININFO {lu: link_url, ref:'EW'}` → `ol`. 실패: -324 등 링크 없음 → `link_gone`. `ol.lt === 1`(1:1 오픈채팅·오픈프로필) → `not_group`. 그 밖(2, 커뮤니티 방 등 새 값, `lt` 가 빠진 답)은 그룹방으로 보고 들어간다(`roomfeat.groupLinkType`). 2 가 아니면 `lt`·`ol` 칸 이름·`pv` 를 로그에 남긴다(`/v1/bot/resolve` 도 같다).
    `link_id` 가 비어 있으면 `ol.li` 를 저장(UNIQUE 위반 23505 → `duplicate_room`). 있는데 다르면 → `link_changed`. `link_name = ol.ln`. 저장한 `link_id` 가 금지 목록이면 → `blocked`. 0 의 사전 확인을 이 `li` 로 한 번 더.
 3. `ol.pv & 64`(참여코드 필요): `passcode_ct` 가 없으면 `passcode_needed`. 있으면 `secretbox.open` → `CHECKJOIN {li, pc}` → 실패면 `passcode_wrong`, 성공이면 `tk`.
 4. 프로필(D12): 늘 `JOINLINK {li, ref:'EW:', ptp:16, pli: 오픈프로필 li, tk?}`(`nn`·`pp` 없음). 방의 `ol.pv & 32`(기본 프로필 참여 허용)는 보지 않는다(트레이스에만 남긴다).
@@ -1344,11 +1346,11 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 #### (c) 프로필 로그
 
-- 관찰 원천: MSG 푸시 `authorNickname`(실측 전), `SYNCLINKPF` 푸시(실측 전), 입장 때 `memberCard`, 방마다 60초에 최대 1회 `getMembersByIds(≤20명)`로 30분 넘게 안 본 작성자 다시 읽기.
+- 관찰 원천: MSG 푸시 `authorNickname`(실측 전), `SYNCLINKPF` 푸시(실측 전), 입장 때 `memberCard`, 방마다 60초에 최대 1회 MEMBER(≤20명)로 명부에 카드가 없는 사람(글로 이름만 본 사람·사진을 모르는 저장된 행) 채우기.
 - `profileObserve(state, cfg, {userId, name, photo, status})`: 사진 서명 = `original_profile_image_url || profile_image_url` 의 경로(쿼리 제거). 상태 메시지는 null 이면 무시. 첫 관찰은 기준만 저장. 변경은 `changes` 에 `{at, kind:'name'|'photo'|'status', from?, to?}`(최근 30개).
 - **접기([전체보기])**: 사람 안내 3가지는 첫 줄 `{제목} · @{닉네임}`(멘션) 뒤에 U+200B 500자(`FOLD`)와 줄바꿈을 붙이고 나머지를 적는다 → 방에는 첫 줄만 보이고 [전체보기]를 눌러야 자세한 내용이 보인다. 멘션 첨부는 첫 줄의 @ 하나(이름 뒤 U+200B 허용).
 - 안내(관리자 지정, 자세하게·기호로): `🔔 프로필 변경 감지 · @{지금 닉네임}` + 접기 / `━━━━━━━━━━━━━━` / `👤 {지금 닉네임}` / `🆔 {사용자 ID}` / `🔗 옾링 : {링크|없음}` / `🖼 사진 : {주소|없음}` / 빈 줄 / `✏️ 바뀐 내용` + 바뀐 항목마다 `▸ 닉네임|옾링|사진` ` ├ 전 : …` ` └ 후 : …` / (2번째부터) `🔁 누적 변경 : N회` / `━━━━━━━━━━━━━━`. 바뀔 때마다 알린다(같은 사람이 연달아 바꿔도 매번). 사진을 모르면(계정 단위 옛 기능) 사진 줄을 뺀다.
-- **방 멤버 명부(room_members)**: 봇이 방에 들어가 사용 중이 되면 GETMEM 으로 모든 멤버의 닉네임·pli·사진을 읽고, pli 는 INFOLINK(20개씩, 봇마다 메모리 캐시)로 옾링 주소를 얻는다. 10분마다 다시 읽고(BOT_MEMBER_SYNC_MS), 들어온 사람은 카드(MEMBER)로, 메시지 닉네임이 다르면 카드를 다시 읽어 합친다. 아는 사람의 닉네임·옾링(pli 바뀜)·사진이 바뀌면 프로필 변경 안내(profileChange). 퇴장 안내는 명부의 옾링·사진을 쓴다 → 봇보다 먼저 있던 사람도 옾링이 나온다. 명부는 (install_id, user_id) 행으로 저장하고 방(chat_id)이 바뀌면 그 방 것만 읽는다. 90일 못 본 사람·해제된 설치의 행은 부모의 하루 정리가 지운다.
+- **방 멤버 명부(room_members)**: 봇이 방에 들어가 사용 중이 되면 GETMEM 으로 모든 멤버의 닉네임·pli·사진을 읽고, pli 는 INFOLINK(20개씩, 봇마다 메모리 캐시)로 옾링 주소를 얻는다. 10분마다 다시 읽고(BOT_MEMBER_SYNC_MS), 들어온 사람은 카드(MEMBER)로, 메시지 닉네임이 다르면 카드를 다시 읽어 합친다. GETMEM 이 빠뜨린 사람이 글을 쓰면 이름만 적어 두고 위의 카드 채우기가 읽는다. 아는 사람의 닉네임·옾링(pli 바뀜)·사진이 바뀌면 프로필 변경 안내(profileChange). 옾링은 pli 가 바뀔 때만 바뀐 것으로 본다 → 비어 있던 옾링('')을 같은 pli 로 다시 읽어 채워도 안내하지 않는다. 퇴장 안내는 명부의 옾링·사진을 쓴다 → 봇보다 먼저 있던 사람도 옾링이 나온다. 명부에 없는 사람이 나가면 로그 한 줄을 남기고, 안내를 만들기 전에 MEMBER 를 한 번 읽어 본다(방마다 10초에 1회, 2초까지. 나간 사람에게도 답하는지는 실측 전). 명부 일(동기화·채우기·다시 읽기)은 방 점검과 따로 봇마다 한 줄로 하고, 하나가 BOT_MEMBER_JOB_MS(2분)를 넘기면 다음 일로 넘어간다. GETMEM·MEMBER·INFOLINK 는 status 를 확인한다: 실패하면 로그 한 줄을 남기고 명부를 바꾸지 않으며, 읽지 못한 옾링은 '없음'이 아니라 모름(null)으로 두고 다음 동기화가 다시 읽는다. INFOLINK 가 속도 제한(-312·-805·-819)이면 그 읽기를 멈추고 BOT_RATE_WAIT_MS 첫 값 동안 옾링을 읽지 않는다. 동기화마다 숫자만 적힌 로그 한 줄(멤버 수·pli 있는 수·사진 있는 수·걸린 시간). 명부는 (install_id, user_id) 행으로 저장하고 방(chat_id)이 바뀌면 그 방 것만 읽는다. 90일 못 본 사람·해제된 설치의 행은 부모의 하루 정리가 지운다.
 - 입장·퇴장 안내: `📥 입장 안내 · @{닉네임}`|`📤 퇴장 안내 · @{닉네임}` + 접기 / 줄 / 👤 🆔 🔗 🖼 / (퇴장) `⏳ 머문 시간 : {기간} ({MM-DD HH:MM} 입장)` / `🕒 입장|퇴장 기록 · N회`(최근 5번, 가지 줄) / (있으면) `📝 예전 프로필 · N회` / 줄.
 - 조회 명령 `{앞글자}프로필 @닉네임` 또는 `{앞글자}프로필 닉네임`: 대상은 멘션 user_id → 현재 이름 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 기록이 없으면 `이 사람의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만) / `all` / `off`. 답(멘션 없음):
 
@@ -1583,6 +1585,7 @@ PRODUCTS, MAX_ROOMS, quote(input), table(), label(id), bankInfo(), contactInfo()
 
 // lib/openchat.js
 normLink(text) -> string            // 'https://open.kakao.com/o/<code>' | ''
+parseLink(text) -> {kind:'room', url} | {kind:'profile'} | {kind:'post'} | {kind:'none'}
 
 // lib/secretbox.js
 seal(text) -> string ; open(blob) -> string|null ; sealWithIv(text, iv) -> string   // 마지막은 시험 전용(9.0)
@@ -1652,7 +1655,7 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 
 - 가짜 서버 상태(프로세스 메모리): 방 표 `{code → {li, ln, lt:2, pv, passcode?, chatId, members:Map<userId,{mt, nick}>, bans:Set, deleted}}`. 봇마다 `userId`.
 - `sendPacket(method, body)` 응답(node-kakao 응답 모양, `{statusCode, body:{status, …}}`):
-  - `JOININFO {lu}` → 코드에 `gone` → `status:-324`; `dm` → `ol.lt=1`; 그 밖 `{ol:{li: Long, ln, lu, lt:2, pv: (pass ? 64 : 0) | (noprof ? 0 : 32)}}`.
+  - `JOININFO {lu}` → 코드에 `gone` → `status:-324`; `dm` → `ol.lt=1`; `comm` → `ol.lt=3`(커뮤니티 방); 그 밖 `{ol:{li: Long, ln, lu, lt:2, pv: (pass ? 64 : 0) | (noprof ? 0 : 32)}}`.
   - `CHECKJOIN {li, pc}` → `pc==='0000'` 이면 `{tk:'t'}`, 아니면 `status:-802`(가정 값, 10.1 #2 와 같게).
   - `JOINLINK {li, ptp, pli?, nn?, tk?}` → 코드에 `full` → `status:-501`; `rate` → 처음 1번 `-312`; `noprof` 이고 `ptp===1` → `status:-804`(가정 값); `noanon` 이고 `ptp!==16` → `-804`; `noopen` 이고 `ptp===16` → `-804`; `ptp===16` 인데 `pli` 가 그 계정의 오픈프로필이 아니면 `-804`; `bans` 에 봇 → `-815`; 성공 `{chatRoom:{chatId: Long}, olu:{userId, lmt:2, ptp, pli?, nn}}` 그리고 멤버 추가(이름 = 오픈프로필 이름). `FAKE_JOIN_MS`(기본 1500) 뒤 응답.
   - `CHATONROOM {chatId}` → `{olu:{userId, lmt: 지금 봇 mt, ptp, pli?, nn}}`(`ptp` 없는 옛 멤버는 1, `/v1/fake/perm` 이 `drop_olu:true` 면 `olu` 를 빼서 MEMBER 경로를 시험).

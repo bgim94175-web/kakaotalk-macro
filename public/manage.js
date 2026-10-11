@@ -1439,7 +1439,12 @@
       ]));
     }
     if (d.status === 'unmatched') item.appendChild(el('p', { cls: 'mg-warn', text: '금액이 맞는 대기 주문이 없습니다. 입금 구분용 금액을 빼고 입금했거나 이미 처리된 주문일 수 있습니다.' }));
-    if (d.status === 'ambiguous') item.appendChild(el('p', { cls: 'mg-crit', text: '같은 금액의 주문이 여러 개이거나 주문에 확인할 점이 있어 자동 처리하지 않았습니다. 원문과 입금자명을 확인한 뒤 주문을 연결해 주세요.' }));
+    if (d.status === 'ambiguous') {
+      var cancelNote = /입금\s*(취소|정정)/.test(str(d.raw));
+      item.appendChild(el('p', { cls: 'mg-crit', text: cancelNote
+        ? '입금 취소·정정 알림입니다. 주문을 연결하지 말고, 이미 승인한 주문이 있는지 확인한 뒤 [무시]를 눌러 주세요.'
+        : '같은 금액의 주문이 여러 개이거나, 주문에 확인할 점이 있거나, 금액을 확실히 읽지 못해 자동 처리하지 않았습니다. 원문과 입금자명을 확인한 뒤 주문을 연결해 주세요.' }));
+    }
 
     var raw = str(d.raw);
     var pre = el('pre', { cls: 'mg-raw', text: raw || '(원문 없음)' });

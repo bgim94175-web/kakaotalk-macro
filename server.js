@@ -42,6 +42,9 @@ const jsonSmall = express.json({ limit: '512kb' });
 const jsonSettings = express.json({ limit: '16mb' });
 app.use((req, res, next) => {
   if (req.method === 'POST' && req.path === '/panel/api/settings') return jsonSettings(req, res, next);
+  // 입금 웹훅은 본문을 routes/purchase.js 가 글자 그대로 받아 직접 푼다 — MacroDroid 처럼 줄바꿈이 그대로
+  // 들어간 JSON 도 400 으로 버리지 않고 기록해야 한다. 경로는 rl.kindOf 로 본다(끝 슬래시·대소문자가 달라도 같은 라우트).
+  if (rl.kindOf(req) === 'deposit') return next();
   return jsonSmall(req, res, next);
 });
 

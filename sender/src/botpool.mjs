@@ -30,6 +30,19 @@ const DAY = 24 * HOUR
 const RATE_STATUS = new Set([-312, -805, -819])
 const GONE_STATUS = new Set([-324])
 const DEAD_CODES = new Set(['invalid_access_token', 'login_rejected', 'kicked', 'reauth'])
+// 방 멤버 명부: 카드 채우기는 방마다 60초에 20명까지, 명부에 없는 사람이 나가면 방마다 10초에 한 번 2초까지만 읽어 본다
+const MEMBER_FILL_MAX = 20
+const MEMBER_FILL_GAP_MS = MIN
+const LEAVE_READ_MS = 2000
+const LEAVE_READ_GAP_MS = 10000
+const EMPTY_LINK_MS = 12 * 60 * MIN   // 옾링이 없다고 답한 pli 는 12시간 다시 묻지 않는다
+const MEMBER_FAIL_MAX = 3             // 카드 채우기에서 세 번 못 읽은 사람은 목록에서 뺀다(다음 동기화가 다시 넣는다)
+const MEMBER_LOG_MS = 60 * MIN        // 명부 동기화 요약은 처음·수가 바뀔 때·1시간마다만 남긴다
+
+// 카드(옾링·사진)를 더 읽어야 하는 사람: 사진을 모르거나, pli 는 있는데 옾링을 모른다
+function needsCard(m) {
+  return !m || m.photo == null || (!!m.pli && m.link == null)
+}
 
 function envNum(name, dflt) {
   const raw = process.env[name]
@@ -87,6 +100,9 @@ export function poolOptions(over) {
     // 방 멤버 명부(옾링·사진)를 GETMEM 으로 다시 읽는 주기, 옾링(INFOLINK) 20개 묶음 사이 쉼
     memberSyncMs: envNum('BOT_MEMBER_SYNC_MS', 10 * MIN),
     linkGapMs: envNum('BOT_LINK_GAP_MS', 300),
+    memberGapMs: envNum('BOT_MEMBER_GAP_MS', 500),
+    // 명부 일 하나(동기화·채우기·다시 읽기)를 기다리는 최대 시간. 넘기면 명부 줄은 다음 일로 넘어간다
+    memberJobMs: envNum('BOT_MEMBER_JOB_MS', 2 * MIN),
     flushMs: 5000,
     tickMs: 1000,
     reconnectGapMs: 2000,
@@ -399,7 +415,12 @@ export class BotPool {
     if (st !== 0) return { ok: false, error: 'kakao_error', status: st }
     const ol = r.body && r.body.ol
     if (!ol || typeof ol !== 'object') return { ok: false, error: 'kakao_error', status: 0 }
-    if (Number(ol.lt) !== 2) return { ok: false, error: 'not_group' }
+    // 2(그룹방)가 아닌 종류는 로그에 남긴다(커뮤니티 방 등이 실제로 어떤 값을 보내는지 보려고)
+    if (Number(ol.lt) !== 2) {
+      log('pool', `resolve JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
+        `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv}): ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
+    }
+    if (!R.groupLinkType(ol.lt)) return { ok: false, error: 'not_group' }
     const li = R.idText(ol.li)
     if (!li) return { ok: false, error: 'kakao_error', status: 0 }
     const pv = Number(ol.pv) || 0
@@ -640,6 +661,7 @@ export class BotSlot {
     this.transient = new Map()
     this.chain = Promise.resolve()
     this.checks = Promise.resolve()
+    this.memberQ = Promise.resolve() // 방 멤버 명부 일(동기화·채우기·다시 읽기). 방 점검(checks)과 따로 줄 선다
     this.timers = []
     this.connects = 0
     this.refreshed = false
@@ -648,6 +670,8 @@ export class BotSlot {
     this.openProfiles = null      // [{li,name,url}] — null = 아직 읽은 적 없음(캐시도 없음)
     this.profilePick = null       // 관리자가 고른 오픈프로필 li(bot_accounts.open_profile_pick)
     this.linkCache = new Map()    // 사람의 pli(오픈프로필 링크 id) → 옾링 주소('' = 없음). 방이 달라도 같다
+    this.emptyLinks = new Map()   // 옾링이 없다고 답한 pli → 그때(EMPTY_LINK_MS 동안 다시 묻지 않는다. 5000개 캐시와 따로)
+    this.readPauseUntil = 0       // GETMEM·MEMBER·INFOLINK 가 속도 제한(-312·-805·-819)에 걸리면 이때까지 명부를 읽지 않는다
     this.lastProfileLi = null     // 지난번에 쓰던 li(고른 것이 없을 때 같은 것을 계속 쓴다)
     this.openProfile = null       // 지금 입장에 쓰는 {li,name,url}
     this.profileState = 'unknown' // ok | none | gone | unknown
@@ -1195,6 +1219,16 @@ export class BotSlot {
       memberRefresh: new Set(),
       memberSyncAt: 0,
       memberSyncing: false,
+      memberOkAt: 0,              // 마지막으로 GETMEM 동기화가 된 때
+      memberWant: new Set(),      // 카드(옾링·사진)를 아직 못 읽은 사람 → MEMBER(옾링만 모르면 INFOLINK)로 채운다
+      memberFails: new Map(),     // 카드 채우기에서 못 읽은 횟수
+      memberFillAt: 0,
+      memberFilling: false,
+      memberJobAt: 0,             // 이 방의 동기화·채우기가 시작된 때(표시가 내려지지 않으면 오래된 것으로 본다)
+      memberLog: '',              // 지난 동기화 요약(수가 같으면 1시간에 한 번만 남긴다)
+      memberLogAt: 0,
+      memberFailLogAt: 0,
+      leaveReadAt: 0,
       nextCheckAt: 0,
       checkFull: false,
       checking: false,
@@ -1246,6 +1280,7 @@ export class BotSlot {
     if (chat && v.membersChat !== chat) {
       await this.flushMembers(v)
       v.members.clear()
+      v.memberWant.clear()
       v.membersChat = chat
       v.memberSyncAt = 0
       await this.loadMembers(v)
@@ -1526,6 +1561,10 @@ export class BotSlot {
       return true
     }
     if (Number(ol.lt) !== 2) {
+      log(this.id, `install ${row.id} JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
+        `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv})`)
+    }
+    if (!R.groupLinkType(ol.lt)) {
       await this.fail(row, 'not_group')
       return true
     }
@@ -2005,7 +2044,10 @@ export class BotSlot {
       v.checking = true
       this.checks = this.checks.then(() => this.checkRoom(v)).catch((e) => log(this.id, `check ${v.install_id} failed: ${errText(e)}`)).finally(() => { v.checking = false })
     }
-    for (const v of this.byInstall.values()) this.memberSync(v, now)
+    for (const v of this.byInstall.values()) {
+      this.memberSync(v, now)
+      this.memberFill(v, now)
+    }
     for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
     // 오픈프로필 목록을 주기적으로 다시 읽는다(모르는 상태면 5분마다)
     const every = this.profileState === 'unknown' ? 5 * MIN : this.opts.profileReadMs
@@ -2323,27 +2365,29 @@ export class BotSlot {
   }
 
   // pli(사람의 오픈프로필 링크 id) → 옾링 주소. 봇마다 메모리에 둔다. 모르는 것만 20개씩 INFOLINK 로 읽는다.
-  // 읽지 못한 묶음은 돌려주지 않는다(모름) → 다음 동기화가 다시 읽는다.
+  // 읽지 못한 묶음(실패 status·응답 없음)은 캐시에 넣지도 돌려주지도 않는다(모름) → 다음 동기화가 다시 읽는다.
+  // 실패하면 이번 읽기는 멈춘다. 속도 제한(-312·-805·-819)이면 rateWaits 첫 값 동안 INFOLINK 를 보내지 않는다.
   async linksFor(plis) {
     const out = new Map()
     const want = []
+    const now = this.now()
     for (const li of plis || []) {
       if (!/^[1-9][0-9]*$/.test(String(li || ''))) continue
       if (this.linkCache.has(li)) out.set(li, this.linkCache.get(li))
+      else if (now - (this.emptyLinks.get(li) || -Infinity) < EMPTY_LINK_MS) out.set(li, '')
       else if (!want.includes(li)) want.push(li)
     }
     for (let i = 0; i < want.length; i += 20) {
+      if (this.readPauseUntil > this.now()) break
       const part = want.slice(i, i + 20)
-      let body = null
-      try {
-        body = await this.client.executeWithReconnect(async ({ session }) => {
-          const r = await session.getOpenLinkInfo(part.map((x) => L(x)))
-          return r && r.body
-        })
-      } catch (e) {
-        log(this.id, `open link read failed: ${errText(e)}`)
+      const r = await this.raw('INFOLINK', { lis: part.map((x) => L(x)) })
+      if (!R.locoOk(r)) {
+        const s = R.locoStatus(r)
+        log(this.id, `open link read failed: status ${s} (${want.length - i} left unknown)`)
+        this.ratePause(s)
         break
       }
+      const body = r.body
       const got = new Map()
       for (const row of (body && Array.isArray(body.ols) ? body.ols : [])) {
         const li = R.idText(row && row.li)
@@ -2351,9 +2395,11 @@ export class BotSlot {
       }
       for (const li of part) {
         const lu = got.get(li) || ''
-        this.linkCache.set(li, lu)
+        if (lu) this.linkCache.set(li, lu)
+        else this.emptyLinks.set(li, this.now())
         out.set(li, lu)
       }
+      if (this.emptyLinks.size > 20000) for (const k of [...this.emptyLinks.keys()].slice(0, 5000)) this.emptyLinks.delete(k)
       if (this.linkCache.size > 5000) for (const k of [...this.linkCache.keys()].slice(0, 1000)) this.linkCache.delete(k)
       if (i + 20 < want.length && this.opts.linkGapMs) await new Promise((ok) => setTimeout(ok, this.opts.linkGapMs))
     }
@@ -2394,6 +2440,11 @@ export class BotSlot {
     // 들어온 사람은 카드(닉네임·옾링·사진)를 명부에 합치고, 나간 사람은 명부에서 찾는다.
     // 명부는 봇이 들어간 뒤 방 전체를 읽어 둔 것이라, 봇보다 먼저 있던 사람이 나가도 옾링·사진이 있다.
     if (card) await this.mergeMembers(v, [{ uid: ev.userId, name: card.name || ev.name || '', pli: card.pli || '', photo: card.photoUrl }], 'join')
+    // 명부에 없는(카드를 못 읽은) 사람이 나가면 퇴장 안내를 만들기 전에 한 번 짧게 읽어 본다
+    if (ev.kind === 'leave' && ev.userId && cfg.visit.enabled) {
+      const known = v.members.get(ev.userId)
+      if (needsCard(known)) await this.leaveCard(v, ev.userId, known)
+    }
     const mem = ev.userId ? v.members.get(ev.userId) : null
     const adapter = R.adapterRecord(v, this.id)
     const g = guardOnChat(adapter, {
@@ -2748,6 +2799,7 @@ export class BotSlot {
   // ── 방 멤버 명부(옾링·사진) ──────────────────────────────────────────────
   // 봇이 방에 있는 동안 GETMEM 으로 모든 멤버의 닉네임·옾링·사진을 읽어 둔다(입장 뒤 처음·10분마다·다시 시작한 뒤).
   // 그래서 봇이 들어가기 전부터 있던 사람이 나가도 퇴장 안내에 옾링을 적는다. 아는 사람이 바뀌었으면 프로필 변경 안내.
+  // 명부 일(동기화·카드 채우기·다시 읽기)은 방 점검 줄(checks)과 따로 memberQ 에서 하나씩 한다.
   async loadMembers(v) {
     try {
       const rows = await this.store.loadMembers(v.install_id, v.membersChat, this.now() - 90 * DAY)
@@ -2761,6 +2813,8 @@ export class BotSlot {
           photo: r.photo == null ? null : String(r.photo),
           seenAt: Number(r.seen_at) || 0,
         })
+        // 사진·옾링을 모르는 행(메시지로 이름만 본 사람·옾링 읽기가 실패한 사람)은 카드 채우기가 읽는다
+        if (needsCard(v.members.get(uid))) v.memberWant.add(uid)
       }
     } catch (e) {
       log(this.id, `room_members read failed: ${errText(e)}`)
@@ -2784,44 +2838,196 @@ export class BotSlot {
     }
   }
 
+  // 명부 일 하나를 memberQ 에 넣는다. memberJobMs 를 넘기면 기다리지 않고 다음 일로 넘어간다(그 일은 뒤에서 마저 끝난다).
+  // 방마다의 표시(memberSyncing 등)는 일이 실제로 끝날 때 내린다 → 같은 방의 같은 일이 겹치지 않는다.
+  // 일 사이에는 memberGapMs 쉰다(다시 시작한 직후 모든 방의 GETMEM 이 한꺼번에 나가지 않게).
+  memberJob(what, fn) {
+    this.memberQ = this.memberQ
+      .then(() => withTimeout(fn(), this.opts.memberJobMs))
+      .catch((e) => log(this.id, `${what} ${e && e.timeout ? 'timed out' : 'failed: ' + errText(e)}`))
+      .then(() => (this.opts.memberGapMs ? new Promise((ok) => setTimeout(ok, this.opts.memberGapMs)) : null))
+  }
+
+  // 속도 제한 답이면 rateWaits 첫 값 동안 명부 읽기(GETMEM·MEMBER·INFOLINK)를 쉰다
+  ratePause(status) {
+    if (RATE_STATUS.has(status)) this.readPauseUntil = Math.max(this.readPauseUntil, this.now() + (this.opts.rateWaits[0] || 0))
+  }
+
+  // 이 방의 명부 일 표시가 너무 오래 내려지지 않았으면(답이 끝내 안 온 일) 오래된 것으로 보고 푼다
+  memberBusy(v, flag, now) {
+    if (!v[flag]) return false
+    if (now - v.memberJobAt < 5 * this.opts.memberJobMs) return true
+    v[flag] = false
+    return false
+  }
+
+  // 같은 방·같은 대화방인지(일을 기다리는 사이 방을 다시 만들었거나 대화방이 바뀌었으면 결과를 버린다)
+  sameView(v, chat) {
+    return this.live() && this.byInstall.get(v.install_id) === v && v.membersChat === chat
+  }
+
   memberSync(v, now) {
     if (!v.chat_id || !R.roombotLive(v) || !(v.cfg.visit.enabled || v.cfg.profile.enabled)) return
-    if (v.memberSyncing || (v.memberSyncAt && now - v.memberSyncAt < this.opts.memberSyncMs)) return
+    if (this.readPauseUntil > now) return
+    if (this.memberBusy(v, 'memberSyncing', now) || (v.memberSyncAt && now - v.memberSyncAt < this.opts.memberSyncMs)) return
     v.memberSyncing = true
     v.memberSyncAt = now
-    this.checks = this.checks.then(() => this.syncMembers(v))
-      .catch((e) => log(this.id, `member sync ${v.install_id} failed: ${errText(e)}`))
-      .finally(() => { v.memberSyncing = false })
+    v.memberJobAt = now
+    this.memberJob(`member sync ${v.install_id}`, () => this.syncMembers(v).finally(() => { v.memberSyncing = false }))
+  }
+
+  // GETMEM·MEMBER 의 멤버 하나 → {uid, name, pli, photo}. 봇 자신·id 없는 것은 null.
+  memberRow(m) {
+    const uid = R.idText(m && m.userId)
+    if (!uid || uid === this.userId) return null
+    return {
+      uid,
+      name: String(m.nickName || m.nickname || m.nn || '').trim().slice(0, 40),
+      pli: R.idText(m.pli) || '',
+      photo: R.photoUrl(m.pi || m.profileImageUrl, m.opi || m.originalProfileImageUrl),
+    }
   }
 
   async syncMembers(v) {
-    if (!this.live() || !this.byInstall.has(v.install_id) || !v.chat_id) return
-    const body = await this.client.executeWithReconnect(async ({ session }) => {
-      const r = await session.getAllMembers(L(v.chat_id))
-      return r && r.body
-    })
-    if (!body || !Array.isArray(body.members)) return
-    const rows = []
-    for (const m of body.members) {
-      const uid = R.idText(m && m.userId)
-      if (!uid || uid === this.userId) continue
-      rows.push({
-        uid,
-        name: String(m.nickName || m.nickname || m.nn || '').trim().slice(0, 40),
-        pli: R.idText(m.pli) || '',
-        photo: R.photoUrl(m.pi || m.profileImageUrl, m.opi || m.originalProfileImageUrl),
-      })
+    const chat = v.membersChat
+    if (!this.sameView(v, chat) || !v.chat_id) return
+    const t0 = this.now()
+    const r = await this.raw('GETMEM', { chatId: L(v.chat_id) })
+    const list = R.locoOk(r) && r.body && Array.isArray(r.body.members) ? r.body.members : null
+    if (!list) {
+      this.ratePause(R.locoStatus(r))
+      this.memberFailLog(v, `member sync ${v.install_id}: GETMEM failed (status ${R.locoStatus(r)})`)
+      return
     }
+    if (!this.sameView(v, chat)) return
+    const rows = list.map((m) => this.memberRow(m)).filter(Boolean)
     await this.mergeMembers(v, rows, 'sync')
+    v.memberOkAt = this.now()
+    // 숫자만 남긴다(이름·주소는 남기지 않는다). pli·사진·옾링 수로 실제 GETMEM 이 옾링·사진을 주는지도 본다.
+    // 수가 같으면 1시간에 한 번만(방이 많으면 10분마다 방마다 한 줄은 너무 많다)
+    let links = 0
+    for (const x of rows) { const m = v.members.get(x.uid); if (m && m.link) links++ }
+    const key = `${rows.length} members, ${rows.filter((x) => x.pli).length} with pli, ${links} with link, ${rows.filter((x) => x.photo).length} with photo`
+    const now = this.now()
+    if (key !== v.memberLog || now - v.memberLogAt >= MEMBER_LOG_MS) {
+      v.memberLog = key
+      v.memberLogAt = now
+      log(this.id, `member sync ${v.install_id}: ${key}, ${now - t0}ms`)
+    }
   }
 
-  // 새로 읽은 값(rows: {uid, name, pli, photo}, null = 모름)을 명부에 합친다. 옾링은 새로 보거나 바뀐 pli 만 읽는다.
-  // why 'sync'·'refresh' 면 아는 사람의 변경을 프로필 변경으로 알린다. 'join' 은 입장 안내가 대신하므로 조용히 합친다.
+  // 명부 읽기 실패 줄은 방마다 10분에 한 번만
+  memberFailLog(v, line) {
+    const now = this.now()
+    if (now - v.memberFailLogAt < 10 * MIN) return
+    v.memberFailLogAt = now
+    log(this.id, line)
+  }
+
+  // 카드(옾링·사진)를 아직 못 읽은 사람(memberWant)을 MEMBER 로 채운다. 방마다 60초에 1번, 한 번에 20명까지.
+  // 동기화 중이면 동기화가 채우므로 기다린다.
+  memberFill(v, now) {
+    if (!v.memberWant.size || this.memberBusy(v, 'memberFilling', now) || v.memberSyncing || now - v.memberFillAt < MEMBER_FILL_GAP_MS) return
+    if (!v.chat_id || !R.roombotLive(v) || !(v.cfg.visit.enabled || v.cfg.profile.enabled)) return
+    if (this.readPauseUntil > now) return
+    const ids = [...v.memberWant].slice(0, MEMBER_FILL_MAX)
+    v.memberFilling = true
+    v.memberFillAt = now
+    v.memberJobAt = now
+    this.memberJob(`member fill ${v.install_id}`, () => this.fillMembers(v, ids).finally(() => { v.memberFilling = false }))
+  }
+
+  // 사진·pli 를 이미 아는 사람은 옾링만(INFOLINK), 나머지는 카드(MEMBER)를 읽는다.
+  // 읽지 못한 사람은 줄 뒤로 보내고(같은 20명만 되풀이하지 않게) 세 번 못 읽으면 뺀다.
+  async fillMembers(v, ids) {
+    const chat = v.membersChat
+    if (!this.sameView(v, chat)) return
+    const linkOnly = []
+    const cardIds = []
+    for (const uid of ids) {
+      const m = v.members.get(uid)
+      if (m && typeof m.photo === 'string' && m.pli && m.link == null) linkOnly.push(uid)
+      else cardIds.push(uid)
+    }
+    let rows = []
+    const failed = []
+    if (cardIds.length) {
+      const got = await this.readMembers(v, cardIds)
+      if (got) rows = got
+      else failed.push(...cardIds)
+    }
+    if (!this.sameView(v, chat)) return
+    for (const uid of linkOnly) {
+      const m = v.members.get(uid)
+      rows.push({ uid, name: m.name || '', pli: m.pli, photo: m.photo })
+    }
+    // 답이 없는 사람(이미 나감)은 다시 읽지 않는다
+    for (const uid of cardIds) if (!failed.includes(uid)) v.memberWant.delete(uid)
+    if (rows.length) await this.mergeMembers(v, rows, 'refresh')
+    for (const uid of [...failed, ...linkOnly]) {
+      if (!v.memberWant.has(uid)) {
+        v.memberFails.delete(uid)
+        continue
+      }
+      const n = (v.memberFails.get(uid) || 0) + 1
+      v.memberWant.delete(uid)
+      if (n >= MEMBER_FAIL_MAX) {
+        v.memberFails.delete(uid)
+        continue
+      }
+      v.memberFails.set(uid, n)
+      v.memberWant.add(uid)          // 줄 뒤로
+    }
+  }
+
+  // MEMBER 1회(다시 접속하지 않음) → [{uid, name, pli, photo}] | null(읽지 못함)
+  async readMembers(v, ids) {
+    const r = await this.raw('MEMBER', { chatId: L(v.chat_id), memberIds: ids.map((x) => L(x)) })
+    const list = R.locoOk(r) && r.body && Array.isArray(r.body.members) ? r.body.members : null
+    if (!list) {
+      this.ratePause(R.locoStatus(r))
+      this.memberFailLog(v, `member read ${v.install_id}: MEMBER failed (status ${R.locoStatus(r)})`)
+      return null
+    }
+    return list.map((m) => this.memberRow(m)).filter((x) => x && ids.includes(x.uid))
+  }
+
+  // 명부에 없는(카드를 못 읽은) 사람이 나갔다: 한 줄 남기고, 방마다 10초에 한 번 MEMBER 를 2초까지만 읽어 본다.
+  // 나간 사람에게도 MEMBER 가 답하는지는 실측 전이다. 푸시 줄(chain)에서 도므로 짧게 끊고, 퇴장 안내는 그 뒤에 만든다.
+  // 사진·pli 는 아는데 옾링만 모르면(옾링 읽기가 실패·쉬는 중이었음) INFOLINK 만 읽는다.
+  async leaveCard(v, uid, known) {
+    const now = this.now()
+    const linkOnly = !!(known && typeof known.photo === 'string' && known.pli && known.link == null)
+    let got = 'skipped'
+    if (now - v.leaveReadAt >= LEAVE_READ_GAP_MS && this.readPauseUntil <= now) {
+      v.leaveReadAt = now
+      got = await withTimeout((async () => {
+        if (linkOnly) {
+          const links = await this.linksFor([known.pli])
+          if (!links.has(known.pli)) return 'failed'
+          await this.mergeMembers(v, [{ uid, name: known.name || '', pli: known.pli, photo: known.photo }], 'leave')
+          return links.get(known.pli) ? 'link' : 'no link'
+        }
+        const rows = await this.readMembers(v, [uid])
+        if (!rows) return 'failed'
+        if (!rows.length) return 'no card'
+        await this.mergeMembers(v, rows, 'leave')
+        return 'card'
+      })(), LEAVE_READ_MS).catch((e) => (e && e.timeout ? 'timed out' : 'failed: ' + errText(e)))
+    }
+    const ago = v.memberOkAt ? `${Math.round((now - v.memberOkAt) / 1000)}s ago` : 'never'
+    const what = !known ? 'not in' : linkOnly ? 'has no link in' : 'has no card in'
+    log(this.id, `leave ${v.install_id}: ${uid} ${what} the member book (book ${v.members.size}, last sync ${ago}), ${linkOnly ? 'link' : 'member'} read: ${got}`)
+  }
+
+  // 새로 읽은 값(rows: {uid, name, pli, photo}, null = 모름)을 명부에 합친다. 옾링은 새로 보거나 바뀐 pli 와
+  // 옾링이 아직 비어 있는('' 포함: 예전 읽기 실패가 '없음'으로 남았을 수 있다) pli 만 읽는다(읽어 둔 것은 캐시에서).
+  // why 'sync'·'refresh' 면 아는 사람의 변경을 프로필 변경으로 알린다. 'join'(입장 안내가 대신)·'leave' 는 조용히 합친다.
   async mergeMembers(v, rows, why) {
     const need = []
     for (const r of rows) {
       const prev = v.members.get(r.uid)
-      if (r.pli && !(prev && prev.pli === r.pli && prev.link != null)) need.push(r.pli)
+      if (r.pli && !(prev && prev.pli === r.pli && prev.link)) need.push(r.pli)
     }
     const links = need.length ? await this.linksFor(need) : new Map()
     const now = this.now()
@@ -2842,7 +3048,15 @@ export class BotSlot {
       }
       v.members.set(r.uid, next)
       v.membersDirty.add(r.uid)
-      if (prev && why !== 'join') this.announceProfile(v, r.uid, prev, next)
+      if (!needsCard(next)) {
+        v.memberWant.delete(r.uid)
+        v.memberFails.delete(r.uid)
+      } else if (!v.memberFails.has(r.uid)) {
+        v.memberWant.add(r.uid)      // 옾링·사진을 못 읽었다(읽기 실패·쉬는 중) → 카드 채우기가 다시 읽는다
+      }
+      if (!prev || (why !== 'sync' && why !== 'refresh')) continue
+      // 옾링은 pli 에서 나온다. pli 가 같으면 옾링은 바뀐 것이 아니다('' → 주소는 다시 읽어 고친 것) → 옾링 변경은 pli 가 바뀔 때만
+      this.announceProfile(v, r.uid, prev.pli === next.pli ? Object.assign({}, prev, { link: null }) : prev, next)
     }
   }
 
@@ -2860,9 +3074,10 @@ export class BotSlot {
     if (!nm || !uid || uid === this.userId) return
     const prev = v.members.get(uid)
     if (!prev) {
-      // 명부에 아직 없다(동기화 전): 닉네임만 적어 둔다. 옾링·사진은 다음 동기화가 채운다.
+      // 명부에 아직 없다(동기화 전·GETMEM 이 빠뜨린 사람): 닉네임만 적어 두고, 옾링·사진은 카드 채우기가 1분 안에 읽는다.
       v.members.set(uid, { name: nm, pli: null, link: null, photo: null, seenAt: this.now() })
       v.membersDirty.add(uid)
+      v.memberWant.add(uid)
       return
     }
     if (prev.name !== nm) this.refreshSoon(v, uid, nm)
@@ -2871,14 +3086,14 @@ export class BotSlot {
   refreshSoon(v, uid, hint) {
     if (!uid || v.memberRefresh.has(uid)) return
     v.memberRefresh.add(uid)
-    this.checks = this.checks.then(() => this.refreshMember(v, uid, hint))
-      .catch((e) => log(this.id, `member refresh failed: ${errText(e)}`))
-      .finally(() => { v.memberRefresh.delete(uid) })
+    this.memberJob('member refresh', () => this.refreshMember(v, uid, hint).finally(() => { v.memberRefresh.delete(uid) }))
   }
 
   async refreshMember(v, uid, hint) {
-    if (!this.byInstall.has(v.install_id)) return
+    const chat = v.membersChat
+    if (!this.sameView(v, chat)) return
     const card = await this.memberCard(v, uid)
+    if (!this.sameView(v, chat)) return
     const row = card
       ? { uid, name: card.name || hint || '', pli: card.pli || '', photo: card.photoUrl }
       : { uid, name: hint || '', pli: null, photo: null }

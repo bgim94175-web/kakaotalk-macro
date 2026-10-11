@@ -4,7 +4,7 @@ import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from
 import { Hub, Slot } from './runner.mjs'
 import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
-import { FOLD, withProfileLink } from './roomfeat.mjs'
+import { FOLD, groupLinkType, withProfileLink } from './roomfeat.mjs'
 
 // 접힌 사람 안내: 첫 줄(제목 · @닉네임) + 보이지 않는 글자 + 줄바꿈 + 자세한 내용([전체보기])
 const folded = (head, lines) => head + FOLD + '\n' + lines.join('\n')
@@ -94,17 +94,41 @@ const kinds = [
   [{ type: 10 }, 'normal'],
   [{ type: 'PlusChat' }, 'normal'],
   [{ type: 'MemoChat' }, 'normal'],
-  [{ type: 2, link_id: '9', display_name: '김, 이, 박', title: '김, 이, 박', active_members: 4 }, 'normal'],
+  // 링크가 있고 3명 이상이면 이름을 못 읽었어도 오픈 단체방이다(이름이 없으면 패널 목록에서만 빠진다)
+  [{ type: 2, link_id: '9', display_name: '김, 이, 박', title: '김, 이, 박', active_members: 4 }, 'open_room'],
   [{ type: 2, link_id: '9', title: '동네모임', display_name: '김, 이, 박', active_members: 4 }, 'open_room'],
   [{ type: 2, link_id: '9', title: '홍길동', display_name: '홍길동', active_members: 2 }, 'open_dm'],
+  [{ type: 2, link_id: '9020', active_members: 2 }, 'open_dm'],
+  // 1:1 에는 2명보다 많이 있을 수 없다: 링크가 있는 14·16 방도 3명 이상이면 단체방
+  [{ type: 14, link_id: '9022', active_members: 50 }, 'open_room'],
+  [{ type: 16, link_id: '9022', active_members: 3 }, 'open_room'],
+  [{ type: 14, link_id: '9001', active_members: 2 }, 'open_dm'],
+  [{ type: 16, link_id: '9001' }, 'open_dm'],
+  [{ type: 'OD', link_id: '9001', active_members: 5 }, 'open_dm'],
   [{ type: 13, link_id: '9', title: '모임방', display_name: '김, 이', active_members: 3 }, 'open_room'],
   [{ type: 13, link_id: '9', display_name: '김, 이', active_members: 3 }, 'open_room'],
   [{ type: 'OM', title: '김, 이, 박', display_name: '김, 이, 박' }, 'open_room'],
   [{ type: 15, link_id: '3', title: '별명방', display_name: '가, 나', active_members: 2 }, 'open_room'],
+  // 커뮤니티 타입 방(새 type 값): 오픈링크가 있으면 오픈 단체방
+  [{ type: 18, link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
+  [{ type: 'OC', link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
+  [{ type: 17, link_id: '9005', active_members: 300 }, 'open_room'],
+  [{ type: 'OC', link_id: '9006', active_members: 40 }, 'open_room'],
+  [{ type: 18, link_id: '5' }, 'open_room'],
+  [{ type: 17, link_id: '5', active_members: 2 }, 'open_dm'],
+  // 일반 단톡방·1:1 은 고르는 목록에 올리지 않는다
+  [{ type: 'MultiChat', title: '가족', active_members: 3 }, 'normal'],
+  [{ type: 10, active_members: 5 }, 'normal'],
+  [{ type: 11, active_members: 2 }, 'normal'],
+  [{ type: 18, display_name: '김, 이, 박', active_members: 500 }, 'normal'],
 ]
 for (const [ch, want] of kinds) {
   const got = roomListKind(ch)
   if (got !== want) throw new Error(`room kind ${JSON.stringify(ch)} -> ${got}, want ${want}`)
+}
+// 오픈링크 종류: 1(1:1·오픈프로필)만 그룹이 아니다. 커뮤니티(3)·모르는 값·빠진 값은 들어가 본다
+for (const [lt, want] of [[1, false], ['1', false], [2, true], [3, true], [0, true], [undefined, true], [null, true]]) {
+  if (groupLinkType(lt) !== want) throw new Error(`groupLinkType(${lt}) -> ${!want}`)
 }
 
 const roomKey = parseRoomKey('0\u0001공지').key
@@ -606,6 +630,13 @@ if (roomTitle(stamped[0]) !== '검 Fam 1424') throw new Error('link name is the 
 if (stamped[1].title != null) throw new Error('open profile chat is not named here')
 if (stamped[2].title !== '검 Fam 1424' || roomListKind(stamped[2]) !== 'open_room') throw new Error('type 2 open multi uses the link name')
 if (stamped[3].title !== '가족' || roomListKind(stamped[3]) !== 'normal') throw new Error('a normal room stays out')
+// 커뮤니티 타입 방(카카오가 새 type 값을 보냄)도 오픈링크 이름을 받아 목록에 오른다
+const community = stampOpenLinkTitles([
+  { type: 18, link_id: '77', title: null, display_name: '김, 이, 박', active_members: 120 },
+  { type: 'MultiChat', title: null, display_name: '김, 이, 박', active_members: 5 },
+], new Map([['77', '주식 커뮤니티']]))
+if (community[0].title !== '주식 커뮤니티' || roomListKind(community[0]) !== 'open_room') throw new Error('community room gets its link name')
+if (community[1].title != null || roomListKind(community[1]) !== 'normal') throw new Error('a normal group without a link stays out')
 const unnamed = stampOpenLinkTitles(
   [{ type: 13, link_id: '1', title: null, display_name: '김, 이', active_members: 4 }],
   new Map(),
@@ -618,6 +649,13 @@ if (countedTitle[0].title !== '검 Fam' || roomTitle(countedTitle[0]) !== '검 F
   throw new Error('member count is removed from the open-chat name')
 }
 if (withoutMemberCount('검 Fam 1424', 8) !== '검 Fam 1424') throw new Error('a real numbered title stays')
+// 카카오가 준 오픈링크 이름은 닉네임 목록과 같아도 방 이름이다
+const sameAsNick = stampOpenLinkTitles([
+  { type: 13, link_id: '9008', title: null, display_name: '홍길동', active_members: 5 },
+  { type: 14, link_id: '9022', title: null, display_name: '김, 이', active_members: 50 },
+], new Map([['9008', '홍길동'], ['9022', '주식방']]))
+if (roomListKind(sameAsNick[0]) !== 'open_room' || roomTitle(sameAsNick[0]) !== '홍길동') throw new Error('a link name equal to the nicknames is the room name')
+if (roomTitle(sameAsNick[1]) !== '주식방') throw new Error('a big type 14 room with a link gets its link name')
 
 if (!isProfanity('씨발') || !isProfanity('시 발') || !isProfanity('씨1발') || !isProfanity('씨이발')) {
   throw new Error('profanity is recognized')
@@ -844,6 +882,134 @@ chatHub.accounts.set('empty', emptySlot)
 await chatHub.thread('empty', '8')
 await chatHub.thread('empty', '8')
 if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 (' + emptyReads + '회)')
+
+// ── 대화방 불러오기: 지금 카카오의 방 목록(LCHATLIST) + 오픈링크 이름(INFOLINK) ──────────────
+// 로그에 남는 줄을 받아 둔다(방 이름·링크 id 가 남지 않는지 본다).
+async function withLog(fn) {
+  const lines = []
+  const write = process.stderr.write
+  process.stderr.write = (s) => { lines.push(String(s)); return true }
+  try {
+    return { value: await fn(), lines }
+  } finally {
+    process.stderr.write = write
+  }
+}
+{
+  const { Long } = await import('bson')
+  const L = (s) => Long.fromString(String(s))
+  // 로그인 때 목록(getChats)에는 101 만 있다. 그 뒤 102·103 에 들어갔다.
+  const raw = [
+    { c: L(101), t: 13, li: L(9101), a: 30, n: 0, k: ['가', '나'], o: 4 },
+    { c: L(102), t: 2, li: L(9102), a: 12, n: 0, k: ['다'], o: 3 },
+    { c: L(103), t: 'OC', li: L(9103), a: 40, n: 0, k: [], o: 2 },
+    { c: L(104), t: 10, a: 5, n: 0, k: ['엄마', '아빠'], o: 1 },
+    { c: L(150), li: L(9150), a: 9 },
+  ]
+  let pages = 0
+  let listFail = false
+  let stuck = false
+  const asked = []
+  const session = {
+    async getChatList(token) {
+      pages++
+      if (listFail) throw new Error('LOCO packet timeout: LCHATLIST (15000ms)')
+      // stuck: 다음 위치를 무시하고 첫 쪽만 되풀이한다
+      const from = stuck ? 0 : Number(token.toString())
+      const page = raw.slice(from, from + 2)
+      const next = from + page.length
+      // 다음 위치는 Long 으로 온다(큰 값은 bson 이 숫자로 바꾸지 않는다)
+      return { statusCode: 0, body: { status: 0, chatDatas: page, lastTokenId: L(next), lastChatId: page.length ? page[page.length - 1].c : 0, eof: next >= raw.length } }
+    },
+    async getOpenLinkInfo(lis) {
+      const ids = lis.map((x) => x.toString())
+      asked.push(ids)
+      // 묶음 답: li 없는 이름 하나(첫 자리)와 9102 하나뿐. 하나씩 물으면 9101 만 답한다.
+      if (ids.length > 1) return { statusCode: 0, body: { status: 0, ols: [{ ln: '엉뚱한 이름' }, { li: L(9102), ln: '동네모임', lt: 2 }] } }
+      if (ids[0] === '9101') return { statusCode: 0, body: { status: 0, ols: [{ li: L(9101), ln: '검 Fam', lt: 2 }] } }
+      throw new Error('LOCO packet timeout: INFOLINK (15000ms)')
+    },
+  }
+  const listSlot = new Slot('list-dev', { credentials: { user_id: '111' }, needs_register: false, reason: 'ok' })
+  listSlot.client = {
+    async acquireSession() { return session },
+    async getChats() { return [{ chat_id: '101', type: 13, link_id: '9101', active_members: 30, title: null, display_name: '가, 나' }] },
+  }
+  const listHub = new Hub()
+  listHub.accounts.set('list-dev', listSlot)
+  const { value: rows, lines } = await withLog(() => listHub.chats('list-dev'))
+  const row = (id) => rows.find((r) => r.chat_id === id)
+  if (pages !== 3) throw new Error('chats: LCHATLIST is read to eof (' + pages + ' pages)')
+  if (rows.map((r) => r.chat_id).join(',') !== '101,102,103,104') throw new Error('chats: live list with rooms joined after login, bad row dropped: ' + rows.map((r) => r.chat_id))
+  if (row('101').title !== '검 Fam') throw new Error('chats: a link name is matched by li only, then retried alone')
+  if (row('102').title !== '동네모임' || row('102').list_kind !== 'open_room') throw new Error('chats: type 2 room named by li')
+  if (row('103').list_kind !== 'open_room' || row('103').title !== null) throw new Error('chats: an unnamed community room stays an open room without a made-up name')
+  if (row('103').kind !== 'group') throw new Error('chats: an unknown string type with 40 members is a group (no 1:1 auto reply)')
+  if (row('104').list_kind !== 'normal') throw new Error('chats: a normal group stays out')
+  if (asked.length !== 3 || asked[0].length !== 3 || asked[1][0] !== '9101' || asked[2][0] !== '9103') throw new Error('chats: unnamed links are retried one by one: ' + JSON.stringify(asked))
+  const line = lines.find((s) => s.indexOf(' chats ') >= 0) || ''
+  if (lines.filter((s) => s.indexOf(' chats ') >= 0).length !== 1) throw new Error('chats: one log line per load')
+  if (line.indexOf('live 3p') < 0 || line.indexOf('rows 4 bad 1') < 0 || line.indexOf('unnamed 1') < 0 || line.indexOf('retry 2') < 0) throw new Error('chats: log counts: ' + line)
+  if (/동네모임|검 Fam|9101|9102/.test(line)) throw new Error('chats: the log has no names or ids: ' + line)
+  // 카카오가 eof 를 붙여 일부만 주면(오픈방이 절반 넘게 한꺼번에 빠짐) 빠진 방을 더한다 — 매크로 방이 사라지지 않게
+  {
+    const full = raw.slice()
+    const extra = [5, 6, 7].map((i) => ({ c: L(110 + i), t: 13, li: L(9110 + i), a: 20, n: 0, k: ['라'], o: 0 }))
+    raw.splice(4, 0, ...extra)                 // 오픈방 6개가 있는 목록을 한 번 읽어 둔다
+    await withLog(() => listHub.chats('list-dev'))
+    raw.length = 0
+    raw.push(full[0], full[3])                 // 다음엔 101·104 만(eof) — 오픈방 5개가 한꺼번에 빠짐
+    const { value: part, lines: partLines } = await withLog(() => listHub.chats('list-dev'))
+    if (part.length !== 7 || !partLines.some((s) => s.indexOf('chats live 1p (partial) + kept 5') >= 0)) throw new Error('chats: a partial list keeps the rooms that vanished at once: ' + part.length + ' ' + partLines.join(' | '))
+    raw.length = 0
+    raw.push(...full)
+    await withLog(() => listHub.chats('list-dev'))   // 지난 목록(오픈방 6개)에서 둘만 빠지면 그대로 쓴다 — 아래 시험을 위해 원래 목록으로
+  }
+  // 첫 쪽만 되풀이되면 끝까지 읽을 수 없다 → 예전 길(로그인 때 목록)
+  stuck = true
+  const { value: rep, lines: repLines } = await withLog(() => listHub.chats('list-dev'))
+  // 로그인 때 목록(101)에 마지막으로 읽은 카카오 목록에만 있던 방(102~104)을 더한다 — 매크로 방이 사라지지 않게
+  if (rep.length !== 4 || !repLines.some((s) => s.indexOf('chats login (LCHATLIST page repeats) + kept 3') >= 0)) throw new Error('chats: a repeating page falls back to getChats and keeps the last live rooms: ' + rep.length + ' ' + repLines.join(' | '))
+  // LCHATLIST 가 실패하면 예전 길로 읽는다
+  stuck = false
+  listFail = true
+  const { value: old, lines: oldLines } = await withLog(() => listHub.chats('list-dev'))
+  if (old.length !== 4 || old[0].chat_id !== '101' || old[0].title !== '검 Fam') throw new Error('chats: LCHATLIST failure falls back to getChats (+ last live rooms)')
+  if (!oldLines.some((s) => s.indexOf('chats login (LOCO packet timeout') >= 0)) throw new Error('chats: the fallback is logged')
+}
+// 가짜 연결: getChats 는 로그인 때 목록, LCHATLIST 는 지금 목록 — 로그인 뒤 들어간 방도 불러오고 폰에서 나간 방은 뺀다
+{
+  const FK = await import('./fake.mjs')
+  const fs = FK.resetFakeServer()
+  fs.chatSnapshot = true
+  fs.chatPage = 1
+  const uid = FK.fakeUserId('cust-list')
+  const member = () => ({ mt: 2, nick: '손님', ptp: 1, pli: null, photo: '', status: null })
+  const before = fs.room('roomlistbefore')
+  before.members[uid] = member()
+  const client = new FK.FakeKakaoClient(fs)
+  await client.login({ oauthToken: 'fake-cust', userId: uid, deviceUuid: 'du-cust' })
+  await client.acquireSession()
+  const after = fs.room('roomlistafter')
+  after.members[uid] = member()
+  delete before.members[uid]
+  const snap = await client.getChats()
+  if (!snap.some((c) => c.chat_id === before.chatId) || snap.some((c) => c.chat_id === after.chatId)) throw new Error('fake: getChats is the login snapshot')
+  const custSlot = new Slot('cust-list', { credentials: { user_id: uid }, needs_register: false, reason: 'ok' })
+  custSlot.client = client
+  const custHub = new Hub()
+  custHub.accounts.set('cust-list', custSlot)
+  const { value: rows } = await withLog(() => custHub.chats('cust-list'))
+  const joined = rows.find((r) => r.chat_id === after.chatId)
+  if (!joined || joined.list_kind !== 'open_room' || joined.title !== '테스트방 roomlistafter') throw new Error('fake: a room joined after login is listed with its name')
+  if (rows.some((r) => r.chat_id === before.chatId)) throw new Error('fake: a room left from the phone is not listed')
+  if (rows.length !== 3 || !rows.some((r) => r.title === '가짜 오픈채팅 2')) throw new Error('fake: customer rooms are listed (' + rows.length + ')')
+  fs.chatListFail = true
+  const { value: old } = await withLog(() => custHub.chats('cust-list'))
+  // 카카오 목록을 못 읽으면 로그인 때 목록 + 마지막으로 읽은 카카오 목록에만 있던 방(로그인 뒤 들어간 방)
+  if (!old.some((r) => r.chat_id === before.chatId) || !old.some((r) => r.chat_id === after.chatId)) throw new Error('fake: LCHATLIST failure uses the login list and keeps the room joined after login')
+  custSlot.client.close()
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 방 설치형 봇(K bot 계정) — docs/ACCOUNTS_V1.md 7.7 의 사례. DB·HTTP 없이 돈다.
@@ -1180,7 +1346,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     opts: {
       joinGapMs: 0, permPollMs: 150, activeCheckMs: 600000, pushDelayMs: 120, tickMs: 30, hideGapMs: 0,
       rateWaits: [60000, 120000, 240000], ipWaits: [300000, 600000, 900000], reconnectGapMs: 5, transientWaitMs: 60000,
-      profilePushDelayMs: 30, profileReadGapMs: 50, profileConvert: 'off', linkGapMs: 0,
+      profilePushDelayMs: 30, profileReadGapMs: 50, profileConvert: 'off', linkGapMs: 0, memberGapMs: 0,
     },
   })
   async function addBot(n) {
@@ -1212,8 +1378,10 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   const iPassNone = install('passx2')
   const iPassOk = install('passx3', { passcode_ct: passbox2.seal('0000'), roombot: false, minigame: true })
   const iDm = install('dmx1')
+  const iComm = install('commx1', { roombot: false, minigame: true })   // 커뮤니티 타입 방(오픈링크 종류 3)
   await pool.reconcile(null)
   await waitFor(() => [iGone, iBan, iAnon, iPassWrong, iPassNone, iDm].every((id) => rowOf(id).state === 'error') && rowOf(iPassOk).state === 'active' && rowOf(iRate).error_detail === 'rate_limited', 8000, '7.7#16 joins')
+  await waitFor(() => rowOf(iComm).state === 'active', 5000, 'community room joins like a group room')
   const codeOf = (id) => rowOf(id).error_code
   if (codeOf(iGone) !== 'link_gone') throw new Error('7.7#16 -324 → link_gone, got ' + codeOf(iGone))
   if (rowOf(iRate).state !== 'joining' || rowOf(iRate).error_detail !== 'rate_limited' || !(rowOf(iRate).next_try_at > Date.now() + 50000)) throw new Error('7.7#16 -312 → joining + rate_limited')
@@ -1316,7 +1484,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 8000, '#28 photo notice').catch((e) => {
+    // 봇 전체 발송 한도(분당 30)에 걸리면 다음 1분 창까지 기다린다
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 70000, '#28 photo notice').catch((e) => {
       const sl = botA.slot
       throw new Error(e.message + ' DIAG ' + JSON.stringify({ live: sl.live(), syncing: vb.memberSyncing, syncAt: vb.memberSyncAt, now: Date.now(), checking: vb.checking,
         sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m703: vb.members.get('703'), m702: vb.members.get('702') && vb.members.get('702').name }))
@@ -1352,6 +1521,284 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (!rows.some((r) => r.changes.some((c) => c.kind === 'link' && c.to === 'https://open.kakao.com/o/b711'))) throw new Error('#28-2 the panel log has the link change ' + JSON.stringify(rows))
   }
 
+  // 로그 줄을 모은다(그대로 내보내면서). 명부 시험(#28-3~6)이 남기는 한 줄 로그를 확인한다.
+  async function withLog(fn) {
+    const lines = []
+    const w = process.stderr.write
+    process.stderr.write = function (chunk, ...rest) {
+      lines.push(String(chunk))
+      return w.call(this, chunk, ...rest)
+    }
+    try {
+      await fn(lines)
+    } finally {
+      process.stderr.write = w
+    }
+  }
+  const hasLine = (lines, ...parts) => lines.some((l) => parts.every((p) => l.indexOf(p) >= 0))
+  // 명부 시험(#28-3~6)의 입장 4번은 뒤 사례가 보는 봇 A 의 입장 예산(시간 20)에서 돌려준다(아래 끝에서)
+  const joinMark = [botA.slot.joinH.list.length, botA.slot.joinD.list.length]
+  // #28-3 옾링을 읽지 못하면(INFOLINK 실패) '없음'으로 굳히지 않고 모름(null)으로 두었다가 다음 동기화가 채운다.
+  //   · 예전에 '' 로 저장된 행(pli 는 있음)도 다시 읽어 고친다 · 고쳐 읽은 것은 옾링 변경이 아니다(프로필 변경 안내 없음)
+  //   · 속도 제한(-805)이면 그 뒤 잠시 INFOLINK 를 보내지 않는다 · 동기화마다 숫자만 적힌 로그 한 줄
+  {
+    const code = 'bookx30'
+    const room0 = fs.room(code)
+    fs.setProfiles('731', [{ li: '7311', name: '셋째 프로필', url: 'https://open.kakao.com/o/a731' }])
+    fs.setProfiles('732', [{ li: '7321', name: '넷째 프로필', url: 'https://open.kakao.com/o/a732' }])
+    room0.members['731'] = { mt: 2, nick: '새로읽기', ptp: 16, pli: '7311', photo: 'https://k.kakaocdn.net/dn/p/731.jpg', status: null }
+    room0.members['732'] = { mt: 2, nick: '고쳐읽기', ptp: 16, pli: '7321', photo: 'https://k.kakaocdn.net/dn/p/732.jpg', status: null }
+    const iHeal = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    // 예전 코드가 읽기 실패를 '없음'('')으로 저장해 둔 행
+    await store.saveMembers(iHeal, room0.chatId, [{ user_id: '732', name: '고쳐읽기', pli: '7321', link: '', photo: 'https://k.kakaocdn.net/dn/p/732.jpg', seen_at: Date.now() }])
+    await withLog(async (lines) => {
+      try {
+        fs.infolinkFail = -805
+        await pool.reconcile(null)
+        await waitFor(() => rowOf(iHeal).state === 'waiting_host', 5000, '#28-3 join')
+        const chat = rowOf(iHeal).chat_id
+        const vh = botA.slot.byInstall.get(iHeal)
+        if (!vh.members.get('732') || vh.members.get('732').link !== '') throw new Error('#28-3 saved row loaded ' + JSON.stringify(vh.members.get('732')))
+        fs.setPerm(chat, botA.uid, 4)
+        await waitFor(() => rowOf(iHeal).state === 'active', 3000, '#28-3 promotion')
+        await waitFor(() => vh.memberOkAt > 0, 5000, '#28-3 first sync')
+        const m731 = vh.members.get('731')
+        if (!m731 || m731.pli !== '7311' || m731.link !== null) throw new Error('#28-3 a failed link read stays unknown, not 없음 ' + JSON.stringify(m731))
+        if (botA.slot.linkCache.has('7311') || botA.slot.linkCache.has('7321')) throw new Error('#28-3 a failed link read is not cached')
+        if (!hasLine(lines, 'open link read failed: status -805')) throw new Error('#28-3 failed link read is logged')
+        if (!hasLine(lines, `member sync ${iHeal}: 2 members, 2 with pli, 0 with link, 2 with photo, `)) throw new Error('#28-3 one summary line per sync ' + JSON.stringify(lines))
+        // 속도 제한 동안은 명부를 읽지 않는다(GETMEM·MEMBER·INFOLINK 모두 쉼 — 실패한 INFOLINK 가 늘지 않음)
+        const failed = () => packets('INFOLINK', (p) => p.status === -805).length
+        const n0 = failed()
+        const ok0 = vh.memberOkAt
+        const getmem0 = packets('GETMEM').length
+        if (!(botA.slot.readPauseUntil > Date.now())) throw new Error('#28-3 a rate-limited INFOLINK pauses member reads')
+        vh.memberSyncAt = 0
+        await sleep(400)
+        if (failed() !== n0 || vh.memberOkAt !== ok0 || packets('GETMEM').length !== getmem0) throw new Error('#28-3 no member reads while rate limited')
+        // 풀린 뒤 다음 동기화가 채운다 — 모름 → 주소, '' → 주소 모두 프로필 변경이 아니다
+        fs.infolinkFail = 0
+        botA.slot.readPauseUntil = 0
+        vh.memberSyncAt = 0
+        await waitFor(() => vh.members.get('731').link === 'https://open.kakao.com/o/a731' && vh.members.get('732').link === 'https://open.kakao.com/o/a732', 5000, '#28-3 links filled')
+        await sleep(300)
+        if (sentIn(iHeal).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28-3 filling a link is not a profile change ' + JSON.stringify(sentIn(iHeal)))
+      } finally {
+        fs.infolinkFail = 0
+        botA.slot.readPauseUntil = 0
+      }
+    })
+  }
+  // #28-4 GETMEM 이 빠뜨린 사람: 글을 쓰면 이름만 적어 두었다가 카드 채우기(MEMBER)가 옾링·사진을 채운다(방마다 60초에 20명까지).
+  //   명부에 없는 사람이 나가면 로그 한 줄 + 안내를 만들기 전에 MEMBER 를 한 번 읽어 본다(나간 사람에게도 답하는 경우)
+  {
+    const code = 'bookx31'
+    const room0 = fs.room(code)
+    fs.setProfiles('741', [{ li: '7411', name: '빠진 프로필', url: 'https://open.kakao.com/o/a741' }])
+    fs.setProfiles('742', [{ li: '7421', name: '조용한 프로필', url: 'https://open.kakao.com/o/a742' }])
+    room0.members['741'] = { mt: 2, nick: '빠진사람', ptp: 16, pli: '7411', photo: 'https://k.kakaocdn.net/dn/p/741.jpg', status: null }
+    room0.members['742'] = { mt: 2, nick: '조용한사람', ptp: 16, pli: '7421', photo: 'https://k.kakaocdn.net/dn/p/742.jpg', status: null }
+    const many = []
+    for (let i = 1; i <= 24; i++) {
+      many.push(String(7500 + i))
+      room0.members[String(7500 + i)] = { mt: 2, nick: '손님' + i, ptp: 1, pli: null, photo: '', status: null }
+    }
+    room0.getmemSkip = ['741', '742', ...many]
+    room0.keepLeft = true
+    const iFill = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iFill).state === 'waiting_host', 5000, '#28-4 join')
+    const chat = rowOf(iFill).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iFill).state === 'active', 3000, '#28-4 promotion')
+    const vf = botA.slot.byInstall.get(iFill)
+    await waitFor(() => vf.memberOkAt > 0, 5000, '#28-4 first sync')
+    if (vf.members.has('741') || vf.members.has('742') || vf.members.has(many[0])) throw new Error('#28-4 GETMEM left them out')
+    // 25명이 글을 쓴다 → 이름만 적힌 행 25개. 채우기를 잠시 막아 두고 모은다
+    vf.memberFillAt = Date.now()
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '741', name: '빠진사람', text: '안녕하세요' })
+    for (let i = 0; i < many.length; i++) fs.event(chat, botA.uid, { kind: 'message', user_id: many[i], name: '손님' + (i + 1), text: '안녕' })
+    await waitFor(() => vf.memberWant.size === 25, 5000, '#28-4 25 name-only rows')
+    const stub = vf.members.get('741')
+    if (stub.name !== '빠진사람' || stub.pli !== null || stub.link !== null || stub.photo !== null) throw new Error('#28-4 name-only row ' + JSON.stringify(stub))
+    vf.memberFillAt = 0
+    await waitFor(() => vf.memberWant.size === 5, 3000, '#28-4 first fill')
+    await sleep(300)
+    if (vf.memberWant.size !== 5) throw new Error('#28-4 at most 20 per room per minute, left ' + vf.memberWant.size)
+    const m741 = vf.members.get('741')
+    if (m741.link !== 'https://open.kakao.com/o/a741' || m741.photo !== 'https://k.kakaocdn.net/dn/p/741.jpg' || m741.pli !== '7411') throw new Error('#28-4 filled row ' + JSON.stringify(m741))
+    vf.memberFillAt = 0
+    await waitFor(() => vf.memberWant.size === 0 && many.every((id) => vf.members.get(id).photo === ''), 3000, '#28-4 the rest is filled a minute later')
+    if (sentIn(iFill).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28-4 filling a name-only row is not a profile change')
+    await pool.flush()
+    if (!(await store.loadMembers(iFill, chat, 0)).some((r) => r.user_id === '741' && r.link === 'https://open.kakao.com/o/a741')) throw new Error('#28-4 filled row saved')
+    // 명부에 없는 742 가 나간다 → 로그 한 줄 + MEMBER 로 읽어 퇴장 안내에 옾링·사진
+    await withLog(async (lines) => {
+      fs.event(chat, botA.uid, { kind: 'leave', user_id: '742', name: '조용한사람' })
+      await waitFor(() => sentIn(iFill).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-4 leave notice')
+      const out = sentIn(iFill).find((t) => t.indexOf('📤 퇴장 안내') === 0)
+      if (out.indexOf('\n👤 조용한사람\n🆔 742\n🔗 옾링 : https://open.kakao.com/o/a742\n🖼 사진 : https://k.kakaocdn.net/dn/p/742.jpg\n') < 0) throw new Error('#28-4 leave notice of someone not in the book ' + JSON.stringify(out))
+      if (!hasLine(lines, `leave ${iFill}: 742 not in the member book`, 'member read: card')) throw new Error('#28-4 leave line ' + JSON.stringify(lines))
+    })
+  }
+  // #28-7 GETMEM 이 빠뜨린 사람의 카드를 옾링 읽기가 실패하는 동안 채웠다(pli·사진은 있고 옾링만 모름):
+  //   목록에서 빠지지 않고 다음 채우기가 옾링만(INFOLINK) 다시 읽는다. 옾링을 모른 채 나가면 나갈 때 옾링을 한 번 읽는다.
+  {
+    const code = 'bookx34'
+    const room0 = fs.room(code)
+    fs.setProfiles('771', [{ li: '7711', name: '늦은 프로필', url: 'https://open.kakao.com/o/a771' }])
+    fs.setProfiles('772', [{ li: '7721', name: '나갈 프로필', url: 'https://open.kakao.com/o/a772' }])
+    room0.members['771'] = { mt: 2, nick: '늦은사람', ptp: 16, pli: '7711', photo: 'https://k.kakaocdn.net/dn/p/771.jpg', status: null }
+    room0.members['772'] = { mt: 2, nick: '나갈사람', ptp: 16, pli: '7721', photo: 'https://k.kakaocdn.net/dn/p/772.jpg', status: null }
+    room0.getmemSkip = ['771', '772']
+    room0.keepLeft = true
+    botA.slot.joinH.list = []     // 봇 A 의 시간당 입장 한도(20)를 이 방이 쓰지 않게(뒤 시험의 입장이 밀리지 않게)
+    const iLate = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iLate).state === 'waiting_host', 5000, '#28-7 join')
+    const chat = rowOf(iLate).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iLate).state === 'active', 3000, '#28-7 promotion')
+    const vt = botA.slot.byInstall.get(iLate)
+    await waitFor(() => vt.memberOkAt > 0, 5000, '#28-7 first sync')
+    try {
+      vt.memberFillAt = Date.now()
+      fs.event(chat, botA.uid, { kind: 'message', user_id: '771', name: '늦은사람', text: '안녕' })
+      fs.event(chat, botA.uid, { kind: 'message', user_id: '772', name: '나갈사람', text: '안녕' })
+      await waitFor(() => vt.memberWant.size === 2, 5000, '#28-7 name-only rows')
+      // 옾링 읽기가 실패하는(속도 제한 아님) 동안 카드를 채운다 → 사진·pli 는 채워지고 옾링은 모름
+      fs.infolinkFail = -500
+      vt.memberFillAt = 0
+      await waitFor(() => vt.members.get('771').photo && vt.members.get('772').photo, 3000, '#28-7 cards filled')
+      const half = vt.members.get('771')
+      if (half.pli !== '7711' || half.link !== null) throw new Error('#28-7 link unknown while INFOLINK fails ' + JSON.stringify(half))
+      if (!vt.memberWant.has('771') || !vt.memberWant.has('772')) throw new Error('#28-7 rows with unknown link stay in the fill list')
+      // 옾링을 모른 채 772 가 나간다 → 나갈 때 옾링을 한 번 읽는다(실패해도 안내는 나간다)
+      fs.infolinkFail = 0
+      vt.leaveReadAt = 0
+      await withLog(async (lines) => {
+        fs.event(chat, botA.uid, { kind: 'leave', user_id: '772', name: '나갈사람' })
+        await waitFor(() => sentIn(iLate).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-7 leave notice')
+        const out = sentIn(iLate).find((t) => t.indexOf('📤 퇴장 안내') === 0)
+        if (out.indexOf('🔗 옾링 : https://open.kakao.com/o/a772\n') < 0) throw new Error('#28-7 leave reads the unknown link ' + JSON.stringify(out))
+        if (!hasLine(lines, `leave ${iLate}: 772 has no link in the member book`, 'link read: link')) throw new Error('#28-7 leave line ' + JSON.stringify(lines))
+      })
+      // 다음 채우기는 771 의 옾링만 다시 읽는다(MEMBER 없이)
+      const members0 = packets('MEMBER').length
+      vt.memberFillAt = 0
+      await waitFor(() => vt.members.get('771').link === 'https://open.kakao.com/o/a771', 3000, '#28-7 link filled later')
+      if (packets('MEMBER').length !== members0) throw new Error('#28-7 a link-only fill sends no MEMBER')
+      if (vt.memberWant.has('771')) throw new Error('#28-7 filled row leaves the fill list')
+      await sleep(300)
+      if (sentIn(iLate).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28-7 filling a link is not a profile change')
+    } finally {
+      fs.infolinkFail = 0
+    }
+  }
+  // #28-5 나간 사람의 카드를 읽지 못해도 안내는 나간다(옾링 없음). 읽기는 2초에서 끊고, 방마다 10초에 한 번만 한다.
+  {
+    const code = 'bookx32'
+    const room0 = fs.room(code)
+    for (const id of ['751', '752', '753']) room0.members[id] = { mt: 2, nick: '나갈사람' + id, ptp: 1, pli: null, photo: '', status: null }
+    room0.getmemSkip = ['751', '752', '753']
+    const iLv = install(code, { config: { visit: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iLv).state === 'waiting_host', 5000, '#28-5 join')
+    const chat = rowOf(iLv).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iLv).state === 'active', 3000, '#28-5 promotion')
+    const vl = botA.slot.byInstall.get(iLv)
+    await waitFor(() => vl.memberOkAt > 0, 5000, '#28-5 first sync')
+    // 아래에서 onVisit 를 바로 기다리는 동안 이벤트 루프가 비지 않게(풀의 타이머는 unref)
+    const alive = setInterval(() => {}, 100)
+    await withLog(async (lines) => {
+      try {
+        // 751: 나간 뒤라 MEMBER 에 카드가 없다 → 옾링 없음, 사진 줄 없음
+        fs.event(chat, botA.uid, { kind: 'leave', user_id: '751', name: '나갈사람751' })
+        await waitFor(() => sentIn(iLv).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-5 leave notice')
+        const out = sentIn(iLv).find((t) => t.indexOf('📤 퇴장 안내') === 0)
+        if (out.indexOf('\n👤 나갈사람751\n🆔 751\n🔗 옾링 : 없음\n') < 0 || out.indexOf('🖼 사진') >= 0) throw new Error('#28-5 leave notice without a card ' + JSON.stringify(out))
+        if (!hasLine(lines, `leave ${iLv}: 751 not in the member book (book 0, last sync `, 'member read: no card')) throw new Error('#28-5 leave line ' + JSON.stringify(lines))
+        // 752: MEMBER 가 답하지 않는다 → 2초에서 끊고 안내를 만든다
+        room0.memberHang = true
+        vl.leaveReadAt = 0
+        let t0 = Date.now()
+        await botA.slot.onVisit(vl, { kind: 'leave', userId: '752', name: '나갈사람752', logId: '7520001', at: Date.now() })
+        const took = Date.now() - t0
+        if (took < 1800 || took > 3500) throw new Error('#28-5 a stuck read is cut at 2 s, took ' + took)
+        // 753: 10초 안의 두 번째는 읽지 않고 바로 안내
+        t0 = Date.now()
+        await botA.slot.onVisit(vl, { kind: 'leave', userId: '753', name: '나갈사람753', logId: '7530001', at: Date.now() })
+        if (Date.now() - t0 > 500) throw new Error('#28-5 one read per room per 10 s')
+        if (!hasLine(lines, `leave ${iLv}: 752 not in`, 'member read: timed out') || !hasLine(lines, `leave ${iLv}: 753 not in`, 'member read: skipped')) throw new Error('#28-5 leave lines ' + JSON.stringify(lines))
+        await waitFor(() => sentIn(iLv).filter((t) => t.indexOf('📤 퇴장 안내') === 0).length === 3, 12000, '#28-5 all leave notices go out')
+      } finally {
+        clearInterval(alive)
+        room0.memberHang = false
+        fs.releaseHeld()
+      }
+    })
+  }
+  // #28-6 명부 일은 방 점검 줄과 따로 돈다. 한 방의 GETMEM 이 답하지 않아도 memberJobMs 뒤 다른 방의 명부 일이 이어지고,
+  //   멈춘 방은 그 일이 끝날 때까지 다시 동기화하지 않는다. GETMEM 실패는 로그 한 줄로 남고 명부는 그대로다.
+  {
+    const code = 'bookx33'
+    const room0 = fs.room(code)
+    room0.members['761'] = { mt: 2, nick: '기다림', ptp: 1, pli: null, photo: '', status: null }
+    const iHang = install(code, { config: { visit: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iHang).state === 'waiting_host', 5000, '#28-6 join')
+    const chat = rowOf(iHang).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iHang).state === 'active', 3000, '#28-6 promotion')
+    const vh = botA.slot.byInstall.get(iHang)
+    await waitFor(() => vh.memberOkAt > 0 && !vh.memberSyncing, 5000, '#28-6 first sync')
+    // 다른 방: #28-5 의 방
+    const vOther = botA.slot.byInstall.get([...store.installs.values()].find((r) => r.link_url === url('bookx32')).id)
+    let open = null
+    await withLog(async (lines) => {
+      try {
+        // GETMEM 실패(-500) → 로그 한 줄, 명부·마지막 동기화 시각은 그대로
+        const okF = vh.memberOkAt
+        room0.getmemFail = -500
+        vh.memberSyncAt = 0
+        await waitFor(() => hasLine(lines, `member sync ${iHang}: GETMEM failed (status -500)`), 3000, '#28-6 GETMEM failure is logged')
+        await waitFor(() => !vh.memberSyncing, 3000, '#28-6 failed sync ends')
+        if (vh.memberOkAt !== okF || !vh.members.get('761')) throw new Error('#28-6 a failed sync keeps the book')
+        room0.getmemFail = 0
+        // GETMEM 이 답하지 않는다 → 300ms 뒤 명부 줄은 다음 일로
+        botA.slot.opts = Object.assign({}, pool.opts, { memberJobMs: 300 })
+        room0.getmemHang = true
+        vh.memberSyncAt = 0
+        await waitFor(() => fs.holds.length === 1, 3000, '#28-6 GETMEM is stuck')
+        // 방 점검 줄이 막혀 있어도 명부 일은 돈다
+        const gate = new Promise((ok) => { open = ok })
+        botA.slot.checks = botA.slot.checks.then(() => gate)
+        const ok0 = vOther.memberOkAt
+        vOther.memberSyncAt = 0
+        await waitFor(() => vOther.memberOkAt > ok0, 3000, '#28-6 another room syncs while one is stuck')
+        if (!hasLine(lines, `member sync ${iHang} timed out`)) throw new Error('#28-6 timed out line')
+        // 멈춘 방은 두 번째 동기화를 시작하지 않는다
+        vh.memberSyncAt = 0
+        await sleep(200)
+        if (!vh.memberSyncing || fs.holds.length !== 1) throw new Error('#28-6 the stuck room does not start a second sync')
+        // 풀리면 그 일이 끝나고, 다음 동기화를 받는다
+        const okH = vh.memberOkAt
+        room0.getmemHang = false
+        fs.releaseHeld()
+        await waitFor(() => !vh.memberSyncing && vh.memberOkAt > okH, 3000, '#28-6 the stuck sync finishes later')
+      } finally {
+        if (open) open()
+        room0.getmemFail = 0
+        room0.getmemHang = false
+        fs.releaseHeld()
+        botA.slot.opts = pool.opts
+      }
+    })
+  }
+  botA.slot.joinH.list.splice(joinMark[0])
+  botA.slot.joinD.list.splice(joinMark[1])
+
   // #19 권한 읽기·#20 푸시
   {
     const iP = iAfterIp
@@ -1366,7 +1813,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await sleep(100)
     const reads = packets('CHATONROOM', (p) => p.chat === chat).length - before
     if (reads !== 1) throw new Error('7.7#20 one perm read after the push, got ' + reads)
-    await waitFor(() => sentIn(iP).some((t) => t === RF.PROMOTED_NOTICE), 3000, 'promotion notice')
+    await waitFor(() => sentIn(iP).some((t) => t === RF.PROMOTED_NOTICE), 70000, 'promotion notice')   // 봇 전체 발송 한도(분당 30) 창까지 기다릴 수 있다
     if (!store.logs.some((l) => l.install_id === iP && l.kind === 'perm' && l.detail.granted === true)) throw new Error('7.7#20 perm log')
     // #19 olu 없음 + MEMBER mt 2 → waiting_host
     fs.room(fs.byChat(chat).code).dropOlu = true
@@ -1835,6 +2282,10 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     const ok = await pool.resolve(url('passx9'))
     if (!ok.ok || !ok.needs_passcode || ok.profile_only || ok.name !== '테스트방 passx9' || !/^\d+$/.test(ok.link_id)) throw new Error('7.7#23 resolve ' + JSON.stringify(ok))
     if ((await pool.resolve(url('gonex9'))).error !== 'not_found' || (await pool.resolve(url('dmx9'))).error !== 'not_group') throw new Error('7.7#23 resolve errors')
+    // 커뮤니티 타입 방(오픈링크 종류 3)은 그룹방처럼 받는다
+    botA.slot.resolveM.list = []
+    const cm = await pool.resolve(url('commx9'))
+    if (!cm.ok || cm.type !== 3 || !/^\d+$/.test(cm.link_id)) throw new Error('7.7#23 community link resolves ' + JSON.stringify(cm))
   }
 
   // #24 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다

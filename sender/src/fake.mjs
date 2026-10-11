@@ -19,6 +19,9 @@
 // 봇 계정(users[id].bot)은 기본으로 오픈프로필 1개를 갖는다(users[id].profiles, /v1/fake/profiles 로 바꿈).
 // SYNCLINK 는 그 오픈프로필(lt 1, /me/ 주소, op 표지) + 걸러져야 할 링크 2개(이 계정이 만든 방 lt 2, 1:1 오픈채팅 /o/)를 준다.
 // users[id].syncFail 이면 SYNCLINK 가 -500. 방 구성원은 ptp(1 기본·2 닉네임·16 오픈프로필)·pli 를 갖는다(없으면 ptp 1).
+// 방 멤버 명부 시험 스위치(방 r): r.getmemFail = status(GETMEM 거절) · r.getmemSkip = [id](GETMEM 이 그 사람을 빼고 준다) ·
+//   r.getmemHang / r.memberHang(GETMEM / MEMBER 가 releaseHeld() 전까지 답하지 않는다) · r.keepLeft(나간 사람에게도 MEMBER 가 답한다).
+//   서버: infolinkFail = status(방 링크가 아닌 INFOLINK, 곧 사람의 오픈프로필 링크 읽기를 그 status 로 거절).
 // 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -93,6 +96,13 @@ class FakeServer {
     this.clients = new Set()
     this.packets = []        // 최근 패킷 기록(시험 확인용)
     this.logins = {}         // userId → 새 세션 수
+    // 방 목록(시험용 스위치). chatSnapshot 이면 getChats 가 진짜처럼 로그인 때 목록을 그대로 준다
+    // (기본은 끔 — botpool 은 아직 getChats 로 방을 찾는다). LCHATLIST 는 늘 지금 목록을 chatPage 줄씩 준다.
+    this.chatSnapshot = false
+    this.chatPage = 100
+    this.chatListFail = false
+    this.holds = []          // 답을 미룬 패킷(getmemHang·memberHang) — releaseHeld() 로 푼다
+    this.infolinkFail = 0
     this.load()
   }
 
@@ -245,9 +255,34 @@ class FakeServer {
     return !!(r && r.members[str(userId)])
   }
 
+  /** 지금 그 계정이 든 방(LCHATLIST 의 chatDatas 한 줄 모양, type 은 숫자 13). 고객 계정은 가짜 오픈채팅방 2개도 본다. */
+  chatDatas(userId) {
+    const me = str(userId)
+    const out = []
+    for (const r of Object.values(this.rooms)) {
+      if (!r.members[me]) continue
+      out.push({ c: L(r.chatId), t: 13, li: L(r.li), a: Object.keys(r.members).length, n: 0, k: [], l: null })
+    }
+    if (!this.user(me).bot) {
+      for (const c of CUSTOMER_ROOMS) out.push({ c: L(c.chat_id), t: 13, li: L(c.link_id), a: c.members, n: 0, k: ['가', '나'], l: null })
+    }
+    return out
+  }
+
   mtOf(r, userId) {
     const m = r && r.members[str(userId)]
     return m ? Number(m.mt) : 0
+  }
+
+  /** 시험: releaseHeld() 전까지 답하지 않는다(응답 없는 카카오). */
+  held() {
+    return new Promise((ok) => this.holds.push(ok))
+  }
+
+  releaseHeld() {
+    const list = this.holds
+    this.holds = []
+    for (const ok of list) ok()
   }
 
   async packet(client, method, body) {
@@ -258,6 +293,17 @@ class FakeServer {
 
   async handle(client, method, b) {
     const me = client.userId
+    if (method === 'LCHATLIST') {
+      // lastTokenId 는 이미 준 줄 수다(진짜는 서버가 정하는 위치)
+      if (this.chatListFail) return resp(method, { status: -500 })
+      const all = this.chatDatas(me)
+      const from = Number(str(b.lastTokenId)) || 0
+      const page = all.slice(from, from + this.chatPage)
+      const next = from + page.length
+      return resp(method, {
+        status: 0, chatDatas: page, lastTokenId: next, lastChatId: page.length ? page[page.length - 1].c : 0, eof: next >= all.length,
+      })
+    }
     if (method === 'JOININFO' && /open\.kakao\.com\/me\//.test(String(b.lu || ''))) {
       // 오픈프로필 링크(관리자가 붙여 넣은 /me/ 주소 확인용)
       for (const [uid, u] of Object.entries(this.users)) {
@@ -306,7 +352,7 @@ class FakeServer {
       const pv = (r.passcode ? 64 : 0) | (has(code, 'noprof') || has(code, 'noanon') ? 0 : 32)
       return resp(method, {
         status: 0,
-        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : 2, pv, ml: 1500 },
+        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : has(code, 'comm') ? 3 : 2, pv, ml: 1500 },
       })
     }
     if (method === 'CHECKJOIN') {
@@ -354,14 +400,19 @@ class FakeServer {
     if (method === 'MEMBER') {
       const r = this.byChat(b.chatId)
       if (!r) return resp(method, { status: -403 })
+      if (r.memberHang) await this.held()
       if (r.dropMember) return resp(method, { status: 0, members: [] })
       const ids = (b.memberIds || []).map(str)
-      return resp(method, { status: 0, chatId: L(r.chatId), members: ids.filter((id) => r.members[id]).map((id) => this.memberStruct(r, id)) })
+      const known = (id) => r.members[id] || (r.keepLeft && r.left && r.left[id])
+      return resp(method, { status: 0, chatId: L(r.chatId), members: ids.filter(known).map((id) => this.memberStruct(r, id)) })
     }
     if (method === 'GETMEM') {
       const r = this.byChat(b.chatId)
       if (!r) return resp(method, { status: -403 })
-      return resp(method, { status: 0, members: Object.keys(r.members).map((id) => this.memberStruct(r, id)) })
+      if (r.getmemHang) await this.held()
+      if (r.getmemFail) return resp(method, { status: Number(r.getmemFail) })
+      const skip = Array.isArray(r.getmemSkip) ? r.getmemSkip : []
+      return resp(method, { status: 0, members: Object.keys(r.members).filter((id) => !skip.includes(id)).map((id) => this.memberStruct(r, id)) })
     }
     if (method === 'CHATINFO') {
       const r = this.byChat(b.chatId)
@@ -377,6 +428,8 @@ class FakeServer {
       })
     }
     if (method === 'INFOLINK') {
+      const roomLink = (li) => !!this.byLi(li) || CUSTOMER_ROOMS.some((x) => x.link_id === str(li))
+      if (this.infolinkFail && !(b.lis || []).some(roomLink)) return resp(method, { status: Number(this.infolinkFail) })
       const ols = []
       for (const li of b.lis || []) {
         const s = str(li)
@@ -437,7 +490,7 @@ class FakeServer {
   }
 
   memberStruct(r, id) {
-    const m = r.members[id]
+    const m = r.members[id] || (r.left && r.left[id])
     return {
       userId: L(id),
       type: 1000,
@@ -542,6 +595,7 @@ class FakeServer {
     }
     const logId = ev.log_id ? String(ev.log_id) : this.nextLog()
     if (kind === 'join' || kind === 'leave') {
+      if (kind === 'leave' && r.keepLeft && r.members[uid]) r.left = Object.assign(r.left || {}, { [uid]: r.members[uid] })
       if (kind === 'join') r.members[uid] = Object.assign({ mt: 2, photo: '', status: null }, r.members[uid] || {}, { nick: name || (r.members[uid] && r.members[uid].nick) || '' })
       else delete r.members[uid]
       this.save()
@@ -608,6 +662,7 @@ class FakeSession {
   getChatInfo(chatId) { return this.send('CHATONROOM', { chatId }) }
   getChannelInfo(chatId) { return this.send('CHATINFO', { chatId }) }
   getOpenLinkInfo(lis) { return this.send('INFOLINK', { lis }) }
+  getChatList(lastTokenId, lastChatId) { return this.send('LCHATLIST', { chatIds: [], maxIds: [], lastTokenId, lastChatId }) }
   getAllMembers(chatId) { return this.send('GETMEM', { chatId }) }
   getMembersByIds(chatId, memberIds) { return this.send('MEMBER', { chatId, memberIds }) }
   leaveChat(chatId) { return this.send('LEAVE', { chatId }) }
@@ -637,6 +692,7 @@ export class FakeKakaoClient {
     this.deviceUuid = ''
     this.oauthToken = null
     this.session = null
+    this.loginChats = null
     this.closed = false
     this.pushHandlers = new Set()
     this.sessionHandlers = new Set()
@@ -663,6 +719,8 @@ export class FakeKakaoClient {
         throw Object.assign(new Error('invalid token'), { code: 'invalid_access_token' })
       }
       this.session = new FakeSession(this)
+      // 진짜 getChats({all:true}) 는 로그인 때 받은 목록을 그대로 준다(server.chatSnapshot 일 때만 흉내 낸다)
+      this.loginChats = this.server.chatSnapshot ? this.chatRows() : null
       this.server.clients.add(this)
       this.server.logins[this.userId] = (this.server.logins[this.userId] || 0) + 1
       this.emit({ type: 'connected', userId: this.userId })
@@ -729,6 +787,10 @@ export class FakeKakaoClient {
 
   async getChats() {
     await this.acquireSession()
+    return this.loginChats ? this.loginChats.slice() : this.chatRows()
+  }
+
+  chatRows() {
     const out = []
     for (const r of Object.values(this.server.rooms)) {
       if (!r.members[this.userId]) continue

@@ -452,7 +452,9 @@ router.post('/panel/api/rooms', wrap(async (req, res) => {
   }
   const again = await snapshot(deviceId);
   const m = await memberRow(s.member.id);
-  res.json({ ok: true, account: viewAccount(row, again, legacyOn(m)) });
+  // 이름을 아직 못 읽은 오픈채팅방 수 — 화면이 "목록이 최신입니다" 대신 몇 개가 빠졌는지 알린다
+  const unnamed = cfg.unnamedRooms(merged, listed.chats || []);
+  res.json({ ok: true, account: viewAccount(row, again, legacyOn(m)), unnamed: unnamed });
 }));
 
 router.post('/panel/api/settings', wrap(async (req, res) => {

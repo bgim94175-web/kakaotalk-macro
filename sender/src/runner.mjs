@@ -99,21 +99,24 @@ function olName(ol) {
 }
 
 function olLinkKey(ol) {
-  if (!ol || typeof ol !== 'object' || ol.li == null) return ''
-  const v = ol.li
-  if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v.trim())) return v.trim()
-  if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return String(v)
-  if (typeof v === 'bigint' && v > 0n) return v.toString()
-  if (typeof v.toString === 'function') {
-    const s = v.toString()
-    if (/^[1-9][0-9]*$/.test(s)) return s
-  }
-  return ''
+  if (!ol || typeof ol !== 'object') return ''
+  return longText(ol.li)
 }
 
-// One INFOLINK for the open multi chats. Per-room CHATINFO made 대화방 불러오기
-// stall until the browser dropped it, and a missing ln dropped every row.
-async function openLinkNames(client, list) {
+// BSON Long·{low, high}·숫자·문자열 id 를 10진 문자열로. 0 이나 모르는 모양은 ''.
+function longText(v) {
+  if (v && typeof v === 'object' && 'high' in v && 'low' in v) {
+    const s = ((BigInt(v.high >>> 0) << 32n) | BigInt(v.low >>> 0)).toString()
+    return s === '0' ? '' : s
+  }
+  return idText(v)
+}
+
+// 오픈 단체방 이름(오픈링크 ln)을 INFOLINK 로 읽는다. 방마다 CHATINFO 를 보내면 대화방 불러오기가
+// 브라우저가 끊을 때까지 멈췄다. 20개씩 묻고, 이름은 답에 든 링크 id(li)로만 붙인다(답의 순서는 믿지 않는다).
+// 묶음이 실패하거나 일부만 오면 이름을 못 받은 링크를 하나씩 다시 묻는다(최대 20개, 30초 안에서).
+async function openLinkNames(client, list, stat, opt) {
+  const maxRetry = opt && opt.retry === false ? 0 : 20
   const names = new Map()
   const ids = []
   const seen = new Set()
@@ -124,6 +127,7 @@ async function openLinkNames(client, list) {
     seen.add(id)
     ids.push(id)
   }
+  if (stat) stat.links = ids.length
   if (!ids.length || !client || typeof client.acquireSession !== 'function') return names
   let session
   try {
@@ -131,26 +135,151 @@ async function openLinkNames(client, list) {
   } catch {
     return names
   }
-  for (let i = 0; i < ids.length; i += 20) {
-    const part = ids.slice(i, i + 20)
-    let body = null
+  const ask = async (part) => {
+    let ols = []
     try {
       const response = await session.getOpenLinkInfo(part.map((id) => Long.fromString(id)))
-      body = response && response.body
+      const body = response && response.body
+      if (body && Array.isArray(body.ols)) ols = body.ols
     } catch {
-      body = null
+      ols = []
     }
-    const ols = body && Array.isArray(body.ols) ? body.ols : []
-    for (let j = 0; j < part.length; j++) {
-      const ol = ols[j]
-      const name = olName(ol)
-      if (!name) continue
+    for (const ol of ols) {
       const key = olLinkKey(ol)
-      if (key) names.set(key, name)
-      else names.set(part[j], name)
+      const name = olName(ol)
+      if (key && name) names.set(key, name)
     }
   }
+  for (let i = 0; i < ids.length; i += 20) await ask(ids.slice(i, i + 20))
+  // 하나씩 다시 묻기는 다 합쳐 15초 안에서만(한 번이 카카오 답 기다림 15초를 다 써도 넘지 않게)
+  const until = Date.now() + 15000
+  let retried = 0
+  for (const id of ids) {
+    if (names.has(id)) continue
+    const left = until - Date.now()
+    if (retried >= maxRetry || left <= 0) break
+    retried++
+    let timer = null
+    await Promise.race([ask([id]), new Promise((ok) => { timer = setTimeout(ok, left) })])
+    clearTimeout(timer)
+  }
+  if (stat) {
+    stat.retried = retried
+    stat.named = ids.filter((id) => names.has(id)).length
+  }
   return names
+}
+
+// LCHATLIST 다음 쪽 위치. 숫자·BigInt·Long·{low, high} 가 온다. 모르는 모양이면 0(첫 쪽).
+function cursorLong(v) {
+  if (typeof v === 'number' && Number.isSafeInteger(v)) return Long.fromNumber(v)
+  if (typeof v === 'bigint') return Long.fromBigInt(v)
+  if (v && typeof v === 'object' && 'high' in v && 'low' in v) return new Long(v.low, v.high)
+  return Long.ZERO
+}
+
+// LCHATLIST 한 줄을 getChats 가 주는 모양으로. type 이 없거나 이상한 줄은 null — 그 줄만 버린다.
+function chatRow(raw) {
+  const id = longText(raw && raw.c)
+  const t = raw && raw.t
+  const type = typeof t === 'string' && t ? t : (Number.isInteger(t) && t >= 0 ? t : null)
+  if (!id || type == null) return null
+  const names = Array.isArray(raw.k) ? raw.k.filter((x) => typeof x === 'string') : []
+  const l = raw.l && typeof raw.l === 'object' ? raw.l : null
+  return {
+    chat_id: id,
+    type,
+    display_name: names.join(', ') || null,
+    title: null,
+    link_id: longText(raw.li) || null,
+    active_members: raw.a,
+    unread_count: raw.n,
+    last_message: l ? { author_id: l.authorId, message: l.message, sent_at: l.sendAt } : null,
+  }
+}
+
+// 방 목록은 지금 카카오가 가진 목록(LCHATLIST)을 첫 쪽부터 끝(eof)까지 다시 읽는다.
+// getChats({all:true}) 는 로그인 때 받은 목록을 그대로 줘서, 로그인 뒤에 들어간 방이 빠지고 나간 방이 남는다.
+// 끝까지 못 읽거나 목록이 비면 예전 길(getChats)로 읽는다.
+async function liveChats(client, stat) {
+  const st = stat || {}
+  st.pages = 0
+  st.bad = 0
+  try {
+    const session = typeof client.acquireSession === 'function' ? await client.acquireSession() : null
+    if (!session || typeof session.getChatList !== 'function') throw new Error('no LCHATLIST')
+    const raws = []
+    const seen = new Set()
+    let token = Long.ZERO
+    let last = Long.ZERO
+    for (;;) {
+      if (st.pages >= 60) throw new Error('LCHATLIST did not end')
+      const res = await session.getChatList(token, last)
+      st.pages++
+      const body = res && res.body
+      if (!locoOk(res) || !body || !Array.isArray(body.chatDatas)) throw new Error('LCHATLIST failed')
+      let fresh = 0
+      for (const raw of body.chatDatas) {
+        const id = longText(raw && raw.c)
+        if (!id) {
+          st.bad++
+          continue
+        }
+        if (seen.has(id)) continue
+        seen.add(id)
+        fresh++
+        raws.push(raw)
+      }
+      if (body.eof === true) break
+      // 같은 쪽이 되풀이되면(다음 위치가 0 으로 돌아감) 끝까지 읽을 수 없다
+      if (!body.chatDatas.length) throw new Error('LCHATLIST empty page without eof')
+      if (!fresh) throw new Error('LCHATLIST page repeats')
+      token = cursorLong(body.lastTokenId)
+      last = cursorLong(body.lastChatId)
+    }
+    raws.sort((a, b) => (Number(b.o) || 0) - (Number(a.o) || 0))
+    const out = []
+    for (const raw of raws) {
+      const ch = chatRow(raw)
+      if (ch) out.push(ch)
+      else st.bad++
+    }
+    if (!out.length) throw new Error('LCHATLIST empty')
+    st.source = 'live'
+    return out
+  } catch (e) {
+    st.source = 'login'
+    st.why = String((e && e.message) || e).slice(0, 60)
+  }
+  const list = await client.getChats({ all: true })
+  return Array.isArray(list) ? list : []
+}
+
+// 모르는 문자열 type 을 라이브러리는 'unknown' 으로 둔다. 그대로 두면 갠톡 응답이 단체방에서도 돈다.
+// 숫자 type 처럼 인원으로 나눈다(2명 이하면 1:1).
+function chatKind(ch) {
+  const kind = classifyKakaoChat(ch)
+  if (kind !== 'unknown') return kind
+  return Number(ch && ch.active_members) <= 2 ? 'dm' : 'group'
+}
+
+// 대화방 불러오기 한 번에 한 줄. 방 이름·id 는 남기지 않고 수만 남긴다.
+function chatsLine(stat, rows) {
+  const kinds = { open_room: 0, open_dm: 0, normal: 0 }
+  const types = {}
+  let unnamed = 0
+  for (const r of rows) {
+    kinds[r.list_kind] = (kinds[r.list_kind] || 0) + 1
+    if (r.list_kind === 'open_room' && !r.title) unnamed++
+    const t = String(r.type).slice(0, 16)
+    types[t] = (types[t] || 0) + 1
+  }
+  const kept = stat.kept ? ' + kept ' + stat.kept : ''
+  const from = stat.source === 'live' ? `live ${stat.pages}p${stat.why === 'partial' ? ' (partial)' : ''}${kept}` : `login (${stat.why || '?'})${kept}`
+  const typeText = Object.keys(types).map((t) => `${t}:${types[t]}`).join(' ')
+  return `chats ${from} rows ${rows.length} bad ${stat.bad || 0}` +
+    ` · open ${kinds.open_room} (unnamed ${unnamed}) dm ${kinds.open_dm} normal ${kinds.normal}` +
+    ` · links ${stat.links || 0} named ${stat.named || 0} retry ${stat.retried || 0} · types ${typeText}`
 }
 
 function idText(v) {
@@ -537,15 +666,16 @@ export class Hub {
 
   async chats(id) {
     const slot = this.requireLive(id)
-    const list = await slot.client.getChats({ all: true })
-    const names = await openLinkNames(slot.client, list)
+    const stat = {}
+    const list = await slot.chatList(0, stat)
+    const names = await openLinkNames(slot.client, list, stat)
     const stamped = stampOpenLinkTitles(list, names)
-    return stamped.map((ch) => {
+    const out = stamped.map((ch) => {
       const listKind = roomListKind(ch)
       const title = listKind === 'open_room' ? (roomTitle(ch) || null) : (ch.title || null)
       return {
         chat_id: String(ch.chat_id),
-        kind: classifyKakaoChat(ch),
+        kind: chatKind(ch),
         type: ch.type,
         list_kind: listKind,
         title: title,
@@ -554,6 +684,8 @@ export class Hub {
         last_at: ch.last_message ? ch.last_message.sent_at : 0,
       }
     })
+    log(id, chatsLine(stat, out))
+    return out
   }
 
   async recent(id, chatId) {
@@ -773,6 +905,43 @@ class Slot {
     this.catalogPromise = null
     // 오픈채팅방 이름(오픈링크 ln). 방 이름은 잘 바뀌지 않으니 길게 들고 있는다.
     this.linkNames = { at: 0, map: new Map() }
+    // 지금 카카오가 가진 방 목록(LCHATLIST). 채팅 화면이 몇 초마다 보므로 잠깐 들고 있는다.
+    this.liveChats = { at: 0, list: [] }
+  }
+
+  // 방 목록. maxAge 안에 읽은 목록이 있으면 그대로 쓴다(0 이면 늘 새로 읽는다).
+  // 지금 읽는 중이면 그 결과를 같이 쓴다. 카카오 목록(LCHATLIST)을 못 읽어 로그인 때 목록으로 대신하면
+  // 마지막으로 읽은 카카오 목록에만 있던 방(로그인 뒤 들어간 방)을 더해 준다 — 매크로 방이 사라지지 않게.
+  async chatList(maxAge, stat) {
+    const c = this.liveChats
+    if (maxAge > 0 && c.at && Date.now() - c.at < maxAge) return c.list
+    if (this.liveChatsP) return this.liveChatsP
+    const st = stat || {}
+    this.liveChatsP = (async () => {
+      let list = await liveChats(this.client, st)
+      // 카카오가 eof 를 붙여 일부만 준 것 같으면(지난 목록의 오픈방이 절반 넘게 한꺼번에 빠짐) 빠진 방을 더하고
+      // 지난 목록을 그대로 둔다. 폰에서 나간 방은 하나씩 빠지므로 이렇게 한꺼번에 빠지지 않는다
+      const prevOpen = (this.lastLive || []).filter((ch) => ch && ch.link_id)
+      const have0 = new Set(list.map((ch) => String(ch && ch.chat_id)))
+      const gone = prevOpen.filter((ch) => !have0.has(String(ch.chat_id)))
+      if (st.source === 'live' && prevOpen.length >= 4 && gone.length * 2 > prevOpen.length) {
+        list = list.concat(gone)
+        st.kept = gone.length
+        st.why = 'partial'
+      } else if (st.source === 'live') {
+        this.lastLive = list
+      } else if (this.lastLive && this.lastLive.length) {
+        const have = new Set(list.map((ch) => String(ch && ch.chat_id)))
+        const kept = this.lastLive.filter((ch) => !have.has(String(ch.chat_id)))
+        if (kept.length) {
+          list = list.concat(kept)
+          st.kept = kept.length
+        }
+      }
+      this.liveChats = { at: Date.now(), list }
+      return list
+    })().finally(() => { this.liveChatsP = null })
+    return this.liveChatsP
   }
 
   // getChats 는 resolveTitles 를 주지 않으면 title 을 채우지 않는다.
@@ -782,7 +951,8 @@ class Slot {
     const now = Date.now()
     if (now - this.linkNames.at > 600000) {
       try {
-        this.linkNames = { at: now, map: await openLinkNames(this.client, list) }
+        // 채팅 화면용 이름은 하나씩 다시 묻지 않는다(대화방 불러오기가 다시 묻는다)
+        this.linkNames = { at: now, map: await openLinkNames(this.client, list, null, { retry: false }) }
       } catch {
         this.linkNames = { at: now, map: this.linkNames.map }
       }
@@ -843,7 +1013,11 @@ class Slot {
     // 처음 보는 방은 일단 담되, 목록을 다시 읽어 종류를 알아낸다 (새로 생긴 갠톡일 수 있다).
     const kind = this.kindOf(id)
     if (kind && kind !== 'open_dm') return
-    if (!kind) this.catalogCache.at = 0
+    if (!kind) {
+      this.catalogCache.at = 0
+      // 카카오 목록은 5분씩 들고 있으니, 처음 보는 방이면 1분에 한 번까지 새로 읽게 한다
+      if (Date.now() - this.liveChats.at > 60000) this.liveChats.at = 0
+    }
     const logId = m.logId ? String(m.logId) : ''
     const conv = this.convFor(id)
     if (logId && conv.list.some((x) => x.log_id === logId)) return
@@ -880,7 +1054,9 @@ class Slot {
     const run = () => {
       if (this.catalogPromise) return this.catalogPromise
       this.catalogPromise = (async () => {
-        const raw = await this.client.getChats({ all: true })
+        // 채팅 화면은 몇 초마다 목록을 본다. 카카오 목록(LCHATLIST)은 5분에 한 번만 다시 읽는다
+        // (처음 보는 방의 글이 오면 noteChat 이 1분에 한 번까지 앞당긴다). 자주 물으면 카카오가 연결을 끊는다.
+        const raw = await this.chatList(300000)
         const list = await this.stampNames(Array.isArray(raw) ? raw : [])
         const mapped = list.map((ch) => {
           const listKind = roomListKind(ch)
@@ -984,6 +1160,7 @@ class Slot {
     this.client = null
     this.inbox.clear()
     this.catalogCache = { at: 0, list: [] }
+    this.liveChats = { at: 0, list: [] }
   }
 
   enqueue(fn) {
