@@ -523,7 +523,6 @@ function profileStore(runtime) {
   const p = runtime.profile
   if (!isObj(p.people)) p.people = {}
   if (!isObj(p.nextAt)) p.nextAt = {}
-  if (!isObj(p.lastAt)) p.lastAt = {}
   return p
 }
 
@@ -586,7 +585,6 @@ export function stayText(ms) {
 }
 
 const FIELD_LABEL = { name: '닉네임', link: '옾링', photo: '사진', status: '상태 메시지' }
-export const PROFILE_QUIET_MS = 5 * MIN
 
 function fieldText(kind, v) {
   const s = v == null ? '' : String(v)
@@ -608,7 +606,7 @@ export function profileChangeNotice(cur, changes, n) {
     lines.push(...branch(['전 : ' + fieldText(c.kind, c.from), '후 : ' + fieldText(c.kind, c.to)]))
   }
   if (n >= 2) lines.push('🔁 누적 변경 : ' + n + '회')
-  lines.push(RULE, '⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요')
+  lines.push(RULE)
   const text = lines.join('\n')
   return { text, mention: mentionAt(text, who) }
 }
@@ -633,14 +631,6 @@ function changeMoments(changes) {
   return new Set((Array.isArray(changes) ? changes : []).map((c) => Number(c && c.at) || 0)).size
 }
 
-// 같은 사람에게 5분 안에 다시 알리지 않는다(기록은 남긴다). 알리면 시각을 적는다.
-function quietNow(p, key, now) {
-  if (now - (Number(p.lastAt[key]) || 0) < PROFILE_QUIET_MS) return true
-  for (const k of Object.keys(p.lastAt)) if (now - Number(p.lastAt[k]) >= PROFILE_QUIET_MS) delete p.lastAt[k]
-  p.lastAt[key] = now
-  return false
-}
-
 function noticeDelay(p, chatId, now) {
   const at = Math.max(now, Number(p.nextAt[chatId] || 0))
   p.nextAt[chatId] = at + 4000
@@ -653,7 +643,7 @@ function known(v) {
 
 /**
  * 방 관리봇: 멤버 명부에서 본 한 사람의 변경(before → after, 각 {name, link, photo}, null 은 모름 = 비교하지 않음).
- * 바뀐 칸을 기록하고, 켜진 항목(닉네임·옾링 = name, 사진 = photo)이 바뀌었으면 안내 1개(5분 안 재안내 생략).
+ * 바뀐 칸을 기록하고, 켜진 항목(닉네임·옾링 = name, 사진 = photo)이 바뀌었으면 바뀔 때마다 안내 1개.
  * → [{text, mention, delayMs, kind}]
  */
 export function profileChange(runtime, chatId, pcfg, ev, now) {
@@ -681,7 +671,7 @@ export function profileChange(runtime, chatId, pcfg, ev, now) {
   pruneProfile(p)
   const on = (k) => !pcfg || pcfg[k] !== false
   const shown = changed.filter((c) => (c.kind === 'photo' ? on('photo') : on('name')))
-  if (!shown.length || quietNow(p, key, now)) return []
+  if (!shown.length) return []
   const cur = { userId, name: an || bn, link: known(a.link) ? a.link : b.link, photo: known(a.photo) ? a.photo : (known(b.photo) ? b.photo : null) }
   const note = profileChangeNotice(cur, shown, changeMoments(changes))
   return [{ text: note.text, mention: note.mention, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
@@ -689,7 +679,7 @@ export function profileChange(runtime, chatId, pcfg, ev, now) {
 
 /**
  * 계정 단위 옛 방 기능: 한 사람의 관찰(이름·사진·상태 메시지, 알면 옾링). 첫 관찰은 기준만 저장한다.
- * 바뀐 칸을 모아 안내 1개(5분 안 재안내 생략). 옾링을 모르면 linkFor 를 붙인다 → 보내는 쪽이 withProfileLink 로 채운다.
+ * 바뀐 칸을 모아 바뀔 때마다 안내 1개. 옾링을 모르면 linkFor 를 붙인다 → 보내는 쪽이 withProfileLink 로 채운다.
  * → [{text, mention, kind, linkFor?}]
  */
 export function profileObserve(runtime, chatId, pcfg, ob, now) {
@@ -744,7 +734,7 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
   pruneProfile(p)
   const on = (k) => !pcfg || pcfg[k] !== false
   const shown = changed.filter((c) => on(c.kind))
-  if (!shown.length || quietNow(p, key, now)) return []
+  if (!shown.length) return []
   const note = profileChangeNotice({ userId, name: nowName, link: keepLink, photo: photoUrl(keepPhoto) || null }, shown, changeMoments(changes))
   const out = { text: note.text, mention: note.mention, kind: shown[0].kind }
   if (!keepLink) out.linkFor = userId

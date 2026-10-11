@@ -369,7 +369,7 @@ if (renameMsg.sends.length !== 1) throw new Error('a rename posts one notice at 
 const rtext = renameMsg.sends[0].text
 // 새 모양: 사람 정보(👤 🆔 🔗) + 바뀐 내용(전·후). 메시지에서는 옾링을 모르니 '없음'으로 두고 linkFor 로 봇에게 맡긴다.
 const RENAME = ['🔔 프로필 변경 감지', '━━━━━━━━━━━━━━', '👤 @사기꾼_새닉', '🆔 7', '🔗 옾링 : 없음', '', '✏️ 바뀐 내용', '▸ 닉네임',
-  ' ├ 전 : 홍길동', ' └ 후 : 사기꾼_새닉', '━━━━━━━━━━━━━━', '⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요'].join('\n')
+  ' ├ 전 : 홍길동', ' └ 후 : 사기꾼_새닉', '━━━━━━━━━━━━━━'].join('\n')
 if (rtext !== RENAME) throw new Error('rename notice layout: ' + JSON.stringify(rtext))
 if (renameMsg.sends[0].linkFor !== '7') throw new Error('rename notice asks the sender to fill the open profile link')
 if (renameMsg.sends[0].mention.userId !== '7') throw new Error('rename notice mentions the person')
@@ -388,14 +388,14 @@ if (renameMsg.sends[0].delayMs !== 0) throw new Error('first profile notice has 
 const after = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '사기꾼_새닉',
   text: '또 메시지', now: t0 + 3000 })
 if (after.sends.length !== 0) throw new Error('no repeat notice for the same new name')
-// 5분 안에 또 바꾸면 알리지 않고(기록은 남김), 5분이 지나 또 바꾸면 알리며 누적 횟수가 올라간다
+// 연달아 바꿔도 바뀔 때마다 알리고, 누적 횟수가 올라간다
 const twice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '또다른닉',
   text: '세번째', now: t0 + 4000 })
-if (twice.sends.length !== 0) throw new Error('a rename within 5 minutes is not announced again')
+if (twice.sends.length !== 1 || twice.sends[0].text.indexOf(' ├ 전 : 사기꾼_새닉\n └ 후 : 또다른닉') < 0) throw new Error('a quick second rename is announced too')
+if (twice.sends[0].text.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('repeated renames count up')
 const thrice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '세번째닉',
-  text: '네번째', now: t0 + 6 * 60000 })
-if (thrice.sends.length !== 1 || thrice.sends[0].text.indexOf(' ├ 전 : 또다른닉\n └ 후 : 세번째닉') < 0) throw new Error('a rename after 5 minutes posts again')
-if (thrice.sends[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('repeated renames count up')
+  text: '네번째', now: t0 + 5000 })
+if (thrice.sends.length !== 1 || thrice.sends[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('a third rename posts again')
 // 처음 보는 사람의 메시지는 기준이 없어 아무것도 안 한다
 const stranger = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '88', authorName: '처음본사람',
   text: '하이', now: t0 + 5000 })
@@ -959,7 +959,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     const kicked = F.visitEventsFromMessage({ message_type: 0, message: '{"feedType":6,"members":[{"userId":7,"nickName":"홍"}]}' })
     if (kicked.length !== 0) throw new Error('7.7#5 kick feed is not a leave')
   }
-  // #6 사진 변경 → 프로필 변경 안내 1개(사진 전·후). 상태 null → 없음. 첫 관찰 → 없음. 같은 사람 5분 안 재안내 없음
+  // #6 사진 변경 → 프로필 변경 안내 1개(사진 전·후). 상태 null → 없음. 첫 관찰 → 없음. 바로 또 바뀌어도 매번 안내
   {
     const rt = {}
     const pcfg = { name: true, photo: true, status: true }
@@ -968,14 +968,15 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P1 + '?t=1', status: null }, T).length) throw new Error('7.7#6 first')
     const ph = RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2 + '?t=2', status: null }, T + 1000)
     const PH = ['🔔 프로필 변경 감지', RF.RULE, '👤 @홍', '🆔 7', '🔗 옾링 : 없음', '🖼 사진 : ' + P2, '', '✏️ 바뀐 내용', '▸ 사진',
-      ' ├ 전 : ' + P1, ' └ 후 : ' + P2, RF.RULE, '⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요'].join('\n')
+      ' ├ 전 : ' + P1, ' └ 후 : ' + P2, RF.RULE].join('\n')
     if (ph.length !== 1 || ph[0].text !== PH || ph[0].mention.userId !== '7' || ph[0].text.slice(ph[0].mention.at, ph[0].mention.at + 1) !== '홍') throw new Error('7.7#6 photo ' + JSON.stringify(ph[0] && ph[0].text))
     if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2, status: null }, T + 2000).length) throw new Error('7.7#6 status null')
     RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '안녕' }, T)
     const stc = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '바이' }, T + 1)
     if (stc.length !== 1 || stc[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 안녕\n └ 후 : 바이') < 0) throw new Error('7.7#6 status')
-    // 5분 안에 또 바뀌면 기록만 하고 알리지 않는다
-    if (RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '다시' }, T + 2).length) throw new Error('7.7#6 quiet within 5 minutes')
+    // 바로 또 바뀌어도 알린다
+    const st2 = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '다시' }, T + 2)
+    if (st2.length !== 1 || st2[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 바이\n └ 후 : 다시') < 0) throw new Error('7.7#6 every change is announced')
     // 관찰한 곳에서 옾링을 알면 바로 적고 linkFor 는 없다
     const wl = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김새닉', status: '다시', link: 'https://open.kakao.com/me/kim' }, T + 6 * 60000)
     if (wl.length !== 1 || wl[0].text.indexOf('👤 @김새닉\n🆔 8\n🔗 옾링 : https://open.kakao.com/me/kim\n') < 0 || wl[0].text.indexOf('▸ 닉네임\n ├ 전 : 김\n └ 후 : 김새닉') < 0 || wl[0].linkFor) throw new Error('7.7#6 known link is written at once ' + JSON.stringify(wl[0] && wl[0].text))
@@ -1270,7 +1271,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링·사진을 안다(GETMEM + INFOLINK)
   //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링·사진 · 명부는 저장소에 남는다
   //   · 메시지 닉네임이 바뀌면 카드를 다시 읽어 프로필 변경 안내(닉네임 전·후 + 지금 옾링·사진)
-  //   · 주기 동기화가 옾링(다른 오픈프로필로 바꿈)·사진 변경을 찾는다 · 같은 사람 5분 안 재안내 없음
+  //   · 주기 동기화가 옾링(다른 오픈프로필로 바꿈)·사진 변경을 찾는다 · 바뀔 때마다 알린다
   {
     const code = 'bookx28'
     const room0 = fs.room(code)
@@ -1305,19 +1306,20 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await waitFor(() => sentIn(iBook).some((t) => t.indexOf('🔔 프로필 변경 감지') === 0), 8000, '#28 rename notice')
     const rn = sentIn(iBook).find((t) => t.indexOf('🔔 프로필 변경 감지') === 0)
     const RN = ['🔔 프로필 변경 감지', RF.RULE, '👤 @둘째새닉', '🆔 702', '🔗 옾링 : https://open.kakao.com/o/second702', '🖼 사진 : https://k.kakaocdn.net/dn/p/702a.jpg',
-      '', '✏️ 바뀐 내용', '▸ 닉네임', ' ├ 전 : 둘째', ' └ 후 : 둘째새닉', RF.RULE, '⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요'].join('\n')
+      '', '✏️ 바뀐 내용', '▸ 닉네임', ' ├ 전 : 둘째', ' └ 후 : 둘째새닉', RF.RULE].join('\n')
     if (rn !== RN) throw new Error('#28 rename notice ' + JSON.stringify(rn))
-    // 주기 동기화: 703 은 사진을 바꾸고, 702 는 5분 안에 또 바꿨다(기록만)
+    // 주기 동기화: 703 은 사진을 바꾸고, 702 는 닉네임을 또 바꿨다(바뀔 때마다 알린다)
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
     await waitFor(() => sentIn(iBook).some((t) => t.indexOf('👤 @기본프로필') >= 0), 8000, '#28 photo notice')
     const pc = sentIn(iBook).find((t) => t.indexOf('👤 @기본프로필') >= 0)
     if (pc.indexOf('🔗 옾링 : 없음\n🖼 사진 : https://k.kakaocdn.net/dn/p/703b.jpg\n') < 0 || pc.indexOf('▸ 사진\n ├ 전 : 없음\n └ 후 : https://k.kakaocdn.net/dn/p/703b.jpg') < 0) throw new Error('#28 photo change ' + JSON.stringify(pc))
-    await sleep(300)
-    if (sentIn(iBook).some((t) => t.indexOf('👤 @둘째또닉') >= 0)) throw new Error('#28 the same person is not announced again within 5 minutes')
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('👤 @둘째또닉') >= 0), 8000, '#28 second rename notice')
+    const rn2 = sentIn(iBook).find((t) => t.indexOf('👤 @둘째또닉') >= 0)
+    if (rn2.indexOf('▸ 닉네임\n ├ 전 : 둘째새닉\n └ 후 : 둘째또닉') < 0 || rn2.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('#28 a quick second rename is announced ' + JSON.stringify(rn2))
     const hist = vb.runtime.profile.people[chat + '\u0001702']
-    if (!hist || hist.changes.filter((c) => c.kind === 'name').length !== 2) throw new Error('#28 a quiet change is still recorded ' + JSON.stringify(hist))
+    if (!hist || hist.changes.filter((c) => c.kind === 'name').length !== 2) throw new Error('#28 both renames are recorded ' + JSON.stringify(hist))
   }
   // #28-2 다른 오픈프로필로 바꿈(pli → 다른 pli)은 옾링 변경. 방마다 1분에 6번까지만 보내므로 새 방에서 본다.
   {
