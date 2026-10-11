@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS room_members (
   seen_at    BIGINT NOT NULL,
   PRIMARY KEY (install_id, user_id)
 );
+-- 배포 겹침 울타리(owner.mjs): 마지막으로 켜진 sender 하나만 카카오 연결의 주인이다. 한 줄(id = 1)만 쓴다.
+CREATE TABLE IF NOT EXISTS sender_owner (
+  id    INT    PRIMARY KEY,
+  boot  TEXT   NOT NULL,
+  since BIGINT NOT NULL,
+  beat  BIGINT NOT NULL
+);
 `
 
 let pool = null
@@ -466,6 +473,40 @@ export const dbStore = {
     }
     if (!sets.length) return
     await q(`UPDATE bot_accounts SET ${sets.join(', ')} WHERE device_id = $1`, params)
+  },
+
+  // 배포 겹침 울타리(owner.mjs). 나보다 늦게 켜진 주인이 살아 있으면 주인이 되지 않는다.
+  async claimOwner(boot, since, now, staleBefore) {
+    await ensureSchema()
+    const r = await q(
+      `INSERT INTO sender_owner (id, boot, since, beat) VALUES (1, $1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET boot = EXCLUDED.boot, since = EXCLUDED.since, beat = EXCLUDED.beat
+        WHERE sender_owner.since <= EXCLUDED.since OR sender_owner.beat < $4`,
+      [boot, since, now, staleBefore],
+    )
+    return r.rowCount === 1
+  },
+
+  async ownerBeat(boot, now) {
+    const r = await q('UPDATE sender_owner SET beat = $2 WHERE id = 1 AND boot = $1', [boot, now])
+    return r.rowCount === 1
+  },
+
+  async ownerRow() {
+    const r = await q('SELECT boot, since, beat FROM sender_owner WHERE id = 1')
+    return r.rows[0] || null
+  },
+
+  // 예전 서버가 밀려나며 지운 로그인을, 지금 붙어 있는 서버의 기록으로 되살린다. 지워진(needs_register) 행만 고친다.
+  async restoreLogin(id, record) {
+    const creds = credentialsOf(record)
+    if (!creds || !creds.access_token) return false
+    const r = await q(
+      `UPDATE kakao_sessions SET token_ct = $2, needs_register = FALSE, reason = 'ok', updated_at = $3
+        WHERE device_id = $1 AND needs_register = TRUE`,
+      [id, seal(creds), Date.now()],
+    )
+    return r.rowCount === 1
   },
 
   async ensureBotAccount(botId, email) {

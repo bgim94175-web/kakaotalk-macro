@@ -19,6 +19,7 @@ import {
   visitEventsFromMessage,
   visitMentionExtra,
 } from './features.mjs'
+import { Owner } from './owner.mjs'
 import * as R from './roomfeat.mjs'
 import { open as openPasscode } from './secretbox.mjs'
 
@@ -231,6 +232,8 @@ export class BotPool {
     this.syncAgain = false
     this.timers = []
     this.traced = new Set()
+    // 배포 겹침 울타리(owner.mjs). 주지 않으면 늘 주인이다(시험).
+    this.owner = d.owner || new Owner(null)
   }
 
   start() {
@@ -249,6 +252,15 @@ export class BotPool {
     this.timers = []
     for (const s of this.bots.values()) await s.stop()
     await this.flush()
+  }
+
+  // 새 서버가 주인이 되었다(Hub.standDown): 봇 연결을 닫는다. 저장된 로그인은 그대로 둔다.
+  async standDown() {
+    for (const t of this.timers) clearInterval(t)
+    this.timers = []
+    const slots = [...this.bots.values()]
+    this.bots.clear()
+    for (const s of slots) await s.stop()
   }
 
   isBot(id) {
@@ -716,7 +728,12 @@ export class BotSlot {
     if (this.opening) return this.opening
     // 클라이언트가 있으면 새로 만들지 않고 그 클라이언트의 세션을 다시 얻는다(agent-messenger 가 끊긴 상태를 지웠으므로
     // 다음 acquireSession() 이 스스로 다시 접속한다, 5.3). 클라이언트를 닫았다 여는 일은 처음 접속 때만.
-    this.opening = (this.client ? this.reacquire() : this.open()).finally(() => { this.opening = null })
+    // 새 서버가 주인이면 다시 붙지 않는다(붙으면 그쪽을 카카오에서 밀어낸다).
+    this.opening = (async () => {
+      if ((await this.pool.owner.check()) === 'lost') return
+      if (this.stopped || this.dead) return
+      return this.client ? this.reacquire() : this.open()
+    })().finally(() => { this.opening = null })
     return this.opening
   }
 
@@ -853,8 +870,24 @@ export class BotSlot {
   async markDead(reason) {
     if (this.dead) return
     this.dead = true
+    const why = reason || 'reauth'
+    const v = await this.pool.owner.verdict(why, this)
+    if (v === 'retry') {
+      log(this.id, `bot session ${why} right after boot: reconnecting, saved login kept`)
+      const t = setTimeout(() => {
+        this.dead = false
+        this.bg(this.ensure(), 'reconnect')
+      }, this.pool.owner.retryMs)
+      if (t.unref) t.unref()
+      return
+    }
+    if (v === 'keep') {
+      log(this.id, `bot session ${why} on a sender that is not the owner: saved login kept`)
+      await this.stop()
+      return
+    }
     this.record.needs_register = true
-    this.record.reason = reason || 'reauth'
+    this.record.reason = why
     const c = credsOf(this.record)
     this.record.credentials = { access_token: '', refresh_token: '', user_id: c.user_id, device_uuid: '', device_type: 'tablet' }
     log(this.id, `bot session ended: ${this.record.reason}`)

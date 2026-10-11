@@ -904,6 +904,7 @@ export class MemStore {
     this.bots = new Map()
     this.blocks = []
     this.records = new Map()
+    this.senderOwner = null       // 배포 겹침 울타리 한 줄(owner.mjs)
     this.seq = 0
   }
 
@@ -1062,5 +1063,33 @@ export class MemStore {
 
   async saveRecord(id, record) {
     this.records.set(id, JSON.parse(JSON.stringify(record)))
+  }
+
+  // 배포 겹침 울타리(owner.mjs) — store.mjs 의 sender_owner 한 줄과 같은 규칙
+  async claimOwner(boot, since, now, staleBefore) {
+    const cur = this.senderOwner
+    if (cur && !(cur.since <= since || cur.beat < staleBefore)) return false
+    this.senderOwner = { boot, since, beat: now }
+    return true
+  }
+
+  async ownerBeat(boot, now) {
+    if (!this.senderOwner || this.senderOwner.boot !== boot) return false
+    this.senderOwner.beat = now
+    return true
+  }
+
+  async ownerRow() {
+    return this.senderOwner ? Object.assign({}, this.senderOwner) : null
+  }
+
+  async restoreLogin(id, record) {
+    const cur = this.records.get(id)
+    const c = record && record.credentials
+    if (!cur || !cur.needs_register || !c || !c.access_token) return false
+    cur.credentials = JSON.parse(JSON.stringify(c))
+    cur.needs_register = false
+    cur.reason = 'ok'
+    return true
   }
 }
