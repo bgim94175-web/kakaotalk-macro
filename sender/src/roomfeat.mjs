@@ -195,7 +195,8 @@ export function adapterRecord(view, botId) {
     device_id: botId || '',
     config: {
       visit: { enabled: live && cfg.visit.enabled, rooms: ['r'] },
-      profile: { enabled: live && cfg.profile.enabled, rooms: ['r'], name: cfg.profile.name, photo: cfg.profile.photo, status: cfg.profile.status },
+      // 방 관리봇의 프로필 변경은 botpool 이 멤버 명부와 비교해 따로 알린다(profileChange). 여기서는 끈다.
+      profile: { enabled: false, rooms: ['r'], name: cfg.profile.name, photo: cfg.profile.photo, status: cfg.profile.status },
       cover: {
         enabled: live && cfg.cover.enabled,
         rooms: ['r'],
@@ -238,7 +239,7 @@ export function kstStamp(ms) {
   return k ? `${k.y}-${k.mo}-${k.d} ${k.h}:${k.mi}` : ''
 }
 
-function kstShort(ms) {
+export function kstShort(ms) {
   const k = kst(ms)
   return k ? `${k.mo}-${k.d} ${k.h}:${k.mi}` : ''
 }
@@ -494,7 +495,7 @@ export function leaveKickNotice(name) {
 }
 
 // ── 7.2 (c) 프로필 로그 ────────────────────────────────────────────────────
-/** 사진 서명 = 원본(없으면 작은) 사진 주소의 경로(쿼리 제거, 7.2(c)). 주소 전체는 저장하지 않는다. */
+/** 사진 서명 = 사진 주소의 경로(쿼리 제거, 7.2(c)). 같은 사진인지 비교할 때만 쓴다. */
 export function photoSig(original, small) {
   const raw = String(original || small || '').trim()
   if (!raw) return ''
@@ -505,11 +506,24 @@ export function photoSig(original, small) {
   }
 }
 
+/** 안내에 적을 사진 주소: https 주소에서 쿼리를 뗀 것(작은 사진 우선). 주소가 아니면 ''. */
+export function photoUrl(small, original) {
+  const raw = String(small || original || '').trim()
+  if (!/^https?:\/\//i.test(raw)) return ''
+  try {
+    const u = new URL(raw)
+    return ('https://' + u.host + u.pathname).slice(0, 300)
+  } catch {
+    return ''
+  }
+}
+
 function profileStore(runtime) {
   if (!runtime.profile || typeof runtime.profile !== 'object') runtime.profile = {}
   const p = runtime.profile
   if (!isObj(p.people)) p.people = {}
   if (!isObj(p.nextAt)) p.nextAt = {}
+  if (!isObj(p.lastAt)) p.lastAt = {}
   return p
 }
 
@@ -517,39 +531,96 @@ function nameChanges(changes) {
   return (Array.isArray(changes) ? changes : []).filter((c) => c && (!c.kind || c.kind === 'name'))
 }
 
-// 옾링 = 그 사람의 오픈프로필 링크. 관찰한 곳에서 몰랐으면 '없음'으로 쓰고 linkFor(사람 id)를 붙인다.
-// 봇이 보내기 직전에 찾아 withProfileLink 로 채운다. 끝내 못 찾으면 '없음' 그대로 나간다.
+// ── 사람 안내 공통 모양(입장·퇴장·프로필 변경) ─────────────────────────────
+// 카카오톡은 글자 폭이 제각각이라 오른쪽 테두리·칸 맞춤을 쓰지 않는다. 왼쪽 기호와 가지(├ └)로만 묶는다.
+export const RULE = '━━━━━━━━━━━━━━'
 export const NO_LINK = '없음'
-const LINK_LABEL = '옾링 : '
+const LINK_LINE = '🔗 옾링 : '
 
 export function profileUrl(link) {
   const s = String(link == null ? '' : link).trim()
   return /^https:\/\/open\.kakao\.com\/[^\s@]+$/i.test(s) && s.length <= 200 ? s : ''
 }
 
-// 멘션 위치는 그 줄의 @ 바로 뒤다(앞줄에 @ 가 있어도 틀리지 않게 줄로 찾는다)
-function mentionIn(text, nm) {
-  if (!nm.mention) return null
-  const i = text.indexOf('\n' + nm.line)
+/** 가지 줄: 마지막 줄만 └ */
+export function branch(items) {
+  return items.map((t, i) => (i === items.length - 1 ? ' └ ' : ' ├ ') + t)
+}
+
+/** 👤 줄. id 와 이름이 있으면 @이름(멘션), 아니면 이름만 */
+export function whoLine(name, userId) {
+  const nm = oneLine(name, 40).replace(/@/g, '')
+  const uid = idText(userId)
+  if (uid && nm) return { line: '👤 @' + nm, mention: { userId: uid, len: nm.length } }
+  return { line: '👤 ' + (nm || '이름 없음'), mention: null }
+}
+
+/** 멘션 위치 = 그 줄의 @ 바로 뒤(앞줄에 @ 가 있어도 틀리지 않게 줄로 찾는다) */
+export function mentionAt(text, who) {
+  if (!who || !who.mention) return null
+  const i = text.indexOf('\n' + who.line)
   if (i < 0) return null
-  return Object.assign({}, nm.mention, { at: i + 1 + nm.line.indexOf('@') + 1 })
+  return Object.assign({}, who.mention, { at: i + 1 + who.line.indexOf('@') + 1 })
 }
 
-function profileNote(lines, nm, kind, link, userId) {
+/** 👤 · 🆔 · 🔗 옾링 · 🖼 사진. photo 가 null 이면(모름) 사진 줄을 뺀다. */
+export function personLines(cur, who) {
+  const out = [who.line]
+  const uid = idText(cur.userId)
+  if (uid) out.push('🆔 ' + uid)
+  out.push(LINK_LINE + (profileUrl(cur.link) || NO_LINK))
+  if (cur.photo !== null && cur.photo !== undefined) out.push('🖼 사진 : ' + (photoUrl(cur.photo) || '없음'))
+  return out
+}
+
+/** 머문 시간: 2일 3시간 / 3시간 12분 / 5분 / 1분 미만 */
+export function stayText(ms) {
+  const m = Math.floor(Number(ms) / MIN)
+  if (!Number.isFinite(m) || m < 1) return '1분 미만'
+  const d = Math.floor(m / 1440)
+  const h = Math.floor((m % 1440) / 60)
+  const mm = m % 60
+  if (d) return d + '일' + (h ? ' ' + h + '시간' : '')
+  if (h) return h + '시간' + (mm ? ' ' + mm + '분' : '')
+  return mm + '분'
+}
+
+const FIELD_LABEL = { name: '닉네임', link: '옾링', photo: '사진', status: '상태 메시지' }
+export const PROFILE_QUIET_MS = 5 * MIN
+
+function fieldText(kind, v) {
+  const s = v == null ? '' : String(v)
+  if (kind === 'name') return oneLine(s, 40).replace(/@/g, '') || '이름 없음'
+  if (kind === 'status') return oneLine(s, 60) || '없음'
+  if (kind === 'photo') return photoUrl(s) || (s ? '알 수 없음' : '없음')
+  return profileUrl(s) || NO_LINK
+}
+
+/**
+ * 프로필 변경 안내 1개. cur = 지금 프로필 {userId, name, link, photo}(photo 가 null 이면 사진 줄을 뺀다),
+ * changes = 안내할 변경 [{kind:'name'|'link'|'photo'|'status', from, to}], n = 이 사람의 누적 변경 횟수.
+ */
+export function profileChangeNotice(cur, changes, n) {
+  const who = whoLine(cur.name, cur.userId)
+  const lines = ['🔔 프로필 변경 감지', RULE, ...personLines(cur, who), '', '✏️ 바뀐 내용']
+  for (const c of changes) {
+    lines.push('▸ ' + FIELD_LABEL[c.kind])
+    lines.push(...branch(['전 : ' + fieldText(c.kind, c.from), '후 : ' + fieldText(c.kind, c.to)]))
+  }
+  if (n >= 2) lines.push('🔁 누적 변경 : ' + n + '회')
+  lines.push(RULE, '⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요')
   const text = lines.join('\n')
-  const note = { text, mention: mentionIn(text, nm), kind }
-  if (!profileUrl(link) && userId) note.linkFor = String(userId)
-  return note
+  return { text, mention: mentionAt(text, who) }
 }
 
-/** 보내기 전 옾링 채우기: '옾링 : 없음' 줄을 링크로 바꾸고, 그 뒤에 있는 멘션 위치를 그만큼 민다. */
+/** 보내기 전 옾링 채우기: '🔗 옾링 : 없음' 줄을 링크로 바꾸고, 그 뒤에 있는 멘션 위치를 그만큼 민다. */
 export function withProfileLink(send, link) {
   const url = profileUrl(link)
   if (!url || !send || typeof send.text !== 'string') return send
-  const from = '\n' + LINK_LABEL + NO_LINK
+  const from = '\n' + LINK_LINE + NO_LINK
   const i = send.text.indexOf(from)
   if (i < 0) return send
-  const text = send.text.slice(0, i) + '\n' + LINK_LABEL + url + send.text.slice(i + from.length)
+  const text = send.text.slice(0, i) + '\n' + LINK_LINE + url + send.text.slice(i + from.length)
   const out = Object.assign({}, send, { text })
   delete out.linkFor
   if (send.mention && typeof send.mention.at === 'number' && send.mention.at > i) {
@@ -558,73 +629,126 @@ export function withProfileLink(send, link) {
   return out
 }
 
+function changeMoments(changes) {
+  return new Set((Array.isArray(changes) ? changes : []).map((c) => Number(c && c.at) || 0)).size
+}
+
+// 같은 사람에게 5분 안에 다시 알리지 않는다(기록은 남긴다). 알리면 시각을 적는다.
+function quietNow(p, key, now) {
+  if (now - (Number(p.lastAt[key]) || 0) < PROFILE_QUIET_MS) return true
+  for (const k of Object.keys(p.lastAt)) if (now - Number(p.lastAt[k]) >= PROFILE_QUIET_MS) delete p.lastAt[k]
+  p.lastAt[key] = now
+  return false
+}
+
+function noticeDelay(p, chatId, now) {
+  const at = Math.max(now, Number(p.nextAt[chatId] || 0))
+  p.nextAt[chatId] = at + 4000
+  return at - now
+}
+
+function known(v) {
+  return v !== null && v !== undefined
+}
+
 /**
- * 한 사람의 관찰(이름·사진 서명·상태 메시지, 알면 옾링). 첫 관찰은 기준만 저장한다. 바뀐 칸마다 안내 1개.
- * pcfg: {name, photo, status} (없으면 켜짐). runtime 은 방(또는 계정) runtime.
+ * 방 관리봇: 멤버 명부에서 본 한 사람의 변경(before → after, 각 {name, link, photo}, null 은 모름 = 비교하지 않음).
+ * 바뀐 칸을 기록하고, 켜진 항목(닉네임·옾링 = name, 사진 = photo)이 바뀌었으면 안내 1개(5분 안 재안내 생략).
+ * → [{text, mention, delayMs, kind}]
+ */
+export function profileChange(runtime, chatId, pcfg, ev, now) {
+  const userId = idText(ev && ev.userId)
+  if (!userId) return []
+  const b = (ev && ev.before) || {}
+  const a = (ev && ev.after) || {}
+  const changed = []
+  const bn = oneLine(b.name, 40)
+  const an = oneLine(a.name, 40)
+  if (bn && an && bn !== an) changed.push({ kind: 'name', from: bn, to: an })
+  if (known(b.link) && known(a.link) && (profileUrl(b.link) || '') !== (profileUrl(a.link) || '')) changed.push({ kind: 'link', from: b.link, to: a.link })
+  if (known(b.photo) && known(a.photo) && photoSig(b.photo) !== photoSig(a.photo)) changed.push({ kind: 'photo', from: b.photo, to: a.photo })
+  if (!changed.length) return []
+  const p = profileStore(runtime)
+  const key = `${chatId}${SEP}${userId}`
+  const prev = isObj(p.people[key]) ? p.people[key] : null
+  const changes = prev && Array.isArray(prev.changes) ? prev.changes.slice() : []
+  for (const c of changed) {
+    if (c.kind === 'name') changes.push({ at: now, kind: 'name', name: c.from })
+    else if (c.kind === 'photo') changes.push({ at: now, kind: 'photo' })
+    else changes.push({ at: now, kind: 'link', from: profileUrl(c.from), to: profileUrl(c.to) })
+  }
+  p.people[key] = { name: an || bn, userId, at: now, changes: changes.slice(-30) }
+  pruneProfile(p)
+  const on = (k) => !pcfg || pcfg[k] !== false
+  const shown = changed.filter((c) => (c.kind === 'photo' ? on('photo') : on('name')))
+  if (!shown.length || quietNow(p, key, now)) return []
+  const cur = { userId, name: an || bn, link: known(a.link) ? a.link : b.link, photo: known(a.photo) ? a.photo : (known(b.photo) ? b.photo : null) }
+  const note = profileChangeNotice(cur, shown, changeMoments(changes))
+  return [{ text: note.text, mention: note.mention, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
+}
+
+/**
+ * 계정 단위 옛 방 기능: 한 사람의 관찰(이름·사진·상태 메시지, 알면 옾링). 첫 관찰은 기준만 저장한다.
+ * 바뀐 칸을 모아 안내 1개(5분 안 재안내 생략). 옾링을 모르면 linkFor 를 붙인다 → 보내는 쪽이 withProfileLink 로 채운다.
  * → [{text, mention, kind, linkFor?}]
  */
 export function profileObserve(runtime, chatId, pcfg, ob, now) {
-  const out = []
   const userId = idText(ob && ob.userId)
   const name = oneLine(ob && ob.name, 40)
-  if (!userId) return out
+  if (!userId) return []
   const p = profileStore(runtime)
   const key = `${chatId}${SEP}${userId}`
   const prev = p.people[key]
-  const on = (k) => !pcfg || pcfg[k] !== false
   const photo = ob.photo == null ? null : String(ob.photo)
   const status = ob.status == null ? null : String(ob.status).slice(0, 200)
+  const link = profileUrl(ob.link)
   if (!isObj(prev) || !prev.name) {
-    if (!name) return out
+    if (!name) return []
     p.people[key] = {
       name, userId, at: now,
       photo: photo || undefined,
       status: status == null ? undefined : status,
+      link: link || undefined,
       changes: isObj(prev) && Array.isArray(prev.changes) ? prev.changes : [],
     }
     pruneProfile(p)
-    return out
+    return []
   }
   const changes = Array.isArray(prev.changes) ? prev.changes.slice() : []
   const cur = String(prev.name).trim()
   const nowName = name || cur
-  const link = profileUrl(ob.link)
-  const linkLine = LINK_LABEL + (link || NO_LINK)
+  const changed = []
   if (name && name !== cur) {
     changes.push({ at: now, kind: 'name', name: cur })
-    if (on('name')) {
-      const n = nameChanges(changes).length
-      const nm = mentionLine('지금 닉', name, userId)
-      const lines = ['[프로필 변경 감지]', '이전닉 : ' + (cur.replace(/@/g, '') || '이름 없음'), linkLine, nm.line]
-      if (n >= 2) lines.push('누적 : ' + n + '회')
-      out.push(profileNote(lines, nm, 'name', link, userId))
-    }
+    changed.push({ kind: 'name', from: cur, to: name })
   }
-  if (photo && prev.photo && photo !== prev.photo) {
+  if (photo && prev.photo && photoSig(photo) !== photoSig(prev.photo)) {
     changes.push({ at: now, kind: 'photo' })
-    if (on('photo')) {
-      const nm = mentionLine('지금 닉', nowName, userId)
-      out.push(profileNote(['[프로필 변경 감지]', nm.line, linkLine, '변경 : 프로필 사진'], nm, 'photo', link, userId))
-    }
+    changed.push({ kind: 'photo', from: prev.photo, to: photo })
   }
   if (status != null && prev.status != null && status !== prev.status) {
     changes.push({ at: now, kind: 'status', from: String(prev.status).slice(0, 200), to: status })
-    if (on('status')) {
-      const nm = mentionLine('지금 닉', nowName, userId)
-      const lines = ['[프로필 변경 감지]', nm.line, linkLine, '변경 : 상태 메시지', '이전 : ' + (oneLine(prev.status, 60) || '없음')]
-      out.push(profileNote(lines, nm, 'status', link, userId))
-    }
+    changed.push({ kind: 'status', from: prev.status, to: status })
   }
+  const keepLink = link || profileUrl(prev.link)
+  const keepPhoto = photo || prev.photo || null
   p.people[key] = {
     name: nowName,
     userId,
     at: now,
-    photo: photo || prev.photo || undefined,
+    photo: keepPhoto || undefined,
     status: status != null ? status : prev.status,
+    link: keepLink || undefined,
     changes: changes.slice(-30),
   }
   pruneProfile(p)
-  return out
+  const on = (k) => !pcfg || pcfg[k] !== false
+  const shown = changed.filter((c) => on(c.kind))
+  if (!shown.length || quietNow(p, key, now)) return []
+  const note = profileChangeNotice({ userId, name: nowName, link: keepLink, photo: photoUrl(keepPhoto) || null }, shown, changeMoments(changes))
+  const out = { text: note.text, mention: note.mention, kind: shown[0].kind }
+  if (!keepLink) out.linkFor = userId
+  return [out]
 }
 
 function pruneProfile(p) {

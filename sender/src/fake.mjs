@@ -535,6 +535,8 @@ class FakeServer {
       if (ev.photo != null) r.members[uid].photo = String(ev.photo)
       if (ev.status !== undefined) r.members[uid].status = ev.status
       if (ev.mt != null) r.members[uid].mt = Number(ev.mt)
+      // 오픈프로필로 바꾸기(pli 있음 = ptp 16) / 빼기(pli '' = ptp 1)
+      if (ev.pli !== undefined) Object.assign(r.members[uid], ev.pli ? { ptp: 16, pli: String(ev.pli) } : { ptp: 1, pli: null })
       this.save()
       return { ok: true }
     }
@@ -898,6 +900,7 @@ export class MemStore {
     this.leaves = []
     this.logs = []
     this.states = new Map()
+    this.roomMembers = new Map()   // install_id → Map(user_id → 방 멤버 명부 행)
     this.bots = new Map()
     this.blocks = []
     this.records = new Map()
@@ -1002,6 +1005,19 @@ export class MemStore {
 
   async saveRoomState(installId, runtime) {
     this.states.set(Number(installId), JSON.parse(JSON.stringify(runtime || {})))
+  }
+
+  async loadMembers(installId, chatId, since) {
+    const m = this.roomMembers.get(Number(installId))
+    if (!m) return []
+    return [...m.values()].filter((r) => r.chat_id === String(chatId || '') && Number(r.seen_at) >= (Number(since) || 0)).map((r) => Object.assign({}, r))
+  }
+
+  async saveMembers(installId, chatId, rows) {
+    const id = Number(installId)
+    if (!this.roomMembers.has(id)) this.roomMembers.set(id, new Map())
+    const m = this.roomMembers.get(id)
+    for (const r of rows || []) m.set(String(r.user_id), Object.assign({ chat_id: String(chatId || '') }, r))
   }
 
   async botState(botId, fields) {

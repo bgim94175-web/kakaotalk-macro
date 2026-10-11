@@ -1,6 +1,6 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
-import { josa, profileObserve } from './roomfeat.mjs'
+import { branch, josa, kstShort, mentionAt, personLines, profileObserve, RULE, stayText, whoLine } from './roomfeat.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -1625,7 +1625,7 @@ function uniqTimes(list, now) {
   return out
 }
 
-function rememberPerson(v, chatId, who, now, kind, link) {
+function rememberPerson(v, chatId, who, now, kind, link, photo) {
   const keys = []
   if (who.id) keys.push(`${chatId}${SEP}${who.id}`)
   if (who.name) keys.push(`${chatId}${SEP}n:${who.name}`)
@@ -1636,6 +1636,7 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     if (!row || typeof row !== 'object') continue
     if (!prev.name && row.name) prev.name = row.name
     if (!prev.link && row.link) prev.link = row.link
+    if (prev.photo === undefined && typeof row.photo === 'string') prev.photo = row.photo
     if (!prev.userId && row.userId) prev.userId = String(row.userId)
     if (Array.isArray(row.joins)) prev.joins = prev.joins.concat(row.joins)
     if (Array.isArray(row.leaves)) prev.leaves = prev.leaves.concat(row.leaves)
@@ -1653,6 +1654,8 @@ function rememberPerson(v, chatId, who, now, kind, link) {
   if (nameChanged || linkChanged) {
     changes.push({ at: now, name: prevName, link: prevLink })
   }
+  // 사진: 주소(없으면 ''). 모르면(옛 계정 기능) 칸을 두지 않아 안내에서 사진 줄이 빠진다.
+  const freshPhoto = typeof photo === 'string' ? photo : undefined
   const row = {
     name: freshName || prevName,
     link: freshLink || prevLink,
@@ -1661,6 +1664,8 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     leaves: uniqTimes(prev.leaves, now),
     changes: trimChanges(changes, now),
   }
+  const keepPhoto = freshPhoto !== undefined ? freshPhoto : prev.photo
+  if (typeof keepPhoto === 'string') row.photo = keepPhoto
   // 시각이 같아도 이벤트마다 센다(7.2(a)). 같은 값은 합칠 때 하나로 줄어드므로 1ms 씩 민다.
   const list = kind === 'join' ? row.joins : row.leaves
   let t = now
@@ -1704,35 +1709,38 @@ function timeLines(times) {
   return times.map((t) => '- ' + kstStamp(t))
 }
 
+// 입장·퇴장 안내(7.2(a)): 사람 정보(👤 🆔 🔗 옾링 🖼 사진) + 이번 종류의 기록(최근 5번) + 예전 프로필(닉네임·옾링이 바뀐 적).
+// 입장 안내에는 입장 시각만, 퇴장 안내에는 퇴장 시각과 머문 시간만 적는다. 사진을 모르면(옛 계정 기능) 사진 줄을 뺀다.
+const VISIT_SHOW_N = 5
+
 function visitNotice(row, kind) {
-  const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
-  const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
-  const link = row && row.link ? row.link : '없음'
-  const mentioned = !!(userId && name)
-  const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
+  const r = row || {}
   const leave = kind === 'leave'
-  const times = timeLines(leave ? (row && row.leaves) : (row && row.joins))
-  const lines = [
-    leave ? '[퇴장 안내]' : '[입장 안내]',
-    nameLine,
-    '옾링 : ' + link,
-    leave ? '퇴장 기록' : '입장 기록',
-    ...times,
-  ]
-  const changes = Array.isArray(row && row.changes) ? row.changes : []
-  if (changes.length) {
-    lines.push('프로필 변경')
-    for (const c of changes) {
-      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-      const pastLink = c && c.link ? String(c.link) : '옾링 없음'
-      lines.push('- ' + kstStamp(c && c.at) + '  ' + past + ' / ' + pastLink)
-    }
+  const userId = /^[1-9][0-9]*$/.test(String(r.userId || '')) ? String(r.userId) : ''
+  const who = whoLine(r.name, userId)
+  const cur = { userId, link: r.link, photo: typeof r.photo === 'string' ? r.photo : null }
+  const lines = [leave ? '📤 퇴장 안내' : '📥 입장 안내', RULE, ...personLines(cur, who)]
+  const times = (leave ? r.leaves : r.joins) || []
+  if (leave && times.length) {
+    const out = Number(times[times.length - 1])
+    const joinedAt = (Array.isArray(r.joins) ? r.joins : []).map(Number).filter((t) => t <= out).pop()
+    if (joinedAt) lines.push('⏳ 머문 시간 : ' + stayText(out - joinedAt) + ' (' + kstShort(joinedAt) + ' 입장)')
   }
+  const shown = times.slice(-VISIT_SHOW_N)
+  lines.push('', (leave ? '🕒 퇴장 기록 · ' : '🕒 입장 기록 · ') + times.length + '회' + (times.length > shown.length ? ' · 최근 ' + shown.length + '번' : ''))
+  lines.push(...branch(shown.map((t) => kstStamp(t))))
+  const changes = Array.isArray(r.changes) ? r.changes : []
+  if (changes.length) {
+    lines.push('', '📝 예전 프로필 · ' + changes.length + '회')
+    lines.push(...branch(changes.slice(-VISIT_SHOW_N).map((c) => {
+      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
+      const pastLink = openProfileLink(c && c.link)
+      return kstStamp(c && c.at) + ' · ' + past + (pastLink && pastLink !== r.link ? ' · ' + pastLink : '')
+    })))
+  }
+  lines.push(RULE)
   const text = lines.join('\n')
-  if (!mentioned) return { text, mention: null }
-  const at = text.indexOf('\n이름 : @')
-  const start = at + '\n이름 : @'.length
-  return { text, mention: { userId, at: start, len: name.length } }
+  return { text, mention: mentionAt(text, who) }
 }
 
 function mentionIdJson(id) {
@@ -1874,7 +1882,7 @@ function applyVisit(record, ev, sends) {
   const at = Number(ev.at) || now
   const v = visitState(record)
   if (visitSeen(v, String(room.chat_id), who, ev.kind, at, ev.logId ? String(ev.logId) : '', now)) return true
-  const row = rememberPerson(v, String(room.chat_id), who, at, ev.kind, ev.profileLink)
+  const row = rememberPerson(v, String(room.chat_id), who, at, ev.kind, ev.profileLink, ev.photo)
   const notice = visitNotice(row, ev.kind)
   sends.push({
     chatId: String(room.chat_id),
@@ -2008,15 +2016,15 @@ function logChanges(list, withLink) {
     if (!Number.isFinite(at) || at <= 0) continue
     const name = String(c.name || '')
     const link = String(c.link || '')
-    const kind = c.kind === 'photo' || c.kind === 'status' ? c.kind : 'name'
-    const sig = at + SEP + name + SEP + (withLink ? link : kind)
+    const kind = c.kind === 'photo' || c.kind === 'status' || c.kind === 'link' ? c.kind : 'name'
+    const sig = at + SEP + name + SEP + (withLink ? link : kind + SEP + String(c.to || ''))
     if (seen.has(sig)) continue
     seen.add(sig)
     if (withLink) out.push({ at, name, link })
     else {
       // 프로필 기록 행은 항목(kind)을 같이 낸다(7.5). 사진은 바뀐 사실만, 주소는 내보내지 않는다(8.11).
       const row = { at, name, kind }
-      if (kind === 'status') {
+      if (kind === 'status' || kind === 'link') {
         row.from = String(c.from || '').slice(0, 200)
         row.to = String(c.to || '').slice(0, 200)
       }

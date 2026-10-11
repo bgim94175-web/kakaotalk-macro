@@ -35,6 +35,19 @@ CREATE TABLE IF NOT EXISTS room_log (
   detail     JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_room_log ON room_log (install_id, at DESC);
+-- 방 멤버 명부: 봇이 방에 들어간 뒤 모은 사람별 닉네임·옾링(pli→link)·사진. NULL = 아직 모름, '' = 없음.
+-- 오래된 행은 부모(lib/entitle.js cleanup)가 지운다. 이 파일은 DELETE 를 하지 않는다.
+CREATE TABLE IF NOT EXISTS room_members (
+  install_id BIGINT NOT NULL,
+  chat_id    TEXT   NOT NULL DEFAULT '',
+  user_id    TEXT   NOT NULL,
+  name       TEXT   NOT NULL DEFAULT '',
+  pli        TEXT,
+  link       TEXT,
+  photo      TEXT,
+  seen_at    BIGINT NOT NULL,
+  PRIMARY KEY (install_id, user_id)
+);
 `
 
 let pool = null
@@ -371,6 +384,32 @@ export const dbStore = {
        ON CONFLICT (install_id) DO UPDATE SET runtime = EXCLUDED.runtime, updated_at = EXCLUDED.updated_at`,
       [installId, JSON.stringify(runtime || {}), Date.now()],
     )
+  },
+
+  // 방 멤버 명부(옾링·사진). 지금 방(chat)의 것만, since 보다 오래 안 본 사람은 읽지 않는다.
+  async loadMembers(installId, chatId, since) {
+    const r = await q(
+      'SELECT user_id, name, pli, link, photo, seen_at FROM room_members WHERE install_id = $1 AND chat_id = $2 AND seen_at >= $3',
+      [installId, String(chatId || ''), Number(since) || 0],
+    )
+    return r.rows
+  },
+
+  // 바뀐 사람만 묶어서 쓴다(500명씩).
+  async saveMembers(installId, chatId, rows) {
+    for (let i = 0; i < rows.length; i += 500) {
+      const part = rows.slice(i, i + 500)
+      await q(
+        `INSERT INTO room_members (install_id, chat_id, user_id, name, pli, link, photo, seen_at)
+         SELECT $1, $8, u, n, p, l, ph, s
+           FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::bigint[]) AS t(u, n, p, l, ph, s)
+         ON CONFLICT (install_id, user_id) DO UPDATE
+            SET chat_id = EXCLUDED.chat_id, name = EXCLUDED.name, pli = EXCLUDED.pli, link = EXCLUDED.link,
+                photo = EXCLUDED.photo, seen_at = EXCLUDED.seen_at`,
+        [installId, part.map((r) => r.user_id), part.map((r) => r.name || ''), part.map((r) => r.pli), part.map((r) => r.link),
+          part.map((r) => r.photo), part.map((r) => Number(r.seen_at) || Date.now()), String(chatId || '')],
+      )
+    }
   },
 
   // 2.2: bot_accounts 는 nickname state state_at(+ 오픈프로필 칸, 아래)만. 등록 직후 최소 행은 ensureBotAccount.

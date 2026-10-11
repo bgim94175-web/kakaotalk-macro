@@ -387,8 +387,8 @@
       <div class="srow stack" id="row-visit-rooms"><div class="srow-l"><span class="lb">대화방</span><p>기록하고 안내를 보낼 오픈채팅방을 선택합니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="rooms" id="visit-open" role="group" aria-label="대화방"></div>
           <div class="rooms-meta"><span data-rooms-count="visit"></span><button type="button" class="btn sm ghost" data-load-rooms><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>대화방 불러오기</button></div></div></div></div>
-      <div class="srow stack" id="row-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 시 예시입니다. 퇴장 시에는 [퇴장 안내]와 퇴장 시각을 적습니다. 이름이 바뀐 적이 있으면 이전 이름도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="visit"></span><div class="bub notice">[입장 안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/me/sH7k2Lb&#10;입장 기록&#10;- 2026-10-09 21:14</div></div></div></div>
+      <div class="srow stack" id="row-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 그 사람의 ID·옾링·프로필 사진을 함께 적습니다. 퇴장 때는 퇴장 시각과 머문 시간을, 닉네임이나 옾링이 바뀐 적이 있으면 예전 프로필도 적습니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="visit"></span><div class="bub notice">📥 입장 안내&#10;━━━━━━━━━━━━━━&#10;👤 @하늘&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;🕒 입장 기록 · 2회&#10; ├ 2026-10-08 20:02&#10; └ 2026-10-09 21:14&#10;━━━━━━━━━━━━━━</div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 기록이 꺼져 있습니다. 켜면 기록할 방과 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="visit-on">켜기</button></div></div></div>
     <div class="sec-f"><span>기록은 이 기능을 켠 방에서만 남습니다. K bot은 사람을 내보내지 않습니다.</span></div>
@@ -425,8 +425,8 @@
       <div class="srow stack" id="row-profile-rooms"><div class="srow-l"><span class="lb">대화방</span><p>기록하고 안내를 보낼 오픈채팅방을 선택합니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="rooms" id="profile-open" role="group" aria-label="대화방"></div>
           <div class="rooms-meta"><span data-rooms-count="profile"></span><button type="button" class="btn sm ghost" data-load-rooms><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>대화방 불러오기</button></div></div></div></div>
-      <div class="srow stack" id="row-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>그 사람의 오픈프로필 링크(옾링)도 함께 적습니다. 두 번 이상 바꾼 사람은 누적 횟수도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="profile"></span><div class="bub notice">[프로필 변경 감지]&#10;이전닉 : 하늘&#10;옾링 : https://open.kakao.com/me/sH7k2Lb&#10;지금 닉 : @하늘_판매</div></div></div></div>
+      <div class="srow stack" id="row-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>그 사람의 ID·옾링·프로필 사진과 바뀐 내용(전·후)을 적습니다. 닉네임, 옾링(다른 오픈프로필로 바꿈), 프로필 사진 변경을 알리며, 같은 사람이 5분 안에 또 바꾸면 기록만 하고 알리지 않습니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="profile"></span><div class="bub notice">🔔 프로필 변경 감지&#10;━━━━━━━━━━━━━━&#10;👤 @하늘_판매&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;✏️ 바뀐 내용&#10;▸ 닉네임&#10; ├ 전 : 하늘&#10; └ 후 : 하늘_판매&#10;━━━━━━━━━━━━━━&#10;⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요</div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 변경 감지가 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="profile-on">켜기</button></div></div></div>
     <div class="sec-f"><span>기록은 이 기능을 켠 방에서만 남습니다. 입장·퇴장 기록과 따로 켜고 끕니다.</span></div>
@@ -636,8 +636,8 @@
     <div class="srow inline main" id="row-r-visit-on"><div class="srow-l"><span class="lb">입장·퇴장 기록</span><p>켜면 누군가 들어오거나 나갈 때 그 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-visit-on" aria-label="입장·퇴장 기록"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-visit-on" data-open="false"><div class="dep-in">
-      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 시 예시입니다. 퇴장 시에는 [퇴장 안내]와 퇴장 시각을 적습니다. 이름이 바뀐 적이 있으면 이전 이름도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[입장 안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/me/sH7k2Lb&#10;입장 기록&#10;- 2026-10-09 21:14</div></div></div></div>
+      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 그 사람의 ID·옾링·프로필 사진을 함께 적습니다. 퇴장 때는 퇴장 시각과 머문 시간을, 닉네임이나 옾링이 바뀐 적이 있으면 예전 프로필도 적습니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">📥 입장 안내&#10;━━━━━━━━━━━━━━&#10;👤 @하늘&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;🕒 입장 기록 · 2회&#10; ├ 2026-10-08 20:02&#10; └ 2026-10-09 21:14&#10;━━━━━━━━━━━━━━</div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 기록이 꺼져 있습니다. 켜면 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-visit-on">켜기</button></div></div></div>
    </section>
@@ -703,8 +703,8 @@
     <div class="srow inline main" id="row-r-profile-on"><div class="srow-l"><span class="lb">프로필 기록</span><p>켜면 프로필을 바꾼 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다. 처음 확인한 사람은 현재 프로필만 저장하고, 이후 바뀔 때부터 기록합니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-on" aria-label="프로필 기록"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-profile-on" data-open="false"><div class="dep-in">
-      <div class="srow inline" id="row-r-profile-name"><div class="srow-l"><span class="lb">닉네임 변경</span><p>이전 닉네임과 함께 안내합니다.</p></div>
-        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-name" aria-label="닉네임 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
+      <div class="srow inline" id="row-r-profile-name"><div class="srow-l"><span class="lb">닉네임·옾링 변경</span><p>바뀌기 전 닉네임·옾링과 함께 안내합니다.</p></div>
+        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-name" aria-label="닉네임·옾링 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-profile-photo"><div class="srow-l"><span class="lb">프로필 사진 변경</span><p>바뀐 사실만 기록합니다. 사진은 저장하거나 표시하지 않습니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-photo" aria-label="프로필 사진 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-profile-status"><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>이전 상태 메시지와 함께 안내합니다.</p></div>
@@ -712,8 +712,8 @@
       <div class="srow" id="row-r-profile-status-na" hidden><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.</p></div></div>
       <div class="srow" id="row-r-profile-lookup"><div class="srow-l"><span class="lb">기록 조회 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>프로필 @닉네임」으로 그 사람의 기록을 볼 수 있습니다.</p></div>
         <div class="srow-r"><div class="seg" id="r-profile-lookup" role="group" aria-label="기록 조회 명령어"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">방장·부방장만</button><button type="button" data-v="all" aria-pressed="false">모두</button><button type="button" data-v="off" aria-pressed="false">끄기</button></div></div></div>
-      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>그 사람의 오픈프로필 링크(옾링)도 함께 적습니다. 두 번 이상 바꾼 사람은 누적 횟수도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[프로필 변경 감지]&#10;이전닉 : 하늘&#10;옾링 : https://open.kakao.com/me/sH7k2Lb&#10;지금 닉 : @하늘_판매</div></div></div></div>
+      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>그 사람의 ID·옾링·프로필 사진과 바뀐 내용(전·후)을 적습니다. 닉네임, 옾링(다른 오픈프로필로 바꿈), 프로필 사진 변경을 알리며, 같은 사람이 5분 안에 또 바꾸면 기록만 하고 알리지 않습니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">🔔 프로필 변경 감지&#10;━━━━━━━━━━━━━━&#10;👤 @하늘_판매&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;✏️ 바뀐 내용&#10;▸ 닉네임&#10; ├ 전 : 하늘&#10; └ 후 : 하늘_판매&#10;━━━━━━━━━━━━━━&#10;⏱ 같은 사람이 5분 안에 또 바꾸면 알리지 않아요</div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 기록이 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-profile-on">켜기</button></div></div></div>
    </section>
