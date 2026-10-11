@@ -1316,7 +1316,11 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 8000, '#28 photo notice')
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 8000, '#28 photo notice').catch((e) => {
+      const sl = botA.slot
+      throw new Error(e.message + ' DIAG ' + JSON.stringify({ live: sl.live(), syncing: vb.memberSyncing, syncAt: vb.memberSyncAt, now: Date.now(), checking: vb.checking,
+        sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m703: vb.members.get('703'), m702: vb.members.get('702') && vb.members.get('702').name }))
+    })
     const pc = sentIn(iBook).find((t) => t.indexOf('\n👤 기본프로필\n') >= 0)
     if (pc.indexOf('🔗 옾링 : 없음\n🖼 사진 : https://k.kakaocdn.net/dn/p/703b.jpg\n') < 0 || pc.indexOf('▸ 사진\n ├ 전 : 없음\n └ 후 : https://k.kakaocdn.net/dn/p/703b.jpg') < 0) throw new Error('#28 photo change ' + JSON.stringify(pc))
     await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 둘째또닉\n') >= 0), 8000, '#28 second rename notice')
@@ -1908,11 +1912,15 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await oldHub.attach(id, rec())
     if (oldHub.pool.bots.size || fs.logins[uid] !== logins) throw new Error('owner: a stood-down sender must not attach')
 
-    // 울타리가 없던 예전 서버가 지운 로그인 → 새 서버가 되살린다
+    // 울타리가 없던 예전 서버가 지운 로그인(기록·봇 상태·맡은 방 bot_down) → 새 서버가 되살린다
     await store.saveRecord(id, Object.assign(rec(), { credentials: { access_token: '', refresh_token: '', user_id: uid, device_uuid: '', device_type: 'tablet' }, needs_register: true, reason: 'kicked' }))
+    await store.botState(id, { state: 'needs_register' })
+    await store.markBotRooms(id, Date.now())
+    if (rowOf(iO).error_code !== 'bot_down') throw new Error('owner: test setup bot_down')
     if ((await newHub.heal()) !== 1) throw new Error('owner: heal restores one login')
     const healed = store.records.get(id)
     if (healed.needs_register || healed.credentials.access_token !== 'fake-ov' || healed.reason !== 'ok') throw new Error('owner: healed record')
+    await waitFor(() => rowOf(iO).state === 'active' && store.bots.get(id).state === 'connected', 5000, 'owner: heal puts the bot and its rooms back')
     if ((await newHub.heal()) !== 0) throw new Error('owner: heal leaves a good record alone')
 
     // 막 켜진 주인이 KICKOUT 을 받음(예전 서버가 다시 붙음) → 지우지 않고 다시 붙는다

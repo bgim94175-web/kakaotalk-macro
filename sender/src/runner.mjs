@@ -355,9 +355,13 @@ export class Hub {
       if (slot.stopped || slot.halting || slot.record.needs_register || !socketUp(slot)) continue
       if (await store.restoreLogin(id, slot.record)) n++
     }
+    let bots = 0
     for (const [id, s] of [...this.pool.bots]) {
-      if (s.live() && await store.restoreLogin(id, s.record)) n++
+      if (s.live() && await store.restoreLogin(id, s.record)) bots++
     }
+    // 예전 서버는 봇을 끊긴 것으로 적으며 맡은 방도 bot_down 으로 바꿨다: 봇 상태와 방을 바로 다시 맞춘다
+    if (bots) await this.pool.reconcile(null, { periodic: true }).catch((e) => log('pool', `reconcile after restore failed: ${e && e.message ? e.message : e}`))
+    n += bots
     if (n) log('hub', `restored ${n} saved login(s) cleared by the previous sender`)
     return n
   }
