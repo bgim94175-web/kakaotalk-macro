@@ -274,7 +274,8 @@ function chatsLine(stat, rows) {
     const t = String(r.type).slice(0, 16)
     types[t] = (types[t] || 0) + 1
   }
-  const from = stat.source === 'live' ? `live ${stat.pages}p` : `login (${stat.why || '?'})${stat.kept ? ' + kept ' + stat.kept : ''}`
+  const kept = stat.kept ? ' + kept ' + stat.kept : ''
+  const from = stat.source === 'live' ? `live ${stat.pages}p${stat.why === 'partial' ? ' (partial)' : ''}${kept}` : `login (${stat.why || '?'})${kept}`
   const typeText = Object.keys(types).map((t) => `${t}:${types[t]}`).join(' ')
   return `chats ${from} rows ${rows.length} bad ${stat.bad || 0}` +
     ` · open ${kinds.open_room} (unnamed ${unnamed}) dm ${kinds.open_dm} normal ${kinds.normal}` +
@@ -918,7 +919,16 @@ class Slot {
     const st = stat || {}
     this.liveChatsP = (async () => {
       let list = await liveChats(this.client, st)
-      if (st.source === 'live') {
+      // 카카오가 eof 를 붙여 일부만 준 것 같으면(지난 목록의 오픈방이 절반 넘게 한꺼번에 빠짐) 빠진 방을 더하고
+      // 지난 목록을 그대로 둔다. 폰에서 나간 방은 하나씩 빠지므로 이렇게 한꺼번에 빠지지 않는다
+      const prevOpen = (this.lastLive || []).filter((ch) => ch && ch.link_id)
+      const have0 = new Set(list.map((ch) => String(ch && ch.chat_id)))
+      const gone = prevOpen.filter((ch) => !have0.has(String(ch.chat_id)))
+      if (st.source === 'live' && prevOpen.length >= 4 && gone.length * 2 > prevOpen.length) {
+        list = list.concat(gone)
+        st.kept = gone.length
+        st.why = 'partial'
+      } else if (st.source === 'live') {
         this.lastLive = list
       } else if (this.lastLive && this.lastLive.length) {
         const have = new Set(list.map((ch) => String(ch && ch.chat_id)))

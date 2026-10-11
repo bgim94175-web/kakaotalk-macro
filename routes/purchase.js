@@ -701,12 +701,12 @@ router.post('/api/deposit-hook',
     }
     const matched = found.rows[0];
 
-    // 금액을 확실히 읽지 못했으면(입금과 붙은 금액이 여럿 · 다른 "…원" 숫자가 있음 · 모르는 모양) 자동 처리하지 않는다.
-    // 맞는 주문은 후보로만 붙여 둔다
+    // 금액을 확실히 읽지 못했으면(다른 "…원" 숫자가 있음 · 모르는 모양) 자동 처리하지 않는다.
+    // 후보 주문도 붙이지 않는다 — 그 금액이 입금자명 칸의 숫자일 수 있다(관리자가 원문을 보고 연결한다)
     if (!rd.sure) {
-      await setStatus('ambiguous', matched.id);
-      return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
-                        order: matched.id, why: '금액을 확실히 읽지 못했습니다. 관리자 확인이 필요합니다' });
+      await setStatus('ambiguous', null);
+      return res.json({ ok: true, status: 'ambiguous', amount: usedAmount,
+                        why: '금액을 확실히 읽지 못했습니다. 관리자 확인이 필요합니다' });
     }
 
     // 금액 뒷자리를 못 받은 주문(needs_review, 금액=정가 그대로)은 금액이 고유하지 않다 —
