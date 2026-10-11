@@ -41,7 +41,7 @@
   var MSG_PRICE_FAIL = '가격 정보를 불러올 수 없습니다';
   var MSG_BROKEN = '화면을 표시하지 못했습니다. 새로고침 후에도 같으면 문의해 주세요.';
   var MSG_LOGIN = '로그인이 필요합니다.';
-  var MSG_BAD_LINK = '오픈채팅방 링크 형식이 아닙니다. https://open.kakao.com/o/로 시작하는 링크를 입력해 주세요.';
+  var MSG_BAD_LINK = '오픈채팅방 링크를 찾지 못했습니다. 카카오톡에서 방 링크(https://open.kakao.com/o/…)를 복사해 붙여 넣어 주세요.';
   var MSG_UNVERIFIED = '방을 지금 확인하지 못했습니다. 결제 후 K bot이 들어갈 때 다시 확인하며, 들어가지 못하면 그 이유를 패널에 표시합니다.';
   var MSG_PROFILE_ONLY = 'K bot은 방의 프로필 설정과 관계없이 오픈프로필로 들어갑니다.';   // 미리 보기는 profile_only 를 늘 false 로 준다(D12). 호환용으로만 남긴다.
 
@@ -255,10 +255,18 @@
   var KEY_RE = /^KAKA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 
   /* 붙여넣은 글에서 오픈채팅 링크를 뽑아 https://open.kakao.com/o/<code> 로 맞춘다. 없으면 ''.
+     lib/openchat.js 와 같은 식이다(lib/purchase-check.js 가 두 쪽 결과를 맞춰 본다).
      서버(lib/openchat.normLink)가 최종 판정한다 — 이건 화면 안내용 */
+  var LINK_RE = /(?:(?:^|[^\/.@:])https?:\/\/|(?:^|[^A-Za-z0-9.\-_@\/]))open\.kakao\.com\/o\/([A-Za-z0-9]{1,40})(?![A-Za-z0-9_\-])/i;
+  var ZW_RE = /[\u200B-\u200D\u2060\uFEFF]/g;
   function normLink(text) {
-    var m = String(text || '').match(/(?:https?:\/\/)?open\.kakao\.com\/o\/([A-Za-z0-9]+)/i);
+    var m = LINK_RE.exec(String(text || '').slice(0, 2000).replace(ZW_RE, ''));
     return m ? 'https://open.kakao.com/o/' + m[1] : '';
+  }
+  /* 미리 보기에 보낼 값: 방 링크, 아니면 open.kakao.com 이 든 글 그대로
+     (오픈프로필·게시물 링크는 서버가 무엇이 틀렸는지 알려 준다) */
+  function linkKey(text) {
+    return normLink(text) || (/open\.kakao\.com\//i.test(String(text || '')) ? str(text) : '');
   }
   function shortLink(u) { return String(u || '').replace(/^https?:\/\//i, ''); }
 
@@ -1015,7 +1023,7 @@
     minigame: 'K bot이 방에 들어가면 바로 게임 명령어를 쓸 수 있습니다'
   };
   /* 미리 보기 오류 가운데 다시 확인해도 소용없는 것 — 주문을 막는다 */
-  var PV_HARD = { bad_link: 1, not_found: 1, not_group: 1, taken: 1, room_taken: 1, blocked_room: 1 };
+  var PV_HARD = { bad_link: 1, profile_link: 1, post_link: 1, not_found: 1, not_group: 1, taken: 1, room_taken: 1, blocked_room: 1 };
   /* 문구 옆에 [문의하기] 를 붙이는 사유 (6.6) */
   var SUPPORT_REASONS = { room_taken: 1, taken: 1, pending_exists: 1, blocked_room: 1, too_many_pending: 1 };
 
@@ -1152,7 +1160,7 @@
       var r = { i: i, installId: null, view: null, preview: null, pvFor: '', pvErr: null, req: 0, pvP: null, needsCode: false, unvIn: null, prod: {} };
 
       r.linkIn = el('input', { type: 'url', id: linkId, name: linkId, inputmode: 'url', placeholder: 'https://open.kakao.com/o/…',
-        autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', maxlength: '400', 'aria-describedby': 'room' + i + '-pv err-' + linkId });
+        autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', maxlength: '2000', 'aria-describedby': 'room' + i + '-pv err-' + linkId });
       r.checkBtn = el('button', { type: 'button', cls: 'btn' }, '확인');
       r.pv = el('div', { cls: 'rpv', id: 'room' + i + '-pv' });
       r.linkErr = el('p', { cls: 'err', id: 'err-' + linkId, role: 'alert', hidden: true });
@@ -1202,7 +1210,7 @@
 
       r.linkIn.addEventListener('input', function () {
         setRowErr(r, 'link', '');
-        if (normLink(r.linkIn.value) !== r.pvFor) resetPreview(r);
+        if (linkKey(r.linkIn.value) !== r.pvFor) resetPreview(r);
         updateSum();
       });
       r.linkIn.addEventListener('paste', function () { setTimeout(function () { check(r, false); }, 0); });
@@ -1281,7 +1289,7 @@
     function check(r, force) {
       if (r.installId) return Promise.resolve();
       var raw = str(r.linkIn.value);
-      var v = normLink(raw);
+      var v = linkKey(raw);
       if (!raw) { resetPreview(r); setRowErr(r, 'link', ''); return Promise.resolve(); }
       if (!v) {
         resetPreview(r);
@@ -1477,12 +1485,13 @@
           return;
         }
         var v = normLink(r.linkIn.value);
-        if (!v) { setRowErr(r, 'link', MSG_BAD_LINK); mark(r.linkIn); return; }
+        /* 서버가 알려 준 이유(오픈프로필 링크 등)가 있으면 그 문구를 먼저 보인다 */
         if (r.pvErr && PV_HARD[r.pvErr.reason]) {
           setRowErr(r, 'link', r.pvErr.msg, SUPPORT_REASONS[r.pvErr.reason] ? supportBtn('문의하기', '구매 · ' + shortLink(v) + ' · ' + r.pvErr.msg) : null);
           mark(r.linkIn);
           return;
         }
+        if (!v) { setRowErr(r, 'link', MSG_BAD_LINK); mark(r.linkIn); return; }
         var lid = r.preview && r.preview.room && r.preview.room.link_id;
         var mineId = r.preview && r.preview.mine && r.preview.mine.install_id;
         if (seen['u' + v] || (lid && seen['l' + lid]) || (mineId && seen['i' + mineId])) { setRowErr(r, 'link', '이미 추가한 방입니다'); mark(r.linkIn); return; }
@@ -1521,7 +1530,7 @@
       lock(true);
       /* 확인하지 않은 링크는 먼저 확인한다(서버도 다시 확인하지만, 미확인 동의란을 화면에 띄우려면 필요) */
       var pend = rows.filter(function (r) {
-        return !r.installId && normLink(r.linkIn.value) && (normLink(r.linkIn.value) !== r.pvFor || r.pvP || (!r.preview && !r.pvErr));
+        return !r.installId && linkKey(r.linkIn.value) && (linkKey(r.linkIn.value) !== r.pvFor || r.pvP || (!r.preview && !r.pvErr));
       });
       Promise.all(pend.map(function (r) { return check(r, false); })).then(function () {
         var bad = validate();
