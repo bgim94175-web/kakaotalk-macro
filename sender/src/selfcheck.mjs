@@ -1695,31 +1695,55 @@ async function withLog(fn) {
       fs.infolinkFail = 0
     }
   }
-  // #28-8 옾링 묶음(20개) 하나가 한 사람 때문에 -500 이면 반으로 나눠 다시 읽어 나머지는 읽고 그 사람만 옾링 없음으로 둔다.
-  //   INFOLINK 자체가 안 되면(나눈 두 쪽도 실패, 된 읽기 없음) 몇 번만 보내고 멈추고 아무것도 정하지 않는다(모름).
+  // #28-8 옾링 묶음(20개)에 읽지 못하는 사람이 있으면 카카오가 묶음 전체를 -500 으로 거절한다 → 나눠 다시 읽어 나머지는 읽고
+  //   혼자서도 실패하는 사람만 옾링 없음으로 둔다. 읽지 못하는 사람이 많으면(두 쪽 다 실패) 옾링을 아는 사람 하나로 INFOLINK 가
+  //   되는지 확인하고 하나씩 읽는다. INFOLINK 자체가 안 되면(확인도 실패) 몇 번만 보내고 멈추고 아무것도 정하지 않는다(모름).
   {
     const slot = botA.slot
-    const ids = Array.from({ length: 25 }, (_, k) => String(7800 + k))
+    const ids = Array.from({ length: 37 }, (_, k) => String(7800 + k))
     for (const id of ids) fs.setProfiles(id, [{ li: id + '1', name: '묶음' + id, url: 'https://open.kakao.com/o/b' + id }])
     const plis = ids.map((id) => id + '1')
+    const urlOf = (k) => 'https://open.kakao.com/o/b' + ids[k]
     const reads = () => packets('INFOLINK').length
+    const check = (got, want, what) => {
+      const miss = want.filter(([li, lu]) => got.get(li) !== lu)
+      if (miss.length) throw new Error(what + ' ' + JSON.stringify(miss.map(([li, lu]) => [li, got.get(li), lu])))
+    }
     try {
+      // INFOLINK 가 안 된다 → 20·10·10·확인 한 번만 보내고 멈춘다
       fs.infolinkFail = -500
       const r0 = reads()
-      const down = await slot.linksFor(plis)
-      if (down.size !== 0) throw new Error('#28-8 nothing decided while INFOLINK fails ' + JSON.stringify([...down]))
-      if (reads() - r0 > 3) throw new Error('#28-8 stops early while INFOLINK fails: ' + (reads() - r0))
+      await withLog(async (lines) => {
+        const down = await slot.linksFor(plis.slice(0, 25))
+        if (down.size !== 0) throw new Error('#28-8 nothing decided while INFOLINK fails ' + JSON.stringify([...down]))
+        if (!hasLine(lines, 'open link read failed: status -500 (stopped) (25 left unknown', 'check read failed')) throw new Error('#28-8 down log ' + JSON.stringify(lines))
+      })
+      if (reads() - r0 > 4) throw new Error('#28-8 stops early while INFOLINK fails: ' + (reads() - r0))
+      // 한 사람 → 그 사람만 옾링 없음
       fs.infolinkFail = 0
       fs.infolinkBad = new Set([plis[3]])
       await withLog(async (lines) => {
-        const got = await slot.linksFor(plis)
-        const miss = plis.filter((li, k) => got.get(li) !== (k === 3 ? '' : 'https://open.kakao.com/o/b' + ids[k]))
-        if (miss.length) throw new Error('#28-8 split read ' + JSON.stringify(miss.map((li) => [li, got.get(li)])))
+        const got = await slot.linksFor(plis.slice(0, 25))
+        check(got, plis.slice(0, 25).map((li, k) => [li, k === 3 ? '' : urlOf(k)]), '#28-8 split read')
         if (!hasLine(lines, 'open link read failed: status -500', '1 unreadable set to no link')) throw new Error('#28-8 log ' + JSON.stringify(lines))
       })
       const r1 = reads()
-      await slot.linksFor(plis)
+      await slot.linksFor(plis.slice(0, 25))
       if (reads() !== r1) throw new Error('#28-8 known links are not read again')
+      // 많은 사람(12명 중 10명) → 확인 읽기 뒤 하나씩 읽어 두 사람만 옾링이 나온다
+      const many = plis.slice(25)
+      fs.infolinkBad = new Set(many.filter((_, k) => k !== 4 && k !== 9))
+      const got = await slot.linksFor(many)
+      check(got, many.map((li, k) => [li, k === 4 || k === 9 ? urlOf(25 + k) : '']), '#28-8 many unreadable')
+      // 나갈 때처럼 한 사람만 읽는다: 읽지 못하면 확인 뒤 옾링 없음, INFOLINK 가 안 되면 모름
+      fs.setProfiles('7900', [{ li: '79001', name: '혼자', url: 'https://open.kakao.com/o/b7900' }])
+      fs.setProfiles('7901', [{ li: '79011', name: '혼자2', url: 'https://open.kakao.com/o/b7901' }])
+      fs.infolinkBad = new Set(['79001'])
+      const one = await slot.linksFor(['79001'])
+      if (one.get('79001') !== '') throw new Error('#28-8 single unreadable ' + JSON.stringify([...one]))
+      fs.infolinkFail = -500
+      const none = await slot.linksFor(['79011'])
+      if (none.size !== 0) throw new Error('#28-8 single while INFOLINK fails ' + JSON.stringify([...none]))
     } finally {
       fs.infolinkFail = 0
       fs.infolinkBad = new Set()
