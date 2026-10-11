@@ -19,6 +19,9 @@
 // 봇 계정(users[id].bot)은 기본으로 오픈프로필 1개를 갖는다(users[id].profiles, /v1/fake/profiles 로 바꿈).
 // SYNCLINK 는 그 오픈프로필(lt 1, /me/ 주소, op 표지) + 걸러져야 할 링크 2개(이 계정이 만든 방 lt 2, 1:1 오픈채팅 /o/)를 준다.
 // users[id].syncFail 이면 SYNCLINK 가 -500. 방 구성원은 ptp(1 기본·2 닉네임·16 오픈프로필)·pli 를 갖는다(없으면 ptp 1).
+// 방 멤버 명부 시험 스위치(방 r): r.getmemFail = status(GETMEM 거절) · r.getmemSkip = [id](GETMEM 이 그 사람을 빼고 준다) ·
+//   r.getmemHang / r.memberHang(GETMEM / MEMBER 가 releaseHeld() 전까지 답하지 않는다) · r.keepLeft(나간 사람에게도 MEMBER 가 답한다).
+//   서버: infolinkFail = status(방 링크가 아닌 INFOLINK, 곧 사람의 오픈프로필 링크 읽기를 그 status 로 거절).
 // 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -93,6 +96,8 @@ class FakeServer {
     this.clients = new Set()
     this.packets = []        // 최근 패킷 기록(시험 확인용)
     this.logins = {}         // userId → 새 세션 수
+    this.holds = []          // 답을 미룬 패킷(getmemHang·memberHang) — releaseHeld() 로 푼다
+    this.infolinkFail = 0
     this.load()
   }
 
@@ -250,6 +255,17 @@ class FakeServer {
     return m ? Number(m.mt) : 0
   }
 
+  /** 시험: releaseHeld() 전까지 답하지 않는다(응답 없는 카카오). */
+  held() {
+    return new Promise((ok) => this.holds.push(ok))
+  }
+
+  releaseHeld() {
+    const list = this.holds
+    this.holds = []
+    for (const ok of list) ok()
+  }
+
   async packet(client, method, body) {
     const out = await this.handle(client, method, body || {})
     this.record(client, method, body, out)
@@ -354,14 +370,19 @@ class FakeServer {
     if (method === 'MEMBER') {
       const r = this.byChat(b.chatId)
       if (!r) return resp(method, { status: -403 })
+      if (r.memberHang) await this.held()
       if (r.dropMember) return resp(method, { status: 0, members: [] })
       const ids = (b.memberIds || []).map(str)
-      return resp(method, { status: 0, chatId: L(r.chatId), members: ids.filter((id) => r.members[id]).map((id) => this.memberStruct(r, id)) })
+      const known = (id) => r.members[id] || (r.keepLeft && r.left && r.left[id])
+      return resp(method, { status: 0, chatId: L(r.chatId), members: ids.filter(known).map((id) => this.memberStruct(r, id)) })
     }
     if (method === 'GETMEM') {
       const r = this.byChat(b.chatId)
       if (!r) return resp(method, { status: -403 })
-      return resp(method, { status: 0, members: Object.keys(r.members).map((id) => this.memberStruct(r, id)) })
+      if (r.getmemHang) await this.held()
+      if (r.getmemFail) return resp(method, { status: Number(r.getmemFail) })
+      const skip = Array.isArray(r.getmemSkip) ? r.getmemSkip : []
+      return resp(method, { status: 0, members: Object.keys(r.members).filter((id) => !skip.includes(id)).map((id) => this.memberStruct(r, id)) })
     }
     if (method === 'CHATINFO') {
       const r = this.byChat(b.chatId)
@@ -377,6 +398,8 @@ class FakeServer {
       })
     }
     if (method === 'INFOLINK') {
+      const roomLink = (li) => !!this.byLi(li) || CUSTOMER_ROOMS.some((x) => x.link_id === str(li))
+      if (this.infolinkFail && !(b.lis || []).some(roomLink)) return resp(method, { status: Number(this.infolinkFail) })
       const ols = []
       for (const li of b.lis || []) {
         const s = str(li)
@@ -437,7 +460,7 @@ class FakeServer {
   }
 
   memberStruct(r, id) {
-    const m = r.members[id]
+    const m = r.members[id] || (r.left && r.left[id])
     return {
       userId: L(id),
       type: 1000,
@@ -542,6 +565,7 @@ class FakeServer {
     }
     const logId = ev.log_id ? String(ev.log_id) : this.nextLog()
     if (kind === 'join' || kind === 'leave') {
+      if (kind === 'leave' && r.keepLeft && r.members[uid]) r.left = Object.assign(r.left || {}, { [uid]: r.members[uid] })
       if (kind === 'join') r.members[uid] = Object.assign({ mt: 2, photo: '', status: null }, r.members[uid] || {}, { nick: name || (r.members[uid] && r.members[uid].nick) || '' })
       else delete r.members[uid]
       this.save()
