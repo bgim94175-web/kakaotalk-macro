@@ -546,25 +546,25 @@ export function branch(items) {
   return items.map((t, i) => (i === items.length - 1 ? ' └ ' : ' ├ ') + t)
 }
 
-/** 👤 줄. id 와 이름이 있으면 @이름(멘션), 아니면 이름만 */
-export function whoLine(name, userId) {
+// 카카오톡은 글이 길면 앞부분만 보여 주고 [전체보기]를 띄운다. 사람 안내는 첫 줄(제목 · @닉네임)만 보이게
+// 그 뒤에 보이지 않는 글자(U+200B)를 채우고, 자세한 내용은 [전체보기]를 눌러야 보이게 한다.
+export const FOLD = '\u200b'.repeat(500)
+
+/**
+ * 접힌 사람 안내: 첫 줄 = 제목 · @닉네임(멘션), 그 뒤는 [전체보기]. body 에는 @ 를 쓰지 않는다(멘션은 하나).
+ * → {text, mention}
+ */
+export function foldedNotice(title, name, userId, body) {
   const nm = oneLine(name, 40).replace(/@/g, '')
   const uid = idText(userId)
-  if (uid && nm) return { line: '👤 @' + nm, mention: { userId: uid, len: nm.length } }
-  return { line: '👤 ' + (nm || '이름 없음'), mention: null }
+  const head = uid && nm ? `${title} · @${nm}` : `${title} · ${nm || '이름 없음'}`
+  const text = head + FOLD + '\n' + body.join('\n')
+  return { text, mention: uid && nm ? { userId: uid, len: nm.length, at: title.length + 4 } : null }
 }
 
-/** 멘션 위치 = 그 줄의 @ 바로 뒤(앞줄에 @ 가 있어도 틀리지 않게 줄로 찾는다) */
-export function mentionAt(text, who) {
-  if (!who || !who.mention) return null
-  const i = text.indexOf('\n' + who.line)
-  if (i < 0) return null
-  return Object.assign({}, who.mention, { at: i + 1 + who.line.indexOf('@') + 1 })
-}
-
-/** 👤 · 🆔 · 🔗 옾링 · 🖼 사진. photo 가 null 이면(모름) 사진 줄을 뺀다. */
-export function personLines(cur, who) {
-  const out = [who.line]
+/** 👤 닉네임 · 🆔 · 🔗 옾링 · 🖼 사진. photo 가 null 이면(모름) 사진 줄을 뺀다. 멘션은 첫 줄에 있으므로 @ 없이 쓴다. */
+export function personLines(cur) {
+  const out = ['👤 ' + (oneLine(cur.name, 40).replace(/@/g, '') || '이름 없음')]
   const uid = idText(cur.userId)
   if (uid) out.push('🆔 ' + uid)
   out.push(LINK_LINE + (profileUrl(cur.link) || NO_LINK))
@@ -589,7 +589,7 @@ const FIELD_LABEL = { name: '닉네임', link: '옾링', photo: '사진', status
 function fieldText(kind, v) {
   const s = v == null ? '' : String(v)
   if (kind === 'name') return oneLine(s, 40).replace(/@/g, '') || '이름 없음'
-  if (kind === 'status') return oneLine(s, 60) || '없음'
+  if (kind === 'status') return oneLine(s, 60).replace(/@/g, '＠') || '없음'
   if (kind === 'photo') return photoUrl(s) || (s ? '알 수 없음' : '없음')
   return profileUrl(s) || NO_LINK
 }
@@ -599,16 +599,14 @@ function fieldText(kind, v) {
  * changes = 안내할 변경 [{kind:'name'|'link'|'photo'|'status', from, to}], n = 이 사람의 누적 변경 횟수.
  */
 export function profileChangeNotice(cur, changes, n) {
-  const who = whoLine(cur.name, cur.userId)
-  const lines = ['🔔 프로필 변경 감지', RULE, ...personLines(cur, who), '', '✏️ 바뀐 내용']
+  const lines = [RULE, ...personLines(cur), '', '✏️ 바뀐 내용']
   for (const c of changes) {
     lines.push('▸ ' + FIELD_LABEL[c.kind])
     lines.push(...branch(['전 : ' + fieldText(c.kind, c.from), '후 : ' + fieldText(c.kind, c.to)]))
   }
   if (n >= 2) lines.push('🔁 누적 변경 : ' + n + '회')
   lines.push(RULE)
-  const text = lines.join('\n')
-  return { text, mention: mentionAt(text, who) }
+  return foldedNotice('🔔 프로필 변경 감지', cur.name, cur.userId, lines)
 }
 
 /** 보내기 전 옾링 채우기: '🔗 옾링 : 없음' 줄을 링크로 바꾸고, 그 뒤에 있는 멘션 위치를 그만큼 민다. */

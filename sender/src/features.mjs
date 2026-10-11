@@ -1,6 +1,6 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
-import { branch, josa, kstShort, mentionAt, personLines, profileObserve, RULE, stayText, whoLine } from './roomfeat.mjs'
+import { branch, foldedNotice, josa, kstShort, personLines, profileObserve, RULE, stayText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -1717,9 +1717,8 @@ function visitNotice(row, kind) {
   const r = row || {}
   const leave = kind === 'leave'
   const userId = /^[1-9][0-9]*$/.test(String(r.userId || '')) ? String(r.userId) : ''
-  const who = whoLine(r.name, userId)
-  const cur = { userId, link: r.link, photo: typeof r.photo === 'string' ? r.photo : null }
-  const lines = [leave ? '📤 퇴장 안내' : '📥 입장 안내', RULE, ...personLines(cur, who)]
+  const cur = { userId, name: r.name, link: r.link, photo: typeof r.photo === 'string' ? r.photo : null }
+  const lines = [RULE, ...personLines(cur)]
   const times = (leave ? r.leaves : r.joins) || []
   if (leave && times.length) {
     const out = Number(times[times.length - 1])
@@ -1739,8 +1738,7 @@ function visitNotice(row, kind) {
     })))
   }
   lines.push(RULE)
-  const text = lines.join('\n')
-  return { text, mention: mentionAt(text, who) }
+  return foldedNotice(leave ? '📤 퇴장 안내' : '📥 입장 안내', r.name, userId, lines)
 }
 
 function mentionIdJson(id) {
@@ -1790,7 +1788,8 @@ export function visitMentionExtra(text, mention) {
   const mark = text.indexOf('@')
   if (mark < 0 || text.indexOf('@', mark + 1) >= 0) return ''
   if (text.slice(mark + 1, mark + 1 + len).length !== len) return ''
-  if (text.charAt(mark + 1 + len) && text.charAt(mark + 1 + len) !== '\n') return ''
+  const after = text.charAt(mark + 1 + len)
+  if (after && after !== '\n' && after !== '\u200b') return ''
   return `{"mentions":[{"user_id":${idJson},"at":[1],"len":${len}}]}`
 }
 
