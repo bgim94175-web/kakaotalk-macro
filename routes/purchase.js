@@ -15,7 +15,7 @@ const installs = require('../lib/installs');
 const entitle = require('../lib/entitle');
 const memberAuth = require('../lib/member-auth');
 const rl = require('../lib/ratelimit');
-const { amountCandidates, parseName } = require('../lib/deposit-text');
+const { readDeposit } = require('../lib/deposit-text');
 
 const router = express.Router();
 
@@ -556,18 +556,21 @@ router.post('/api/lookup', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // POST /api/deposit-hook — 폰 자동화 앱이 은행 알림을 그대로 넘겨주는 웹훅
 // 처리 결과가 뭐든 200 + ok:true 로 답한다 (자동화 앱이 재시도를 반복하면 중복만 쌓인다)
-// 흐름: 알림 원문 → 금액 후보 → 같은 금액의 pending 주문 1건 → keys.approveOrder
+// 흐름: 알림 원문 → 금액(확실할 때만 자동) → 같은 금액의 pending 주문 1건 → keys.approveOrder
 //       회원 주문은 회원 계정에 적용(매크로 기간 · 방 설치 + 봇 배정), 커밋 뒤 entitle.afterApprove 가
 //       sender 에 권리를 밀고(/v1/grants) 새 설치를 알린다(/v1/bot/sync). 예전 키 주문은 예전 규칙 그대로.
 //       같은 방을 다른 회원이 먼저 입금했으면(D9) 롤백 → 입금 ambiguous + 주문 needs_review(관리자 처리).
 // ─────────────────────────────────────────────────────────────
 
 // 본문 꺼내기. 자동화 앱마다 보내는 모양이 다르다.
-//  - JSON {text|message|body|raw, source, at}  (server.js 의 express.json 이 이미 풀어 둔 경우)
+//  - JSON {text|message|body|raw, source, at}  (server.js 는 이 경로에 express.json 을 쓰지 않는다 → 글자 그대로 받아 여기서 푼다)
 //  - text/plain 원문
 //  - 폼(urlencoded) text=...&source=...
 //  - 깨진 JSON — MacroDroid 처럼 변수를 JSON 문자열 안에 그대로 끼워 넣으면 알림 본문의
 //    줄바꿈·따옴표 때문에 JSON 이 깨진다. 금액은 원문 안에 그대로 있으니 버리지 않고 원문째 쓴다.
+function jsonOr(t) {
+  try { return JSON.parse(t); } catch (e) { return null; }
+}
 function hookBody(req) {
   let b = req.body;
   if (Buffer.isBuffer(b)) b = b.toString('utf8');
@@ -575,11 +578,11 @@ function hookBody(req) {
     const raw = b;
     const t = raw.trim();
     if (t.charAt(0) === '{') {
-      let obj = null;
-      try { obj = JSON.parse(t); } catch (e) {
-        // 문자열 안의 날 줄바꿈·탭은 JSON 에서 금지다 → 공백으로 바꿔 한 번 더
-        try { obj = JSON.parse(t.replace(/[\u0000-\u001f]+/g, ' ')); } catch (e2) { obj = null; }
-      }
+      // 문자열 안의 날 줄바꿈·탭은 JSON 에서 금지다 → \n·\t 로 바꿔 한 번 더(줄 구조를 지켜야 금액·이름 줄을 바로 읽는다).
+      // 그래도 안 되면(JSON 바깥에도 줄바꿈이 있는 경우 등) 공백으로 바꿔 한 번 더
+      const obj = jsonOr(t)
+        || jsonOr(t.replace(/\r\n?|\n/g, '\\n').replace(/\t/g, '\\t').replace(/[\u0000-\u001f]/g, ' '))
+        || jsonOr(t.replace(/[\u0000-\u001f]+/g, ' '));
       if (!obj || typeof obj !== 'object') return { text: raw, source: '', at: 0 };
       b = obj;
     } else if (req.is && req.is('application/x-www-form-urlencoded')) {
@@ -609,7 +612,7 @@ function dedupeHash(text, slot) {
   return signer.sha256Hex(text + '\n#' + slot);
 }
 
-// 금액 후보·입금자명 읽기는 lib/deposit-text.js (은행 알림 모양별 시험: lib/deposit-check.js)
+// 금액·입금자명 읽기는 lib/deposit-text.js (은행 알림 모양별 시험: lib/deposit-check.js, 웹훅 흐름: lib/deposit-hook-check.js)
 
 router.post('/api/deposit-hook',
   express.text({ type: function () { return true; }, limit: '64kb' }),
@@ -637,8 +640,8 @@ router.post('/api/deposit-hook',
     const at = (atRaw > 1000000000000 && atRaw < 4000000000000) ? atRaw : Date.now();
     const slot = Math.floor(at / DEDUPE_SLOT_MS);
     const hash = dedupeHash(text, slot);
-    const cands = amountCandidates(text);
-    const name = parseName(text);
+    const rd = readDeposit(text);      // { amount, sure, cands, name }
+    const name = rd.name;
 
     // 직전 칸에 같은 본문이 이미 있으면 재전송이다
     const prev = await db.one('SELECT id FROM deposits WHERE raw_hash=$1', [dedupeHash(text, slot - 1)]);
@@ -649,41 +652,53 @@ router.post('/api/deposit-hook',
       `INSERT INTO deposits (at, amount, name, raw, source, raw_hash, matched_order, status)
        VALUES ($1::bigint,$2,$3,$4,$5,$6,NULL,'unmatched')
        ON CONFLICT (raw_hash) DO NOTHING RETURNING id`,
-      [at, cands.length ? cands[0] : null, name, text, source, hash]);
+      [at, rd.amount, name, text, source, hash]);
     if (!ins.rowCount) return res.json({ ok: true, status: 'duplicate' });
     const depositId = Number(ins.rows[0].id);
 
-    const setStatus = (status, amount, orderId) =>
-      db.q('UPDATE deposits SET status=$1, amount=COALESCE($2,amount), matched_order=$3 WHERE id=$4',
-        [status, amount === undefined ? null : amount, orderId || null, depositId]);
+    // 금액은 넣을 때 읽은 그대로 둔다(연결한 주문 금액으로 덮지 않는다 — 실제 입금액이 화면에 보여야 한다)
+    const setStatus = (status, orderId) =>
+      db.q('UPDATE deposits SET status=$1, matched_order=$2 WHERE id=$3', [status, orderId || null, depositId]);
 
     // 출금/결제 알림은 무시
     if (/(출금|결제|승인취소|이체수수료)/.test(text) && !/입금/.test(text)) {
-      await setStatus('ignored', null, null);
+      await setStatus('ignored', null);
       return res.json({ ok: true, status: 'ignored', why: '출금 알림' });
     }
 
-    if (!cands.length) {
-      await setStatus('unmatched', null, null);
+    // 입금취소·정정 알림: 앞서 승인한 입금이 취소된 것일 수 있다 → 숨기지 않고 확인 필요로 남긴다
+    if (/입금\s*(취소|정정)/.test(text)) {
+      await setStatus('ambiguous', null);
+      return res.json({ ok: true, status: 'ambiguous', amount: rd.amount,
+                        why: '입금 취소·정정 알림입니다. 관리자 확인이 필요합니다' });
+    }
+
+    if (rd.amount === null) {
+      await setStatus('unmatched', null);
       return res.json({ ok: true, status: 'unmatched', amount: null });
     }
 
-    // 금액 후보로 대기 주문 찾기
-    let matched = null, ambiguous = 0, usedAmount = null;
-    for (const amt of cands) {
-      const r = await db.q("SELECT * FROM orders WHERE status='pending' AND amount=$1", [amt]);
-      if (r.rowCount === 1) { matched = r.rows[0]; usedAmount = amt; break; }
-      if (r.rowCount > 1) { ambiguous = r.rowCount; usedAmount = amt; break; }
+    // 읽은 금액 하나로만 대기 주문을 찾는다. 다른 숫자로 다시 찾지 않는다 —
+    // 100원을 보내며 입금자명 칸에 35047 을 적으면 35,047원 주문이 승인되던 구멍이다.
+    const usedAmount = rd.amount;
+    const found = await db.q("SELECT * FROM orders WHERE status='pending' AND amount=$1", [usedAmount]);
+    if (found.rowCount > 1) {
+      await setStatus('ambiguous', null);
+      console.error('[deposit] 같은 금액 대기 주문 ' + found.rowCount + '건 → 관리자 확인 필요 amount=' + usedAmount);
+      return res.json({ ok: true, status: 'ambiguous', candidates: found.rowCount, amount: usedAmount });
     }
+    if (!found.rowCount) {
+      await setStatus('unmatched', null);
+      return res.json({ ok: true, status: 'unmatched', amount: usedAmount });
+    }
+    const matched = found.rows[0];
 
-    if (ambiguous) {
-      await setStatus('ambiguous', usedAmount, null);
-      console.error('[deposit] 같은 금액 대기 주문 ' + ambiguous + '건 → 관리자 확인 필요 amount=' + usedAmount);
-      return res.json({ ok: true, status: 'ambiguous', candidates: ambiguous, amount: usedAmount });
-    }
-    if (!matched) {
-      await setStatus('unmatched', cands[0], null);
-      return res.json({ ok: true, status: 'unmatched', amount: cands[0] });
+    // 금액을 확실히 읽지 못했으면(입금과 붙은 금액이 여럿 · 다른 "…원" 숫자가 있음 · 모르는 모양) 자동 처리하지 않는다.
+    // 맞는 주문은 후보로만 붙여 둔다
+    if (!rd.sure) {
+      await setStatus('ambiguous', matched.id);
+      return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
+                        order: matched.id, why: '금액을 확실히 읽지 못했습니다. 관리자 확인이 필요합니다' });
     }
 
     // 금액 뒷자리를 못 받은 주문(needs_review, 금액=정가 그대로)은 금액이 고유하지 않다 —
@@ -691,7 +706,7 @@ router.post('/api/deposit-hook',
     // (같은 방 충돌로 needs_review 가 켜진 주문도 여기서 관리자에게 넘어간다)
     // (구매 페이지도 이 주문은 "관리자 확인 대기"로 안내한다)
     if (matched.needs_review) {
-      await setStatus('ambiguous', usedAmount, matched.id);
+      await setStatus('ambiguous', matched.id);
       return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
                         order: matched.id, why: '금액 뒷자리가 없는 주문입니다. 관리자 확인이 필요합니다' });
     }
@@ -704,7 +719,7 @@ router.post('/api/deposit-hook',
 
     const auto = String(process.env.DEPOSIT_AUTO_APPROVE || '1') !== '0';
     if (!auto) {
-      await setStatus('matched', usedAmount, matched.id);
+      await setStatus('matched', matched.id);
       // 수동 확인 모드(DEPOSIT_AUTO_APPROVE=0): 입금은 확인됐으나 발급은 관리자가 한다.
       // 주문을 'paid'(입금 확인됨·발급 대기)로 전환한다 (SPEC 상태집합 pending|paid|done|canceled).
       // pending 일 때만 전환해 이미 done/canceled 인 주문을 덮지 않는다.
@@ -718,7 +733,7 @@ router.post('/api/deposit-hook',
       approved = await db.tx((client) => keys.approveOrder(client, matched.id, null));
     } catch (e) {
       console.error('[deposit] 자동 승인 실패 order=' + matched.id + ' → ' + (e && e.stack ? e.stack : e));
-      await setStatus('ambiguous', usedAmount, matched.id);
+      await setStatus('ambiguous', matched.id);
       return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
                         order: matched.id, why: '자동 승인 중 오류 발생. 관리자 확인 필요' });
     }
@@ -728,7 +743,7 @@ router.post('/api/deposit-hook',
         // 다른 회원이 같은 방을 먼저 입금했다. 주문은 pending 그대로 두고 관리자가 나머지만 적용한다(3.3.1)
         await db.q('UPDATE orders SET needs_review=TRUE WHERE id=$1', [matched.id]);
       }
-      await setStatus('ambiguous', usedAmount, matched.id);
+      await setStatus('ambiguous', matched.id);
       return res.json({ ok: true, status: 'ambiguous', candidates: 1, amount: usedAmount,
                         order: matched.id, why: approved.error });
     }
@@ -736,12 +751,12 @@ router.post('/api/deposit-hook',
     if (approved.already) {
       // 같은 입금의 다른 알림(문자 + 앱 푸시)이 동시에 들어와 다른 쪽이 먼저 발급했다.
       // 다시 발급하지 않는다. 순서대로 왔을 때(주문이 이미 done 이라 미매칭)와 똑같이 남긴다.
-      await setStatus('unmatched', usedAmount, null);
+      await setStatus('unmatched', null);
       return res.json({ ok: true, status: 'unmatched', amount: usedAmount,
                         why: '이미 처리된 주문입니다: ' + matched.id });
     }
 
-    await setStatus('matched', usedAmount, matched.id);
+    await setStatus('matched', matched.id);
     entitle.afterApprove(approved);    // 커밋 뒤, 기다리지 않음(실패는 로그만)
     await audit.record(req, 'order', { key: approved.key || null, member_id: approved.member_id || null,
       detail: '자동입금 승인 ' + (name || matched.depositor || '입금자미상') +
