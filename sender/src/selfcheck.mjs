@@ -1695,6 +1695,36 @@ async function withLog(fn) {
       fs.infolinkFail = 0
     }
   }
+  // #28-8 옾링 묶음(20개) 하나가 한 사람 때문에 -500 이면 반으로 나눠 다시 읽어 나머지는 읽고 그 사람만 옾링 없음으로 둔다.
+  //   INFOLINK 자체가 안 되면(나눈 두 쪽도 실패, 된 읽기 없음) 몇 번만 보내고 멈추고 아무것도 정하지 않는다(모름).
+  {
+    const slot = botA.slot
+    const ids = Array.from({ length: 25 }, (_, k) => String(7800 + k))
+    for (const id of ids) fs.setProfiles(id, [{ li: id + '1', name: '묶음' + id, url: 'https://open.kakao.com/o/b' + id }])
+    const plis = ids.map((id) => id + '1')
+    const reads = () => packets('INFOLINK').length
+    try {
+      fs.infolinkFail = -500
+      const r0 = reads()
+      const down = await slot.linksFor(plis)
+      if (down.size !== 0) throw new Error('#28-8 nothing decided while INFOLINK fails ' + JSON.stringify([...down]))
+      if (reads() - r0 > 3) throw new Error('#28-8 stops early while INFOLINK fails: ' + (reads() - r0))
+      fs.infolinkFail = 0
+      fs.infolinkBad = new Set([plis[3]])
+      await withLog(async (lines) => {
+        const got = await slot.linksFor(plis)
+        const miss = plis.filter((li, k) => got.get(li) !== (k === 3 ? '' : 'https://open.kakao.com/o/b' + ids[k]))
+        if (miss.length) throw new Error('#28-8 split read ' + JSON.stringify(miss.map((li) => [li, got.get(li)])))
+        if (!hasLine(lines, 'open link read failed: status -500', '1 unreadable set to no link')) throw new Error('#28-8 log ' + JSON.stringify(lines))
+      })
+      const r1 = reads()
+      await slot.linksFor(plis)
+      if (reads() !== r1) throw new Error('#28-8 known links are not read again')
+    } finally {
+      fs.infolinkFail = 0
+      fs.infolinkBad = new Set()
+    }
+  }
   // #28-5 나간 사람의 카드를 읽지 못해도 안내는 나간다(옾링 없음). 읽기는 2초에서 끊고, 방마다 10초에 한 번만 한다.
   {
     const code = 'bookx32'

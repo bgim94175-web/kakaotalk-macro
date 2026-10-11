@@ -36,6 +36,7 @@ const MEMBER_FILL_GAP_MS = MIN
 const LEAVE_READ_MS = 2000
 const LEAVE_READ_GAP_MS = 10000
 const EMPTY_LINK_MS = 12 * 60 * MIN   // 옾링이 없다고 답한 pli 는 12시간 다시 묻지 않는다
+const LINK_SPLIT_MAX = 24            // 실패한 옾링 묶음을 반으로 나눠 다시 읽는 것은 한 번에 24번까지
 const MEMBER_FAIL_MAX = 3             // 카드 채우기에서 세 번 못 읽은 사람은 목록에서 뺀다(다음 동기화가 다시 넣는다)
 const MEMBER_LOG_MS = 60 * MIN        // 명부 동기화 요약은 처음·수가 바뀔 때·1시간마다만 남긴다
 
@@ -2366,7 +2367,10 @@ export class BotSlot {
 
   // pli(사람의 오픈프로필 링크 id) → 옾링 주소. 봇마다 메모리에 둔다. 모르는 것만 20개씩 INFOLINK 로 읽는다.
   // 읽지 못한 묶음(실패 status·응답 없음)은 캐시에 넣지도 돌려주지도 않는다(모름) → 다음 동기화가 다시 읽는다.
-  // 실패하면 이번 읽기는 멈춘다. 속도 제한(-312·-805·-819)이면 rateWaits 첫 값 동안 INFOLINK 를 보내지 않는다.
+  // 묶음이 실패하면(속도 제한 아님) 반으로 나눠 다시 읽는다: 한 사람(지운 프로필 등) 때문에 묶음 전체가 거절되는 경우
+  //   나머지는 읽고, 다른 읽기가 된 상태에서 혼자 실패하는 사람만 옾링 없음으로 둔다(EMPTY_LINK_MS). 나누기는 한 번에 LINK_SPLIT_MAX 번까지.
+  //   나눈 두 쪽이 다 실패하고 이번에 된 읽기가 하나도 없으면 INFOLINK 자체가 안 되는 것으로 보고 멈춘다.
+  // 속도 제한(-312·-805·-819)이면 멈추고 rateWaits 첫 값 동안 INFOLINK 를 보내지 않는다.
   async linksFor(plis) {
     const out = new Map()
     const want = []
@@ -2377,16 +2381,23 @@ export class BotSlot {
       else if (now - (this.emptyLinks.get(li) || -Infinity) < EMPTY_LINK_MS) out.set(li, '')
       else if (!want.includes(li)) want.push(li)
     }
-    for (let i = 0; i < want.length; i += 20) {
-      if (this.readPauseUntil > this.now()) break
-      const part = want.slice(i, i + 20)
+    let sent = 0
+    let extra = 0
+    let okSeen = false
+    let status = null
+    const bad = []
+    const read = async (part) => {
+      if (sent++ && this.opts.linkGapMs) await new Promise((ok) => setTimeout(ok, this.opts.linkGapMs))
       const r = await this.raw('INFOLINK', { lis: part.map((x) => L(x)) })
       if (!R.locoOk(r)) {
-        const s = R.locoStatus(r)
-        log(this.id, `open link read failed: status ${s} (${want.length - i} left unknown)`)
-        this.ratePause(s)
-        break
+        status = R.locoStatus(r)
+        if (RATE_STATUS.has(status)) {
+          this.ratePause(status)
+          return 'rate'
+        }
+        return 'fail'
       }
+      okSeen = true
       const body = r.body
       const got = new Map()
       for (const row of (body && Array.isArray(body.ols) ? body.ols : [])) {
@@ -2399,9 +2410,64 @@ export class BotSlot {
         else this.emptyLinks.set(li, this.now())
         out.set(li, lu)
       }
-      if (this.emptyLinks.size > 20000) for (const k of [...this.emptyLinks.keys()].slice(0, 5000)) this.emptyLinks.delete(k)
-      if (this.linkCache.size > 5000) for (const k of [...this.linkCache.keys()].slice(0, 1000)) this.linkCache.delete(k)
-      if (i + 20 < want.length && this.opts.linkGapMs) await new Promise((ok) => setTimeout(ok, this.opts.linkGapMs))
+      return 'ok'
+    }
+    // 실패한 묶음을 반으로 나눠 읽는다 → 'done' | 'rate' | 'down' | 'stop'(나누기 한도)
+    const split = async (part) => {
+      if (part.length === 1) {
+        if (okSeen) {
+          this.emptyLinks.set(part[0], this.now())
+          out.set(part[0], '')
+          bad.push(part[0])
+        }
+        return 'done'
+      }
+      const h = Math.ceil(part.length / 2)
+      const halves = [part.slice(0, h), part.slice(h)]
+      const res = []
+      for (const x of halves) {
+        if (extra >= LINK_SPLIT_MAX) return 'stop'
+        if (this.readPauseUntil > this.now()) return 'rate'
+        extra++
+        const st = await read(x)
+        if (st === 'rate') return st
+        res.push(st)
+      }
+      if (!okSeen && res.every((x) => x === 'fail')) return 'down'
+      for (let k = 0; k < 2; k++) {
+        if (res[k] !== 'fail') continue
+        const st = await split(halves[k])
+        if (st !== 'done') return st
+      }
+      return 'done'
+    }
+    let end = ''
+    for (let i = 0; i < want.length; i += 20) {
+      if (this.readPauseUntil > this.now()) {
+        end = 'rate'
+        break
+      }
+      const part = want.slice(i, i + 20)
+      const st = await read(part)
+      if (st === 'rate') {
+        end = st
+        break
+      }
+      if (st === 'fail' && extra < LINK_SPLIT_MAX) {
+        const how = await split(part)
+        if (how === 'rate' || how === 'down') {
+          end = how
+          break
+        }
+      }
+    }
+    if (this.emptyLinks.size > 20000) for (const k of [...this.emptyLinks.keys()].slice(0, 5000)) this.emptyLinks.delete(k)
+    if (this.linkCache.size > 5000) for (const k of [...this.linkCache.keys()].slice(0, 1000)) this.linkCache.delete(k)
+    const left = want.filter((li) => !out.has(li)).length
+    if (status !== null && (left || bad.length)) {
+      const why = end === 'rate' ? ' (rate limited)' : end === 'down' ? ' (stopped)' : ''
+      const skip = bad.length ? ` · ${bad.length} unreadable set to no link` : ''
+      log(this.id, `open link read failed: status ${status}${why} (${left} left unknown${skip}, ${sent} reads)`)
     }
     return out
   }
