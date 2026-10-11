@@ -33,6 +33,7 @@ import {
   visitNeedsProfile,
 } from './features.mjs'
 import { BotPool } from './botpool.mjs'
+import { BEAT_MS, Owner } from './owner.mjs'
 import { FakeKakaoClient, fakeOn } from './fake.mjs'
 import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
 import { isBotId, locoOk, withProfileLink } from './roomfeat.mjs'
@@ -256,17 +257,34 @@ export class Hub {
   constructor(deps) {
     const d = deps || {}
     this.accounts = new Map()
+    // 배포 겹침 울타리(owner.mjs). 시험용 저장소(claimOwner 없음)면 늘 주인이다.
+    this.owner = d.owner || new Owner(d.store || dbStore)
     this.pool = new BotPool({
       store: d.store || Object.assign({ saveRecord }, dbStore),
       newClient: d.newClient || newKakaoClient,
       refreshToken: refreshBotToken,
       opts: d.opts,
       now: d.now,
+      owner: this.owner,
     })
     this.grantTimer = null
+    this.ownerTimer = null
+    this.healTimers = []
+    this.inert = false
+    this.exit = d.exit || ((code) => process.exit(code))
+    this.owner.onLost(() => {
+      this.standDown().catch((e) => log('hub', `stand down failed: ${e && e.message ? e.message : e}`))
+    })
   }
 
   async boot() {
+    try {
+      await this.owner.claim()
+    } catch (e) {
+      log('hub', `owner claim failed: ${e && e.message ? e.message : e}`)
+    }
+    this.startTimers()
+    if (this.inert) return
     const ids = await listIds()
     for (const id of ids) {
       try {
@@ -280,18 +298,68 @@ export class Hub {
         log(id, `boot skipped: ${e && e.message ? e.message : e}`)
       }
     }
-    this.startTimers()
+    if (this.inert) return
     this.pool.start()
     await this.pool.reconcile(null).catch((e) => log('pool', `boot reconcile failed: ${e && e.message ? e.message : e}`))
+    // 울타리가 없던 예전 서버는 밀려나며 저장된 로그인을 지운다. 켜진 뒤 1분·3분에 지금 붙어 있는 계정의 로그인을 되살린다.
+    for (const ms of [60000, 180000]) {
+      const t = setTimeout(() => {
+        this.heal().catch((e) => log('hub', `login restore failed: ${e && e.message ? e.message : e}`))
+      }, ms)
+      if (t.unref) t.unref()
+      this.healTimers.push(t)
+    }
   }
 
   // 60초마다 권리가 끝난 고객 슬롯을 멈춘다(기록 보존). /v1/grants 로 살아나면 다시 붙는다.
+  // 20초마다 주인 고동(owner.mjs). 주인이 조용해지면(새 서버가 배포에 실패해 꺼짐) 이 프로세스를 다시 띄워 주인이 된다.
   startTimers() {
-    if (this.grantTimer) return
+    if (!this.ownerTimer) {
+      this.ownerTimer = setInterval(() => {
+        this.owner.tick().then((st) => {
+          if (st !== 'orphan') return
+          log('hub', 'the newer sender went quiet: restarting to take the Kakao sessions back')
+          this.exit(0)
+        }).catch(() => {})
+      }, BEAT_MS)
+      if (this.ownerTimer.unref) this.ownerTimer.unref()
+    }
+    if (this.grantTimer || this.inert) return
     this.grantTimer = setInterval(() => {
       this.expireSlots().catch((e) => log('hub', `expire check failed: ${e && e.message ? e.message : e}`))
     }, 60000)
     if (this.grantTimer.unref) this.grantTimer.unref()
+  }
+
+  // 새 서버가 주인이 되었다(owner.mjs): 카카오 연결을 모두 닫고 저장된 로그인은 그대로 둔다. 곧 Render 가 이 서버를 끈다.
+  async standDown() {
+    if (this.inert) return
+    this.inert = true
+    log('hub', 'a newer sender took over: closing Kakao sessions, saved logins kept')
+    if (this.grantTimer) clearInterval(this.grantTimer)
+    this.grantTimer = null
+    for (const t of this.healTimers) clearTimeout(t)
+    this.healTimers = []
+    const slots = [...this.accounts.values()]
+    this.accounts.clear()
+    for (const slot of slots) await slot.stop()
+    await this.pool.standDown()
+  }
+
+  // 지금 붙어 있는 계정 중 DB 에서 로그인이 지워진 것(needs_register)을 이 서버의 기록으로 되살린다
+  async heal() {
+    const store = this.pool.store
+    if (this.inert || !store || typeof store.restoreLogin !== 'function') return 0
+    let n = 0
+    for (const [id, slot] of [...this.accounts]) {
+      if (slot.stopped || slot.halting || slot.record.needs_register || !socketUp(slot)) continue
+      if (await store.restoreLogin(id, slot.record)) n++
+    }
+    for (const [id, s] of [...this.pool.bots]) {
+      if (s.live() && await store.restoreLogin(id, s.record)) n++
+    }
+    if (n) log('hub', `restored ${n} saved login(s) cleared by the previous sender`)
+    return n
   }
 
   async expireSlots(now) {
@@ -644,6 +712,11 @@ export class Hub {
   }
 
   async attach(id, record) {
+    if (this.inert) {
+      // 새 서버가 주인이다: 붙지 않고(붙으면 그쪽을 밀어낸다) 기록만 남긴다
+      if (this.pool.store && this.pool.store.saveRecord) await this.pool.store.saveRecord(id, record)
+      return
+    }
     if (isBotId(id)) {
       await this.pool.attach(id, record)
       return
@@ -657,7 +730,7 @@ export class Hub {
       slot = null
     }
     if (!slot) {
-      slot = new Slot(id, record)
+      slot = new Slot(id, record, this.owner)
       this.accounts.set(id, slot)
       await slot.start()
     } else {
@@ -668,13 +741,16 @@ export class Hub {
 }
 
 class Slot {
-  constructor(id, record) {
+  constructor(id, record, owner) {
     this.id = id
     this.record = record
+    this.owner = owner || null
     this.client = null
     this.listener = null
     this.timer = null
     this.stopped = false
+    this.halting = false     // 로그인을 지울지 판정하는 동안(markDead) 다시 붙지 않는다
+    this.graceTries = 0
     this.chain = Promise.resolve()
     this.refreshed = false
     this.linkIds = new Map()
@@ -841,6 +917,7 @@ class Slot {
     await saveRecord(this.id, this.record)
     this.timer = setInterval(() => {
       this.enqueue(async () => {
+        if (this.halting) return
         await this.ensure()
         await this.macroTick()
         await this.guardTick()
@@ -852,12 +929,14 @@ class Slot {
   }
 
   async ensure() {
-    if (this.stopped || this.record.needs_register) return
+    if (this.stopped || this.halting || this.record.needs_register) return
     if (!this.client || !this.client.isConnected()) {
       if (this.listener) {
         try { this.listener.stop() } catch {}
         this.listener = null
       }
+      // 새 서버가 주인이면 다시 붙지 않는다(붙으면 그쪽을 카카오에서 밀어낸다). 이 서버는 곧 멈춘다.
+      if (this.owner && (await this.owner.check()) === 'lost') return
       await this.open()
     }
     if (!this.client || this.record.needs_register || this.listener) return
@@ -980,8 +1059,26 @@ class Slot {
   }
 
   async markDead(reason) {
+    if (this.halting || this.stopped) return
+    this.halting = true
+    const why = reason || 'reauth'
+    const v = this.owner ? await this.owner.verdict(why, this) : 'wipe'
+    if (v === 'retry') {
+      log(this.id, `session ${why} right after boot: reconnecting, saved login kept`)
+      const t = setTimeout(() => {
+        this.halting = false
+        this.enqueue(() => this.ensure()).catch(() => {})
+      }, this.owner.retryMs)
+      if (t.unref) t.unref()
+      return
+    }
+    if (v === 'keep') {
+      log(this.id, `session ${why} on a sender that is not the owner: saved login kept`)
+      await this.stop()
+      return
+    }
     this.record.needs_register = true
-    this.record.reason = reason || 'reauth'
+    this.record.reason = why
     this.record.credentials = {
       access_token: '',
       refresh_token: '',
@@ -996,6 +1093,7 @@ class Slot {
 
   async onError(err) {
     const code = err && err.code
+    if (this.halting || (this.owner && (await this.owner.check()) === 'lost')) return
     if (code === 'invalid_access_token' && !this.refreshed) {
       if (await this.refresh()) {
         await this.open()

@@ -2,6 +2,7 @@ import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 
 import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from './room-kind.mjs'
 import { Hub, Slot } from './runner.mjs'
+import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
 import { FOLD, withProfileLink } from './roomfeat.mjs'
 
@@ -1863,8 +1864,71 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await waitFor(() => fs.logins[botB.uid] > logins && s.live(), 25000, '7.7#20 reconnect after -2')
     if (s.dead || rowOf(iB).state !== 'active') throw new Error('7.7#20 reason -2 is a reconnect')
     fs.event(rowOf(iB).chat_id, botB.uid, { kind: 'kickout', reason: 0 })
-    await waitFor(() => s.dead, 3000, '7.7#20 reason 0')
-    if (rowOf(iB).error_code !== 'bot_down' || store.bots.get(botB.id).state !== 'needs_register') throw new Error('7.7#20 reason 0 → bot_down')
+    // markDead 는 기록을 지우기 전에 주인인지 묻는다(owner.mjs). 쓰기가 끝날 때까지 기다린다.
+    await waitFor(() => s.dead && rowOf(iB).error_code === 'bot_down' && store.bots.get(botB.id).state === 'needs_register', 3000, '7.7#20 reason 0 → bot_down')
+  }
+
+  // #20-2 배포 겹침(owner.mjs): 새 서버가 같은 봇에 붙어 카카오가 예전 연결을 내보내도(KICKOUT 0)
+  //   예전 서버는 저장된 로그인을 지우지 않고, 다시 붙지 않고, 모든 연결을 닫는다(standDown).
+  //   새 서버는 울타리가 없던 예전 서버가 지운 로그인을 되살리고, 막 켜진 뒤 받은 KICKOUT 으로는 지우지 않는다.
+  {
+    const id = 'bot.' + '7'.repeat(16)
+    const uid = FK.fakeUserId(id)
+    fs.user(uid).bot = true
+    const rec = () => ({ device_id: id, credentials: { access_token: 'fake-ov', user_id: uid, device_uuid: 'fake-du-ov', device_type: 'tablet' }, features: { v: 2, bot: true }, config: {}, rooms: [], runtime: {} })
+    const hubWith = (owner) => new Hub({ store, newClient: () => new FK.FakeKakaoClient(fs), opts: pool.opts, owner })
+    const oldOwner = new Owner(store)
+    if (!(await oldOwner.claim())) throw new Error('owner: first sender claims')
+    const oldHub = hubWith(oldOwner)
+    await oldHub.attach(id, rec())
+    const oldSlot = oldHub.pool.slotOf(id)
+    await waitFor(() => oldSlot.live(), 3000, 'owner: old sender connects')
+    const iO = install('ownerx1', { bot_device_id: id, roombot: false, minigame: true })
+    await oldHub.pool.reconcile(null)
+    await waitFor(() => rowOf(iO).state === 'active', 5000, 'owner: room join')
+
+    await sleep(2)
+    const newOwner = new Owner(store, { retryMs: 30 })
+    if (!(await newOwner.claim())) throw new Error('owner: the newer sender takes over')
+    if (await new Owner(store, { now: () => Date.now() - 60000 }).claim()) throw new Error('owner: an older boot cannot take it back while the owner beats')
+    const newHub = hubWith(newOwner)
+    await newHub.attach(id, rec())
+    const newSlot = newHub.pool.slotOf(id)
+    await waitFor(() => newSlot.live(), 3000, 'owner: new sender connects')
+
+    oldSlot.client._dispatch({ method: 'KICKOUT', body: { reason: 0 } })
+    await waitFor(() => oldHub.inert && oldSlot.stopped && oldOwner.lost, 3000, 'owner: old sender stands down')
+    const logins = fs.logins[uid]
+    await sleep(60)
+    const saved = store.records.get(id)
+    if (saved.needs_register || saved.credentials.access_token !== 'fake-ov') throw new Error('owner: old sender cleared the saved login')
+    if (store.bots.get(id).state === 'needs_register' || rowOf(iO).error_code === 'bot_down') throw new Error('owner: old sender marked the bot down')
+    if (fs.logins[uid] !== logins || oldHub.pool.bots.size) throw new Error('owner: old sender reconnected')
+    if (!newSlot.live()) throw new Error('owner: new sender must stay connected')
+    await oldHub.attach(id, rec())
+    if (oldHub.pool.bots.size || fs.logins[uid] !== logins) throw new Error('owner: a stood-down sender must not attach')
+
+    // 울타리가 없던 예전 서버가 지운 로그인 → 새 서버가 되살린다
+    await store.saveRecord(id, Object.assign(rec(), { credentials: { access_token: '', refresh_token: '', user_id: uid, device_uuid: '', device_type: 'tablet' }, needs_register: true, reason: 'kicked' }))
+    if ((await newHub.heal()) !== 1) throw new Error('owner: heal restores one login')
+    const healed = store.records.get(id)
+    if (healed.needs_register || healed.credentials.access_token !== 'fake-ov' || healed.reason !== 'ok') throw new Error('owner: healed record')
+    if ((await newHub.heal()) !== 0) throw new Error('owner: heal leaves a good record alone')
+
+    // 막 켜진 주인이 KICKOUT 을 받음(예전 서버가 다시 붙음) → 지우지 않고 다시 붙는다
+    const before = fs.logins[uid]
+    newSlot.client._dispatch({ method: 'KICKOUT', body: { reason: 0 } })
+    await waitFor(() => fs.logins[uid] > before && newSlot.live(), 3000, 'owner: owner reconnects after a kick right after boot')
+    if (newSlot.dead || store.records.get(id).needs_register) throw new Error('owner: owner kept the login after a boot-time kick')
+
+    // 주인 고동: 새 서버가 살아 있으면 예전 서버는 lost, 조용해지면 orphan(다시 시작해 주인이 된다)
+    if ((await newOwner.tick()) !== 'mine') throw new Error('owner: tick mine')
+    if ((await oldOwner.tick()) !== 'lost') throw new Error('owner: tick lost')
+    store.senderOwner.beat = Date.now() - 120000
+    if ((await oldOwner.tick()) !== 'orphan') throw new Error('owner: tick orphan')
+    if ((await newOwner.tick()) !== 'mine') throw new Error('owner: a live owner beats again')
+    await newHub.pool.stop()
+    store.senderOwner = null
   }
 
   await pool.stop()
