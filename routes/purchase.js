@@ -15,6 +15,7 @@ const installs = require('../lib/installs');
 const entitle = require('../lib/entitle');
 const memberAuth = require('../lib/member-auth');
 const rl = require('../lib/ratelimit');
+const { amountCandidates, parseName } = require('../lib/deposit-text');
 
 const router = express.Router();
 
@@ -608,42 +609,7 @@ function dedupeHash(text, slot) {
   return signer.sha256Hex(text + '\n#' + slot);
 }
 
-// 금액 후보 뽑기: 잔액/잔고/한도/누적 바로 뒤 숫자는 제외
-function amountCandidates(text) {
-  const re = /(\d{1,3}(?:,\d{3})+|\d{3,})/g;
-  const out = [];
-  const seen = {};
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const before = text.slice(Math.max(0, m.index - 14), m.index);
-    if (/(잔액|잔고|한도|누적)[^0-9]{0,8}$/.test(before)) continue;
-    const n = Number(m[1].replace(/,/g, ''));
-    if (!isFinite(n) || n < 100 || n > 100000000) continue;
-    if (seen[n]) continue;
-    seen[n] = true;
-    out.push(n);
-  }
-  return out;
-}
-
-const NAME_STOP = ['입금', '출금', '잔액', '잔고', '한도', '누적', '계좌', '이체', '수수료', '결제', '승인',
-  '취소', '만원', '알림', '내역', '거래', '일시', '확인', '문자', '광고', '머니', '송금', '완료', '현금'];
-
-// 입금자명 추정 (보조 확인용 — 은행마다 형식이 다르니 실패해도 그냥 null)
-function parseName(text) {
-  const re = /[가-힣]{2,4}/g;
-  const cands = [];
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const w = m[0];
-    if (NAME_STOP.indexOf(w) >= 0) continue;
-    if (/뱅|은행|저축|우체|협|카드|보험|증권|페이|체크|신용/.test(w)) continue;
-    cands.push(w);
-  }
-  if (!cands.length) return null;
-  // 보통 금액 뒤에 이름이 온다 → 마지막 후보
-  return cands[cands.length - 1].replace(/(님|씨)$/, '');
-}
+// 금액 후보·입금자명 읽기는 lib/deposit-text.js (은행 알림 모양별 시험: lib/deposit-check.js)
 
 router.post('/api/deposit-hook',
   express.text({ type: function () { return true; }, limit: '64kb' }),
