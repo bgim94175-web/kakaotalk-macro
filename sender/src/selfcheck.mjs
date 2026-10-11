@@ -1567,7 +1567,8 @@ async function withLog(fn) {
         await waitFor(() => rowOf(iHeal).state === 'waiting_host', 5000, '#28-3 join')
         const chat = rowOf(iHeal).chat_id
         const vh = botA.slot.byInstall.get(iHeal)
-        if (!vh.members.get('732') || vh.members.get('732').link !== '') throw new Error('#28-3 saved row loaded ' + JSON.stringify(vh.members.get('732')))
+        // 저장된 '없음'('', pli 있음)은 예전 읽기 실패일 수 있어 모름(null)으로 읽는다 → 안내는 '확인 못 함', 다시 읽기 대상
+        if (!vh.members.get('732') || vh.members.get('732').link !== null || !vh.memberWant.has('732')) throw new Error('#28-3 saved row loaded ' + JSON.stringify(vh.members.get('732')))
         fs.setPerm(chat, botA.uid, 4)
         await waitFor(() => rowOf(iHeal).state === 'active', 3000, '#28-3 promotion')
         await waitFor(() => vh.memberOkAt > 0, 5000, '#28-3 first sync')

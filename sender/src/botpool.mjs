@@ -2602,7 +2602,8 @@ export class BotSlot {
     // 명부는 봇이 들어간 뒤 방 전체를 읽어 둔 것이라, 봇보다 먼저 있던 사람이 나가도 옾링이 있다.
     if (card) {
       await this.mergeMembers(v, [{ uid: ev.userId, name: card.name || ev.name || '', pli: card.pli || '' }], 'join')
-      await withTimeout(this.fillLink(v, ev.userId), LEAVE_READ_MS).catch(() => {})
+      // 입장 안내를 보낼 때만 옾링을 모르면 혼자 한 번 더 읽는다
+      if (cfg.visit.enabled && R.roombotLive(v)) await withTimeout(this.fillLink(v, ev.userId), LEAVE_READ_MS).catch(() => {})
     }
     // 명부에 없는(카드를 못 읽은) 사람·옾링을 모르는 사람이 나가면 퇴장 안내를 만들기 전에 한 번 짧게 읽어 본다
     if (ev.kind === 'leave' && ev.userId && cfg.visit.enabled) {
@@ -2973,7 +2974,8 @@ export class BotSlot {
         v.members.set(uid, {
           name: String(r.name || ''),
           pli: r.pli == null ? null : String(r.pli),
-          link: r.link == null ? null : String(r.link),
+          // pli 옆의 '' 는 예전 코드가 읽기 실패를 '없음'으로 저장한 것일 수 있다 → 모름으로 읽어 다시 확인한다
+          link: r.link == null || (r.link === '' && r.pli) ? null : String(r.link),
           seenAt: Number(r.seen_at) || 0,
         })
         // 카드·옾링을 모르는 행(메시지로 이름만 본 사람·옾링 읽기가 실패한 사람)은 카드 채우기가 읽는다
