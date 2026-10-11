@@ -248,8 +248,9 @@ router.post('/api/order', wrap(async (req, res) => {
       lines.push({ kind: 'existing', room: room, row: row, products: r.products });
       continue;
     }
-    const url = openchat.normLink(r.link);
-    if (!url) return roomFail(res, 400, 'bad_link', installs.TEXT.bad_link, room);
+    const lk = installs.linkOf(r.link);
+    if (!lk.ok) return roomFail(res, lk.status, lk.reason, lk.error, room);
+    const url = lk.url;
     if (!r.products.length) return roomFail(res, 400, 'no_products', '이 방에 설치할 봇을 1개 이상 골라 주세요.', room);
     const pc = r.passcode === null || r.passcode === undefined ? '' : String(r.passcode).trim();
     if (pc.length > 20) return roomFail(res, 400, 'bad_passcode', installs.TEXT.bad_passcode, room);

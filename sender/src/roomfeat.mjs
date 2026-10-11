@@ -154,16 +154,15 @@ export function locoStatus(res) {
   return typeof s === 'number' ? s : 0
 }
 
-/** 방 관리 기능이 동작하는가(5.7). 한 함수로만 판정한다. */
 /**
- * JOININFO·INFOLINK 의 오픈링크 종류(lt): 1 = 1:1 오픈채팅·오픈프로필, 2 = 그룹방,
- * 그 밖(2025-09 커뮤니티 타입 방 등 새 종류)은 그룹형으로 보고 들어간다. 모르는 값은 0 이하뿐이다.
+ * JOININFO·INFOLINK 의 오픈링크 종류(lt): 1 = 1:1 오픈채팅·오픈프로필, 2 = 그룹방.
+ * 1 일 때만 그룹방이 아니다. 그 밖(2025-09 커뮤니티 타입 방 등 새 종류, lt 가 빠진 답)은 그룹형으로 보고 들어간다.
  */
 export function groupLinkType(lt) {
-  const n = Number(lt)
-  return Number.isInteger(n) && n >= 2
+  return Number(lt) !== 1
 }
 
+/** 방 관리 기능이 동작하는가(5.7). 한 함수로만 판정한다. */
 export function roombotLive(v) {
   return !!(v && v.products && v.products.roombot && (Number(v.perm) & 5) && v.state === 'active')
 }

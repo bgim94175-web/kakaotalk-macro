@@ -399,8 +399,12 @@ export class BotPool {
     if (st !== 0) return { ok: false, error: 'kakao_error', status: st }
     const ol = r.body && r.body.ol
     if (!ol || typeof ol !== 'object') return { ok: false, error: 'kakao_error', status: 0 }
+    // 2(그룹방)가 아닌 종류는 로그에 남긴다(커뮤니티 방 등이 실제로 어떤 값을 보내는지 보려고)
+    if (Number(ol.lt) !== 2) {
+      log('pool', `resolve JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
+        `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv}): ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
+    }
     if (!R.groupLinkType(ol.lt)) return { ok: false, error: 'not_group' }
-    if (Number(ol.lt) !== 2) log('pool', `link type ${ol.lt} treated as a group room: ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
     const li = R.idText(ol.li)
     if (!li) return { ok: false, error: 'kakao_error', status: 0 }
     const pv = Number(ol.pv) || 0
@@ -1525,6 +1529,10 @@ export class BotSlot {
     if (!ol || typeof ol !== 'object') {
       await this.joinFail(row, 0, { step: 'info', res: info, empty: true })
       return true
+    }
+    if (Number(ol.lt) !== 2) {
+      log(this.id, `install ${row.id} JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
+        `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv})`)
     }
     if (!R.groupLinkType(ol.lt)) {
       await this.fail(row, 'not_group')
