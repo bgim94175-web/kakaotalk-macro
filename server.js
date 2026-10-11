@@ -141,9 +141,12 @@ app.use(authRoutes);
 app.use(purchaseRoutes);
 app.use(panelRoutes);
 
-// 루트: 브라우저면 랜딩 페이지, 그 외(curl 연결확인)는 기존 JSON 그대로
+// 링크 미리보기 봇(카카오톡·디스코드 등). Accept 에 text/html 이 없어도 랜딩 페이지를 받아야 og 태그를 읽는다.
+const PREVIEW_BOT = /kakaotalk-scrap|facebookexternalhit|Discordbot|Twitterbot|Slackbot|TelegramBot|WhatsApp|LinkedInBot|Applebot|Googlebot|bingbot|Yeti|Daum/i;
+
+// 루트: 브라우저·미리보기 봇이면 랜딩 페이지, 그 외(curl 연결확인)는 기존 JSON 그대로
 app.get('/', (req, res) => {
-  const wantsHtml = String(req.headers.accept || '').indexOf('text/html') >= 0;
+  const wantsHtml = String(req.headers.accept || '').indexOf('text/html') >= 0 || PREVIEW_BOT.test(String(req.headers['user-agent'] || ''));
   const idx = path.join(PUBLIC_DIR, 'index.html');
   if (wantsHtml && fs.existsSync(idx)) {
     htmlHeaders(res, 'index.html');
