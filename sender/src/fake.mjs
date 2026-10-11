@@ -21,7 +21,8 @@
 // users[id].syncFail 이면 SYNCLINK 가 -500. 방 구성원은 ptp(1 기본·2 닉네임·16 오픈프로필)·pli 를 갖는다(없으면 ptp 1).
 // 방 멤버 명부 시험 스위치(방 r): r.getmemFail = status(GETMEM 거절) · r.getmemSkip = [id](GETMEM 이 그 사람을 빼고 준다) ·
 //   r.getmemHang / r.memberHang(GETMEM / MEMBER 가 releaseHeld() 전까지 답하지 않는다) · r.keepLeft(나간 사람에게도 MEMBER 가 답한다).
-//   서버: infolinkFail = status(방 링크가 아닌 INFOLINK, 곧 사람의 오픈프로필 링크 읽기를 그 status 로 거절).
+//   서버: infolinkFail = status(방 링크가 아닌 INFOLINK, 곧 사람의 오픈프로필 링크 읽기를 그 status 로 거절) ·
+//   infolinkBad = Set(li)(그 li 가 하나라도 든 INFOLINK 는 묶음 전체가 -500 — 지운 프로필 하나가 묶음을 망치는 경우).
 // 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -103,6 +104,7 @@ class FakeServer {
     this.chatListFail = false
     this.holds = []          // 답을 미룬 패킷(getmemHang·memberHang) — releaseHeld() 로 푼다
     this.infolinkFail = 0
+    this.infolinkBad = new Set()
     this.load()
   }
 
@@ -430,6 +432,7 @@ class FakeServer {
     if (method === 'INFOLINK') {
       const roomLink = (li) => !!this.byLi(li) || CUSTOMER_ROOMS.some((x) => x.link_id === str(li))
       if (this.infolinkFail && !(b.lis || []).some(roomLink)) return resp(method, { status: Number(this.infolinkFail) })
+      if ((b.lis || []).some((li) => this.infolinkBad.has(str(li)))) return resp(method, { status: -500 })
       const ols = []
       for (const li of b.lis || []) {
         const s = str(li)
