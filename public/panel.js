@@ -5041,7 +5041,10 @@
       else if (res.rooms) account.rooms = res.rooms;
       var added = refillRoomLists(prevKeys);
       var n = roomChoices().length;
-      if (added) notify('대화방 ' + n + '개를 불러왔습니다.', '새 대화방 ' + added + '개');
+      // 이름을 아직 못 읽은 오픈채팅방은 목록에 없다. "최신입니다" 대신 몇 개인지 알린다.
+      var unnamed = res.unnamed > 0 ? res.unnamed : 0;
+      if (unnamed) notify('대화방 ' + n + '개를 불러왔습니다.', '오픈채팅방 ' + unnamed + '개는 이름을 아직 읽지 못해 목록에 없습니다. 잠시 뒤 [대화방 불러오기]를 다시 눌러 주세요.', { kind: 'warn' });
+      else if (added) notify('대화방 ' + n + '개를 불러왔습니다.', '새 대화방 ' + added + '개');
       else notify('대화방 목록이 최신입니다.');
     } catch (e) {
       if (authFail(e)) { showLogin(e); return; }

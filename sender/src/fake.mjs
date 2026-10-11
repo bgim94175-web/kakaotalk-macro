@@ -93,6 +93,11 @@ class FakeServer {
     this.clients = new Set()
     this.packets = []        // 최근 패킷 기록(시험 확인용)
     this.logins = {}         // userId → 새 세션 수
+    // 방 목록(시험용 스위치). chatSnapshot 이면 getChats 가 진짜처럼 로그인 때 목록을 그대로 준다
+    // (기본은 끔 — botpool 은 아직 getChats 로 방을 찾는다). LCHATLIST 는 늘 지금 목록을 chatPage 줄씩 준다.
+    this.chatSnapshot = false
+    this.chatPage = 100
+    this.chatListFail = false
     this.load()
   }
 
@@ -245,6 +250,20 @@ class FakeServer {
     return !!(r && r.members[str(userId)])
   }
 
+  /** 지금 그 계정이 든 방(LCHATLIST 의 chatDatas 한 줄 모양, type 은 숫자 13). 고객 계정은 가짜 오픈채팅방 2개도 본다. */
+  chatDatas(userId) {
+    const me = str(userId)
+    const out = []
+    for (const r of Object.values(this.rooms)) {
+      if (!r.members[me]) continue
+      out.push({ c: L(r.chatId), t: 13, li: L(r.li), a: Object.keys(r.members).length, n: 0, k: [], l: null })
+    }
+    if (!this.user(me).bot) {
+      for (const c of CUSTOMER_ROOMS) out.push({ c: L(c.chat_id), t: 13, li: L(c.link_id), a: c.members, n: 0, k: ['가', '나'], l: null })
+    }
+    return out
+  }
+
   mtOf(r, userId) {
     const m = r && r.members[str(userId)]
     return m ? Number(m.mt) : 0
@@ -258,6 +277,17 @@ class FakeServer {
 
   async handle(client, method, b) {
     const me = client.userId
+    if (method === 'LCHATLIST') {
+      // lastTokenId 는 이미 준 줄 수다(진짜는 서버가 정하는 위치)
+      if (this.chatListFail) return resp(method, { status: -500 })
+      const all = this.chatDatas(me)
+      const from = Number(str(b.lastTokenId)) || 0
+      const page = all.slice(from, from + this.chatPage)
+      const next = from + page.length
+      return resp(method, {
+        status: 0, chatDatas: page, lastTokenId: next, lastChatId: page.length ? page[page.length - 1].c : 0, eof: next >= all.length,
+      })
+    }
     if (method === 'JOININFO' && /open\.kakao\.com\/me\//.test(String(b.lu || ''))) {
       // 오픈프로필 링크(관리자가 붙여 넣은 /me/ 주소 확인용)
       for (const [uid, u] of Object.entries(this.users)) {
@@ -608,6 +638,7 @@ class FakeSession {
   getChatInfo(chatId) { return this.send('CHATONROOM', { chatId }) }
   getChannelInfo(chatId) { return this.send('CHATINFO', { chatId }) }
   getOpenLinkInfo(lis) { return this.send('INFOLINK', { lis }) }
+  getChatList(lastTokenId, lastChatId) { return this.send('LCHATLIST', { chatIds: [], maxIds: [], lastTokenId, lastChatId }) }
   getAllMembers(chatId) { return this.send('GETMEM', { chatId }) }
   getMembersByIds(chatId, memberIds) { return this.send('MEMBER', { chatId, memberIds }) }
   leaveChat(chatId) { return this.send('LEAVE', { chatId }) }
@@ -637,6 +668,7 @@ export class FakeKakaoClient {
     this.deviceUuid = ''
     this.oauthToken = null
     this.session = null
+    this.loginChats = null
     this.closed = false
     this.pushHandlers = new Set()
     this.sessionHandlers = new Set()
@@ -663,6 +695,8 @@ export class FakeKakaoClient {
         throw Object.assign(new Error('invalid token'), { code: 'invalid_access_token' })
       }
       this.session = new FakeSession(this)
+      // 진짜 getChats({all:true}) 는 로그인 때 받은 목록을 그대로 준다(server.chatSnapshot 일 때만 흉내 낸다)
+      this.loginChats = this.server.chatSnapshot ? this.chatRows() : null
       this.server.clients.add(this)
       this.server.logins[this.userId] = (this.server.logins[this.userId] || 0) + 1
       this.emit({ type: 'connected', userId: this.userId })
@@ -729,6 +763,10 @@ export class FakeKakaoClient {
 
   async getChats() {
     await this.acquireSession()
+    return this.loginChats ? this.loginChats.slice() : this.chatRows()
+  }
+
+  chatRows() {
     const out = []
     for (const r of Object.values(this.server.rooms)) {
       if (!r.members[this.userId]) continue

@@ -94,9 +94,17 @@ const kinds = [
   [{ type: 10 }, 'normal'],
   [{ type: 'PlusChat' }, 'normal'],
   [{ type: 'MemoChat' }, 'normal'],
-  [{ type: 2, link_id: '9', display_name: '김, 이, 박', title: '김, 이, 박', active_members: 4 }, 'normal'],
+  // 링크가 있고 3명 이상이면 이름을 못 읽었어도 오픈 단체방이다(이름이 없으면 패널 목록에서만 빠진다)
+  [{ type: 2, link_id: '9', display_name: '김, 이, 박', title: '김, 이, 박', active_members: 4 }, 'open_room'],
   [{ type: 2, link_id: '9', title: '동네모임', display_name: '김, 이, 박', active_members: 4 }, 'open_room'],
   [{ type: 2, link_id: '9', title: '홍길동', display_name: '홍길동', active_members: 2 }, 'open_dm'],
+  [{ type: 2, link_id: '9020', active_members: 2 }, 'open_dm'],
+  // 1:1 에는 2명보다 많이 있을 수 없다: 링크가 있는 14·16 방도 3명 이상이면 단체방
+  [{ type: 14, link_id: '9022', active_members: 50 }, 'open_room'],
+  [{ type: 16, link_id: '9022', active_members: 3 }, 'open_room'],
+  [{ type: 14, link_id: '9001', active_members: 2 }, 'open_dm'],
+  [{ type: 16, link_id: '9001' }, 'open_dm'],
+  [{ type: 'OD', link_id: '9001', active_members: 5 }, 'open_dm'],
   [{ type: 13, link_id: '9', title: '모임방', display_name: '김, 이', active_members: 3 }, 'open_room'],
   [{ type: 13, link_id: '9', display_name: '김, 이', active_members: 3 }, 'open_room'],
   [{ type: 'OM', title: '김, 이, 박', display_name: '김, 이, 박' }, 'open_room'],
@@ -104,6 +112,15 @@ const kinds = [
   // 커뮤니티 타입 방(새 type 값): 오픈링크가 있으면 오픈 단체방
   [{ type: 18, link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
   [{ type: 'OC', link_id: '5', title: '커뮤니티방', display_name: '김, 이, 박', active_members: 40 }, 'open_room'],
+  [{ type: 17, link_id: '9005', active_members: 300 }, 'open_room'],
+  [{ type: 'OC', link_id: '9006', active_members: 40 }, 'open_room'],
+  [{ type: 18, link_id: '5' }, 'open_room'],
+  [{ type: 17, link_id: '5', active_members: 2 }, 'open_dm'],
+  // 일반 단톡방·1:1 은 고르는 목록에 올리지 않는다
+  [{ type: 'MultiChat', title: '가족', active_members: 3 }, 'normal'],
+  [{ type: 10, active_members: 5 }, 'normal'],
+  [{ type: 11, active_members: 2 }, 'normal'],
+  [{ type: 18, display_name: '김, 이, 박', active_members: 500 }, 'normal'],
 ]
 for (const [ch, want] of kinds) {
   const got = roomListKind(ch)
@@ -628,6 +645,13 @@ if (countedTitle[0].title !== '검 Fam' || roomTitle(countedTitle[0]) !== '검 F
   throw new Error('member count is removed from the open-chat name')
 }
 if (withoutMemberCount('검 Fam 1424', 8) !== '검 Fam 1424') throw new Error('a real numbered title stays')
+// 카카오가 준 오픈링크 이름은 닉네임 목록과 같아도 방 이름이다
+const sameAsNick = stampOpenLinkTitles([
+  { type: 13, link_id: '9008', title: null, display_name: '홍길동', active_members: 5 },
+  { type: 14, link_id: '9022', title: null, display_name: '김, 이', active_members: 50 },
+], new Map([['9008', '홍길동'], ['9022', '주식방']]))
+if (roomListKind(sameAsNick[0]) !== 'open_room' || roomTitle(sameAsNick[0]) !== '홍길동') throw new Error('a link name equal to the nicknames is the room name')
+if (roomTitle(sameAsNick[1]) !== '주식방') throw new Error('a big type 14 room with a link gets its link name')
 
 if (!isProfanity('씨발') || !isProfanity('시 발') || !isProfanity('씨1발') || !isProfanity('씨이발')) {
   throw new Error('profanity is recognized')
@@ -854,6 +878,118 @@ chatHub.accounts.set('empty', emptySlot)
 await chatHub.thread('empty', '8')
 await chatHub.thread('empty', '8')
 if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 (' + emptyReads + '회)')
+
+// ── 대화방 불러오기: 지금 카카오의 방 목록(LCHATLIST) + 오픈링크 이름(INFOLINK) ──────────────
+// 로그에 남는 줄을 받아 둔다(방 이름·링크 id 가 남지 않는지 본다).
+async function withLog(fn) {
+  const lines = []
+  const write = process.stderr.write
+  process.stderr.write = (s) => { lines.push(String(s)); return true }
+  try {
+    return { value: await fn(), lines }
+  } finally {
+    process.stderr.write = write
+  }
+}
+{
+  const { Long } = await import('bson')
+  const L = (s) => Long.fromString(String(s))
+  // 로그인 때 목록(getChats)에는 101 만 있다. 그 뒤 102·103 에 들어갔다.
+  const raw = [
+    { c: L(101), t: 13, li: L(9101), a: 30, n: 0, k: ['가', '나'], o: 4 },
+    { c: L(102), t: 2, li: L(9102), a: 12, n: 0, k: ['다'], o: 3 },
+    { c: L(103), t: 'OC', li: L(9103), a: 40, n: 0, k: [], o: 2 },
+    { c: L(104), t: 10, a: 5, n: 0, k: ['엄마', '아빠'], o: 1 },
+    { c: L(150), li: L(9150), a: 9 },
+  ]
+  let pages = 0
+  let listFail = false
+  let stuck = false
+  const asked = []
+  const session = {
+    async getChatList(token) {
+      pages++
+      if (listFail) throw new Error('LOCO packet timeout: LCHATLIST (15000ms)')
+      // stuck: 다음 위치를 무시하고 첫 쪽만 되풀이한다
+      const from = stuck ? 0 : Number(token.toString())
+      const page = raw.slice(from, from + 2)
+      const next = from + page.length
+      // 다음 위치는 Long 으로 온다(큰 값은 bson 이 숫자로 바꾸지 않는다)
+      return { statusCode: 0, body: { status: 0, chatDatas: page, lastTokenId: L(next), lastChatId: page.length ? page[page.length - 1].c : 0, eof: next >= raw.length } }
+    },
+    async getOpenLinkInfo(lis) {
+      const ids = lis.map((x) => x.toString())
+      asked.push(ids)
+      // 묶음 답: li 없는 이름 하나(첫 자리)와 9102 하나뿐. 하나씩 물으면 9101 만 답한다.
+      if (ids.length > 1) return { statusCode: 0, body: { status: 0, ols: [{ ln: '엉뚱한 이름' }, { li: L(9102), ln: '동네모임', lt: 2 }] } }
+      if (ids[0] === '9101') return { statusCode: 0, body: { status: 0, ols: [{ li: L(9101), ln: '검 Fam', lt: 2 }] } }
+      throw new Error('LOCO packet timeout: INFOLINK (15000ms)')
+    },
+  }
+  const listSlot = new Slot('list-dev', { credentials: { user_id: '111' }, needs_register: false, reason: 'ok' })
+  listSlot.client = {
+    async acquireSession() { return session },
+    async getChats() { return [{ chat_id: '101', type: 13, link_id: '9101', active_members: 30, title: null, display_name: '가, 나' }] },
+  }
+  const listHub = new Hub()
+  listHub.accounts.set('list-dev', listSlot)
+  const { value: rows, lines } = await withLog(() => listHub.chats('list-dev'))
+  const row = (id) => rows.find((r) => r.chat_id === id)
+  if (pages !== 3) throw new Error('chats: LCHATLIST is read to eof (' + pages + ' pages)')
+  if (rows.map((r) => r.chat_id).join(',') !== '101,102,103,104') throw new Error('chats: live list with rooms joined after login, bad row dropped: ' + rows.map((r) => r.chat_id))
+  if (row('101').title !== '검 Fam') throw new Error('chats: a link name is matched by li only, then retried alone')
+  if (row('102').title !== '동네모임' || row('102').list_kind !== 'open_room') throw new Error('chats: type 2 room named by li')
+  if (row('103').list_kind !== 'open_room' || row('103').title !== null) throw new Error('chats: an unnamed community room stays an open room without a made-up name')
+  if (row('103').kind !== 'group') throw new Error('chats: an unknown string type with 40 members is a group (no 1:1 auto reply)')
+  if (row('104').list_kind !== 'normal') throw new Error('chats: a normal group stays out')
+  if (asked.length !== 3 || asked[0].length !== 3 || asked[1][0] !== '9101' || asked[2][0] !== '9103') throw new Error('chats: unnamed links are retried one by one: ' + JSON.stringify(asked))
+  const line = lines.find((s) => s.indexOf(' chats ') >= 0) || ''
+  if (lines.filter((s) => s.indexOf(' chats ') >= 0).length !== 1) throw new Error('chats: one log line per load')
+  if (line.indexOf('live 3p') < 0 || line.indexOf('rows 4 bad 1') < 0 || line.indexOf('unnamed 1') < 0 || line.indexOf('retry 2') < 0) throw new Error('chats: log counts: ' + line)
+  if (/동네모임|검 Fam|9101|9102/.test(line)) throw new Error('chats: the log has no names or ids: ' + line)
+  // 첫 쪽만 되풀이되면 끝까지 읽을 수 없다 → 예전 길(로그인 때 목록)
+  stuck = true
+  const { value: rep, lines: repLines } = await withLog(() => listHub.chats('list-dev'))
+  if (rep.length !== 1 || !repLines.some((s) => s.indexOf('chats login (LCHATLIST page repeats)') >= 0)) throw new Error('chats: a repeating page falls back to getChats')
+  // LCHATLIST 가 실패하면 예전 길로 읽는다
+  stuck = false
+  listFail = true
+  const { value: old, lines: oldLines } = await withLog(() => listHub.chats('list-dev'))
+  if (old.length !== 1 || old[0].chat_id !== '101' || old[0].title !== '검 Fam') throw new Error('chats: LCHATLIST failure falls back to getChats')
+  if (!oldLines.some((s) => s.indexOf('chats login (LOCO packet timeout') >= 0)) throw new Error('chats: the fallback is logged')
+}
+// 가짜 연결: getChats 는 로그인 때 목록, LCHATLIST 는 지금 목록 — 로그인 뒤 들어간 방도 불러오고 폰에서 나간 방은 뺀다
+{
+  const FK = await import('./fake.mjs')
+  const fs = FK.resetFakeServer()
+  fs.chatSnapshot = true
+  fs.chatPage = 1
+  const uid = FK.fakeUserId('cust-list')
+  const member = () => ({ mt: 2, nick: '손님', ptp: 1, pli: null, photo: '', status: null })
+  const before = fs.room('roomlistbefore')
+  before.members[uid] = member()
+  const client = new FK.FakeKakaoClient(fs)
+  await client.login({ oauthToken: 'fake-cust', userId: uid, deviceUuid: 'du-cust' })
+  await client.acquireSession()
+  const after = fs.room('roomlistafter')
+  after.members[uid] = member()
+  delete before.members[uid]
+  const snap = await client.getChats()
+  if (!snap.some((c) => c.chat_id === before.chatId) || snap.some((c) => c.chat_id === after.chatId)) throw new Error('fake: getChats is the login snapshot')
+  const custSlot = new Slot('cust-list', { credentials: { user_id: uid }, needs_register: false, reason: 'ok' })
+  custSlot.client = client
+  const custHub = new Hub()
+  custHub.accounts.set('cust-list', custSlot)
+  const { value: rows } = await withLog(() => custHub.chats('cust-list'))
+  const joined = rows.find((r) => r.chat_id === after.chatId)
+  if (!joined || joined.list_kind !== 'open_room' || joined.title !== '테스트방 roomlistafter') throw new Error('fake: a room joined after login is listed with its name')
+  if (rows.some((r) => r.chat_id === before.chatId)) throw new Error('fake: a room left from the phone is not listed')
+  if (rows.length !== 3 || !rows.some((r) => r.title === '가짜 오픈채팅 2')) throw new Error('fake: customer rooms are listed (' + rows.length + ')')
+  fs.chatListFail = true
+  const { value: old } = await withLog(() => custHub.chats('cust-list'))
+  if (!old.some((r) => r.chat_id === before.chatId) || old.some((r) => r.chat_id === after.chatId)) throw new Error('fake: LCHATLIST failure uses the login list')
+  custSlot.client.close()
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 방 설치형 봇(K bot 계정) — docs/ACCOUNTS_V1.md 7.7 의 사례. DB·HTTP 없이 돈다.
