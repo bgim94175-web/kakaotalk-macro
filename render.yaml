@@ -69,10 +69,10 @@ services:
       #     LOGIN_FAIL_MAX / LOGIN_BLOCK_MS   10 / 900000   (아이디, IP) 쌍이 15분에 10회 틀리면 15분 잠금
       #     LOGIN_SLOW_AFTER / LOGIN_SLOW_MS  30 / 2000     아이디 단독 15분 30회 초과 → 시도마다 2초 늦춤(잠그지 않음)
       #   회원
-      #     MEMBER_MAX_SESSIONS       3           동시 로그인 기기 수(4번째 로그인은 가장 오래 쓰지 않은 기기를 끊는다)
-      #     MEMBER_MAX_ACCOUNTS       3           회원당 카카오 계정 수
+      #     MEMBER_MAX_SESSIONS       3           동시 로그인 기기 수의 처음 값(운영 중에는 판매 관리 [설정] 탭에서 바꾼다)
+      #     MEMBER_MAX_ACCOUNTS       3           회원당 카카오 계정 수의 처음 값([설정] 탭)
       #     MEMBER_SESSION_TTL_MS     2592000000  로그인 유지 30일(쓰지 않은 기간 기준)
-      #     AUTH_RESET_WINDOW_MS      900000      Google 로그인 뒤 현재 비밀번호 없이 새 비밀번호를 정할 수 있는 시간
+      #     AUTH_RESET_WINDOW_MS      900000      Google 로그인 뒤 현재 비밀번호 없이 새 비밀번호를 정할 수 있는 시간 (Google 연결도 비밀번호 로그인 뒤 이 시간 안에만)
       #     AUTH_SCRYPT_LOG_N         15          비밀번호 해시 강도(10~17)
       #     AUTH_HASH_QUEUE_MAX       20          비밀번호 해시 대기 상한(넘으면 503 잠시 뒤 다시)
       #     MEMBER_MAX_PENDING_ORDERS / MEMBER_MAX_PENDING_ROOMS / IP_MAX_PENDING_ORDERS   3 / 10 / 10
@@ -80,9 +80,14 @@ services:
       #     ROOM_RETRY_BASE_MS        120000      고객 다시 시도 첫 간격(두 배씩, 최대 6시간, 연속 10번 뒤 관리자만)
       #     ROOM_HOLD_WORDS           (없음)      쉼표 목록. 방 이름이 걸리면 결제 뒤 운영자 확인을 기다린다
       #     ROOM_LOG_KEEP_DAYS        30          방 조치 기록 보존 일수
-      #     BOT_ROOM_CAP              20          새 K bot 계정의 기본 방 상한
+      #     BOT_ROOM_CAP              20          새 K bot 계정의 기본 방 상한의 처음 값([설정] 탭)
       #     BOT_JOIN_GAP_MS / BOT_PERM_POLL_MS / BOT_ACTIVE_CHECK_MS              45000 / 60000 / 600000
       #     BOT_JOIN_PER_HOUR / BOT_JOIN_PER_DAY / BOT_RESOLVE_PER_MIN / BOT_RESOLVE_PER_DAY   20 / 80 / 10 / 300
+      #   봇 오픈프로필 (DEPLOY.md 8 의 실측을 마친 뒤에만 바꾼다)
+      #     BOT_PROFILE_CONVERT       off         기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸기. off=판매 관리에서 누를 때만 / auto=자동
+      #     BOT_MEMBER_SYNC_MS        600000      방 멤버 명부(옾링·사진)를 다시 읽는 주기(퇴장 안내 옾링·프로필 변경 감지)
+      #     BOT_PROFILE_SWITCH_PER_HOUR  6        auto 일 때 봇마다 시간당 바꾸는 방 수
+      #     BOT_PROFILE_BLOCK_STATUS  -804        카카오가 오픈프로필 입장을 거부할 때의 status(쉼표 목록). 실측 값으로 고친다
       #   Google 시험용 덮어쓰기 — 운영에서는 넣지 마라
       #     GOOGLE_REDIRECT_URI       (PURCHASE_BASE/auth/google/callback)
       #     GOOGLE_AUTH_URL / GOOGLE_TOKEN_URL   https 또는 http://localhost·127.0.0.1 만 받는다

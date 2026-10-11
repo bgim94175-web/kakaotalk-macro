@@ -428,9 +428,10 @@ b, strong { font-weight: 600; }
 /* notes */
 .note { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--bg-1); color: var(--fg-2); font-size: var(--t-13); line-height: 1.65; }
 .note b { color: var(--fg); font-weight: 500; }
-.note .ic { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-3); display: grid; place-items: center; font: 600 11px/1 var(--f-mono); color: var(--fg-2); flex: none; margin-top: 2px; }
+/* 상태 표시 원은 노트 맨 앞의 .ic 하나뿐이다(안쪽 버튼의 아이콘 svg.ic 에는 닿지 않게 자식 선택자) */
+.note > .ic { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-3); display: grid; place-items: center; font: 600 11px/1 var(--f-mono); color: var(--fg-2); flex: none; margin-top: 2px; }
 .note.alert, .note.warn { border-color: var(--warn-line); background: var(--warn-bg); }
-.note.alert .ic, .note.warn .ic { border-color: var(--warn); color: var(--warn); }
+.note.alert > .ic, .note.warn > .ic { border-color: var(--warn); color: var(--warn); }
 .note.dim { background: transparent; }
 /* chips */
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--fg-2); font-size: var(--t-12); font-weight: 500; white-space: nowrap; }

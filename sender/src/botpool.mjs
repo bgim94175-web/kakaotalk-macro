@@ -16,7 +16,6 @@ import {
   guardOnChat,
   logsView,
   onInbound,
-  profileOnly,
   visitEventsFromMessage,
   visitMentionExtra,
 } from './features.mjs'
@@ -45,6 +44,15 @@ function envList(name, dflt) {
   return list.length ? list : dflt
 }
 
+// 카카오 status 목록(음수). 'none' 이면 빈 목록.
+function envStatusList(name, dflt) {
+  const raw = String(process.env[name] || '').trim()
+  if (!raw) return dflt
+  if (raw.toLowerCase() === 'none') return []
+  const list = raw.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n < 0)
+  return list.length ? list : dflt
+}
+
 export function poolOptions(over) {
   return Object.assign({
     joinGapMs: envNum('BOT_JOIN_GAP_MS', 45000),
@@ -63,12 +71,97 @@ export function poolOptions(over) {
     packetTimeoutMs: envNum('BOT_PACKET_TIMEOUT_MS', 20000),
     transientWaitMs: envNum('BOT_TRANSIENT_WAIT_MS', 2 * MIN),
     hideGapMs: envNum('BOT_HIDE_GAP_MS', 300),
+    // 오픈프로필(D12): 봇이 가진 오픈프로필 목록을 다시 읽는 주기(접속할 때마다·푸시·관리자 요청 때도 읽는다)
+    profileReadMs: envNum('BOT_PROFILE_READ_MS', 6 * HOUR),
+    // 푸시·입장 대기 때문에 다시 읽을 때의 최소 간격, 푸시 뒤 기다림
+    profileReadGapMs: envNum('BOT_PROFILE_READ_GAP_MS', MIN),
+    profilePushDelayMs: envNum('BOT_PROFILE_PUSH_DELAY_MS', 5000),
+    // 기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸기(UPLINKPROF). off = 관리자가 방마다 누를 때만, auto = 점검 때 자동
+    profileConvert: String(process.env.BOT_PROFILE_CONVERT || '').trim().toLowerCase() === 'auto' ? 'auto' : 'off',
+    switchPerHour: envNum('BOT_PROFILE_SWITCH_PER_HOUR', 6),
+    // 바꾸기가 거절된 방을 자동으로 다시 바꿔 보기까지(관리자 버튼은 바로 다시 보낸다)
+    profileRetryMs: envNum('BOT_PROFILE_RETRY_MS', DAY),
+    // 오픈프로필 입장(ptp 16)을 카카오가 거절했다고 보는 status(실측 전 가정 -804, 10.1 #9). 'none' = 없음
+    profileBlockStatus: envStatusList('BOT_PROFILE_BLOCK_STATUS', [-804]),
+    // 방 멤버 명부(옾링·사진)를 GETMEM 으로 다시 읽는 주기, 옾링(INFOLINK) 20개 묶음 사이 쉼
+    memberSyncMs: envNum('BOT_MEMBER_SYNC_MS', 10 * MIN),
+    linkGapMs: envNum('BOT_LINK_GAP_MS', 300),
     flushMs: 5000,
     tickMs: 1000,
     reconnectGapMs: 2000,
     trace: process.env.SENDER_TRACE_PUSH === '1',
   }, over || {})
 }
+
+// ── 오픈프로필(D12) ─────────────────────────────────────────────────────────
+// 봇은 고객 방에 카카오톡 기본 프로필이 아니라 그 계정의 오픈프로필(ptp 16, pli = 오픈프로필 링크 id)로 들어간다.
+// SYNCLINK {ltk:0} 는 계정이 가진 오픈링크 전체다. 그중 lt 1(프로필형)이고 오픈프로필 표지(op)가 있거나
+// 주소가 open.kakao.com/me/ 인 것만 오픈프로필이다. lt 2(이 계정이 만든 방)와 1:1 오픈채팅 링크(/o/)는 뺀다.
+export const OPEN_PROFILE = 16
+
+export function cleanName(s, max) {
+  return String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max || 40)
+}
+
+export function ownOpenProfiles(ols, userId) {
+  const out = []
+  for (const ol of Array.isArray(ols) ? ols : []) {
+    if (!ol || typeof ol !== 'object' || Number(ol.lt) !== 1) continue
+    const lu = typeof ol.lu === 'string' ? ol.lu.trim() : ''
+    const isProfile = (!!ol.op && typeof ol.op === 'object') || /^https:\/\/open\.kakao\.com\/me\//i.test(lu)
+    if (!isProfile) continue
+    const li = R.idText(ol.li)
+    if (!li || out.some((p) => p.li === li)) continue
+    const olu = ol.olu && typeof ol.olu === 'object' ? ol.olu : {}
+    const owner = R.idText(olu.userId)
+    if (owner && userId && owner !== String(userId)) continue
+    out.push({ li, name: cleanName(olu.nn) || cleanName(ol.ln), url: /^https:\/\/open\.kakao\.com\//i.test(lu) ? lu.slice(0, 200) : '' })
+  }
+  return out
+}
+
+// DB(bot_accounts.open_profiles)·관리자 입력에서 온 목록 → [{li,name,url,src?}] | null
+export function profileList(v) {
+  let x = v
+  if (typeof x === 'string') {
+    try { x = JSON.parse(x) } catch { return null }
+  }
+  if (!Array.isArray(x)) return null
+  const out = []
+  for (const p of x) {
+    const li = R.idText(p && p.li)
+    if (!li || out.some((q) => q.li === li)) continue
+    const row = { li, name: cleanName(p.name), url: typeof p.url === 'string' && /^https:\/\/open\.kakao\.com\//i.test(p.url) ? p.url.slice(0, 200) : '' }
+    if (p.src === 'url') row.src = 'url'
+    out.push(row)
+  }
+  return out
+}
+
+// 트레이스(SENDER_TRACE_PUSH=1, 10.1): Long 은 글자로, 참여코드·토큰은 가린다.
+const TRACE_KEYS_HIDDEN = new Set(['pc', 'tk', 'passcode', 'token', 'access_token'])
+function traceValue(v, depth) {
+  if (v == null) return v
+  if (typeof v === 'bigint') return v.toString()
+  if (Long.isLong(v)) return v.toString()
+  if (Buffer.isBuffer(v)) return `<${v.length} bytes>`
+  if (typeof v === 'string') return v.length > 200 ? v.slice(0, 200) + '…' : v
+  if (typeof v !== 'object') return v
+  if (depth > 5) return '…'
+  if (Array.isArray(v)) return v.slice(0, 30).map((x) => traceValue(x, depth + 1))
+  const o = {}
+  for (const [k, x] of Object.entries(v)) o[k] = TRACE_KEYS_HIDDEN.has(k) ? '<hidden>' : traceValue(x, depth + 1)
+  return o
+}
+
+export function traceText(v) {
+  const s = JSON.stringify(traceValue(v, 0))
+  return s && s.length > 4000 ? s.slice(0, 4000) + '…' : s
+}
+
+// 이 방법의 응답 모양을 남긴다(오픈프로필 실측). CHATONROOM 은 olu, INFOLINK 는 ols[0] 만.
+const TRACE_METHODS = new Set(['SYNCLINK', 'JOININFO', 'CHECKJOIN', 'JOINLINK', 'UPLINKPROF', 'CHATONROOM', 'INFOLINK'])
+const TRACE_NOISY = new Set(['CHATONROOM', 'INFOLINK'])
 
 function log(id, msg) {
   process.stderr.write(`[sender] ${id} ${msg}\n`)
@@ -247,8 +340,18 @@ export class BotPool {
     if (!ids.length) return
     const rows = await this.store.listInstalls(ids)
     const leaves = await this.store.listLeaves(ids)
+    // 관리자가 고른 오픈프로필(bot_accounts.open_profile_pick, 부모 칸)을 함께 읽는다
+    const profs = new Map()
+    if (this.store.botProfileRows) {
+      try {
+        for (const p of await this.store.botProfileRows(ids)) profs.set(p.device_id, p)
+      } catch (e) {
+        log('pool', `open profile rows read failed: ${errText(e)}`)
+      }
+    }
     for (const s of slots) {
       try {
+        if (profs.has(s.id)) await s.syncProfileRow(profs.get(s.id))
         await s.apply(rows.filter((r) => r.bot_device_id === s.id), leaves.filter((l) => l.bot_device_id === s.id))
         if (periodic && s.live()) await this.store.botState(s.id, { state: 'connected', nickname: s.nickname || undefined })
       } catch (e) {
@@ -307,6 +410,11 @@ export class BotPool {
     const bots = []
     const rooms = []
     for (const s of this.bots.values()) {
+      const counts = { open: 0, main: 0, other: 0, failed: 0, unknown: 0 }
+      for (const v of s.byInstall.values()) {
+        if (!v.chat_id || v.state === 'error') continue
+        counts[s.roomProfile(v)] += 1
+      }
       bots.push({
         device_id: s.id,
         connected: s.live(),
@@ -316,16 +424,68 @@ export class BotPool {
           join_h: Math.max(0, s.joinH.max - s.joinH.count(now)),
           join_d: Math.max(0, s.joinD.max - s.joinD.count(now)),
           resolve_m: Math.max(0, s.resolveM.max - s.resolveM.count(now)),
+          switch_h: Math.max(0, s.switchH.max - s.switchH.count(now)),
         },
+        open_profile: s.openProfile ? Object.assign({}, s.openProfile) : null,
+        open_profile_state: s.profileState,
+        open_profiles: s.openProfiles ? s.openProfiles.map((p) => Object.assign({}, p)) : null,
+        open_profile_read_at: s.profileReadAt || null,
+        profile_rooms: counts,
+        profile_convert: this.opts.profileConvert,
       })
       for (const v of s.byInstall.values()) {
-        rooms.push({ install_id: v.install_id, connected: s.live(), perm: v.perm == null ? null : v.perm, state: v.state })
+        rooms.push({
+          install_id: v.install_id, connected: s.live(), perm: v.perm == null ? null : v.perm, state: v.state,
+          profile: v.chat_id && v.state !== 'error' ? s.roomProfile(v) : null,
+        })
       }
       for (const id of s.joinQ.keys()) {
-        if (!s.byInstall.has(id)) rooms.push({ install_id: id, connected: s.live(), perm: null, state: 'joining' })
+        if (!s.byInstall.has(id)) rooms.push({ install_id: id, connected: s.live(), perm: null, state: 'joining', profile: null })
       }
     }
     return { ok: true, bots, rooms, join_paused_until: this.joinPausedUntil > now ? this.joinPausedUntil : 0 }
+  }
+
+  // ── /v1/bot/open-profile ────────────────────────────────────────────────
+  // 관리자 요청: 고른 오픈프로필을 DB 에서 다시 읽고(open_profile_pick), refresh 면 SYNCLINK 를 바로 다시 보낸다.
+  // url(open.kakao.com/me/…) 이면 SYNCLINK 가 오픈프로필을 보여 주지 않을 때의 대안: JOININFO 로 확인해 목록에 더한다.
+  async openProfileCmd(botId, body) {
+    const s = this.bots.get(String(botId || ''))
+    if (!s || s.dead || s.stopped) return { ok: false, error: 'not_connected' }
+    const b = body || {}
+    let read = null
+    if (this.store.botProfileRows) {
+      try {
+        const rows = await this.store.botProfileRows([s.id])
+        if (rows[0]) await s.syncProfileRow(rows[0])
+      } catch (e) {
+        log(s.id, `open profile row read failed: ${errText(e)}`)
+      }
+    }
+    if (b.url) {
+      const r = await s.addProfileByUrl(String(b.url))
+      if (!r.ok) return r
+    } else if (b.refresh) {
+      if (!s.live()) return { ok: false, error: 'not_connected' }
+      read = await s.readOpenProfiles('admin', true)
+    }
+    // read_ok·read_status: 이번 요청의 SYNCLINK 결과(다시 읽기만). 실패하면 남긴 목록을 그대로 쓰므로 판정만으로는 실패를 알 수 없다.
+    return {
+      ok: true,
+      read_ok: read && typeof read.ok === 'boolean' ? read.ok : null,
+      read_status: read && read.ok === false ? read.status : null,
+      ...s.profileView(),
+    }
+  }
+
+  // ── /v1/bot/room-profile ────────────────────────────────────────────────
+  // how 'switch' = UPLINKPROF 로 프로필만 바꾼다(나가지 않음). 'rejoin' = 나갔다가 오픈프로필로 다시 입장(부방장 다시 지정 필요).
+  async roomProfileCmd(installId, how) {
+    const got = this.viewOf(installId)
+    if (!got) return { ok: false, error: 'not_joined' }
+    const err = got.slot.queueSwitch(got.view, how === 'rejoin' ? 'rejoin' : 'switch', true)
+    if (err) return { ok: false, error: err }
+    return { ok: true, queued: how === 'rejoin' ? 'rejoin' : 'switch' }
   }
 
   // 뷰가 없으면(아직 입장 전·오류) DB 행과 room_state 로 읽기 전용 뷰를 만든다.
@@ -350,9 +510,11 @@ export class BotPool {
     const got = await this.viewOrRow(installId)
     if (!got) return { ok: true, live: null, ranking: [] }
     const v = got.view
+    const live = { connected: !!(got.slot && got.slot.live() && v.chat_id && v.state !== 'error'), perm: v.perm == null ? null : Number(v.perm) }
+    if (got.slot && v.chat_id && v.state !== 'error') live.profile = got.slot.roomProfileView(v)
     return {
       ok: true,
-      live: { connected: !!(got.slot && got.slot.live() && v.chat_id && v.state !== 'error'), perm: v.perm == null ? null : Number(v.perm) },
+      live,
       ranking: v.products.minigame ? R.rankingOf(v.runtime, 10) : [],
     }
   }
@@ -470,10 +632,32 @@ export class BotSlot {
     this.connects = 0
     this.refreshed = false
     this.downWritten = false
+    // 오픈프로필(D12)
+    this.openProfiles = null      // [{li,name,url}] — null = 아직 읽은 적 없음(캐시도 없음)
+    this.profilePick = null       // 관리자가 고른 오픈프로필 li(bot_accounts.open_profile_pick)
+    this.linkCache = new Map()    // 사람의 pli(오픈프로필 링크 id) → 옾링 주소('' = 없음). 방이 달라도 같다
+    this.lastProfileLi = null     // 지난번에 쓰던 li(고른 것이 없을 때 같은 것을 계속 쓴다)
+    this.openProfile = null       // 지금 입장에 쓰는 {li,name,url}
+    this.profileState = 'unknown' // ok | none | gone | unknown
+    this.profileLoaded = false
+    this.profileReadAt = 0
+    this.profileTryAt = 0
+    this.profileReading = null
+    this.profileTimer = null
+    this.profileWait = new Set()  // 오픈프로필을 아직 몰라 미룬 입장
+    this.switchQ = new Map()      // install_id → {notBefore, how:'switch'|'rejoin', manual}
+    this.switchH = new R.Win(HOUR, Math.max(1, Number(this.opts.switchPerHour) || 0))
+    this.rejoinIds = new Set()    // 다시 입장(나간 직후): 사전 확인 없이 JOINLINK
+    this.traceN = new Map()
   }
 
   now() {
     return this.pool.now()
+  }
+
+  // 방에 보일 이름: 오픈프로필 이름(없으면 카카오톡 닉네임)
+  roomName() {
+    return (this.openProfile && this.openProfile.name) || this.nickname || ''
   }
 
   live() {
@@ -514,8 +698,10 @@ export class BotSlot {
     this.timers = []
     if (this.pumpTimer) clearTimeout(this.pumpTimer)
     if (this.sendTimer) clearTimeout(this.sendTimer)
+    if (this.profileTimer) clearTimeout(this.profileTimer)
     this.pumpTimer = null
     this.sendTimer = null
+    this.profileTimer = null
     await this.flush()
     try { this.unpush && this.unpush() } catch {}
     try { this.unsession && this.unsession() } catch {}
@@ -614,6 +800,12 @@ export class BotSlot {
     } catch (e) {
       log(this.id, `bot_accounts update failed: ${errText(e)}`)
     }
+    // 이 계정의 오픈프로필을 읽는다(SYNCLINK 1회, 실제 클라이언트도 접속 직후 보낸다). 실패하면 DB 의 지난 값을 쓴다.
+    try {
+      await this.readOpenProfiles('connect', this.connects === 1)
+    } catch (e) {
+      log(this.id, `open profile read failed: ${errText(e)}`)
+    }
     const now = this.now()
     let i = 0
     for (const v of this.byInstall.values()) {
@@ -678,6 +870,173 @@ export class BotSlot {
     await this.stop()
   }
 
+  // ── 오픈프로필(D12) ─────────────────────────────────────────────────────
+  // 목록: SYNCLINK 로 읽어 bot_accounts.open_profiles 에 남긴다(읽기에 실패하면 남긴 값을 쓴다 — 실패를 "없음"으로 보지 않는다).
+  // 고르기: 관리자가 고른 것(open_profile_pick) → 지난번에 쓰던 것 → 목록의 첫 번째. 고른 것이 목록에 없으면 gone(입장 멈춤).
+  async loadProfileCache() {
+    if (this.profileLoaded) return
+    if (!this.store.botProfileRows) {
+      this.profileLoaded = true
+      return
+    }
+    try {
+      const rows = await this.store.botProfileRows([this.id])
+      this.profileLoaded = true
+      if (rows && rows[0]) this.takeProfileRow(rows[0])
+    } catch (e) {
+      log(this.id, `open profile cache read failed: ${errText(e)}`)
+    }
+  }
+
+  takeProfileRow(row) {
+    if (this.openProfiles == null) {
+      const list = profileList(row.open_profiles)
+      if (list) this.openProfiles = list
+    }
+    this.profilePick = R.idText(row.open_profile_pick) || null
+    if (!this.lastProfileLi) this.lastProfileLi = R.idText(row.open_profile_li) || null
+  }
+
+  // 재조정(5분)·관리자 요청 때: DB 의 고른 오픈프로필을 반영한다
+  async syncProfileRow(row) {
+    const wasLoaded = this.profileLoaded
+    const before = this.profilePick
+    if (!wasLoaded) {
+      this.takeProfileRow(row || {})
+      this.profileLoaded = true
+    } else {
+      this.profilePick = R.idText(row && row.open_profile_pick) || null
+    }
+    if (this.profilePick !== before || !wasLoaded) await this.applyProfile('pick')
+  }
+
+  selectProfile() {
+    const list = this.openProfiles
+    let prof = null
+    let state
+    if (list == null) state = 'unknown'
+    else if (!list.length) state = 'none'
+    else if (this.profilePick) {
+      prof = list.find((p) => p.li === this.profilePick) || null
+      state = prof ? 'ok' : 'gone'
+    } else {
+      const keep = (li) => (li ? list.find((p) => p.li === li) : null)
+      prof = keep(this.openProfile && this.openProfile.li) || keep(this.lastProfileLi) || list[0]
+      state = 'ok'
+    }
+    this.openProfile = prof ? Object.assign({}, prof) : null
+    this.profileState = state
+  }
+
+  // 돌려주는 값 { ok, status, state }: 이번 SYNCLINK 가 됐는지(읽지 않았으면 null), 실패 status, 그 뒤의 판정
+  readOpenProfiles(why, force) {
+    if (this.profileReading) return this.profileReading
+    const now = this.now()
+    if (!this.client || (!force && now - this.profileTryAt < this.opts.profileReadGapMs)) {
+      return Promise.resolve({ ok: null, status: null, state: this.profileState })
+    }
+    this.profileTryAt = now
+    this.profileReading = (async () => {
+      await this.loadProfileCache()
+      const r = await this.raw('SYNCLINK', { ltk: 0 })
+      const ok = R.locoOk(r)
+      if (ok) {
+        const found = ownOpenProfiles(r.body && r.body.ols, this.userId)
+        // 링크로 직접 등록한 오픈프로필(src url)은 SYNCLINK 가 오픈프로필을 하나도 보여 주지 않을 때만 남긴다
+        const manual = found.length ? [] : (this.openProfiles || []).filter((p) => p.src === 'url')
+        this.openProfiles = found.concat(manual)
+        this.profileReadAt = this.now()
+      } else {
+        log(this.id, `open profile read failed (${why}): status ${R.locoStatus(r)}${this.openProfiles ? ', keeping the saved list' : ''}`)
+      }
+      await this.applyProfile(why)
+      return { ok, status: ok ? 0 : R.locoStatus(r), state: this.profileState }
+    })().finally(() => { this.profileReading = null })
+    return this.profileReading
+  }
+
+  async applyProfile(why) {
+    const prevLi = this.openProfile ? this.openProfile.li : ''
+    const prevName = this.openProfile ? this.openProfile.name : ''
+    const prevState = this.profileState
+    this.selectProfile()
+    const li = this.openProfile ? this.openProfile.li : ''
+    const changed = li !== prevLi || this.profileState !== prevState || (this.openProfile ? this.openProfile.name : '') !== prevName
+    if (this.openProfile) this.lastProfileLi = this.openProfile.li
+    if (this.store.botOpenProfile) {
+      // 목록을 모르면(null) 남긴 값을 지우지 않는다. 쓰는 프로필 칸은 판정이 섰을 때만(없음·gone 이면 비운다).
+      const f = { list: this.openProfiles, at: this.profileReadAt || null }
+      if (this.profileState !== 'unknown') {
+        f.li = li || null
+        f.name = this.openProfile ? this.openProfile.name || null : null
+      }
+      try {
+        await this.store.botOpenProfile(this.id, f)
+      } catch (e) {
+        log(this.id, `bot_accounts open profile update failed: ${errText(e)}`)
+      }
+    }
+    if (changed) log(this.id, `open profile ${this.profileState}${this.openProfile ? ' ' + li + ' "' + this.openProfile.name + '"' : ''} (${why})`)
+    if (this.profileState !== 'unknown' && this.profileWait.size) {
+      // 오픈프로필을 몰라 미룬 입장: 판정이 섰으니 바로 다시 본다(없으면 bot_no_open_profile)
+      for (const id of this.profileWait) if (this.joinQ.has(id)) this.joinQ.set(id, { notBefore: 0 })
+      this.profileWait.clear()
+    }
+    if (changed && this.profileState === 'ok') {
+      // bot_no_open_profile 로 멈춘 방을 다시 입장 줄에(apply), 기본 프로필 방은 바꾸기 대상(auto)
+      this.bg(this.pool.reconcile(null), 'reconcile')
+      for (const v of this.byInstall.values()) this.considerSwitch(v)
+    }
+    this.schedulePump(this.now())
+  }
+
+  // 이 계정의 링크가 생기거나 지워졌다는 푸시: 5초 뒤(앞 읽기에서 1분 지난 뒤) 다시 읽는다
+  profilePushed(m) {
+    if (this.profileTimer || this.stopped) return
+    const now = this.now()
+    const at = Math.max(now + this.opts.profilePushDelayMs, this.profileTryAt + this.opts.profileReadGapMs)
+    this.profileTimer = setTimeout(() => {
+      this.profileTimer = null
+      this.bg(this.readOpenProfiles('push ' + m, true), 'open profile read')
+    }, Math.max(0, at - now))
+    if (this.profileTimer.unref) this.profileTimer.unref()
+  }
+
+  // SYNCLINK 가 오픈프로필을 보여 주지 않을 때의 대안: 관리자가 붙여 넣은 open.kakao.com/me/… 를 JOININFO 로 확인한다.
+  // 프로필형 링크(lt 1)이고 주인이 이 봇 계정일 때만 받는다. 조회 예산을 쓴다.
+  async addProfileByUrl(url) {
+    const u = String(url || '').trim()
+    if (!/^https:\/\/open\.kakao\.com\/me\/[A-Za-z0-9_-]+$/.test(u)) return { ok: false, error: 'bad_url' }
+    if (!this.live()) return { ok: false, error: 'not_connected' }
+    const now = this.now()
+    if (this.pool.joinPausedUntil > now || !this.resolveM.ok(now) || !this.resolveD.ok(now)) return { ok: false, error: 'budget' }
+    this.resolveM.add(now)
+    this.resolveD.add(now)
+    await this.loadProfileCache()
+    const r = await this.raw('JOININFO', { lu: u, ref: 'EW' })
+    const st = R.locoStatus(r)
+    if (st !== 0) return { ok: false, error: GONE_STATUS.has(st) ? 'not_found' : 'kakao_error', status: st }
+    const ol = r.body && r.body.ol
+    if (!ol || typeof ol !== 'object' || Number(ol.lt) !== 1) return { ok: false, error: 'not_profile' }
+    const olu = ol.olu && typeof ol.olu === 'object' ? ol.olu : {}
+    if (R.idText(olu.userId) !== this.userId) return { ok: false, error: 'not_mine' }
+    const li = R.idText(ol.li)
+    if (!li) return { ok: false, error: 'kakao_error', status: 0 }
+    const list = (this.openProfiles || []).filter((p) => p.li !== li)
+    list.push({ li, name: cleanName(olu.nn) || cleanName(ol.ln), url: u, src: 'url' })
+    this.openProfiles = list
+    await this.applyProfile('url')
+    return { ok: true }
+  }
+
+  profileView() {
+    return {
+      open_profile: this.openProfile ? Object.assign({}, this.openProfile) : null,
+      open_profile_state: this.profileState,
+      open_profiles: this.openProfiles ? this.openProfiles.map((p) => Object.assign({}, p)) : null,
+    }
+  }
+
   // ── 원시 패킷 ───────────────────────────────────────────────────────────
   // 같은 세션에 1회만 보낸다(5.3). 세션이 없거나 응답이 없으면 {statusCode:-1}. 다시 접속하지 않는다.
   async raw(method, body) {
@@ -690,12 +1049,27 @@ export class BotSlot {
     }
     const conn = s && typeof s.getConnection === 'function' ? s.getConnection() : null
     if (!conn) return { statusCode: -1, body: {}, noSession: true }
+    let out
     try {
       const r = await withTimeout(conn.sendPacket(method, body), this.opts.packetTimeoutMs)
-      return r || { statusCode: -1, body: {} }
+      out = r || { statusCode: -1, body: {} }
     } catch (e) {
-      return { statusCode: -1, body: {}, error: errText(e), timeout: !!(e && e.timeout) }
+      out = { statusCode: -1, body: {}, error: errText(e), timeout: !!(e && e.timeout) }
     }
+    if (this.opts.trace && TRACE_METHODS.has(method)) this.traceRaw(method, body, out)
+    return out
+  }
+
+  // SENDER_TRACE_PUSH=1: 오픈프로필 실측(DEPLOY.md 체크리스트)용 응답 모양. CHATONROOM·INFOLINK 는 봇마다 처음 5번만.
+  traceRaw(method, req, res) {
+    const n = (this.traceN.get(method) || 0) + 1
+    this.traceN.set(method, n)
+    if (TRACE_NOISY.has(method) && n > 5) return
+    const b = (res && res.body) || {}
+    let shown = b
+    if (method === 'CHATONROOM') shown = { status: b.status, olu: b.olu }
+    else if (method === 'INFOLINK') shown = { status: b.status, ols0: Array.isArray(b.ols) ? b.ols[0] : undefined }
+    log(this.id, `raw ${method} req ${traceText(req)} → statusCode ${res ? res.statusCode : '?'} body ${traceText(shown)}`)
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
@@ -743,6 +1117,15 @@ export class BotSlot {
         v.checkFull = true
         continue
       }
+      if (row.state === 'error' && row.error_code === 'bot_no_open_profile' && this.profileState === 'ok' && this.live()) {
+        // 오픈프로필이 준비되었다: 미뤄 둔 입장을 다시 줄에 넣는다(D12)
+        await this.dropView(id)
+        if (await this.write(id, { state: 'queued', error_code: null, error_detail: null, next_try_at: null, state_at: now })) {
+          this.joinQ.set(id, { notBefore: 0 })
+          await this.roomLog(id, 'state', { detail: { state: 'queued', event: 'open_profile' } })
+        }
+        continue
+      }
       await this.upsertView(row)
     }
     for (const id of [...this.byInstall.keys()]) if (!seen.has(id)) await this.dropView(id)
@@ -772,21 +1155,30 @@ export class BotSlot {
       ringFilled: false,
       names: new Map(),
       perms: new Map(),
-      cardAt: new Map(),
+      // 방 멤버 명부: user_id → {name, pli, link, photo, seenAt}. null = 아직 모름, '' = 없음(room_members 에 저장)
+      members: new Map(),
+      membersChat: '',
+      membersDirty: new Set(),
+      memberRefresh: new Set(),
+      memberSyncAt: 0,
+      memberSyncing: false,
       nextCheckAt: 0,
       checkFull: false,
       checking: false,
+      recheck: false,
       limits: R.roomLimits(),
       failStreak: 0,
       actPausedUntil: 0,
       hideJob: null,
-      profileScanAt: 0,
     }
   }
 
-  async upsertView(row) {
+  // opts.joining: 입장 성공(joined)이 처음 만드는 뷰. 옛 안내 기록을 이 봇 것으로 옮기지 않는다(adoptLegacyNotices).
+  async upsertView(row, opts) {
     const id = Number(row.id)
     let v = this.byInstall.get(id)
+    const hadRoombot = v ? !!v.products.roombot : null
+    const created = !v
     if (!v) {
       // 맵에 먼저 넣고 읽는다(겹친 호출이 뷰를 둘 만들지 않게)
       v = this.newView(row)
@@ -817,6 +1209,14 @@ export class BotSlot {
       if (v.chat_id && this.views.get(v.chat_id) === v) this.views.delete(v.chat_id)
       v.chat_id = chat
     }
+    // 멤버 명부는 방(chat)마다 따로다. 링크를 바꿔 다른 방이 되면 비우고 그 방 것을 읽는다.
+    if (chat && v.membersChat !== chat) {
+      await this.flushMembers(v)
+      v.members.clear()
+      v.membersChat = chat
+      v.memberSyncAt = 0
+      await this.loadMembers(v)
+    }
     if (chat) {
       // 내보내진 옛 설치(오류)가 같은 방의 새 설치를 가리지 않게
       const cur = this.views.get(chat)
@@ -827,7 +1227,39 @@ export class BotSlot {
       if (v.state === 'waiting_host') v.nextCheckAt = now + jitter(this.opts.permPollMs, 0.25)
       else if (v.state === 'active') v.nextCheckAt = now + this.opts.activeCheckMs
     }
+    if (created) this.adoptLegacyNotices(v, !(opts && opts.joining))
+    // 이미 들어가 있는 방에 방 관리봇이 붙거나 빠졌다(4.2 "installed → 상품 플래그만 켬, 상태는 sender 가 다시 계산").
+    // 다음 정기 점검(최대 10분)까지 기다리지 않고 곧 권한을 읽어 waiting_host·active 를 다시 정한다(0.1·5.4).
+    // sender 가 꺼져 있던 동안 상품이 바뀌었으면(뷰를 새로 만듦) 상태가 상품·권한과 어긋나 있으니 그때도 곧 본다.
+    const inRoom = !!chat && (v.state === 'active' || v.state === 'waiting_host')
+    const changed = hadRoombot !== null && hadRoombot !== v.products.roombot
+    const stale = v.products.roombot ? (v.state === 'active' && !(Number(v.perm) & 5)) : v.state === 'waiting_host'
+    if (inRoom && (changed || stale)) this.soon(v)
+    // 이 봇이 이 방에서 어떤 프로필로 보이는지 모르는 방(v6 때 기본 프로필로 들어간 방): 정기 점검(최대 10분)까지
+    // 기다리지 않고 1분쯤 뒤에 읽어 runtime.prof 를 남긴다(부모가 방장에게 보일 이름으로 쓴다, 5.8)
+    if (created && inRoom && !(opts && opts.joining) && !this.profOf(v)) {
+      const at = now + jitter(this.opts.permPollMs, 0.25)
+      if (!v.nextCheckAt || v.nextCheckAt > at) v.nextCheckAt = at
+    }
     return v
+  }
+
+  // v6 첫 배포의 room_state.runtime 은 7.9 안내 기록을 봇 구분 없이 남겼다(welcomedChat·hostNoticed).
+  // 재조정이 이미 방에 있는 행으로 뷰를 처음 만들 때(배포 뒤 첫 시작)는 지금 그 방을 맡은 이 봇이 보낸 것으로 옮긴다.
+  // 그러지 않으면 배포 직후 사용 중인 모든 방 관리봇 방에 부방장 지정 안내가 다시 나간다.
+  // 입장하면서 처음 만드는 뷰(옮기기·다시 입장 중이던 행)는 누가 보냈는지 모르므로 버린다(새 봇이면 다시 안내해야 한다, D17).
+  adoptLegacyNotices(v, adopt) {
+    const rt = v.runtime
+    if (!rt || typeof rt !== 'object' || !('welcomedChat' in rt || 'hostNoticed' in rt)) return
+    if (adopt && v.chat_id) {
+      if (!rt.welcomed && rt.welcomedChat && String(rt.welcomedChat) === v.chat_id) {
+        rt.welcomed = { chat: v.chat_id, by: this.id, roombot: !!v.products.roombot || rt.hostNoticed === true }
+      }
+      if (!rt.promoted && rt.hostNoticed === true) rt.promoted = { chat: v.chat_id, by: this.id }
+    }
+    delete rt.welcomedChat
+    delete rt.hostNoticed
+    v.dirty = true
   }
 
   async dropView(installId) {
@@ -840,6 +1272,7 @@ export class BotSlot {
   }
 
   async flushView(v) {
+    await this.flushMembers(v)
     if (!v.dirty) return
     v.dirty = false
     try {
@@ -895,27 +1328,46 @@ export class BotSlot {
         log(this.id, `leave ${lv.id} failed: ${errText(e)}`)
       }
     }
-    while (this.live()) {
-      const now = this.now()
+    // 입장이 먼저, 그다음 프로필 바꾸기(UPLINKPROF·다시 입장). 둘 다 같은 간격(BOT_JOIN_GAP_MS)을 둔다.
+    const first = (q) => {
       let best = null
-      for (const [id, j] of this.joinQ) {
+      for (const [id, j] of q) {
         if (!best || j.notBefore < best.notBefore || (j.notBefore === best.notBefore && id < best.id)) best = { id, notBefore: j.notBefore }
       }
-      if (!best) return
-      if (best.notBefore > now) {
-        this.schedulePump(best.notBefore)
+      return best
+    }
+    while (this.live()) {
+      const now = this.now()
+      const jb = first(this.joinQ)
+      const sb = first(this.switchQ)
+      let kind = ''
+      let best = null
+      if (jb && jb.notBefore <= now) { kind = 'join'; best = jb } else if (sb && sb.notBefore <= now) { kind = 'switch'; best = sb }
+      if (!best) {
+        const at = Math.min(jb ? jb.notBefore : Infinity, sb ? sb.notBefore : Infinity)
+        if (at < Infinity) this.schedulePump(at)
         return
       }
       if (this.nextJoinAt > now) {
         this.schedulePump(this.nextJoinAt)
         return
       }
-      this.joinQ.delete(best.id)
       let used = false
-      try {
-        used = await this.joinOne(best.id)
-      } catch (e) {
-        log(this.id, `join ${best.id} failed: ${errText(e)}`)
+      if (kind === 'join') {
+        this.joinQ.delete(best.id)
+        try {
+          used = await this.joinOne(best.id)
+        } catch (e) {
+          log(this.id, `join ${best.id} failed: ${errText(e)}`)
+        }
+      } else {
+        const job = this.switchQ.get(best.id)
+        this.switchQ.delete(best.id)
+        try {
+          used = await this.switchOne(best.id, job)
+        } catch (e) {
+          log(this.id, `profile switch ${best.id} failed: ${errText(e)}`)
+        }
       }
       if (used) this.nextJoinAt = this.now() + jitter(this.opts.joinGapMs, 0.2)
     }
@@ -992,13 +1444,28 @@ export class BotSlot {
       await this.fail(row, 'blocked')
       return false
     }
-    // 0. 사전 확인: 이미 그 방에 있으면 JOINLINK 없이 성공 처리
-    if (row.link_id) {
+    // 0. 사전 확인: 이미 그 방에 있으면 JOINLINK 없이 성공 처리(다시 입장으로 방금 나온 방은 건너뛴다)
+    const rejoin = this.rejoinIds.has(Number(row.id))
+    if (row.link_id && !rejoin) {
       const ch = await this.chatByLink(row.link_id)
       if (ch) {
         await this.joined(row, ch, null)
         return false
       }
+    }
+    // 0'. 오픈프로필(D12): 오픈프로필이 없으면 기본 프로필로 대신 들어가지 않는다. 카카오에 아무것도 보내지 않는다.
+    const prof = this.profileState === 'ok' ? this.openProfile : null
+    if (!prof) {
+      if (this.profileState === 'unknown') {
+        // 아직 읽지 못했다(접속 직후·SYNCLINK 실패): 오류로 두지 않고 줄에 남긴다. 읽히면 바로 다시 본다.
+        this.profileWait.add(Number(row.id))
+        this.joinQ.set(Number(row.id), { notBefore: now + this.opts.transientWaitMs })
+        this.schedulePump(now + this.opts.transientWaitMs)
+        this.bg(this.readOpenProfiles('join'), 'open profile read')
+        return false
+      }
+      await this.fail(row, 'bot_no_open_profile', this.profileState)
+      return false
     }
     if (this.pool.joinPausedUntil > now) {
       await this.rateLimited(row, this.pool.joinPausedUntil)
@@ -1088,24 +1555,24 @@ export class BotSlot {
       }
       tk = cj.body && cj.body.tk != null ? cj.body.tk : null
     }
-    // 4. JOINLINK. 기본 프로필 참여가 허용되면 봇의 기본 프로필(ptp 1), 아니면 닉네임 프로필(ptp 2, 10.1 #9 실측 전 가정)
-    const body = (pv & 32)
-      ? { li: L(li), ref: 'EW:', ptp: 1 }
-      : { li: L(li), ref: 'EW:', ptp: 2, nn: this.nickname || 'K bot', pp: '' }
+    // 4. JOINLINK — 늘 이 계정의 오픈프로필(ptp 16, pli). 방의 pv(32 = 기본 프로필 참여 허용)와 관계없이 같다.
+    //    기본 프로필(ptp 1)·닉네임 프로필(ptp 2)로 대신 들어가는 일은 없다(D12).
+    const body = { li: L(li), ref: 'EW:', ptp: OPEN_PROFILE, pli: L(prof.li) }
     if (tk != null) body.tk = tk
     const jr = await this.raw('JOINLINK', body)
     const jst = R.locoStatus(jr)
+    if (pv && this.opts.trace) log(this.id, `install ${row.id} JOINLINK ptp 16 status ${jst} room pv ${pv}`)
     if (jst === 0) {
       const room = jr.body && jr.body.chatRoom
       const chatId = R.idText(room && (room.chatId != null ? room.chatId : room.c)) || R.idText(jr.body && jr.body.chatId)
       if (chatId) {
-        await this.joined(row, { chat_id: chatId, link_id: li }, jr.body.olu)
+        await this.joined(row, { chat_id: chatId, link_id: li, pv }, jr.body.olu, prof)
         return true
       }
-      await this.joinFail(row, -1, { step: 'join', res: jr, li, ptp: body.ptp })
+      await this.joinFail(row, -1, { step: 'join', res: jr, li, ptp: body.ptp, prof })
       return true
     }
-    await this.joinFail(row, jst, { step: 'join', res: jr, li, ptp: body.ptp })
+    await this.joinFail(row, jst, { step: 'join', res: jr, li, ptp: body.ptp, prof })
     return true
   }
 
@@ -1161,20 +1628,17 @@ export class BotSlot {
       await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
       return
     }
-    // 입장 단계: ptp 2 의 확정 실패는 profile_blocked(실측 전에는 알 수 없는 status 도 여기로)
+    // 입장 단계: 오픈프로필(ptp 16) 입장을 카카오가 거절한 status(BOT_PROFILE_BLOCK_STATUS) → profile_blocked.
+    // 기본 프로필로 다시 시도하지 않는다(D12).
     const lost = status === -1 || !!res.timeout
-    if (!lost && ctx.step === 'join' && ctx.ptp === 2) {
+    if (!lost && ctx.step === 'join' && ctx.ptp === OPEN_PROFILE && this.opts.profileBlockStatus.includes(status)) {
       await this.fail(row, 'profile_blocked', '카카오 상태 ' + status)
       return
     }
     // 응답 유실·알 수 없는 status: 다시 접속하지 않는다. 지금 세션의 방 목록에서 같은 li 의 방을 찾는다.
     const ch = ctx.li ? await this.chatByLink(ctx.li) : null
     if (ch) {
-      await this.joined(row, ch, null)
-      return
-    }
-    if (ctx.step === 'join' && ctx.ptp === 2) {
-      await this.fail(row, 'profile_blocked', '카카오 상태 ' + status)
+      await this.joined(row, ch, null, ctx.prof || null)
       return
     }
     await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
@@ -1200,6 +1664,8 @@ export class BotSlot {
     }
     this.transient.delete(Number(row.id))
     this.joinQ.delete(Number(row.id))
+    this.rejoinIds.delete(Number(row.id))
+    this.profileWait.delete(Number(row.id))
     if (!n) return
     await this.roomLog(row.id, 'state', { ok: false, detail: { state: 'error', code } })
     const v = this.byInstall.get(Number(row.id))
@@ -1210,12 +1676,17 @@ export class BotSlot {
     log(this.id, `install ${row.id} join error ${code}${detail ? ' (' + detail + ')' : ''}`)
   }
 
-  // 5. 입장 성공(또는 이미 들어가 있음)
-  async joined(row, ch, joinOlu) {
+  // 5. 입장 성공(또는 이미 들어가 있음). sentProf = 이번 JOINLINK 에 실은 오픈프로필(사전 확인으로 끝났으면 null)
+  async joined(row, ch, joinOlu, sentProf) {
     const now = this.now()
     const chatId = String(ch.chat_id)
     const li = String(ch.link_id || row.link_id || '')
-    let perm = await this.readPerm(chatId, joinOlu && joinOlu.lmt != null ? Number(joinOlu.lmt) : null)
+    this.rejoinIds.delete(Number(row.id))
+    this.profileWait.delete(Number(row.id))
+    const self = await this.readSelf(chatId, joinOlu, true)
+    if (self.open == null && sentProf) Object.assign(self, { open: true, pli: sentProf.li, nn: self.nn || sentProf.name })
+    if (self.open && !self.nn && sentProf && self.pli === sentProf.li) self.nn = sentProf.name
+    let perm = self.perm
     const products = productsOf(row)
     let state = 'active'
     if (products.roombot) state = perm != null && (perm & 5) ? 'active' : 'waiting_host'
@@ -1239,37 +1710,253 @@ export class BotSlot {
     this.rateN.delete(Number(row.id))
     this.transient.delete(Number(row.id))
     await this.roomLog(row.id, 'state', { detail: { state, event: 'join' } })
-    const v = await this.upsertView(Object.assign({}, row, fields, { link_id: row.link_id || li, state }))
+    const v = await this.upsertView(Object.assign({}, row, fields, { link_id: row.link_id || li, state }), { joining: true })
     v.nextCheckAt = now + (state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
-    if (v.runtime.welcomedChat !== chatId && v.licensed) {
-      v.runtime.welcomedChat = chatId
-      v.dirty = true
-      this.say(v, R.joinNotice(v, this.nickname), { what: 'notice' })
+    if (ch.pv != null && Number.isFinite(Number(ch.pv))) v.linkPv = Number(ch.pv)
+    // 이 방에서 봇이 어떤 프로필로 보이는지 남긴다(오픈프로필이 아니면 관리자 화면에 바꾸기 대상으로 보인다).
+    // 바로 저장한다: 부모는 이 기록이 없는 입장 완료 방을 v6 때 기본 프로필로 들어간 방으로 본다(installs.BOT_NAME_SQL)
+    this.noteSelf(v, self)
+    await this.flushView(v)
+    // 미니게임봇으로 안내했던 방에 방 관리봇을 더한 뒤 다시 들어왔으면 방 관리봇 안내(지정할 계정 이름)를 한 번 더 한다
+    const welcomed = this.noticed(v, 'welcomed') && (!products.roombot || v.runtime.welcomed.roombot)
+    if (!welcomed && v.licensed) {
+      this.markNoticed(v, 'welcomed', { roombot: !!products.roombot })
+      this.say(v, R.joinNotice(v, this.nameIn(v)), { what: 'notice' })
     }
-    if (state === 'active' && products.roombot && !v.runtime.hostNoticed) {
-      v.runtime.hostNoticed = true
-      v.dirty = true
+    if (state === 'active' && products.roombot && !this.noticed(v, 'promoted')) {
+      this.markNoticed(v, 'promoted')
       await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: true, to: 'active' } })
       this.say(v, R.PROMOTED_NOTICE, { what: 'notice' })
     }
   }
 
+  // 7.9 안내(입장 안내·부방장 지정 확인)는 "이 방에서 이 봇 계정이" 처음일 때 1회다. room_state 는 설치마다 하나라
+  // 옮기기(D17: 새 봇을 다시 부방장으로 지정해야 함)·링크 바꾸기 뒤에는 봇이나 방이 달라져 다시 알린다.
+  noticed(v, kind) {
+    const n = v.runtime[kind]
+    return !!n && typeof n === 'object' && n.chat === v.chat_id && n.by === this.id
+  }
+
+  markNoticed(v, kind, extra) {
+    v.runtime[kind] = Object.assign({ chat: v.chat_id, by: this.id }, extra || {})
+    v.dirty = true
+  }
+
   // 권한 읽기(D13): CHATONROOM 의 olu.lmt → (입장 때) JOINLINK 의 olu.lmt → MEMBER(self) 의 mt → null(판정 보류)
   async readPerm(chatId, fallback) {
+    return (await this.readSelf(chatId, fallback != null ? { lmt: fallback } : null, false)).perm
+  }
+
+  // 이 방에서의 봇 자신 → {perm, open, pli, nn}. 권한은 readPerm 과 같은 순서.
+  // 프로필: CHATONROOM·JOINLINK·UPLINKPROF 의 olu.ptp(16 = 오픈프로필)·pli·nn. 그것이 없고 needProfile 이면
+  // MEMBER(self) — 오픈채팅 멤버의 pli 는 오픈프로필로 들어와 있을 때만 있다(node-kakao OpenMemberStruct).
+  // open: true(오픈프로필) | false(기본·닉네임 프로필) | null(모름)
+  async readSelf(chatId, extraOlu, needProfile) {
+    const out = { perm: null, open: null, pli: '', nn: '', ptp: null }
+    const take = (olu) => {
+      if (!olu || typeof olu !== 'object') return
+      if (out.perm == null && olu.lmt != null && Number.isFinite(Number(olu.lmt))) out.perm = Number(olu.lmt)
+      if (out.open != null) return
+      const ptp = olu.ptp != null && Number.isFinite(Number(olu.ptp)) ? Number(olu.ptp) : null
+      const pli = R.idText(olu.pli)
+      if (ptp != null) out.open = ptp === OPEN_PROFILE
+      else if (pli) out.open = true
+      else return
+      out.ptp = ptp
+      out.pli = out.open ? pli : ''
+      out.nn = cleanName(olu.nn || olu.nickName)
+    }
     const r = await this.raw('CHATONROOM', { chatId: L(chatId) })
-    if (R.locoOk(r)) {
-      const olu = r.body && r.body.olu
-      if (olu && olu.lmt != null && Number.isFinite(Number(olu.lmt))) return Number(olu.lmt)
+    if (R.locoOk(r)) take(r.body && r.body.olu)
+    take(extraOlu)
+    if ((out.perm == null || (needProfile && out.open == null)) && this.userId) {
+      const m = await this.raw('MEMBER', { chatId: L(chatId), memberIds: [L(this.userId)] })
+      if (R.locoOk(m)) {
+        const list = (m.body && m.body.members) || []
+        const me = list.find((x) => R.idText(x && x.userId) === this.userId) || list[0]
+        if (me) {
+          if (out.perm == null && me.mt != null && Number.isFinite(Number(me.mt))) out.perm = Number(me.mt)
+          if (out.open == null && R.idText(me.userId) === this.userId) {
+            const pli = R.idText(me.pli)
+            out.open = !!pli
+            out.pli = pli
+            out.nn = cleanName(me.nickName || me.nn)
+          }
+        }
+      }
     }
-    if (fallback != null && Number.isFinite(Number(fallback))) return Number(fallback)
-    if (!this.userId) return null
-    const m = await this.raw('MEMBER', { chatId: L(chatId), memberIds: [L(this.userId)] })
-    if (R.locoOk(m)) {
-      const list = (m.body && m.body.members) || []
-      const me = list.find((x) => R.idText(x && x.userId) === this.userId) || list[0]
-      if (me && me.mt != null && Number.isFinite(Number(me.mt))) return Number(me.mt)
+    return out
+  }
+
+  // ── 방마다 봇의 프로필(D12) ──────────────────────────────────────────────
+  // runtime.prof = {open, pli, nn, chat, by, at, fail?, failAt?, sw?} — 이 봇(by)이 이 방(chat)에서 본 자기 프로필.
+  // 부모는 room_state 에서 nn 을 읽어 방장에게 보일 이름으로 쓴다(installs BOT_NAME_SQL).
+  profOf(v) {
+    const p = v && v.runtime && v.runtime.prof
+    return p && typeof p === 'object' && p.by === this.id && p.chat === v.chat_id ? p : null
+  }
+
+  profMatches(p) {
+    return !!p && p.open === true && !!this.openProfile && p.pli === this.openProfile.li
+  }
+
+  // open(고른 오픈프로필) | other(다른 오픈프로필) | main(기본·닉네임 프로필) | failed(바꾸기 거절) | unknown
+  roomProfile(v) {
+    const p = this.profOf(v)
+    if (!p || p.open == null) return 'unknown'
+    if (this.profMatches(p)) return 'open'
+    if (p.fail != null) return 'failed'
+    return p.open ? 'other' : 'main'
+  }
+
+  roomProfileView(v) {
+    const p = this.profOf(v)
+    const q = this.switchQ.get(v.install_id)
+    return {
+      state: this.roomProfile(v),
+      name: p && p.nn ? p.nn : null,
+      fail: p && p.fail != null ? p.fail : null,
+      fail_at: p && p.failAt ? p.failAt : null,
+      switched_at: p && p.sw ? p.sw : null,
+      queued: q ? q.how : null,
+      target: this.openProfile ? this.openProfile.name : null,
+      convert: this.opts.profileConvert,
     }
-    return null
+  }
+
+  // 방에 보이는 봇 이름: 그 방에서 읽은 이름 → 기본 프로필이면 닉네임 → 오픈프로필 이름
+  nameIn(v) {
+    const p = this.profOf(v)
+    if (p && p.nn) return p.nn
+    if (p && p.open === false) return this.nickname || this.roomName()
+    return this.roomName()
+  }
+
+  noteSelf(v, self, opt) {
+    if (!self || self.open == null || !v || !v.chat_id) return
+    const p = this.profOf(v)
+    const next = { open: self.open, pli: self.open ? (self.pli || '') : '', nn: self.nn || (p && p.open === self.open && p.pli === (self.pli || '') ? p.nn : '') || '', chat: v.chat_id, by: this.id, at: this.now() }
+    if (p && p.sw) next.sw = p.sw
+    if (p && p.fail != null && !this.profMatches(next)) {
+      next.fail = p.fail
+      next.failAt = p.failAt
+    }
+    const same = p && p.open === next.open && p.pli === next.pli && p.nn === next.nn && (p.fail == null) === (next.fail == null)
+    if (!same) {
+      v.runtime.prof = next
+      v.dirty = true
+    }
+    if (!(opt && opt.noQueue)) this.considerSwitch(v)
+  }
+
+  considerSwitch(v) {
+    if (this.opts.profileConvert !== 'auto') return
+    this.queueSwitch(v, 'switch', false)
+  }
+
+  // → '' (줄에 넣음·이미 있음) | 오류 코드
+  queueSwitch(v, how, manual) {
+    const now = this.now()
+    if (!v || !v.chat_id || !v.link_id || (v.state !== 'active' && v.state !== 'waiting_host')) return 'not_joined'
+    if (this.profileState !== 'ok' || !this.openProfile) return 'no_open_profile'
+    if (!this.live()) return 'not_connected'
+    const p = this.profOf(v)
+    if (this.profMatches(p)) return 'already_open'
+    if (how === 'switch' && !manual) {
+      if (!p || p.open == null) return 'unknown'
+      if (p.failAt && now - p.failAt < this.opts.profileRetryMs) return 'recent_fail'
+    }
+    const cur = this.switchQ.get(v.install_id)
+    if (cur && (cur.how === how || cur.how === 'rejoin')) return ''
+    this.switchQ.set(v.install_id, { notBefore: 0, how, manual: !!manual })
+    this.schedulePump(now)
+    return ''
+  }
+
+  // 프로필 바꾸기 1건(UPLINKPROF, 나가지 않는다). → 카카오에 패킷을 보냈으면 true
+  async switchOne(id, job) {
+    const v = this.byInstall.get(Number(id))
+    if (!job || !v || !v.chat_id || !v.link_id || (v.state !== 'active' && v.state !== 'waiting_host')) return false
+    const prof = this.profileState === 'ok' ? this.openProfile : null
+    if (!prof) return false
+    if (job.how === 'rejoin') return this.rejoinOne(v, job)
+    const now = this.now()
+    const free = this.switchH.freeAt(now)
+    if (free > now) {
+      this.switchQ.set(v.install_id, Object.assign({}, job, { notBefore: free }))
+      this.schedulePump(free)
+      return false
+    }
+    // 지금 프로필을 다시 읽는다. 이미 오픈프로필이면 보내지 않는다.
+    const before = await this.readSelf(v.chat_id, null, true)
+    this.noteSelf(v, before, { noQueue: true })
+    if (before.open === true && before.pli === prof.li) return false
+    this.switchH.add(now)
+    const r = await this.raw('UPLINKPROF', { li: L(v.link_id), ptp: OPEN_PROFILE, pli: L(prof.li) })
+    const st = R.locoStatus(r)
+    log(this.id, `install ${v.install_id} UPLINKPROF ptp 16 status ${st} (room pv ${v.linkPv == null ? '?' : v.linkPv}, was ${before.open == null ? 'unknown' : (before.open ? 'open ' + before.pli : 'main')})`)
+    const lost = st === -1 || !!r.timeout
+    if (st === 0 || lost) {
+      const after = await this.readSelf(v.chat_id, st === 0 && r.body ? r.body.olu : null, true)
+      const done = after.open === true && after.pli === prof.li
+      if (done || (st === 0 && after.open == null)) {
+        const name = (done && after.nn) || prof.name
+        v.runtime.prof = { open: true, pli: prof.li, nn: name, chat: v.chat_id, by: this.id, at: this.now(), sw: this.now() }
+        v.dirty = true
+        log(this.id, `install ${v.install_id} now joined with open profile ${prof.li}`)
+        // 권한(부방장)이 그대로인지 바로 확인한다
+        if (v.products.roombot && after.perm != null) await this.applyPerm(v, after.perm)
+        if (v.state === 'waiting_host' && v.products.roombot && v.licensed) this.say(v, R.profileChangedNotice(name), { what: 'notice' })
+        return true
+      }
+      if (lost) {
+        // 응답이 없고 바뀌지도 않았다: 거절로 보지 않는다(다음 점검에서 다시 판단)
+        this.noteSelf(v, after, { noQueue: true })
+        return true
+      }
+    }
+    const p = this.profOf(v) || { open: before.open, pli: before.pli || '', nn: before.nn || '', chat: v.chat_id, by: this.id, at: now }
+    v.runtime.prof = Object.assign({}, p, { fail: st === 0 ? 'unchanged' : st, failAt: this.now() })
+    v.dirty = true
+    log(this.id, `install ${v.install_id} profile switch refused (${st === 0 ? 'unchanged' : 'status ' + st}); room stays as it is`)
+    return true
+  }
+
+  // 다시 입장 1건(관리자 버튼): 나갔다가 오픈프로필로 다시 들어간다. 부방장은 방장이 다시 지정해야 한다.
+  // 행을 먼저 queued 로 써 둔다(나간 뒤 멈춰도 다음 시작이 다시 입장한다). 입장 예산이 없으면 나가지 않는다.
+  async rejoinOne(v, job) {
+    const id = v.install_id
+    const now = this.now()
+    const until = Math.max(this.pool.joinPausedUntil, this.joinH.freeAt(now), this.joinD.freeAt(now))
+    if (until > now) {
+      this.switchQ.set(id, Object.assign({}, job, { notBefore: until }))
+      this.schedulePump(until)
+      return false
+    }
+    const row = await this.store.getInstall(id)
+    if (!row || row.phase !== 'installed' || row.bot_device_id !== this.id || row.hold_reason) return false
+    if (row.state !== 'active' && row.state !== 'waiting_host') return false
+    const n = await this.write(id, { state: 'queued', error_code: null, error_detail: null, next_try_at: null, perm: null, perm_at: null, state_at: now })
+    if (!n) return false
+    // 새 이름으로 입장 안내·부방장 확인 안내를 다시 한다
+    delete v.runtime.welcomed
+    delete v.runtime.promoted
+    delete v.runtime.prof
+    v.dirty = true
+    const chat = v.chat_id
+    await this.dropView(id)
+    let left = false
+    try {
+      await this.client.leaveChat(chat)
+      left = true
+    } catch (e) {
+      log(this.id, `install ${id} rejoin: leave failed ${errText(e)}`)
+    }
+    if (left) this.rejoinIds.add(id)
+    await this.roomLog(id, 'state', { detail: { state: 'queued', event: 'rejoin' } })
+    log(this.id, `install ${id} rejoin with open profile (${left ? 'left' : 'leave failed, checking the room again'})`)
+    this.joinQ.set(id, { notBefore: 0 })
+    return true
   }
 
   // ── 권한·생존 점검(5.4) ─────────────────────────────────────────────────
@@ -1285,8 +1972,13 @@ export class BotSlot {
       v.checking = true
       this.checks = this.checks.then(() => this.checkRoom(v)).catch((e) => log(this.id, `check ${v.install_id} failed: ${errText(e)}`)).finally(() => { v.checking = false })
     }
-    for (const v of this.byInstall.values()) this.profileScan(v, now)
+    for (const v of this.byInstall.values()) this.memberSync(v, now)
     for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
+    // 오픈프로필 목록을 주기적으로 다시 읽는다(모르는 상태면 5분마다)
+    const every = this.profileState === 'unknown' ? 5 * MIN : this.opts.profileReadMs
+    if (every && !this.profileReading && now - Math.max(this.profileReadAt, this.profileTryAt) > every) {
+      this.bg(this.readOpenProfiles('periodic'), 'open profile read')
+    }
   }
 
   async checkRoom(v) {
@@ -1294,6 +1986,7 @@ export class BotSlot {
     const now = this.now()
     const full = v.checkFull || v.state === 'active' || v.state === 'error'
     v.checkFull = false
+    v.recheck = false
     if (full) {
       try {
         await this.client.getChat(v.chat_id)
@@ -1310,8 +2003,12 @@ export class BotSlot {
         const r = await this.raw('INFOLINK', { lis: [L(v.link_id)] })
         if (R.locoOk(r)) {
           const ols = (r.body && Array.isArray(r.body.ols)) ? r.body.ols : []
-          if (ols.some((o) => R.idText(o && o.li) === v.link_id)) v.linkMiss = 0
-          else {
+          const ol = ols.find((o) => R.idText(o && o.li) === v.link_id)
+          if (ol) {
+            v.linkMiss = 0
+            // 방의 pv(32 = 기본 프로필 참여 허용, 8 = PROFILE_EDITABLE)를 프로필 바꾸기 기록에 함께 남긴다(실측)
+            if (ol.pv != null && Number.isFinite(Number(ol.pv))) v.linkPv = Number(ol.pv)
+          } else {
             v.linkMiss = (v.linkMiss || 0) + 1
             if (v.linkMiss >= 2) {
               await this.roomGone(v, 'room_deleted')
@@ -1324,20 +2021,30 @@ export class BotSlot {
         }
       }
     }
-    if (v.products.roombot) {
-      const perm = await this.readPerm(v.chat_id, null)
-      if (perm != null) await this.applyPerm(v, perm)
-    } else if (v.state !== 'active') {
+    // 방 관리봇 방은 점검마다 권한을 읽는다(CHATONROOM 의 olu 에 프로필도 함께 온다).
+    // 미니게임만 있는 방은 이 봇의 프로필을 아직 모를 때만 한 번 읽는다(D12 오픈프로필 확인).
+    const needProf = !this.profOf(v) || this.profOf(v).open == null
+    if (v.products.roombot || needProf) {
+      const self = await this.readSelf(v.chat_id, null, needProf)
+      if (!this.byInstall.has(v.install_id)) return
+      this.noteSelf(v, self)
+      if (v.products.roombot && self.perm != null) await this.applyPerm(v, self.perm)
+    }
+    if (!v.products.roombot && v.state !== 'active') {
       await this.applyPerm(v, v.perm == null ? 2 : v.perm)
     }
     if (!this.byInstall.has(v.install_id) || v.state === 'error') return
-    v.nextCheckAt = this.now() + (v.state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
+    const due = this.now() + (v.state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
+    // 점검 도중에 soon() 이 왔으면(상품 변경·권한 푸시) 그 요청을 덮어쓰지 않는다
+    v.nextCheckAt = v.recheck ? Math.min(due, this.now() + this.opts.pushDelayMs) : due
+    v.recheck = false
   }
 
   // 방 관리봇이 있는 방: perm & 5 면 active, 아니면 waiting_host. 미니게임만 있는 방은 권한을 보지 않는다(늘 active).
   async applyPerm(v, perm) {
     const now = this.now()
     const prev = v.state
+    const prevPerm = v.perm
     const state = v.products.roombot ? ((perm & 5) ? 'active' : 'waiting_host') : 'active'
     const fields = { perm, perm_at: now }
     if (state !== prev || v.error_code) Object.assign(fields, { state, state_at: now, error_code: null, error_detail: null })
@@ -1346,14 +2053,21 @@ export class BotSlot {
     v.perm = perm
     v.state = state
     v.error_code = null
-    if (prev === state) return
+    const promote = state === 'active' && v.products.roombot && !this.noticed(v, 'promoted')
+    if (prev === state && !promote) return
     if (prev === 'error') await this.roomLog(v.install_id, 'state', { detail: { state, event: 'revive' } })
-    if (v.products.roombot && (prev === 'waiting_host' || prev === 'active')) {
+    // 부방장 없이 사용 중이던 방(미니게임만)에 방 관리봇이 붙음: 강등이 아니라 처음 부방장 대기다(4.2). 해제 기록·알림을 남기지 않는다.
+    const added = v.products.roombot && prev === 'active' && !(prevPerm != null && (prevPerm & 5))
+    if (v.products.roombot && prev !== state && (prev === 'waiting_host' || (prev === 'active' && !added))) {
       await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: state === 'active', to: state } })
     }
-    if (state === 'active' && v.products.roombot && !v.runtime.hostNoticed) {
-      v.runtime.hostNoticed = true
-      v.dirty = true
+    if (added && state === 'waiting_host' && v.licensed && !(this.noticed(v, 'welcomed') && v.runtime.welcomed.roombot)) {
+      // 방장이 어느 계정을 부방장으로 지정할지 알 수 있게 봇 닉네임을 방에 알린다(7.9·D12)
+      this.markNoticed(v, 'welcomed', { roombot: true })
+      this.say(v, R.roombotAddedNotice(v, this.nameIn(v)), { what: 'notice' })
+    }
+    if (promote) {
+      this.markNoticed(v, 'promoted')
       if (prev !== 'waiting_host') await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: true, to: state } })
       this.say(v, R.PROMOTED_NOTICE, { what: 'notice' })
     }
@@ -1362,6 +2076,7 @@ export class BotSlot {
   soon(v) {
     const at = this.now() + this.opts.pushDelayMs
     if (!v.nextCheckAt || v.nextCheckAt > at) v.nextCheckAt = at
+    if (v.checking) v.recheck = true
   }
 
   // 내보내짐·방 삭제·나감(5.4 표)
@@ -1429,6 +2144,14 @@ export class BotSlot {
       const li = b.li != null ? b.li : (b.ol && b.ol.li)
       const v = this.viewByLink(li) || this.views.get(R.idText(b.c) || R.idText(b.chatId))
       if (v && v.state !== 'error') await this.roomGone(v, 'room_deleted')
+      // 이 계정의 링크(오픈프로필 포함)가 지워졌다: 맡은 방이 아니면 오픈프로필 목록을 다시 읽는다
+      else if (!v && m === 'SYNCLINKDL') this.profilePushed(m)
+      return
+    }
+    if (/^SYNCLINK/.test(m) && m !== 'SYNCLINKPF') {
+      // SYNCLINKCR(이 계정의 링크가 생김)·SYNCLINKUP 등: 맡은 방의 링크가 아니면 오픈프로필 목록을 다시 읽는다
+      const li = R.idText(b.li != null ? b.li : (b.ol && b.ol.li))
+      if (!li || !this.viewByLink(li)) this.profilePushed(m)
       return
     }
     if (m === 'LEFT') {
@@ -1437,19 +2160,14 @@ export class BotSlot {
       return
     }
     if (m === 'SYNCLINKPF') {
-      // 오픈 프로필 변경 푸시(7.2(c), 모양은 실측 전). 사람 id 와 이름이 보이면 프로필 관찰로만 쓴다.
+      // 오픈 프로필 변경 푸시(7.2(c), 모양은 실측 전). 사람 id 가 보이면 그 사람 카드를 다시 읽어 명부와 비교한다.
       const v = this.views.get(R.idText(b.c) || R.idText(b.chatId)) || this.viewByLink(b.li)
-      if (!v || !v.licensed || v.state === 'error' || !R.roombotLive(v) || !v.cfg.profile.enabled) return
+      if (!v || !v.licensed || v.state === 'error' || !R.roombotLive(v)) return
       const p = [b.olu, b.member, b.profile, b].find((x) => x && typeof x === 'object' && R.idText(x.userId))
       if (!p) return
       const uid = R.idText(p.userId)
       if (uid === this.userId) return
-      const name = String(p.nickName || p.nn || '').trim().slice(0, 40)
-      const photo = R.photoSig(p.opi || p.originalProfileImageUrl, p.pi || p.profileImageUrl) || null
-      const status = p.statusMessage == null ? null : String(p.statusMessage)
-      const adapter = R.adapterRecord(v, this.id)
-      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: uid, authorName: name, photo, status, now: this.now() }))
-      v.dirty = true
+      this.refreshSoon(v, uid, String(p.nickName || p.nn || '').trim().slice(0, 40))
     }
   }
 
@@ -1503,7 +2221,7 @@ export class BotSlot {
           const g = guardOnChat(adapter, { kind: 'msg', chatId: v.chat_id, text: ev.text, authorId: ev.authorId, messageType: 0, mine: false, ownKick: own, now })
           if (g.askHalt) {
             const allowed = !!(Number(v.perm) & 5)
-            guardFinishHalt(adapter, v.chat_id, allowed, now, v.link_name || '대화방', g.askHalt.count)
+            guardFinishHalt(adapter, v.chat_id, allowed, now, v.link_name || '대화방', g.askHalt.count, 'K bot')
             await this.roomLog(v.install_id, 'wave', { detail: { n: g.askHalt.count } })
           }
           this.sendAll(v, g.sends)
@@ -1550,10 +2268,10 @@ export class BotSlot {
       if (!row) return null
       const perm = row.open_permission == null ? null : Number(row.open_permission)
       if (perm != null) v.perms.set(String(userId), { mt: perm, at: this.now() })
-      v.cardAt.set(String(userId), this.now())
       return {
         name: String(row.nickname || '').trim().slice(0, 40),
         photo: R.photoSig(row.original_profile_image_url, row.profile_image_url) || null,
+        photoUrl: R.photoUrl(row.profile_image_url, row.original_profile_image_url),
         status: row.status_message == null ? null : String(row.status_message),
         perm,
         pli: row.open_profile_link_id ? String(row.open_profile_link_id) : '',
@@ -1565,18 +2283,48 @@ export class BotSlot {
   }
 
   async profileLink(pli) {
-    if (!/^[1-9][0-9]*$/.test(String(pli || ''))) return ''
-    try {
-      const body = await this.client.executeWithReconnect(async ({ session }) => {
-        const r = await session.getOpenLinkInfo([L(pli)])
-        return r && r.body
-      })
-      const row = body && Array.isArray(body.ols) ? body.ols[0] : null
-      const lu = row && typeof row.lu === 'string' ? row.lu.trim() : ''
-      return /^https:\/\/open\.kakao\.com\//i.test(lu) ? lu : ''
-    } catch {
-      return ''
+    const li = String(pli || '')
+    if (!/^[1-9][0-9]*$/.test(li)) return ''
+    const got = await this.linksFor([li])
+    return got.get(li) || ''
+  }
+
+  // pli(사람의 오픈프로필 링크 id) → 옾링 주소. 봇마다 메모리에 둔다. 모르는 것만 20개씩 INFOLINK 로 읽는다.
+  // 읽지 못한 묶음은 돌려주지 않는다(모름) → 다음 동기화가 다시 읽는다.
+  async linksFor(plis) {
+    const out = new Map()
+    const want = []
+    for (const li of plis || []) {
+      if (!/^[1-9][0-9]*$/.test(String(li || ''))) continue
+      if (this.linkCache.has(li)) out.set(li, this.linkCache.get(li))
+      else if (!want.includes(li)) want.push(li)
     }
+    for (let i = 0; i < want.length; i += 20) {
+      const part = want.slice(i, i + 20)
+      let body = null
+      try {
+        body = await this.client.executeWithReconnect(async ({ session }) => {
+          const r = await session.getOpenLinkInfo(part.map((x) => L(x)))
+          return r && r.body
+        })
+      } catch (e) {
+        log(this.id, `open link read failed: ${errText(e)}`)
+        break
+      }
+      const got = new Map()
+      for (const row of (body && Array.isArray(body.ols) ? body.ols : [])) {
+        const li = R.idText(row && row.li)
+        if (li) got.set(li, R.profileUrl(row && row.lu))
+      }
+      for (const li of part) {
+        const lu = got.get(li) || ''
+        this.linkCache.set(li, lu)
+        out.set(li, lu)
+      }
+      if (this.linkCache.size > 5000) for (const k of [...this.linkCache.keys()].slice(0, 1000)) this.linkCache.delete(k)
+      if (i + 20 < want.length && this.opts.linkGapMs) await new Promise((ok) => setTimeout(ok, this.opts.linkGapMs))
+    }
+    return out
   }
 
   async memberIdByName(v, name) {
@@ -1610,16 +2358,17 @@ export class BotSlot {
     if (!ev.userId && ev.name && ev.kind === 'join' && cfg.churn.enabled) ev.userId = await this.memberIdByName(v, ev.name)
     let card = null
     if (ev.kind === 'join' && ev.userId && (cfg.visit.enabled || cfg.profile.enabled)) card = await this.memberCard(v, ev.userId)
+    // 들어온 사람은 카드(닉네임·옾링·사진)를 명부에 합치고, 나간 사람은 명부에서 찾는다.
+    // 명부는 봇이 들어간 뒤 방 전체를 읽어 둔 것이라, 봇보다 먼저 있던 사람이 나가도 옾링·사진이 있다.
+    if (card) await this.mergeMembers(v, [{ uid: ev.userId, name: card.name || ev.name || '', pli: card.pli || '', photo: card.photoUrl }], 'join')
+    const mem = ev.userId ? v.members.get(ev.userId) : null
     const adapter = R.adapterRecord(v, this.id)
-    const link = card && card.pli && cfg.visit.enabled ? await this.profileLink(card.pli) : ''
     const g = guardOnChat(adapter, {
-      kind: ev.kind, chatId: v.chat_id, authorId: ev.userId, authorName: (card && card.name) || ev.name,
-      profileLink: link, mine: false, now, at: ev.at, logId: ev.logId,
+      kind: ev.kind, chatId: v.chat_id, authorId: ev.userId, authorName: (card && card.name) || ev.name || (mem && mem.name) || '',
+      profileLink: mem && mem.link ? mem.link : '', photo: mem && typeof mem.photo === 'string' ? mem.photo : undefined,
+      mine: false, now, at: ev.at, logId: ev.logId,
     })
     this.sendAll(v, g.sends)
-    if (card && cfg.profile.enabled) {
-      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: ev.userId, authorName: card.name, photo: card.photo, status: card.status, now }))
-    }
     const ctx = this.ctxFor(v)
     if (ev.kind === 'join') {
       if (ev.userId && R.bannedNow(rt, ev.userId, now)) {
@@ -1761,6 +2510,8 @@ export class BotSlot {
       if (v.names.size > 500) v.names.delete(v.names.keys().next().value)
     }
     const live = R.roombotLive(v)
+    // 닉네임이 명부와 다르면 프로필 변경 확인(입장·퇴장 안내나 프로필 변경 감지가 켜진 방)
+    if (live && m.authorId && m.nick && (cfg.visit.enabled || cfg.profile.enabled)) this.noteName(v, m.authorId, m.nick)
     if (R.isHelpCommand(text, prefix)) {
       const line = R.helpLine(v)
       if (line) this.say(v, line, { what: 'reply' })
@@ -1837,7 +2588,7 @@ export class BotSlot {
     const p = await this.permOf(v, m.authorId)
     const n = Number(p)
     if (!(Number.isFinite(n) && ((n & 1) || (n & 4)))) {
-      this.say(v, '가리기는 방장과 부방장만 할 수 있습니다.', { what: 'reply' })
+      this.say(v, '글 가리기는 방장과 부방장만 할 수 있어요.', { what: 'reply' })
       return
     }
     if (hc.usage) {
@@ -1850,13 +2601,13 @@ export class BotSlot {
       if (!v.ringFilled) await this.fillRing(v)
       const ids = [...new Set(v.ring.filter((x) => x.name === hc.name && x.authorId).map((x) => x.authorId))]
       if (ids.length !== 1) {
-        this.say(v, ids.length > 1 ? `같은 이름이 ${ids.length}명입니다. @멘션으로 지정하십시오.` : `「${hc.name}」의 최근 글이 없습니다.`, { what: 'reply' })
+        this.say(v, ids.length > 1 ? R.sameNameReply(ids.length) : `「${hc.name}」의 최근 글이 없어요.`, { what: 'reply' })
         return
       }
       req = { userId: ids[0] }
     } else req = { last: hc.last }
     const r = await this.startHide(v, req, m.authorId)
-    if (!r.ok && r.error === 'busy') this.say(v, '가리기 작업이 진행 중입니다.', { what: 'reply' })
+    if (!r.ok && r.error === 'busy') this.say(v, '이미 글을 가리는 중이에요. 끝난 뒤 다시 입력해 주세요.', { what: 'reply' })
   }
 
   async fillRing(v) {
@@ -1924,7 +2675,7 @@ export class BotSlot {
         detail: { n: job.done, failed: job.failed, by: job.by === 'panel' ? 'panel' : 'host' },
       })
       if (job.total > 0) this.say(v, R.hideDoneNotice(job.done, job.failed), { what: 'notice' })
-      else if (job.by !== 'panel') this.say(v, '가릴 글이 없습니다.', { what: 'reply' })
+      else if (job.by !== 'panel') this.say(v, '가릴 글이 없어요.', { what: 'reply' })
     }
   }
 
@@ -1961,41 +2712,144 @@ export class BotSlot {
     return { ok: true }
   }
 
-  // 30분 넘게 안 본 작성자를 방마다 60초에 최대 1회, 20명까지 다시 읽는다(사진·상태 메시지, 7.2(c)).
-  profileScan(v, now) {
-    if (!R.roombotLive(v) || !v.cfg.profile.enabled || (!v.cfg.profile.photo && !v.cfg.profile.status)) return
-    if (now - v.profileScanAt < MIN || v.scanning) return
-    v.profileScanAt = now
-    const due = []
-    for (const uid of v.names.keys()) {
-      if (uid === this.userId) continue
-      if (now - (v.cardAt.get(uid) || 0) > 30 * MIN) due.push(uid)
-      if (due.length >= 20) break
-    }
-    if (!due.length) return
-    v.scanning = true
-    this.checks = this.checks.then(async () => {
-      try {
-        const rows = await this.client.getMembersByIds(v.chat_id, due)
-        const adapter = R.adapterRecord(v, this.id)
-        for (const row of rows || []) {
-          const uid = String(row.user_id)
-          v.cardAt.set(uid, this.now())
-          if (row.open_permission != null) v.perms.set(uid, { mt: Number(row.open_permission), at: this.now() })
-          this.sendAll(v, profileOnly(adapter, {
-            chatId: v.chat_id, authorId: uid, authorName: String(row.nickname || '').trim().slice(0, 40),
-            photo: R.photoSig(row.original_profile_image_url, row.profile_image_url) || null,
-            status: row.status_message == null ? null : String(row.status_message), now: this.now(),
-          }))
-        }
-        for (const uid of due) if (!v.cardAt.has(uid)) v.cardAt.set(uid, this.now())
-        v.dirty = true
-      } catch (e) {
-        log(this.id, `profile scan failed: ${errText(e)}`)
-      } finally {
-        v.scanning = false
+  // ── 방 멤버 명부(옾링·사진) ──────────────────────────────────────────────
+  // 봇이 방에 있는 동안 GETMEM 으로 모든 멤버의 닉네임·옾링·사진을 읽어 둔다(입장 뒤 처음·10분마다·다시 시작한 뒤).
+  // 그래서 봇이 들어가기 전부터 있던 사람이 나가도 퇴장 안내에 옾링을 적는다. 아는 사람이 바뀌었으면 프로필 변경 안내.
+  async loadMembers(v) {
+    try {
+      const rows = await this.store.loadMembers(v.install_id, v.membersChat, this.now() - 90 * DAY)
+      for (const r of rows || []) {
+        const uid = R.idText(r.user_id)
+        if (!uid || v.members.has(uid)) continue
+        v.members.set(uid, {
+          name: String(r.name || ''),
+          pli: r.pli == null ? null : String(r.pli),
+          link: r.link == null ? null : String(r.link),
+          photo: r.photo == null ? null : String(r.photo),
+          seenAt: Number(r.seen_at) || 0,
+        })
       }
+    } catch (e) {
+      log(this.id, `room_members read failed: ${errText(e)}`)
+    }
+  }
+
+  async flushMembers(v) {
+    if (!v.membersDirty.size || !v.membersChat) return
+    const uids = [...v.membersDirty]
+    v.membersDirty.clear()
+    const rows = []
+    for (const uid of uids) {
+      const m = v.members.get(uid)
+      if (m) rows.push({ user_id: uid, name: m.name || '', pli: m.pli, link: m.link, photo: m.photo, seen_at: m.seenAt || this.now() })
+    }
+    try {
+      await this.store.saveMembers(v.install_id, v.membersChat, rows)
+    } catch (e) {
+      for (const uid of uids) v.membersDirty.add(uid)
+      log(this.id, `room_members save failed: ${errText(e)}`)
+    }
+  }
+
+  memberSync(v, now) {
+    if (!v.chat_id || !R.roombotLive(v) || !(v.cfg.visit.enabled || v.cfg.profile.enabled)) return
+    if (v.memberSyncing || (v.memberSyncAt && now - v.memberSyncAt < this.opts.memberSyncMs)) return
+    v.memberSyncing = true
+    v.memberSyncAt = now
+    this.checks = this.checks.then(() => this.syncMembers(v))
+      .catch((e) => log(this.id, `member sync ${v.install_id} failed: ${errText(e)}`))
+      .finally(() => { v.memberSyncing = false })
+  }
+
+  async syncMembers(v) {
+    if (!this.live() || !this.byInstall.has(v.install_id) || !v.chat_id) return
+    const body = await this.client.executeWithReconnect(async ({ session }) => {
+      const r = await session.getAllMembers(L(v.chat_id))
+      return r && r.body
     })
+    if (!body || !Array.isArray(body.members)) return
+    const rows = []
+    for (const m of body.members) {
+      const uid = R.idText(m && m.userId)
+      if (!uid || uid === this.userId) continue
+      rows.push({
+        uid,
+        name: String(m.nickName || m.nickname || m.nn || '').trim().slice(0, 40),
+        pli: R.idText(m.pli) || '',
+        photo: R.photoUrl(m.pi || m.profileImageUrl, m.opi || m.originalProfileImageUrl),
+      })
+    }
+    await this.mergeMembers(v, rows, 'sync')
+  }
+
+  // 새로 읽은 값(rows: {uid, name, pli, photo}, null = 모름)을 명부에 합친다. 옾링은 새로 보거나 바뀐 pli 만 읽는다.
+  // why 'sync'·'refresh' 면 아는 사람의 변경을 프로필 변경으로 알린다. 'join' 은 입장 안내가 대신하므로 조용히 합친다.
+  async mergeMembers(v, rows, why) {
+    const need = []
+    for (const r of rows) {
+      const prev = v.members.get(r.uid)
+      if (r.pli && !(prev && prev.pli === r.pli && prev.link != null)) need.push(r.pli)
+    }
+    const links = need.length ? await this.linksFor(need) : new Map()
+    const now = this.now()
+    for (const r of rows) {
+      const prev = v.members.get(r.uid) || null
+      const pliKnown = r.pli !== null && r.pli !== undefined
+      let link
+      if (!pliKnown) link = prev ? prev.link : null
+      else if (!r.pli) link = ''
+      else if (links.has(r.pli)) link = links.get(r.pli)
+      else link = prev && prev.pli === r.pli ? prev.link : null
+      const next = {
+        name: r.name || (prev && prev.name) || '',
+        pli: pliKnown ? r.pli : (prev ? prev.pli : null),
+        link,
+        photo: r.photo === null || r.photo === undefined ? (prev ? prev.photo : null) : r.photo,
+        seenAt: now,
+      }
+      v.members.set(r.uid, next)
+      v.membersDirty.add(r.uid)
+      if (prev && why !== 'join') this.announceProfile(v, r.uid, prev, next)
+    }
+  }
+
+  announceProfile(v, uid, before, after) {
+    if (!R.roombotLive(v) || !v.cfg.profile.enabled) return
+    const sends = R.profileChange(v.runtime, v.chat_id, v.cfg.profile, { userId: uid, before, after }, this.now())
+    if (!sends.length) return
+    this.sendAll(v, sends)
+    v.dirty = true
+  }
+
+  // 메시지의 작성자 닉네임이 명부와 다르면 그 사람 카드를 다시 읽어(옾링·사진 포함) 비교한다.
+  noteName(v, uid, name) {
+    const nm = String(name || '').trim().slice(0, 40)
+    if (!nm || !uid || uid === this.userId) return
+    const prev = v.members.get(uid)
+    if (!prev) {
+      // 명부에 아직 없다(동기화 전): 닉네임만 적어 둔다. 옾링·사진은 다음 동기화가 채운다.
+      v.members.set(uid, { name: nm, pli: null, link: null, photo: null, seenAt: this.now() })
+      v.membersDirty.add(uid)
+      return
+    }
+    if (prev.name !== nm) this.refreshSoon(v, uid, nm)
+  }
+
+  refreshSoon(v, uid, hint) {
+    if (!uid || v.memberRefresh.has(uid)) return
+    v.memberRefresh.add(uid)
+    this.checks = this.checks.then(() => this.refreshMember(v, uid, hint))
+      .catch((e) => log(this.id, `member refresh failed: ${errText(e)}`))
+      .finally(() => { v.memberRefresh.delete(uid) })
+  }
+
+  async refreshMember(v, uid, hint) {
+    if (!this.byInstall.has(v.install_id)) return
+    const card = await this.memberCard(v, uid)
+    const row = card
+      ? { uid, name: card.name || hint || '', pli: card.pli || '', photo: card.photoUrl }
+      : { uid, name: hint || '', pli: null, photo: null }
+    await this.mergeMembers(v, [row], 'refresh')
   }
 
   // ── 송신(5.5 공정 몫) ───────────────────────────────────────────────────

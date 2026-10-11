@@ -3,6 +3,10 @@ import { KakaoTalkClient } from 'agent-messenger/kakaotalk'
 import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from './room-kind.mjs'
 import { Hub, Slot } from './runner.mjs'
 import { open, seal } from './store.mjs'
+import { FOLD, withProfileLink } from './roomfeat.mjs'
+
+// 접힌 사람 안내: 첫 줄(제목 · @닉네임) + 보이지 않는 글자 + 줄바꿈 + 자세한 내용([전체보기])
+const folded = (head, lines) => head + FOLD + '\n' + lines.join('\n')
 import * as passbox from './secretbox.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -218,10 +222,14 @@ if (guardOnChat(said, { kind: 'msg', chatId: '555', text: '강퇴했습니다', 
 }
 guardFinishHalt(kicked, '555', true, t0 + 4, '관리방', 3)
 const notes = guardNotices(kicked)
-if (notes.length !== 1 || notes[0].text.indexOf('이후 강퇴하지 않습니다') < 0) throw new Error('halt notice')
+if (notes.length !== 1 || notes[0].text.indexOf('10분 동안 사람을 내보내지 않습니다') < 0 || notes[0].text.indexOf('강퇴') >= 0) throw new Error('halt notice')
 const denied = guardRecord()
 guardFinishHalt(denied, '555', false, t0, '관리방', 3)
 if (guardNotices(denied)[0].text.indexOf('권한이 없습니다') < 0) throw new Error('no permission notice')
+if (notes[0].text.indexOf('이 계정은 10분 동안') < 0) throw new Error('halt notice subject (customer account)')
+const kbotHalt = guardRecord()
+guardFinishHalt(kbotHalt, '555', true, t0, '관리방', 3, 'K bot')
+if (guardNotices(kbotHalt)[0].text !== '「관리방」에서 짧은 시간에 3명을 내보냈습니다. K bot은 10분 동안 사람을 내보내지 않습니다.') throw new Error('halt notice subject (K bot) ' + guardNotices(kbotHalt)[0].text)
 if (!guardCanStopKicks(1) || !guardCanStopKicks(4) || guardCanStopKicks(2) || guardCanStopKicks(8) || guardCanStopKicks(null)) {
   throw new Error('kick permission')
 }
@@ -267,34 +275,41 @@ const firstVisit = visitRecord()
 const firstLeft = guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
 if (firstLeft.sends.length !== 1) throw new Error('a leave posts one notice')
 const leftNote = firstLeft.sends[0].text
-const expectedLeave = [
-  '[퇴장안내]',
-  '이름 : @홍길동',
-  '옾링 : 찾지 못했습니다',
-  '퇴장로그',
-  '- 2023-11-15 07:13',
-].join('\n')
-if (leftNote !== expectedLeave) throw new Error('leave notice layout')
-if (leftNote.indexOf('입장로그') >= 0 || leftNote.indexOf('[입장안내]') >= 0) throw new Error('a leave notice has no enter log')
+// 새 모양: 제목 · 줄 · 👤 🆔 🔗(🖼 은 사진을 알 때만) · 기록(가지 줄) · 줄. 옛 계정 기능은 사진을 몰라 사진 줄이 없다.
+const expectedLeave = folded('📤 퇴장 안내 · @홍길동', [
+  '━━━━━━━━━━━━━━',
+  '👤 홍길동',
+  '🆔 7',
+  '🔗 옾링 : 없음',
+  '',
+  '🕒 퇴장 기록 · 1회',
+  ' └ 2023-11-15 07:13',
+  '━━━━━━━━━━━━━━',
+])
+if (leftNote !== expectedLeave) throw new Error('leave notice layout ' + JSON.stringify(leftNote))
+if (leftNote.indexOf('입장 기록') >= 0 || leftNote.indexOf('입장 안내') >= 0) throw new Error('a leave notice has no enter log')
 const joined = guardOnChat(firstVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
-  profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
+  profileLink: 'https://open.kakao.com/o/abc', photo: 'https://k.kakaocdn.net/dn/a/b/img_s.jpg', now: t0 + 60000,
 })
 if (joined.sends.length !== 1) throw new Error('one join notice')
 const note = joined.sends[0].text
-const expected = [
-  '[입장안내]',
-  '이름 : @홍길동',
-  '옾링 : https://open.kakao.com/o/abc',
-  '입장로그',
-  '- 2023-11-15 07:14',
-].join('\n')
-if (note !== expected) throw new Error('enter notice layout')
-if (note.indexOf('퇴장로그') >= 0 || note.indexOf('[퇴장안내]') >= 0 || note.indexOf('07:13') >= 0) {
+const expected = folded('📥 입장 안내 · @홍길동', [
+  '━━━━━━━━━━━━━━',
+  '👤 홍길동',
+  '🆔 7',
+  '🔗 옾링 : https://open.kakao.com/o/abc',
+  '🖼 사진 : https://k.kakaocdn.net/dn/a/b/img_s.jpg',
+  '',
+  '🕒 입장 기록 · 1회',
+  ' └ 2023-11-15 07:14',
+  '━━━━━━━━━━━━━━',
+])
+// [전체보기]: 첫 줄만 보이고 500자가 넘게 채워져 카카오톡이 접는다. 멘션(@)은 첫 줄 하나뿐이다
+if (note.split('\n')[0] !== '📥 입장 안내 · @홍길동' + FOLD || note.length < 500 || note.split('@').length !== 2) throw new Error('the enter notice folds behind 전체보기')
+if (note !== expected) throw new Error('enter notice layout ' + JSON.stringify(note))
+if (note.indexOf('퇴장 기록') >= 0 || note.indexOf('퇴장 안내') >= 0 || note.indexOf('07:13') >= 0) {
   throw new Error('an enter notice has no leave log')
-}
-if (note.indexOf('들어온 방') >= 0 || note.indexOf('들어온 시각') >= 0 || note.indexOf('나간 시각') >= 0) {
-  throw new Error('old labels')
 }
 if (note.indexOf('강퇴') >= 0 || note.indexOf('들낙방지') >= 0) throw new Error('notice must not kick')
 const mention = joined.sends[0].mention
@@ -302,10 +317,7 @@ if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== no
   throw new Error('one mention of the joiner')
 }
 const extra = visitMentionExtra(note, mention)
-const byteAt = Buffer.byteLength(note.slice(0, note.indexOf('홍길동')), 'utf8')
-if (byteAt === 1) throw new Error('a korean header is not the mention order')
-if (extra !== '{"mentions":[{"user_id":7,"at":[1],"len":3}]}') throw new Error('mention attachment')
-if (extra.indexOf(String(byteAt)) >= 0) throw new Error('the mention is not a byte span')
+if (extra !== '{"mentions":[{"user_id":7,"at":[1],"len":3}]}') throw new Error('mention attachment ' + extra)
 if (extra.split('user_id').length !== 2) throw new Error('the notice mentions one person')
 const laterJoin = guardOnChat(firstVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
@@ -313,20 +325,19 @@ const laterJoin = guardOnChat(firstVisit, {
 })
 if (laterJoin.sends.length !== 1) throw new Error('a later join posts again')
 const laterText = laterJoin.sends[0].text
-if (laterText.indexOf('[입장안내]') < 0 || laterText.indexOf('퇴장') >= 0) throw new Error('a later join is only an enter notice')
-if (laterText.indexOf('- 2023-11-15 07:14') < 0 || laterText.indexOf('- 2023-11-15 07:15') < 0) {
-  throw new Error('every join time is listed')
-}
+if (laterText.indexOf('📥 입장 안내') !== 0 || laterText.indexOf('퇴장') >= 0) throw new Error('a later join is only an enter notice')
+if (laterText.indexOf('🕒 입장 기록 · 2회\n ├ 2023-11-15 07:14\n └ 2023-11-15 07:15') < 0) throw new Error('every join time is listed')
+if (laterText.indexOf('🖼 사진 : https://k.kakaocdn.net/dn/a/b/img_s.jpg') < 0) throw new Error('the photo is kept from the last time')
 if (!laterJoin.sends[0].mention || laterJoin.sends[0].mention.userId !== '7') throw new Error('still one mention')
 const laterLeft = guardOnChat(firstVisit, {
-  kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 + 180000,
+  kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 + 3 * 3600000 + 120000,
 })
-if (laterLeft.sends.length !== 1 || laterLeft.sends[0].text.indexOf('[퇴장안내]') < 0) throw new Error('a later leave posts')
-if (laterLeft.sends[0].text.indexOf('입장') >= 0) throw new Error('a leave notice has no enter log')
-if (laterLeft.sends[0].text.indexOf('- 2023-11-15 07:13') < 0 || laterLeft.sends[0].text.indexOf('- 2023-11-15 07:16') < 0) {
-  throw new Error('every leave time is listed')
-}
-if (laterLeft.sends[0].text.indexOf('옾링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
+const leftText = laterLeft.sends.length === 1 ? laterLeft.sends[0].text : ''
+if (leftText.indexOf('📤 퇴장 안내') !== 0) throw new Error('a later leave posts')
+if (leftText.indexOf('입장 기록') >= 0) throw new Error('a leave notice has no enter log')
+if (leftText.indexOf('🕒 퇴장 기록 · 2회\n ├ 2023-11-15 07:13\n └ 2023-11-15 10:15') < 0) throw new Error('every leave time is listed ' + JSON.stringify(leftText))
+if (leftText.indexOf('🔗 옾링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
+if (leftText.indexOf('⏳ 머문 시간 : 3시간 (11-15 07:15 입장)') < 0) throw new Error('the leave states how long the person stayed ' + JSON.stringify(leftText))
 // 프로필 변경: 같은 사람(userId 7)이 이름/링크를 바꿔 다시 들어오면 그 이력을 남긴다.
 const swapRec = visitRecord()
 guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
@@ -334,18 +345,17 @@ guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '
 const renamed = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
   profileLink: 'https://open.kakao.com/o/new', now: t0 + 60000 })
 const swapText = renamed.sends[0].text
-if (swapText.indexOf('프로필 변경') < 0) throw new Error('a profile change is recorded')
-if (swapText.indexOf('홍길동 / https://open.kakao.com/o/old') < 0) throw new Error('the old name and link are kept')
-if (swapText.indexOf('이름 : @김철수') < 0) throw new Error('the current name is the mention')
+if (swapText.indexOf('📝 예전 프로필 · 1회\n └ 2023-11-15 07:14 · 홍길동 · https://open.kakao.com/o/old') < 0) throw new Error('the old name and link are kept ' + JSON.stringify(swapText))
+if (swapText.indexOf('📥 입장 안내 · @김철수' + FOLD) !== 0 || swapText.indexOf('\n👤 김철수\n') < 0) throw new Error('the current name is the mention')
 if (renamed.sends[0].mention.userId !== '7') throw new Error('still one mention after a rename')
 if (visitMentionExtra(swapText, renamed.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
 // 같은 사람이 그대로 다시 들어오면 변경 이력이 늘지 않는다
 const swapAgain = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
   profileLink: 'https://open.kakao.com/o/new', now: t0 + 120000 })
-if (swapAgain.sends[0].text.split('프로필 변경').length !== 2) throw new Error('no new change when nothing changed')
-if (swapAgain.sends[0].text.indexOf('김철수 /') >= 0) throw new Error('the current identity is not logged as a change')
+if (swapAgain.sends[0].text.indexOf('📝 예전 프로필 · 1회') < 0) throw new Error('no new change when nothing changed')
+if (swapAgain.sends[0].text.indexOf('· 김철수') >= 0) throw new Error('the current identity is not logged as a change')
 // 처음 보는 사람은 변경 이력이 없다
-if (note.indexOf('프로필 변경') >= 0) throw new Error('a first sighting has no change log')
+if (note.indexOf('예전 프로필') >= 0) throw new Error('a first sighting has no change log')
 
 // 즉시 감지 (들낙방지와 별개 기능, config.profile): 이미 본 사람(userId 7)이
 // 메시지에서 다른 닉으로 나오면 그 즉시 [프로필 변경 감지]를 쏜다.
@@ -360,21 +370,35 @@ const renameMsg = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '
   text: '싸게 팝니다', now: t0 + 2000 })
 if (renameMsg.sends.length !== 1) throw new Error('a rename posts one notice at once')
 const rtext = renameMsg.sends[0].text
-if (rtext.indexOf('[프로필 변경 감지]') < 0) throw new Error('rename notice header')
-if (rtext.indexOf('이름 : @사기꾼_새닉') < 0) throw new Error('rename notice mentions the new name')
-if (rtext.indexOf('이전 : 홍길동') < 0) throw new Error('rename notice keeps the old name')
+// 새 모양: 사람 정보(👤 🆔 🔗) + 바뀐 내용(전·후). 메시지에서는 옾링을 모르니 '없음'으로 두고 linkFor 로 봇에게 맡긴다.
+const RENAME = folded('🔔 프로필 변경 감지 · @사기꾼_새닉', ['━━━━━━━━━━━━━━', '👤 사기꾼_새닉', '🆔 7', '🔗 옾링 : 없음', '', '✏️ 바뀐 내용', '▸ 닉네임',
+  ' ├ 전 : 홍길동', ' └ 후 : 사기꾼_새닉', '━━━━━━━━━━━━━━'])
+if (rtext !== RENAME) throw new Error('rename notice layout: ' + JSON.stringify(rtext))
+if (renameMsg.sends[0].linkFor !== '7') throw new Error('rename notice asks the sender to fill the open profile link')
 if (renameMsg.sends[0].mention.userId !== '7') throw new Error('rename notice mentions the person')
+{
+  const m0 = renameMsg.sends[0].mention
+  if (rtext.slice(m0.at, m0.at + m0.len) !== '사기꾼_새닉') throw new Error('rename mention points at the new name')
+  const filled = withProfileLink(renameMsg.sends[0], 'https://open.kakao.com/me/abc')
+  if (filled.text !== RENAME.replace('🔗 옾링 : 없음', '🔗 옾링 : https://open.kakao.com/me/abc')) throw new Error('filled rename notice layout')
+  if (filled.text.slice(filled.mention.at, filled.mention.at + filled.mention.len) !== '사기꾼_새닉') throw new Error('the mention moves with the filled link')
+  if (filled.linkFor || !renameMsg.sends[0].linkFor) throw new Error('filling drops linkFor on the copy only')
+  if (withProfileLink(renameMsg.sends[0], 'javascript:alert(1)') !== renameMsg.sends[0]) throw new Error('a bad link is not filled')
+}
 if (visitMentionExtra(rtext, renameMsg.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
 if (renameMsg.sends[0].delayMs !== 0) throw new Error('first profile notice has no wait')
 // 한 번 알린 뒤에는 같은 닉으로 또 쏘지 않는다
 const after = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '사기꾼_새닉',
   text: '또 메시지', now: t0 + 3000 })
 if (after.sends.length !== 0) throw new Error('no repeat notice for the same new name')
-// 또 바꾸면 누적 횟수가 올라간다
+// 연달아 바꿔도 바뀔 때마다 알리고, 누적 횟수가 올라간다
 const twice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '또다른닉',
   text: '세번째', now: t0 + 4000 })
-if (twice.sends.length !== 1) throw new Error('a second rename posts again')
-if (twice.sends[0].text.indexOf('누적 : 2회') < 0) throw new Error('repeated renames count up')
+if (twice.sends.length !== 1 || twice.sends[0].text.indexOf(' ├ 전 : 사기꾼_새닉\n └ 후 : 또다른닉') < 0) throw new Error('a quick second rename is announced too')
+if (twice.sends[0].text.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('repeated renames count up')
+const thrice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '세번째닉',
+  text: '네번째', now: t0 + 5000 })
+if (thrice.sends.length !== 1 || thrice.sends[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('a third rename posts again')
 // 처음 보는 사람의 메시지는 기준이 없어 아무것도 안 한다
 const stranger = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '88', authorName: '처음본사람',
   text: '하이', now: t0 + 5000 })
@@ -395,7 +419,7 @@ const onlyJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
 })
 if (onlyJoin.sends[0].text.indexOf('퇴장') >= 0) throw new Error('an enter notice has no leave log')
-if (onlyJoin.sends[0].text.indexOf('옾링 : 찾지 못했습니다') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].text.indexOf('🔗 옾링 : 없음') < 0) throw new Error('missing link is stated')
 if (!onlyJoin.sends[0].mention || onlyJoin.sends[0].mention.userId !== '9') throw new Error('the named person is the mention')
 if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
 const burst = guardOnChat(noLeave, {
@@ -407,8 +431,8 @@ const otherRoom = guardOnChat(noLeave, {
 })
 if (otherRoom.sends.length !== 0) throw new Error('unwatched room stays quiet')
 const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', authorName: '김', now: t0 + 200 })
-if (left.sends.length !== 1 || left.sends[0].text.indexOf('[퇴장안내]') < 0) throw new Error('a leave is announced')
-if (left.sends[0].text.indexOf('입장') >= 0) throw new Error('a leave notice has no enter log')
+if (left.sends.length !== 1 || left.sends[0].text.indexOf('📤 퇴장 안내') !== 0) throw new Error('a leave is announced')
+if (left.sends[0].text.indexOf('입장 기록') >= 0) throw new Error('a leave notice has no enter log')
 if (left.sends[0].delayMs < 3000) throw new Error('a leave waits behind the previous notice')
 const repeatJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', now: t0 + 500,
@@ -472,7 +496,7 @@ const plainPosted = guardOnChat(visitRecord(), {
 if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보ㄱㄱ') < 0) {
   throw new Error('plain sentence posts one notice')
 }
-if (plainPosted.sends[0].text.indexOf('[입장안내]') < 0) throw new Error('plain sentence uses the enter notice')
+if (plainPosted.sends[0].text.indexOf('📥 입장 안내') !== 0) throw new Error('plain sentence uses the enter notice')
 if (plainPosted.sends[0].text.indexOf('@') >= 0 || plainPosted.sends[0].mention) {
   throw new Error('a sentence without a user id is not a fake mention')
 }
@@ -530,17 +554,17 @@ const feedLeft = guardOnChat(feedRoom, {
   kind: openLeave[0].kind, chatId: '555', authorId: openLeave[0].authorId,
   authorName: openLeave[0].authorName, now: t0,
 })
-if (feedLeft.sends.length !== 1 || feedLeft.sends[0].text.indexOf('[퇴장안내]') < 0) {
+if (feedLeft.sends.length !== 1 || feedLeft.sends[0].text.indexOf('📤 퇴장 안내') !== 0) {
   throw new Error('a feed leave posts one notice')
 }
-if (feedLeft.sends[0].text.indexOf('2023-11-15 07:13') < 0 || feedLeft.sends[0].text.indexOf('입장') >= 0) {
+if (feedLeft.sends[0].text.indexOf('2023-11-15 07:13') < 0 || feedLeft.sends[0].text.indexOf('입장 기록') >= 0) {
   throw new Error('the leave time is on the leave notice')
 }
 const feedJoin = guardOnChat(feedRoom, {
   kind: openJoin[0].kind, chatId: '555', authorId: '7',
   authorName: '홍길동', profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
-if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[입장안내]') < 0) {
+if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('📥 입장 안내') !== 0) {
   throw new Error('a feed join posts one notice')
 }
 if (!feedJoin.sends[0].mention || feedJoin.sends[0].mention.userId !== '7') throw new Error('the feed mention is the joiner')
@@ -552,7 +576,7 @@ const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
 if (bigExtra !== `{"mentions":[{"user_id":"${bigId}","at":[1],"len":3}]}`) {
   throw new Error('a large open-chat id is an int64 string')
 }
-const ascii = '[입장안내]\n이름 : @GOLD_AEC1908\n옾링 : https://open.kakao.com/o/abc\n입장로그\n- 2026-10-05 21:04'
+const ascii = folded('📥 입장 안내 · @GOLD_AEC1908', ['━━━━━━━━━━━━━━', '👤 GOLD_AEC1908', '🆔 42', '🔗 옾링 : https://open.kakao.com/o/abc', '', '🕒 입장 기록 · 1회', ' └ 2026-10-05 21:04', '━━━━━━━━━━━━━━'])
 const asciiAt = ascii.indexOf('GOLD_AEC1908')
 const asciiExtra = visitMentionExtra(ascii, { userId: '42', at: asciiAt, len: 'GOLD_AEC1908'.length })
 const asciiByte = Buffer.byteLength(ascii.slice(0, asciiAt), 'utf8')
@@ -829,6 +853,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   const F = await import('./features.mjs')
   const Q = await import('./quiz.mjs')
   const { BotPool } = await import('./botpool.mjs')
+  const { Long } = await import('bson')
   const FK = await import('./fake.mjs')
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
   async function waitFor(fn, ms, what) {
@@ -895,7 +920,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     let kp = null
     for (let i = 0; i < 3; i++) kp = RF.churnCheck(ks, kcfg, ev(i), host, T)
     if (!kp || kp.action !== 'kick' || kp.userId !== '7') throw new Error('7.7#3 kick plan')
-    if (RF.churnNotice(kp, 'kicked').text.indexOf('조치 : 내보냄') < 0) throw new Error('7.7#3 kicked line')
+    if (RF.churnNotice(kp, 'kicked').text.indexOf('조치 : 내보내기') < 0) throw new Error('7.7#3 kicked line')
+    if (RF.churnNotice(kp, 'kick_failed').text.indexOf('조치 : 내보내기 실패') < 0) throw new Error('7.7#3 kick failed line')
     const xs = {}
     for (let i = 0; i < 4; i++) {
       if (RF.churnCheck(xs, cfg, ev(i, { userId: '77' }), host, T)) throw new Error('7.7#3 exempt')
@@ -936,17 +962,29 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     const kicked = F.visitEventsFromMessage({ message_type: 0, message: '{"feedType":6,"members":[{"userId":7,"nickName":"홍"}]}' })
     if (kicked.length !== 0) throw new Error('7.7#5 kick feed is not a leave')
   }
-  // #6 사진 변경 → 프로필 사진 안내 1개. 상태 null → 없음. 첫 관찰 → 없음
+  // #6 사진 변경 → 프로필 변경 안내 1개(사진 전·후). 상태 null → 없음. 첫 관찰 → 없음. 바로 또 바뀌어도 매번 안내
   {
     const rt = {}
     const pcfg = { name: true, photo: true, status: true }
-    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/1.jpg', status: null }, T).length) throw new Error('7.7#6 first')
-    const ph = RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/2.jpg', status: null }, T + 1000)
-    if (ph.length !== 1 || ph[0].text.indexOf('항목 : 프로필 사진') < 0 || ph[0].mention.userId !== '7') throw new Error('7.7#6 photo')
-    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: 'a/2.jpg', status: null }, T + 2000).length) throw new Error('7.7#6 status null')
+    const P1 = 'https://k.kakaocdn.net/dn/a/1.jpg'
+    const P2 = 'https://k.kakaocdn.net/dn/a/2.jpg'
+    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P1 + '?t=1', status: null }, T).length) throw new Error('7.7#6 first')
+    const ph = RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2 + '?t=2', status: null }, T + 1000)
+    const PH = folded('🔔 프로필 변경 감지 · @홍', [RF.RULE, '👤 홍', '🆔 7', '🔗 옾링 : 없음', '🖼 사진 : ' + P2, '', '✏️ 바뀐 내용', '▸ 사진',
+      ' ├ 전 : ' + P1, ' └ 후 : ' + P2, RF.RULE])
+    if (ph.length !== 1 || ph[0].text !== PH || ph[0].mention.userId !== '7' || ph[0].text.slice(ph[0].mention.at, ph[0].mention.at + 1) !== '홍') throw new Error('7.7#6 photo ' + JSON.stringify(ph[0] && ph[0].text))
+    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2, status: null }, T + 2000).length) throw new Error('7.7#6 status null')
     RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '안녕' }, T)
     const stc = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '바이' }, T + 1)
-    if (stc.length !== 1 || stc[0].text.indexOf('항목 : 상태 메시지') < 0 || stc[0].text.indexOf('이전 : 안녕') < 0) throw new Error('7.7#6 status')
+    if (stc.length !== 1 || stc[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 안녕\n └ 후 : 바이') < 0) throw new Error('7.7#6 status')
+    // 바로 또 바뀌어도 알린다
+    const st2 = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '다시' }, T + 2)
+    if (st2.length !== 1 || st2[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 바이\n └ 후 : 다시') < 0) throw new Error('7.7#6 every change is announced')
+    // 관찰한 곳에서 옾링을 알면 바로 적고 linkFor 는 없다
+    const wl = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김새닉', status: '다시', link: 'https://open.kakao.com/me/kim' }, T + 6 * 60000)
+    if (wl.length !== 1 || wl[0].text.indexOf('\n👤 김새닉\n🆔 8\n🔗 옾링 : https://open.kakao.com/me/kim\n') < 0 || wl[0].text.indexOf('▸ 닉네임\n ├ 전 : 김\n └ 후 : 김새닉') < 0 || wl[0].linkFor) throw new Error('7.7#6 known link is written at once ' + JSON.stringify(wl[0] && wl[0].text))
+    if (wl[0].text.slice(wl[0].mention.at, wl[0].mention.at + wl[0].mention.len) !== '김새닉') throw new Error('7.7#6 mention points at the current name')
+    if (wl[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('7.7#6 cumulative changes ' + JSON.stringify(wl[0].text))
     if (RF.photoSig('https://x.kakao.com/p/1.jpg?t=9', '') !== '/p/1.jpg') throw new Error('7.7#6 photo signature is the path without the query')
     const rows = F.logsView({ rooms: [{ key: 'r', chat_id: '555', name: '방' }], runtime: rt }).profile
     if (!rows.some((r) => r.changes.some((c) => c.kind === 'photo'))) throw new Error('7.7#5 profile log has kind')
@@ -965,9 +1003,14 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (RF.profileLookup(rt, '555', cfg, { authorId: '50', arg: '길동이', mentions: [] }, host, T) !== null) throw new Error('7.7#7 staff only')
     const byMention = RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '같은이름', mentions: ['7'] }, host, T)
     if (byMention.indexOf('이름 : 길동이') < 0) throw new Error('7.7#7 mention wins')
-    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '같은이름', mentions: [] }, host, T) !== '같은 이름이 2명입니다. @멘션으로 지정하십시오.') {
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '같은이름', mentions: [] }, host, T) !== '같은 이름을 쓰는 사람이 2명 있어요. @멘션으로 골라 주세요.') {
       throw new Error('7.7#7 same name')
     }
+    // 기록 없는 사람: 이름으로 물으면 그 이름, 멘션으로 물으면 자리표시 단어 없이(문장 점검 203)
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '없는사람', mentions: [] }, host, T) !== '「없는사람」의 프로필 기록이 없어요.') throw new Error('7.7#7 no record by name')
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '', mentions: ['999'] }, host, T) !== '이 사람의 프로필 기록이 없어요.') throw new Error('7.7#7 no record by mention')
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '', mentions: [] }, host, T) !== '「!프로필 닉네임」처럼 입력해 주세요.') throw new Error('7.7#7 usage')
+    if (!/\n최근 14일 : 입장 \d+회 · 퇴장 \d+회$/.test(ok)) throw new Error('7.7#7 14-day line ' + ok)
   }
   // #8 홍보: 71 위반, 26(인용에만 링크) 아님, 1+https:// 위반, 2 는 media 켰을 때만. 방장·제외 아님. 1/3·2/3 가림, 3/3 강퇴. resetHours 뒤 1부터
   {
@@ -987,8 +1030,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     const p2 = RF.promoCheck(st, cfg, e, host, T + 20000)
     const p3 = RF.promoCheck(st, cfg, e, host, T + 40000)
     if (p1.n !== 1 || p1.kick || !p1.hide || p2.n !== 2 || p2.kick || p3.n !== 3 || !p3.kick) throw new Error('7.7#8 1/3 2/3 3/3')
-    if (RF.promoNotice(p1, { hidden: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 1/3회\n조치 : 글 가림') throw new Error('7.7#8 notice')
-    if (RF.promoNotice(p3, { hidden: true, kicked: true }).text.indexOf('조치 : 내보냄') < 0) throw new Error('7.7#8 kicked notice')
+    if (RF.promoNotice(p1, { hidden: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 1회 (3회가 되면 내보내요)\n조치 : 글 가리기') throw new Error('7.7#8 notice')
+    if (RF.promoNotice(p3, { hidden: true, kicked: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 3회\n조치 : 내보내기') throw new Error('7.7#8 kicked notice')
     RF.promoCheck(st, cfg, e, host, T + 50000)
     const later = RF.promoCheck(st, cfg, e, host, T + 50000 + 25 * 3600000)
     if (later.n !== 1) throw new Error('7.7#8 reset after resetHours')
@@ -1019,7 +1062,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (c1.last !== 5 || c2.userId !== '7' || c3.last !== 300) throw new Error('7.7#10 parse')
     if (!RF.parseHideCommand('!가리기 0', '!', []).usage || !RF.parseHideCommand('!가리기 많이', '!', []).usage) throw new Error('7.7#10 usage')
     if (RF.parseHideCommand('!가리기싫다', '!', []) !== null || RF.parseHideCommand('/가리기 3', '!', []) !== null) throw new Error('7.7#10 not a command')
-    if (RF.hideUsage('!') !== '「!가리기 30」 형식으로 입력하십시오. (1~300)') throw new Error('7.7#10 usage text')
+    if (RF.hideUsage('!') !== '「!가리기 30」처럼 가릴 글 수(1~300)를 입력해 주세요. 한 사람의 글은 「!가리기 @이름」으로 가릴 수 있어요.') throw new Error('7.7#10 usage text')
+    if (RF.hideDoneNotice(4, 1) !== '[글 가리기]\n글 4개를 가렸어요.\n(1개는 가리지 못했어요)') throw new Error('7.7#10 done text')
   }
   // #11 금지어 300개 통과·301번째 거절, 300개로 일치 동작
   {
@@ -1051,7 +1095,35 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (say(B, '!주사위').length !== 1) throw new Error('7.7#13 room B is not blocked by room A')
     const off = mk({ games: { dice: false } })
     const o = say(off, '!주사위')
-    if (o.length !== 1 || o[0].text !== '「주사위」는 사용 중지 상태입니다.') throw new Error('7.7#13 disabled game')
+    if (o.length !== 1 || o[0].text !== '이 방에서는 주사위가 꺼져 있어요.') throw new Error('7.7#13 disabled game')
+    // 미니게임 답 문구(문장 점검 213~229): 해요체, 조사는 받침에 맞춤, 명령어는 「」 안에
+    {
+      const W = mk({})
+      const one = (text, id, name) => { const r = say(W, text, id, name); return r.length ? r[0].text : '' }
+      const st = one('!끝말잇기')
+      if (!/^끝말잇기를 시작해요\. 첫 단어는 「[가-힣]+」(예요|이에요)\.\n'[^']+'(로|으로) 시작하는 단어를 30초 안에 입력해 주세요\. \(그만하기 : !포기\)$/.test(st)) throw new Error('7.7#13 word start ' + st)
+      if (one('!숫자야구') !== '다른 게임이 진행 중이에요. 「!포기」로 끝낸 뒤 시작해 주세요.') throw new Error('7.7#13 busy')
+      const first = W.v.runtime.games.r.word
+      const reveal = one('!정답')
+      if (reveal !== `지금 이을 단어는 「${first}」${RF.josa(first, '이에요')}.`) throw new Error('7.7#13 word reveal ' + reveal)
+      const quit = one('!포기')
+      if (quit !== `게임을 끝냈어요. 마지막 단어는 「${first}」${RF.josa(first, '이었어요')}.`) throw new Error('7.7#13 give up ' + quit)
+      if (one('!포기') !== '진행 중인 게임이 없어요.') throw new Error('7.7#13 nothing to give up')
+      if (one('!주사위 0') !== '주사위 면 수는 1~100 사이로 입력해 주세요. (예: 「!주사위 20」)') throw new Error('7.7#13 dice usage')
+      if (one('!가위바위보 손') !== '「!가위바위보 가위」처럼 입력해 주세요. (가위 · 바위 · 보)') throw new Error('7.7#13 rps usage')
+      if (!/^봇 : (가위|바위|보) \/ 홍님 : 보 → (무승부|봇 승리|홍님 승리 \(\+1점, 누적 \d+점\))$/.test(one('!가위바위보 보'))) throw new Error('7.7#13 rps result')
+      const qs = one('!퀴즈')
+      if (!/^\[퀴즈\] .+\n정답을 입력해 주세요\. \(힌트 : !힌트 · 정답 보기 : !정답\)$/.test(qs)) throw new Error('7.7#13 quiz start ' + qs)
+      const qa = Q.answer(W.v.runtime.games.r.quiz)
+      if (one('!정답') !== `정답은 「${qa}」${RF.josa(qa, '이에요')}.`) throw new Error('7.7#13 quiz reveal')
+      one('!숫자야구')
+      const secret = W.v.runtime.games.r.secret
+      if (one('112') !== '숫자 3개는 서로 달라야 해요.') throw new Error('7.7#13 baseball repeat digits')
+      if (!new RegExp('^정답이에요\\. ' + secret + ' \\(1번 만에\\) · 홍님 \\+5점 \\(누적 \\d+점\\)$').test(one(secret))) throw new Error('7.7#13 baseball win')
+      if (!/^\[랭킹\]\n1\. 홍 \d+점$/.test(one('!랭킹'))) throw new Error('7.7#13 ranking header')
+      if (!/^홍님의 누적 점수는 \d+점이에요\.$/.test(one('!점수'))) throw new Error('7.7#13 score')
+      if (one('!주사위', '8', '') .indexOf('참가자님 ') !== 0) throw new Error('7.7#13 nameless player is 참가자')
+    }
     const S = mk({})
     for (const id of ['301', '302']) {
       say(S, '!퀴즈', id, '')
@@ -1107,6 +1179,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     opts: {
       joinGapMs: 0, permPollMs: 150, activeCheckMs: 600000, pushDelayMs: 120, tickMs: 30, hideGapMs: 0,
       rateWaits: [60000, 120000, 240000], ipWaits: [300000, 600000, 900000], reconnectGapMs: 5, transientWaitMs: 60000,
+      profilePushDelayMs: 30, profileReadGapMs: 50, profileConvert: 'off', linkGapMs: 0,
     },
   })
   async function addBot(n) {
@@ -1132,7 +1205,8 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   const iRate = install('ratex1')
   const iBan = install('banx1')
   fs.room('banx1').bans.push(botA.uid)
-  const iAnon = install('noanonx1')
+  const iAnon = install('noopenx1')        // 오픈프로필 입장을 거절하는 방(D12)
+  const iNoProf = install('noprofx1', { roombot: false, minigame: true })   // 기본 프로필 참여를 막은 방(pv & 32 없음)
   const iPassWrong = install('passx1', { passcode_ct: passbox2.seal('1234') })
   const iPassNone = install('passx2')
   const iPassOk = install('passx3', { passcode_ct: passbox2.seal('0000'), roombot: false, minigame: true })
@@ -1143,8 +1217,11 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
   if (codeOf(iGone) !== 'link_gone') throw new Error('7.7#16 -324 → link_gone, got ' + codeOf(iGone))
   if (rowOf(iRate).state !== 'joining' || rowOf(iRate).error_detail !== 'rate_limited' || !(rowOf(iRate).next_try_at > Date.now() + 50000)) throw new Error('7.7#16 -312 → joining + rate_limited')
   if (codeOf(iBan) !== 'kicked') throw new Error('7.7#16 -815 → kicked')
-  if (codeOf(iAnon) !== 'profile_blocked') throw new Error('7.7#16 ptp 2 failure → profile_blocked, got ' + codeOf(iAnon))
-  if (!packets('JOINLINK', (p) => p.ptp === 2).length) throw new Error('7.7#16 noprof room joins with ptp 2')
+  if (codeOf(iAnon) !== 'profile_blocked') throw new Error('7.7#16 ptp 16 refused → profile_blocked, got ' + codeOf(iAnon))
+  const anonJoins = packets('JOINLINK', (p) => p.li === fs.room('noopenx1').li)
+  if (anonJoins.length !== 1 || anonJoins[0].ptp !== 16) throw new Error('D12 refused open profile join is not retried with another profile ' + JSON.stringify(anonJoins))
+  await waitFor(() => rowOf(iNoProf).state === 'active', 5000, 'D12 room without main profile joins with the open profile')
+  if (packets('JOINLINK', (p) => p.ptp !== 16).length) throw new Error('D12 every JOINLINK is ptp 16 ' + JSON.stringify(packets('JOINLINK', (p) => p.ptp !== 16)))
   if (codeOf(iPassWrong) !== 'passcode_wrong') throw new Error('7.7#16 passcode failure → passcode_wrong')
   if (codeOf(iPassNone) !== 'passcode_needed') throw new Error('7.7#16 passcode_needed')
   if (codeOf(iDm) !== 'not_group') throw new Error('7.7#16 lt 1 → not_group')
@@ -1173,8 +1250,9 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     fs.event(chat, botA.uid, { kind: 'message', user_id: '501', name: '손님', text: '!도움' })
     await waitFor(() => sentIn(iMini).length >= 2, 5000, '7.7#18 reply')
     const sent = sentIn(iMini)
-    if (sent[0].indexOf('미니게임봇이 입장했습니다') < 0) throw new Error('7.7#18 join notice first')
-    if (sent.filter((t) => t.startsWith('!끝말잇기')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
+    if (sent[0] !== '[K bot]\n미니게임봇이 입장했어요.\n「!도움」을 입력하면 명령어를 볼 수 있어요.') throw new Error('7.7#18 join notice first ' + JSON.stringify(sent))
+    if (sent.filter((t) => t.startsWith('[명령어]')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
+    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
     // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
     const before = packets('REWRITE').length
     fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })
@@ -1184,13 +1262,89 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     fs.event(chat, botA.uid, { kind: 'message', user_id: '501', name: '손님', text: '!주사위' })
     await waitFor(() => sentIn(iMini).some((t) => t.indexOf('면 주사위 결과') >= 0), 5000, '7.7#13 dice in minigame-only room')
     if (packets('REWRITE').length !== before) throw new Error('7.7#13 minigame-only room does not hide')
-    if (sentIn(iMini).some((t) => t.indexOf('[입장안내]') >= 0 || t.indexOf('[홍보 금지]') >= 0 || t.indexOf('[가리기]') >= 0)) throw new Error('7.7#13 minigame-only room is quiet')
+    if (sentIn(iMini).some((t) => t.indexOf('입장 안내') >= 0 || t.indexOf('[홍보 금지]') >= 0 || t.indexOf('[글 가리기]') >= 0)) throw new Error('7.7#13 minigame-only room is quiet')
     // #17 미니게임만 산 방(perm 4, active)에서 hide·unkick·people → no_roombot
     fs.setPerm(chat, botA.uid, 4)
     await sleep(200)
     for (const r of [await pool.hide(iMini, { last: 3 }), await pool.unkick(iMini, '502'), await pool.people(iMini)]) {
       if (r.ok || r.error !== 'no_roombot') throw new Error('7.7#17 no_roombot ' + JSON.stringify(r))
     }
+  }
+
+  // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링·사진을 안다(GETMEM + INFOLINK)
+  //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링·사진 · 명부는 저장소에 남는다
+  //   · 메시지 닉네임이 바뀌면 카드를 다시 읽어 프로필 변경 안내(닉네임 전·후 + 지금 옾링·사진)
+  //   · 주기 동기화가 옾링(다른 오픈프로필로 바꿈)·사진 변경을 찾는다 · 바뀔 때마다 알린다
+  {
+    const code = 'bookx28'
+    const room0 = fs.room(code)
+    fs.setProfiles('701', [{ li: '7101', name: '먼저 온 프로필', url: 'https://open.kakao.com/o/first701' }, { li: '7102', name: '바꾼 프로필', url: 'https://open.kakao.com/o/second701' }])
+    fs.setProfiles('702', [{ li: '7201', name: '둘째 프로필', url: 'https://open.kakao.com/o/second702' }])
+    room0.members['701'] = { mt: 2, nick: '먼저온사람', ptp: 16, pli: '7101', photo: 'https://k.kakaocdn.net/dn/p/701a.jpg', status: null }
+    room0.members['702'] = { mt: 2, nick: '둘째', ptp: 16, pli: '7201', photo: 'https://k.kakaocdn.net/dn/p/702a.jpg', status: null }
+    room0.members['703'] = { mt: 2, nick: '기본프로필', ptp: 1, pli: null, photo: '', status: null }
+    const iBook = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iBook).state === 'waiting_host', 5000, '#28 join')
+    const chat = rowOf(iBook).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iBook).state === 'active', 3000, '#28 promotion')
+    const vb = botA.slot.byInstall.get(iBook)
+    await waitFor(() => vb.members.get('701') && vb.members.get('701').link && vb.members.get('702') && vb.members.get('702').link, 5000, '#28 member book')
+    const m701 = vb.members.get('701')
+    if (m701.link !== 'https://open.kakao.com/o/first701' || m701.photo !== 'https://k.kakaocdn.net/dn/p/701a.jpg' || m701.name !== '먼저온사람') throw new Error('#28 book row ' + JSON.stringify(m701))
+    if (vb.members.get('703').link !== '' || vb.members.get('703').photo !== '') throw new Error('#28 default profile has no link and no photo')
+    if (sentIn(iBook).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28 the first read only sets a baseline')
+    // 먼저 있던 사람이 나간다 → 퇴장 안내에 옾링·사진(예전에는 '없음'이었다)
+    fs.event(chat, botA.uid, { kind: 'leave', user_id: '701', name: '먼저온사람' })
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28 leave notice')
+    const out = sentIn(iBook).find((t) => t.indexOf('📤 퇴장 안내') === 0)
+    if (out.indexOf('\n👤 먼저온사람\n🆔 701\n🔗 옾링 : https://open.kakao.com/o/first701\n🖼 사진 : https://k.kakaocdn.net/dn/p/701a.jpg\n') < 0) throw new Error('#28 leave notice has the link of someone who was there before the bot ' + JSON.stringify(out))
+    await pool.flush()
+    const saved = await store.loadMembers(iBook, chat, 0)
+    if (!saved.some((r) => r.user_id === '701' && r.link === 'https://open.kakao.com/o/first701')) throw new Error('#28 the book is saved ' + JSON.stringify(saved))
+    // 메시지 닉네임이 바뀌었다 → 카드를 읽어 프로필 변경 안내
+    fs.event(chat, botA.uid, { kind: 'profile', user_id: '702', name: '둘째새닉' })
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '702', name: '둘째새닉', text: '닉 바꿨어요' })
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('🔔 프로필 변경 감지') === 0), 8000, '#28 rename notice')
+    const rn = sentIn(iBook).find((t) => t.indexOf('🔔 프로필 변경 감지') === 0)
+    const RN = folded('🔔 프로필 변경 감지 · @둘째새닉', [RF.RULE, '👤 둘째새닉', '🆔 702', '🔗 옾링 : https://open.kakao.com/o/second702', '🖼 사진 : https://k.kakaocdn.net/dn/p/702a.jpg',
+      '', '✏️ 바뀐 내용', '▸ 닉네임', ' ├ 전 : 둘째', ' └ 후 : 둘째새닉', RF.RULE])
+    if (rn !== RN) throw new Error('#28 rename notice ' + JSON.stringify(rn))
+    // 주기 동기화: 703 은 사진을 바꾸고, 702 는 닉네임을 또 바꿨다(바뀔 때마다 알린다)
+    room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
+    room0.members['702'].nick = '둘째또닉'
+    vb.memberSyncAt = 0
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 8000, '#28 photo notice')
+    const pc = sentIn(iBook).find((t) => t.indexOf('\n👤 기본프로필\n') >= 0)
+    if (pc.indexOf('🔗 옾링 : 없음\n🖼 사진 : https://k.kakaocdn.net/dn/p/703b.jpg\n') < 0 || pc.indexOf('▸ 사진\n ├ 전 : 없음\n └ 후 : https://k.kakaocdn.net/dn/p/703b.jpg') < 0) throw new Error('#28 photo change ' + JSON.stringify(pc))
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 둘째또닉\n') >= 0), 8000, '#28 second rename notice')
+    const rn2 = sentIn(iBook).find((t) => t.indexOf('\n👤 둘째또닉\n') >= 0)
+    if (rn2.indexOf('▸ 닉네임\n ├ 전 : 둘째새닉\n └ 후 : 둘째또닉') < 0 || rn2.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('#28 a quick second rename is announced ' + JSON.stringify(rn2))
+    const hist = vb.runtime.profile.people[chat + '\u0001702']
+    if (!hist || hist.changes.filter((c) => c.kind === 'name').length !== 2) throw new Error('#28 both renames are recorded ' + JSON.stringify(hist))
+  }
+  // #28-2 다른 오픈프로필로 바꿈(pli → 다른 pli)은 옾링 변경. 방마다 1분에 6번까지만 보내므로 새 방에서 본다.
+  {
+    const code = 'bookx29'
+    const room0 = fs.room(code)
+    fs.setProfiles('711', [{ li: '7111', name: '처음 프로필', url: 'https://open.kakao.com/o/a711' }, { li: '7112', name: '바꾼 프로필', url: 'https://open.kakao.com/o/b711' }])
+    room0.members['711'] = { mt: 2, nick: '바꿀사람', ptp: 16, pli: '7111', photo: 'https://k.kakaocdn.net/dn/p/711.jpg', status: null }
+    const iLink = install(code, { config: { profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iLink).state === 'waiting_host', 5000, '#28-2 join')
+    const chat = rowOf(iLink).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iLink).state === 'active', 3000, '#28-2 promotion')
+    const vl = botA.slot.byInstall.get(iLink)
+    await waitFor(() => vl.members.get('711') && vl.members.get('711').link === 'https://open.kakao.com/o/a711', 5000, '#28-2 member book')
+    room0.members['711'].pli = '7112'
+    vl.memberSyncAt = 0
+    await waitFor(() => sentIn(iLink).some((t) => t.indexOf('▸ 옾링') >= 0), 8000, '#28-2 link change notice')
+    const lc = sentIn(iLink).find((t) => t.indexOf('▸ 옾링') >= 0)
+    if (lc.indexOf('▸ 옾링\n ├ 전 : https://open.kakao.com/o/a711\n └ 후 : https://open.kakao.com/o/b711') < 0 || lc.indexOf('🔗 옾링 : https://open.kakao.com/o/b711') < 0) throw new Error('#28-2 link change ' + JSON.stringify(lc))
+    const rows = F.logsView(RF.adapterRecord(vl, botA.id)).profile
+    if (!rows.some((r) => r.changes.some((c) => c.kind === 'link' && c.to === 'https://open.kakao.com/o/b711'))) throw new Error('#28-2 the panel log has the link change ' + JSON.stringify(rows))
   }
 
   // #19 권한 읽기·#20 푸시
@@ -1207,7 +1361,7 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await sleep(100)
     const reads = packets('CHATONROOM', (p) => p.chat === chat).length - before
     if (reads !== 1) throw new Error('7.7#20 one perm read after the push, got ' + reads)
-    await waitFor(() => sentIn(iP).some((t) => t.indexOf('부방장 지정을 확인했습니다') >= 0), 3000, 'promotion notice')
+    await waitFor(() => sentIn(iP).some((t) => t === RF.PROMOTED_NOTICE), 3000, 'promotion notice')
     if (!store.logs.some((l) => l.install_id === iP && l.kind === 'perm' && l.detail.granted === true)) throw new Error('7.7#20 perm log')
     // #19 olu 없음 + MEMBER mt 2 → waiting_host
     fs.room(fs.byChat(chat).code).dropOlu = true
@@ -1263,6 +1417,336 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await waitFor(() => rowOf(iDel2).error_code === 'room_deleted', 3000, '5.4 INFOLINK twice → room_deleted')
   }
 
+  // #25 이미 들어간 방에 방 관리봇 추가(4.2 "installed → 상품 플래그만 켬, 상태는 sender 가 다시 계산"):
+  //     미니게임만 쓰던 방(봇 perm 2, active) → 곧 waiting_host(강등 기록 없음) + 지정할 계정 닉네임 안내 1회 → 부방장 지정 → active.
+  //     옮기기(D17): 새 봇이 자기 닉네임으로 입장 안내를 하고, 다시 부방장으로 지정되면 확인 안내를 한다.
+  {
+    const botC = await addBot(3)
+    const botD = await addBot(4)
+    const iUp = install('upsellx1', { bot_device_id: botC.id, roombot: false, minigame: true, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iUp).state === 'active', 5000, '#25 minigame-only join')
+    const chat = rowOf(iUp).chat_id
+    if (Number(rowOf(iUp).perm) & 5) throw new Error('#25 bot joined without host rights')
+    const vC = botC.slot.byInstall.get(iUp)
+    if (!(vC.nextCheckAt > Date.now() + 60000)) throw new Error('#25 an active room otherwise waits for the long check')
+    store.installs.get(iUp).roombot = true          // 부모 applyOrder·setProducts: 상품 플래그만 켬
+    await pool.reconcile(iUp)                         // 부모 nudge → /v1/bot/sync
+    await waitFor(() => rowOf(iUp).state === 'waiting_host', 3000, '#25 roombot added → waiting_host right away')
+    if (store.logs.some((l) => l.install_id === iUp && l.kind === 'perm')) throw new Error('#25 adding roombot is not a demotion')
+    await waitFor(() => sentIn(iUp).some((t) => t.indexOf('방 관리봇이 추가되었어요') >= 0), 3000, '#25 roombot added notice')
+    const addN = sentIn(iUp).filter((t) => t.indexOf('방 관리봇이 추가되었어요') >= 0)
+    if (addN.length !== 1 || addN[0].indexOf('「' + botC.slot.roomName() + '」') < 0 || botC.slot.roomName() === botC.slot.nickname) throw new Error('#25 added notice names the bot by its open profile ' + JSON.stringify(addN))
+    fs.setPerm(chat, botC.uid, 4)
+    await waitFor(() => rowOf(iUp).state === 'active', 3000, '#25 promotion after add')
+    await waitFor(() => sentIn(iUp).filter((t) => t === RF.PROMOTED_NOTICE).length === 1, 3000, '#25 promoted notice')
+    // 다른 정기 점검이 와도 안내를 되풀이하지 않는다
+    vC.nextCheckAt = Date.now()
+    await sleep(300)
+    if (sentIn(iUp).filter((t) => t.indexOf('방 관리봇이') >= 0 || t === RF.PROMOTED_NOTICE).length !== 2) throw new Error('#25 notices are once ' + JSON.stringify(sentIn(iUp)))
+    // 상품 해제(관리자 room-products): waiting_host 방에서 방 관리봇을 빼면 곧 active
+    fs.setPerm(chat, botC.uid, 2)
+    await waitFor(() => rowOf(iUp).state === 'waiting_host', 3000, '#25 demotion')
+    store.installs.get(iUp).roombot = false
+    await pool.reconcile(iUp)
+    await waitFor(() => rowOf(iUp).state === 'active', 3000, '#25 roombot removed → active right away')
+    store.installs.get(iUp).roombot = true
+    fs.setPerm(chat, botC.uid, 4)
+    await pool.reconcile(iUp)
+    await waitFor(() => rowOf(iUp).state === 'active' && Number(rowOf(iUp).perm) === 4, 3000, '#25 roombot back with host rights')
+    // 옮기기: 부모가 한 UPDATE 로 "다시 입장" 묶음 + 옛 봇 나가기 행
+    const before = sentIn(iUp).length
+    Object.assign(store.installs.get(iUp), { bot_device_id: botD.id, state: 'queued', error_code: null, error_detail: null, next_try_at: null, perm: null, perm_at: null })
+    store.leaves.push({ id: 25, install_id: iUp, bot_device_id: botC.id, chat_id: chat, link_id: rowOf(iUp).link_id, why: 'move', created_at: Date.now(), done_at: null, result: null })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iUp).state === 'waiting_host' && rowOf(iUp).bot_device_id === botD.id, 5000, '#25 moved bot joins')
+    await waitFor(() => sentIn(iUp).slice(before).some((t) => t.indexOf('방 관리봇이 입장했어요') >= 0), 3000, '#25 new bot join notice')
+    const joinN = sentIn(iUp).slice(before).filter((t) => t.indexOf('방 관리봇이 입장했어요') >= 0)
+    if (joinN.length !== 1 || joinN[0].indexOf('「' + botD.slot.roomName() + '」') < 0 || botD.slot.roomName() === botC.slot.roomName()) throw new Error('#25 new bot names itself ' + JSON.stringify(joinN))
+    fs.setPerm(chat, botD.uid, 4)
+    await waitFor(() => rowOf(iUp).state === 'active', 3000, '#25 new bot promoted')
+    await waitFor(() => sentIn(iUp).slice(before).filter((t) => t === RF.PROMOTED_NOTICE).length === 1, 3000, '#25 new bot promoted notice')
+    await waitFor(() => store.leaves.find((l) => l.id === 25).done_at, 3000, '#25 old bot leaves')
+    // 뒤 사례(#23 예산)가 봇 A·B 만 있다고 보므로 이 사례의 봇은 내린다
+    store.installs.get(iUp).phase = 'removed'
+    await pool.detach(botC.id)
+    await pool.detach(botD.id)
+  }
+
+  // #26 v6 첫 배포의 room_state(봇 구분 없는 welcomedChat·hostNoticed)로 다시 시작해도
+  //     사용 중인 방에 안내를 되풀이하지 않는다. 옮기던 중이던 행은 새 봇이 안내한다.
+  //     sender 가 꺼진 사이 방 관리봇이 붙은 방(뷰를 새로 만듦)도 10분 점검을 기다리지 않는다.
+  {
+    const botE = await addBot(5)
+    const botF = await addBot(6)
+    const iL = install('legacyx1', { bot_device_id: botE.id, roombot: true, minigame: false, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iL).state === 'waiting_host', 5000, '#26 join')
+    const chat = rowOf(iL).chat_id
+    fs.setPerm(chat, botE.uid, 4)
+    await waitFor(() => rowOf(iL).state === 'active', 3000, '#26 promoted')
+    await waitFor(() => sentIn(iL).filter((t) => t === RF.PROMOTED_NOTICE).length === 1, 3000, '#26 promoted notice')
+    // 배포 전 기록 모양으로 되돌리고 뷰를 처음부터 다시 만든다(sender 다시 시작)
+    await botE.slot.dropView(iL)
+    store.states.set(iL, { welcomedChat: chat, hostNoticed: true })
+    const n0 = sentIn(iL).length
+    await pool.reconcile(iL)
+    const vE = botE.slot.byInstall.get(iL)
+    if (!vE || vE.runtime.welcomedChat !== undefined || vE.runtime.hostNoticed !== undefined) throw new Error('#26 legacy keys dropped ' + JSON.stringify(vE && vE.runtime))
+    if (!(vE.runtime.welcomed && vE.runtime.welcomed.by === botE.id && vE.runtime.welcomed.chat === chat && vE.runtime.welcomed.roombot === true)) throw new Error('#26 welcomed adopted ' + JSON.stringify(vE.runtime))
+    if (!(vE.runtime.promoted && vE.runtime.promoted.by === botE.id)) throw new Error('#26 promoted adopted ' + JSON.stringify(vE.runtime))
+    vE.nextCheckAt = Date.now()                       // 정기 점검이 와도
+    await sleep(400)
+    if (sentIn(iL).length !== n0) throw new Error('#26 no repeated notices after restart ' + JSON.stringify(sentIn(iL).slice(n0)))
+    await botE.slot.flush()
+    if (store.states.get(iL).hostNoticed !== undefined || !store.states.get(iL).promoted) throw new Error('#26 converted runtime saved')
+    // 옮기던 중(queued)인 행에 옛 기록만 있으면 새 봇은 누가 안내했는지 모르니 다시 안내한다
+    await botE.slot.dropView(iL)
+    store.states.set(iL, { welcomedChat: chat, hostNoticed: true })
+    Object.assign(store.installs.get(iL), { bot_device_id: botF.id, state: 'queued', error_code: null, error_detail: null, next_try_at: null, perm: null, perm_at: null })
+    store.leaves.push({ id: 26, install_id: iL, bot_device_id: botE.id, chat_id: chat, link_id: rowOf(iL).link_id, why: 'move', created_at: Date.now(), done_at: null, result: null })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iL).state === 'waiting_host' && rowOf(iL).bot_device_id === botF.id, 5000, '#26 moved bot joins')
+    await waitFor(() => sentIn(iL).slice(n0).some((t) => t.indexOf('「' + botF.slot.roomName() + '」') >= 0), 3000, '#26 moved bot names itself')
+    fs.setPerm(chat, botF.uid, 4)
+    await waitFor(() => sentIn(iL).slice(n0).filter((t) => t === RF.PROMOTED_NOTICE).length === 1, 3000, '#26 moved bot promoted notice')
+    // sender 가 꺼진 사이 미니게임만 쓰던 방에 방 관리봇이 붙음 → 다시 시작하자마자 부방장 대기(강등 기록 없음)
+    const iM = install('legacyx2', { bot_device_id: botE.id, roombot: false, minigame: true, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iM).state === 'active', 5000, '#26 minigame-only join')
+    await botE.slot.dropView(iM)
+    store.installs.get(iM).roombot = true
+    await pool.reconcile(iM)
+    await waitFor(() => rowOf(iM).state === 'waiting_host', 3000, '#26 stale active roombot room rechecked right after restart')
+    if (store.logs.some((l) => l.install_id === iM && l.kind === 'perm')) throw new Error('#26 restart recheck is not a demotion')
+    await waitFor(() => sentIn(iM).some((t) => t.indexOf('방 관리봇이 추가되었어요') >= 0), 3000, '#26 added notice after restart')
+    store.installs.get(iL).phase = 'removed'
+    store.installs.get(iM).phase = 'removed'
+    await pool.detach(botE.id)
+    await pool.detach(botF.id)
+  }
+
+  // #27 오픈프로필(D12): 봇은 고객 방에 카카오톡 기본 프로필이 아니라 그 계정의 오픈프로필(ptp 16, pli)로 들어간다.
+  {
+    const BP = await import('./botpool.mjs')
+    const meName = (uid, code) => fs.room(code).members[uid] && fs.room(code).members[uid].nick
+    const sentOf = (id) => (rowOf(id).chat_id ? sentIn(id) : [])
+    // SYNCLINK 걸러내기: 오픈프로필(lt 1 + op 또는 /me/)만, 이 계정이 만든 방(lt 2)·1:1 오픈채팅(/o/)·남의 것은 뺀다
+    const ols = [
+      { li: '11', lt: 1, lu: 'https://open.kakao.com/me/aa', ln: '링크 이름', olu: { userId: '5', nn: '오픈 이름' } },
+      { li: '12', lt: 1, lu: 'https://open.kakao.com/o/sAbc', ln: '1:1 문의' },
+      { li: '13', lt: 2, lu: 'https://open.kakao.com/o/gAbc', ln: '내 방', op: undefined },
+      { li: '14', lt: 1, lu: '', ln: '표지 있음', op: { desc: '' } },
+      { li: '15', lt: 1, lu: 'https://open.kakao.com/me/bb', ln: '남의 것', olu: { userId: '6' } },
+    ]
+    const own = BP.ownOpenProfiles(ols, '5')
+    if (own.map((p) => p.li).join(',') !== '11,14' || own[0].name !== '오픈 이름' || own[1].name !== '표지 있음') throw new Error('#27 SYNCLINK filter ' + JSON.stringify(own))
+    if (BP.traceText({ li: Long.fromString('123'), pc: '0000', tk: 't' }) !== '{"li":"123","pc":"<hidden>","tk":"<hidden>"}') throw new Error('#27 trace hides passcode, Long as text')
+    if (RF.profileChangedNotice('K bot 1') !== '[K bot]\nK bot 프로필이 「K bot 1」로 바뀌었어요.\n방장님이 「K bot 1」을 부방장으로 지정하면 방 관리 기능이 시작돼요.') throw new Error('#27 changed notice')
+    if (RF.profileChangedNotice('') !== '[K bot]\nK bot 프로필이 바뀌었어요.\n방장님이 K bot을 부방장으로 지정하면 방 관리 기능이 시작돼요.') throw new Error('#27 changed notice without a name')
+    if (RF.roJosa('케이봇') !== '으로' || RF.roJosa('봇2') !== '로' || RF.roJosa('K봇 하늘') !== '로' || RF.roJosa('K bot 2B') !== '로' ||
+      RF.roJosa('K bot M') !== '으로' || RF.roJosa('K bot') !== '으로' || RF.roJosa('K bot 3') !== '으로') throw new Error('#27 로/으로')
+    // 방 메시지 조사(문장 점검 220·225): 받침에 맞춘다
+    if (RF.josa('바람', '은') !== '은' || RF.josa('사과', '은') !== '는' || RF.josa('K bot 2', '을') !== '를' || RF.josa('K bot 1', '을') !== '을' ||
+      RF.josa('123', '이었어요') !== '이었어요' || RF.josa('789', '이었어요') !== '였어요' || RF.josa('서울', '이에요') !== '이에요' ||
+      RF.josa('라 / 나', '으로') !== '로' || RF.josa('림 / 임', '으로') !== '으로' || RF.josa('', '을') !== '을(를)') throw new Error('#27 조사')
+    const jv = (products, games) => ({ cfg: { cmdPrefix: '!', games: { enabled: games } }, products })
+    if (RF.joinNotice(jv({ roombot: true, minigame: true }, true), '하늘') !== '[K bot]\n방 관리봇이 입장했어요.\n방장님이 「하늘」을 부방장으로 지정하면 방 관리 기능이 시작돼요.\n「!도움」을 입력하면 미니게임 명령어를 볼 수 있어요.') throw new Error('#27 join notice text')
+    if (RF.joinNotice(jv({ roombot: false, minigame: true }, false), '') !== '[K bot]\n미니게임봇이 입장했어요.\n관리자가 미니게임을 켜면 바로 쓸 수 있어요.') throw new Error('#27 minigame-off join notice')
+    if (RF.roombotAddedNotice(jv({ roombot: true }, false), '') !== '[K bot]\n방 관리봇이 추가되었어요.\n방장님이 K bot을 부방장으로 지정하면 방 관리 기능이 시작돼요.') throw new Error('#27 added notice without a name')
+
+    // 1. 오픈프로필 1개: JOINLINK 는 ptp 16 + 그 pli 하나뿐, 방에 보이는 이름 = 오픈프로필 이름, 입장 안내도 그 이름
+    const G = { uid: FK.fakeUserId('bot.0000000000000071') }
+    fs.user(G.uid).bot = true
+    fs.setProfiles(G.uid, [{ name: 'K봇 하나' }])
+    Object.assign(G, await addBot(71))
+    const gli = fs.profilesOf(G.uid)[0].li
+    if (G.slot.profileState !== 'ok' || !G.slot.openProfile || G.slot.openProfile.li !== gli || G.slot.roomName() !== 'K봇 하나') throw new Error('#27 discovery ' + JSON.stringify(G.slot.profileView()))
+    const gRow = store.bots.get(G.id)
+    if (gRow.open_profile_li !== gli || gRow.open_profile_name !== 'K봇 하나' || gRow.open_profiles.length !== 1 || !gRow.open_profile_at) throw new Error('#27 bot_accounts open profile columns ' + JSON.stringify(gRow))
+    const i1 = install('opone1', { bot_device_id: G.id, roombot: true, minigame: true, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i1).state === 'waiting_host', 5000, '#27.1 join')
+    // 입장하자마자 runtime.prof 를 저장한다(5초 일괄 저장을 기다리지 않는다): 부모는 prof 가 없는 입장 완료 방을 v6 방으로 본다
+    await waitFor(() => !!(store.states.get(i1) && store.states.get(i1).prof && store.states.get(i1).prof.by === G.id), 500, '#27.1 prof saved right after the join')
+    const j1 = packets('JOINLINK', (p) => p.user === G.uid)
+    if (j1.length !== 1 || j1[0].ptp !== 16 || j1[0].pli !== gli) throw new Error('#27.1 JOINLINK ptp 16 + pli ' + JSON.stringify(j1))
+    const m1 = fs.room('opone1').members[G.uid]
+    if (m1.nick !== 'K봇 하나' || m1.ptp !== 16 || m1.pli !== gli) throw new Error('#27.1 room member is the open profile ' + JSON.stringify(m1))
+    await waitFor(() => sentOf(i1).some((t) => t.indexOf('방 관리봇이 입장했어요') >= 0), 3000, '#27.1 join notice')
+    if (!sentOf(i1).some((t) => t.indexOf('「K봇 하나」') >= 0) || sentOf(i1).some((t) => t.indexOf(G.slot.nickname) >= 0)) throw new Error('#27.1 notice names the open profile ' + JSON.stringify(sentOf(i1)))
+    const v1 = G.slot.byInstall.get(i1)
+    if (G.slot.roomProfile(v1) !== 'open' || v1.runtime.prof.nn !== 'K봇 하나' || v1.runtime.prof.by !== G.id) throw new Error('#27.1 room profile record ' + JSON.stringify(v1.runtime.prof))
+    await G.slot.flush()
+    if (!store.states.get(i1).prof || store.states.get(i1).prof.nn !== 'K봇 하나') throw new Error('#27.1 room_state keeps the name the room shows')
+    const st1 = pool.botStatus()
+    const gs = st1.bots.find((b) => b.device_id === G.id)
+    if (!gs || gs.open_profile_state !== 'ok' || gs.open_profile.name !== 'K봇 하나' || gs.profile_rooms.open !== 1) throw new Error('#27.10 status ' + JSON.stringify(gs))
+    if (st1.rooms.find((r) => r.install_id === i1).profile !== 'open') throw new Error('#27.10 status room profile')
+    if ((await pool.room(i1)).live.profile.state !== 'open' || (await pool.room(i1)).live.profile.name !== 'K봇 하나') throw new Error('#27.10 /v1/bot/room profile')
+    // SENDER_TRACE_PUSH: 응답 모양 기록(참여코드·토큰은 가림)
+    {
+      const lines = []
+      const w = process.stderr.write.bind(process.stderr)
+      process.stderr.write = (chunk, ...rest) => { lines.push(String(chunk)); return true }
+      try {
+        G.slot.opts = Object.assign({}, G.slot.opts, { trace: true })
+        await G.slot.readOpenProfiles('trace', true)
+        await G.slot.raw('CHATONROOM', { chatId: Long.fromString(rowOf(i1).chat_id) })
+      } finally {
+        process.stderr.write = w
+        G.slot.opts = pool.opts
+      }
+      const sync = lines.find((l) => l.indexOf('raw SYNCLINK') >= 0) || ''
+      if (sync.indexOf('"lt":1') < 0 || sync.indexOf('/me/') < 0 || sync.indexOf(gli) < 0) throw new Error('#27 trace SYNCLINK ' + sync)
+      if (!lines.some((l) => l.indexOf('raw CHATONROOM') >= 0 && l.indexOf('"ptp":16') >= 0)) throw new Error('#27 trace CHATONROOM olu')
+    }
+
+    // 2. 오픈프로필 없음: bot_no_open_profile(none), JOININFO·JOINLINK 를 보내지 않는다
+    const H = { uid: FK.fakeUserId('bot.0000000000000072') }
+    fs.user(H.uid).bot = true
+    fs.setProfiles(H.uid, [])
+    Object.assign(H, await addBot(72))
+    if (H.slot.profileState !== 'none' || store.bots.get(H.id).open_profile_li !== null) throw new Error('#27.2 none ' + H.slot.profileState)
+    const i2 = install('opnone1', { bot_device_id: H.id, roombot: true, minigame: false, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i2).state === 'error', 3000, '#27.2 no open profile')
+    if (rowOf(i2).error_code !== 'bot_no_open_profile' || rowOf(i2).error_detail !== 'none') throw new Error('#27.2 error ' + JSON.stringify([rowOf(i2).error_code, rowOf(i2).error_detail]))
+    if (packets('JOININFO', (p) => p.user === H.uid).length || packets('JOINLINK', (p) => p.user === H.uid).length) throw new Error('#27.2 nothing sent to Kakao')
+
+    // 3. 오픈프로필을 만들면(SYNCLINKCR 푸시) 다시 읽고, 멈춘 방은 스스로 다시 입장 줄에 들어가 ptp 16 으로 들어간다
+    fs.setProfiles(H.uid, [{ name: 'K봇 둘' }])
+    await waitFor(() => rowOf(i2).state === 'waiting_host', 5000, '#27.3 requeued after the profile appeared')
+    const hli = fs.profilesOf(H.uid)[0].li
+    const j3 = packets('JOINLINK', (p) => p.user === H.uid)
+    if (j3.length !== 1 || j3[0].ptp !== 16 || j3[0].pli !== hli || meName(H.uid, 'opnone1') !== 'K봇 둘') throw new Error('#27.3 join with the new profile ' + JSON.stringify(j3))
+    if (store.bots.get(H.id).open_profile_name !== 'K봇 둘') throw new Error('#27.3 bot_accounts name')
+
+    // 4. 오픈프로필 2개: 고른 것이 없으면 첫 번째, 관리자가 고르면 그것, 고른 것이 사라지면 gone(입장 멈춤)
+    const I = { uid: FK.fakeUserId('bot.0000000000000073') }
+    fs.user(I.uid).bot = true
+    fs.setProfiles(I.uid, [{ name: 'K봇 셋 A' }, { name: 'K봇 셋 B' }])
+    Object.assign(I, await addBot(73))
+    const [pa, pb] = fs.profilesOf(I.uid)
+    if (I.slot.openProfile.li !== pa.li || I.slot.openProfiles.length !== 2) throw new Error('#27.4 default first')
+    const i4a = install('optwoa', { bot_device_id: I.id, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i4a).state === 'active', 5000, '#27.4 join A')
+    if (meName(I.uid, 'optwoa') !== 'K봇 셋 A') throw new Error('#27.4 joined with the first profile')
+    store.bots.get(I.id).open_profile_pick = pb.li                         // 부모 /admin/bot-open-profile
+    const cmd = await pool.openProfileCmd(I.id, {})
+    if (!cmd.ok || cmd.open_profile.li !== pb.li || cmd.open_profile_state !== 'ok') throw new Error('#27.4 pick ' + JSON.stringify(cmd))
+    if (G.slot.roomProfile(v1) !== 'open' || I.slot.roomProfile(I.slot.byInstall.get(i4a)) !== 'other') throw new Error('#27.4 old room shows another open profile')
+    const i4b = install('optwob', { bot_device_id: I.id, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i4b).state === 'active', 5000, '#27.4 join B')
+    const jb = packets('JOINLINK', (p) => p.user === I.uid && p.li === fs.room('optwob').li)
+    if (jb.length !== 1 || jb[0].pli !== pb.li || meName(I.uid, 'optwob') !== 'K봇 셋 B') throw new Error('#27.4 picked profile ' + JSON.stringify(jb))
+    store.bots.get(I.id).open_profile_pick = '99999'
+    await pool.reconcile(null)
+    if (I.slot.profileState !== 'gone' || store.bots.get(I.id).open_profile_li !== null) throw new Error('#27.4 gone ' + I.slot.profileState)
+    const i4c = install('optwoc', { bot_device_id: I.id, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i4c).state === 'error', 3000, '#27.4 gone stops joins')
+    if (rowOf(i4c).error_code !== 'bot_no_open_profile' || rowOf(i4c).error_detail !== 'gone') throw new Error('#27.4 gone detail')
+    store.bots.get(I.id).open_profile_pick = null
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i4c).state === 'active', 5000, '#27.4 cleared pick → joins again')
+    if (meName(I.uid, 'optwoc') !== 'K봇 셋 B') throw new Error('#27.4 keeps the last used profile when the pick is cleared')
+
+    // 5. 기본 프로필(ptp 1)로 들어가 있는 방 → 관리자 [오픈프로필로 바꾸기] = UPLINKPROF 1번. 권한·상태 유지, 나가기·입장 없음
+    const rm = fs.room('opmainx1')
+    rm.members[G.uid] = { mt: 4, nick: G.slot.nickname, photo: '', status: null }      // 옛 입장(ptp 없음 = 기본 프로필)
+    const i5 = install('opmainx1', { bot_device_id: G.id, roombot: true, minigame: false, link_id: rm.li, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i5).state === 'active', 5000, '#27.5 already in the room with the main profile')
+    const v5 = G.slot.byInstall.get(i5)
+    if (G.slot.roomProfile(v5) !== 'main' || G.slot.nameIn(v5) !== G.slot.nickname) throw new Error('#27.5 main profile detected ' + JSON.stringify(v5.runtime.prof))
+    await sleep(200)
+    if (packets('UPLINKPROF', (p) => p.li === rm.li).length) throw new Error('#27.5 BOT_PROFILE_CONVERT=off does not switch by itself')
+    const mark5 = fs.packets.length
+    const q5 = await pool.roomProfileCmd(i5, 'switch')
+    if (!q5.ok || q5.queued !== 'switch') throw new Error('#27.5 queue ' + JSON.stringify(q5))
+    await waitFor(() => G.slot.roomProfile(v5) === 'open', 3000, '#27.5 switched')
+    const after5 = fs.packets.slice(mark5).filter((p) => p.user === G.uid)
+    if (after5.filter((p) => p.method === 'UPLINKPROF').length !== 1 || after5.some((p) => p.method === 'LEAVE' || p.method === 'JOINLINK' || p.method === 'JOININFO')) throw new Error('#27.5 one UPLINKPROF, no leave/join ' + after5.map((p) => p.method).join(','))
+    if (after5.find((p) => p.method === 'UPLINKPROF').ptp !== 16 || after5.find((p) => p.method === 'UPLINKPROF').pli !== gli) throw new Error('#27.5 UPLINKPROF body')
+    if (rowOf(i5).state !== 'active' || Number(rowOf(i5).perm) !== 4 || rm.members[G.uid].nick !== 'K봇 하나' || rm.members[G.uid].mt !== 4) throw new Error('#27.5 perm and state kept')
+    if ((await pool.roomProfileCmd(i5, 'switch')).error !== 'already_open') throw new Error('#27.5 already open')
+    // 자동(BOT_PROFILE_CONVERT=auto): 부방장 대기 방은 점검 때 바꾸고 새 이름을 방에 알린다
+    const rw = fs.room('opmainx2')
+    rw.members[G.uid] = { mt: 2, nick: G.slot.nickname, ptp: 1, photo: '', status: null }
+    const i5b = install('opmainx2', { bot_device_id: G.id, roombot: true, minigame: false, link_id: rw.li, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i5b).state === 'waiting_host', 5000, '#27.5 waiting room on the main profile')
+    pool.opts.profileConvert = 'auto'
+    const v5b = G.slot.byInstall.get(i5b)
+    v5b.nextCheckAt = Date.now()
+    await waitFor(() => G.slot.roomProfile(v5b) === 'open', 3000, '#27.5 auto switch')
+    await waitFor(() => sentOf(i5b).some((t) => t === RF.profileChangedNotice('K봇 하나')), 3000, '#27.5 changed notice in a waiting room')
+    if (rowOf(i5b).state !== 'waiting_host' || rw.members[G.uid].nick !== 'K봇 하나') throw new Error('#27.5 auto switch keeps the state')
+
+    // 6. UPLINKPROF 거절(noopen): 방은 그대로, 실패 기록, 24시간 안에는 다시 보내지 않음, 나가지 않음
+    const rn = fs.room('opnoopenx1')
+    rn.members[G.uid] = { mt: 4, nick: G.slot.nickname, ptp: 1, photo: '', status: null }
+    const i6 = install('opnoopenx1', { bot_device_id: G.id, roombot: true, minigame: false, link_id: rn.li, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i6).state === 'active', 5000, '#27.6 join')
+    const v6 = G.slot.byInstall.get(i6)
+    await waitFor(() => G.slot.roomProfile(v6) === 'failed', 3000, '#27.6 refused switch is recorded')
+    if (v6.runtime.prof.fail !== -804 || !v6.runtime.prof.failAt || rowOf(i6).state !== 'active') throw new Error('#27.6 failure ' + JSON.stringify(v6.runtime.prof))
+    v6.nextCheckAt = Date.now()
+    await sleep(300)
+    if (packets('UPLINKPROF', (p) => p.li === rn.li).length !== 1) throw new Error('#27.6 no retry within 24 hours')
+    if (packets('LEAVE', (p) => p.chat === rn.chatId).length || packets('JOINLINK', (p) => p.li === rn.li).length) throw new Error('#27.6 never leaves or rejoins for a switch')
+    if ((await pool.room(i6)).live.profile.state !== 'failed') throw new Error('#27.6 room view shows the failure')
+    pool.opts.profileConvert = 'off'
+    // 관리자 [다시 입장]: 나갔다가 오픈프로필로 다시 들어간다(부방장은 다시 지정, 새 이름으로 다시 안내)
+    const rr = fs.room('oprejoinx1')
+    rr.members[G.uid] = { mt: 4, nick: G.slot.nickname, ptp: 1, photo: '', status: null }
+    const i6r = install('oprejoinx1', { bot_device_id: G.id, roombot: true, minigame: false, link_id: rr.li, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(i6r).state === 'active', 5000, '#27.6 rejoin room join')
+    const markR = fs.packets.length
+    const qr = await pool.roomProfileCmd(i6r, 'rejoin')
+    if (!qr.ok || qr.queued !== 'rejoin') throw new Error('#27.6 rejoin queue ' + JSON.stringify(qr))
+    await waitFor(() => rowOf(i6r).state === 'waiting_host' && rr.members[G.uid] && rr.members[G.uid].ptp === 16, 5000, '#27.6 rejoined with the open profile')
+    const seqR = fs.packets.slice(markR).filter((p) => p.user === G.uid && ['LEAVE', 'JOININFO', 'JOINLINK'].includes(p.method)).map((p) => p.method + (p.ptp ? ':' + p.ptp : ''))
+    if (seqR.join(',') !== 'LEAVE,JOININFO,JOINLINK:16') throw new Error('#27.6 rejoin = leave then join with ptp 16 ' + seqR.join(','))
+    await waitFor(() => sentOf(i6r).some((t) => t.indexOf('「K봇 하나」') >= 0 && t.indexOf('방 관리봇이 입장했어요') >= 0), 3000, '#27.6 rejoin notice')
+
+    // 8. SYNCLINK 실패 + 남긴 값 없음: 행은 오류가 아니라 queued 로 남는다. 다시 읽기에 성공하면 들어간다
+    const J = { uid: FK.fakeUserId('bot.0000000000000074') }
+    fs.user(J.uid).bot = true
+    fs.setProfiles(J.uid, [{ name: 'K봇 넷' }], true)
+    Object.assign(J, await addBot(74))
+    if (J.slot.profileState !== 'unknown') throw new Error('#27.8 unknown after a failed read')
+    const i8 = install('opfailx1', { bot_device_id: J.id, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await sleep(300)
+    if (rowOf(i8).state !== 'queued' || packets('JOININFO', (p) => p.user === J.uid).length) throw new Error('#27.8 stays queued ' + rowOf(i8).state)
+    fs.setProfiles(J.uid, null, false)
+    const rj = await pool.openProfileCmd(J.id, { refresh: true })
+    if (!rj.ok || rj.open_profile_state !== 'ok' || rj.read_ok !== true) throw new Error('#27.8 admin refresh ' + JSON.stringify(rj))
+    await waitFor(() => rowOf(i8).state === 'active', 5000, '#27.8 joins after the profile is read')
+    // 남긴 값이 있으면 읽기 실패가 "없음"이 되지 않는다
+    fs.setProfiles(J.uid, null, true)
+    await J.slot.readOpenProfiles('test', true)
+    if (J.slot.profileState !== 'ok' || store.bots.get(J.id).open_profile_li !== fs.profilesOf(J.uid)[0].li) throw new Error('#27.8 failed read keeps the cached profile')
+    // 관리자 다시 읽기: 이번 SYNCLINK 가 실패하면 read_ok false 와 카카오 상태를 돌려준다(남긴 판정은 그대로)
+    const rf = await pool.openProfileCmd(J.id, { refresh: true })
+    if (!rf.ok || rf.read_ok !== false || rf.read_status !== -500 || rf.open_profile_state !== 'ok') throw new Error('#27.8 failed admin refresh reports read_ok false ' + JSON.stringify(rf))
+    if ((await pool.openProfileCmd(J.id, {})).read_ok !== null) throw new Error('#27.8 no read without refresh')
+    fs.setProfiles(J.uid, null, false)
+    // 링크로 직접 확인(SYNCLINK 가 오픈프로필을 보여 주지 않을 때의 대안): 이 계정 것만 받는다
+    if ((await pool.openProfileCmd(J.id, { url: fs.profilesOf(G.uid)[0].url })).error !== 'not_mine') throw new Error('#27 url of another account is refused')
+    const byUrl = await pool.openProfileCmd(J.id, { url: fs.profilesOf(J.uid)[0].url })
+    if (!byUrl.ok || byUrl.open_profiles.length !== 1) throw new Error('#27 url adds the same profile once ' + JSON.stringify(byUrl))
+
+    for (const id of [i1, i2, i4a, i4b, i4c, i5, i5b, i6, i6r, i8]) store.installs.get(id).phase = 'removed'
+    for (const b of [G, H, I, J]) await pool.detach(b.id)
+  }
+
   // #21 나가기 대기열
   {
     const r1 = fs.room('leavex1')
@@ -1291,6 +1775,19 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     if (packets('LEAVE', (p) => p.chat === r2.chatId).length) throw new Error('7.7#21 kept room is not left')
   }
 
+  // #27.11 v6 때 기본 프로필로 들어가 있던 방(runtime.prof 없음): 정기 점검(10분)을 기다리지 않고 곧 읽어 prof 를 남긴다
+  {
+    const rv = fs.room('v6mainx1')
+    rv.members[botA.uid] = { mt: 2, nick: '운영자 기본닉' }
+    const iV6 = install('v6mainx1', { state: 'active', link_id: rv.li, chat_id: rv.chatId, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => { const v = botA.slot.byInstall.get(iV6); return !!(v && v.runtime.prof && v.runtime.prof.by === botA.id) }, 3000, '#27.11 v6 room profile is read soon')
+    const pv6 = botA.slot.byInstall.get(iV6).runtime.prof
+    if (pv6.open !== false || pv6.nn !== '운영자 기본닉' || pv6.chat !== rv.chatId) throw new Error('#27.11 v6 room shows the main profile ' + JSON.stringify(pv6))
+    if (packets('JOINLINK', (p) => p.li === rv.li).length || sentIn(iV6).length) throw new Error('#27.11 no join or notice for an adopted room')
+    store.installs.get(iV6).phase = 'removed'
+  }
+
   // #22 다시 접속 금지: JOINLINK 알 수 없는 status → close·새 로그인 없이 getChats 확인만. 이미 그 li 의 방이면 JOINLINK 없음
   {
     const loginsBefore = fs.logins[botA.uid]
@@ -1312,6 +1809,9 @@ if (emptyReads !== 1) throw new Error('chat: 빈 방을 계속 다시 읽는다 
     await pool.reconcile(null)
     await waitFor(() => rowOf(iLost).state === 'active', 5000, '7.7#22 lost response')
     if (fs.logins[botA.uid] !== loginsBefore) throw new Error('7.7#22 lost response does not log in again')
+    // #27.9 오픈프로필 입장(ptp 16)의 응답이 유실되어도 방 목록으로 찾아 성공 처리하고, 그 방의 프로필은 오픈프로필로 남는다
+    const lostJoin = packets('JOINLINK', (p) => p.li === fs.room('lostx1').li)
+    if (lostJoin.length !== 1 || lostJoin[0].ptp !== 16 || botA.slot.roomProfile(botA.slot.byInstall.get(iLost)) !== 'open') throw new Error('#27.9 lost ptp 16 join ' + JSON.stringify(lostJoin))
   }
 
   // #23 예산: 시간 예산 20 을 다 쓰면 21번째 입장은 rate_limited + next_try_at = 예산 복귀 시각. 조회 예산이 없으면 budget

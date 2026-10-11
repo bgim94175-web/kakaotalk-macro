@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const db = require('./lib/db');
+const settings = require('./lib/settings');
 const rl = require('./lib/ratelimit');
 const senderChild = require('./lib/sender-child');
 const memberAuth = require('./lib/member-auth');
@@ -69,7 +70,7 @@ app.use((req, res, next) => {
       console.log('[rate] 관리자 인증 실패로 차단중 ' + ip + ' ' + req.method + ' ' + req.path +
                   ' (' + mins + '분 남음)');
       return res.status(429).json({ ok: false, reason: 'rate_limited',
-        error: '비밀번호 입력 실패 횟수를 초과했습니다. ' + mins + '분 후 다시 시도하십시오' });
+        error: '비밀번호 입력 실패 횟수를 넘었습니다. ' + mins + '분 뒤 다시 시도해 주세요.' });
     }
   }
 
@@ -77,7 +78,7 @@ app.use((req, res, next) => {
   if (!r.ok) {
     res.set('Retry-After', String(r.retryAfter));
     console.log('[rate] 과다요청 차단 ' + ip + ' ' + req.method + ' ' + req.path + ' (버킷=' + kind + ')');
-    return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 빈번합니다. 잠시 후 다시 시도하십시오' });
+    return res.status(429).json({ ok: false, reason: 'rate_limited', error: '요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
   next();
 });
@@ -161,12 +162,12 @@ app.use((err, req, res, next) => {
   console.error('[unhandled ' + req.method + ' ' + req.originalUrl + '] ' + (err && err.stack ? err.stack : err));
   if (res.headersSent) return;
   if (err && (err.type === 'entity.too.large' || err.status === 413)) {
-    return res.status(413).json({ ok: false, error: '본문 크기가 허용 범위를 초과했습니다' });
+    return res.status(413).json({ ok: false, reason: 'too_large', error: '보낸 내용이 너무 큽니다. 내용을 줄인 뒤 다시 시도해 주세요.' });
   }
   if (err && err.type === 'entity.parse.failed') {
-    return res.status(400).json({ ok: false, error: '요청 본문(JSON) 형식이 올바르지 않습니다' });
+    return res.status(400).json({ ok: false, reason: 'bad_request', error: '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' });
   }
-  res.status(500).json({ ok: false, error: 'server_error' });
+  res.status(500).json({ ok: false, reason: 'server_error', error: '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' });
 });
 
 // ── 셀프핑: Render 무료는 15분 동안 외부 요청이 없으면 잠듦 → 10분마다 자기 공개 주소를 호출해서 막음
@@ -282,6 +283,8 @@ function startLoops() {
 
 warnEnv();
 db.migrate()
+  // 운영 한도(/manage [설정])를 먼저 읽는다. 못 읽어도 기본값으로 뜬다.
+  .then(() => settings.load().catch((e) => console.error('[boot] 운영 한도를 읽지 못해 기본값으로 시작합니다: ' + (e && e.message ? e.message : e))))
   .then(() => app.listen(PORT, () => {
     console.log('license server on :' + PORT);
     startSelfPing();

@@ -14,6 +14,7 @@ const memberAuth = require('../lib/member-auth');
 const oauth = require('../lib/google-oauth');
 const audit = require('../lib/audit');
 const entitle = require('../lib/entitle');
+const settings = require('../lib/settings');
 const installs = require('../lib/installs');
 const pricing = require('../lib/pricing');
 const panelRoutes = require('./panel');
@@ -22,20 +23,20 @@ const router = express.Router();
 
 const T = memberAuth.TEXT;
 const TEXT = {
-  bad_credentials: '아이디 또는 비밀번호가 일치하지 않습니다. 다시 입력하십시오',
-  taken: '이미 사용 중인 아이디입니다. 다른 아이디를 입력하십시오',
-  bad_contact: '연락처는 100자 이하로 입력하십시오',
-  signup_limit: '가입 요청이 너무 많습니다. 잠시 후 다시 시도하십시오',
-  wrong_current: '현재 비밀번호가 일치하지 않습니다. 다시 입력하십시오',
-  reauth_needed: '비밀번호 재설정 시간이 지났습니다. 현재 비밀번호를 입력하거나 Google 계정으로 다시 로그인하십시오.',
-  no_session: '없는 로그인 기기입니다.',
+  bad_credentials: '아이디 또는 비밀번호가 일치하지 않습니다. 다시 입력해 주세요.',
+  taken: '이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.',
+  bad_contact: '연락처는 100자 이하로 입력해 주세요.',
+  signup_limit: '가입 요청이 너무 많습니다. 잠시 뒤 다시 시도해 주세요.',
+  wrong_current: '현재 비밀번호가 일치하지 않습니다. 다시 입력해 주세요.',
+  reauth_needed: 'Google 로그인 뒤 시간이 지나 현재 비밀번호 없이는 바꿀 수 없습니다. 현재 비밀번호를 입력하거나 Google 계정으로 다시 로그인해 주세요.',
+  no_session: '이미 로그아웃된 기기입니다.',
   not_linked: '연결된 Google 계정이 없습니다.',
-  claim_not_found: '키를 찾을 수 없습니다. 키를 확인하십시오.',
-  server: '처리하지 못했습니다. 잠시 뒤 다시 시도하십시오.',
+  claim_not_found: '키를 찾을 수 없습니다. 키를 확인해 주세요.',
+  server: '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
 };
 
 function lockedText(ms) {
-  return '로그인 실패 횟수를 초과했습니다. ' + Math.max(1, Math.ceil(ms / 60000)) + '분 후 다시 시도하십시오';
+  return '로그인 실패 횟수를 넘었습니다. ' + Math.max(1, Math.ceil(ms / 60000)) + '분 뒤 다시 시도해 주세요.';
 }
 
 function fail(res, status, reason, error, extra) {
@@ -180,6 +181,8 @@ router.get('/api/site', wrap(async (req, res) => {
     channel: memberAuth.channelConfig(member),
     contact: contactInfo(),
     member: member,
+    // 화면 안내 숫자(관리자가 /manage [설정]에서 바꾼다). [data-limit] 칸을 support.js 가 채운다.
+    limits: { kakao_accounts: settings.get('kakao_accounts'), sessions: settings.get('sessions') },
   });
 }));
 
@@ -398,7 +401,7 @@ router.get('/api/me', wrap(async (req, res) => {
   let accounts = sum && sum.accounts;
   if (!accounts) {
     const n = await db.one('SELECT count(*)::int AS n FROM panel_accounts WHERE member_id=$1', [id]);
-    accounts = { n: n ? Number(n.n) : 0, max: entitle.MAX_ACCOUNTS };
+    accounts = { n: n ? Number(n.n) : 0, max: entitle.maxAccounts() };
   }
   const member = memberAuth.publicMember(row, g);
   member.created_at = Number(row.created_at);
@@ -451,6 +454,19 @@ function redirect(res, url) {
   res.redirect(302, url);
 }
 
+// Google 연결은 비밀번호 재설정 권한을 주는 일이다(연결한 Google 로 로그인하면 현재 비밀번호 없이 바꿀 수 있다).
+// 그래서 연결은 비밀번호 변경만큼 엄격해야 한다: 최근(AUTH_RESET_WINDOW_MS 안)에 아이디·비밀번호로 로그인한 세션에서만 연다.
+// 훔친 세션 쿠키만으로 공격자 자신의 Google 을 연결해 두고 나중에 비밀번호를 바꿔 계정을 빼앗지 못하게 한다.
+function linkOpen(s, slackMs) {
+  return !!s && s.method === 'pw' && Date.now() - Number(s.auth_at) < memberAuth.resetWindowMs() + (slackMs || 0);
+}
+
+// 비밀번호로 다시 로그인한 뒤 바로 연결을 이어 가는 주소(로그인 화면의 next). 이미 로그인한 사람에게
+// "먼저 로그인하십시오"(login_needed)는 맞지 않아 relogin 문구를 쓴다(3.2.2).
+function relinkUrl(next) {
+  return '/login?g=relogin&next=' + encodeURIComponent('/auth/google/start?mode=link&next=' + encodeURIComponent(oauth.safeNext(next)));
+}
+
 async function liveSession(req) {
   try {
     const s = await memberAuth.readSession(req);
@@ -476,6 +492,7 @@ router.get('/auth/google/start', wrap(async (req, res) => {
   if (mode === 'link') {
     s = await liveSession(req);
     if (!s) return redirect(res, '/login?g=login_needed&next=' + encodeURIComponent('/account'));
+    if (!linkOpen(s)) return redirect(res, relinkUrl(next));
   }
   const state = oauth.randomToken(32);
   const verifier = oauth.randomToken(32);
@@ -517,6 +534,8 @@ router.get('/auth/google/callback', wrap(async (req, res) => {
   if (st.md === 'link') {
     const s = await liveSession(req);
     if (!s || s.member.id !== Number(st.m) || s.sid.slice(0, 16) !== st.sid) return redirect(res, toResult('expired'));
+    // 시작 때 본 조건을 다시 본다(Google 화면에 머문 시간만큼은 봐준다)
+    if (!linkOpen(s, oauth.STATE_TTL_MS)) return redirect(res, relinkUrl(nx));
     const mine = await googleRow(s.member.id);
     if (mine) return redirect(res, toResult(mine.sub === tok.sub ? 'linked' : 'already'));
     const other = await db.one('SELECT member_id FROM member_google WHERE sub=$1', [tok.sub]);

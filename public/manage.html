@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=7">
+<link rel="stylesheet" href="/style.css?v=8">
 <!-- 판매 관리 화면(/manage) 전용 보충 스타일. 색·글꼴·간격은 전부 style.css 토큰을 쓴다 (다크 고정). -->
 <style>
   /* 로그인 */
@@ -58,6 +58,10 @@
   /* 탭 */
   .mg-tabs { display: flex; gap: 2px; margin-top: 28px; border-bottom: 1px solid var(--line-2); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
   .mg-tabs::-webkit-scrollbar { display: none; }
+  /* 좁은 화면에서 탭이 넘치면 가려진 쪽 가장자리를 흐리게 해 옆으로 밀 수 있다는 것을 보인다(manage.js tabFade) */
+  .mg-tabs.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+  .mg-tabs.fade-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+  .mg-tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
   .mg-tab { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 14px; color: var(--fg-3); font-size: var(--t-14); font-weight: 500; white-space: nowrap; transition: color var(--d1); }
   .mg-tab:hover { color: var(--fg-2); }
   .mg-tab[aria-selected="true"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--fg); }
@@ -199,7 +203,7 @@
     .mg-stat { padding: 12px 14px; }
     .mg-stat .v { font-size: var(--t-18); }
     .mg-tabs { margin-top: 22px; }
-    .mg-tab { padding: 0 12px; gap: 6px; }
+    .mg-tab { padding: 0 8px; gap: 4px; }
     .mg-item { padding: 14px; }
     .mg-filt button { height: 36px; }
     .mg-search .sel { flex: 1 1 100%; }
@@ -220,7 +224,7 @@
     .mg-feat .btn { grid-row: 2; grid-column: 2; justify-self: end; }
   }
 </style>
-<script src="/manage.js?v=2" defer></script>
+<script src="/manage.js?v=5" defer></script>
 </head>
 <body data-page="manage">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -244,7 +248,7 @@
     <a class="brand" href="/" aria-label="K bot 홈"><span class="brand-mark" aria-hidden="true"></span>K bot</a>
     <div>
       <h1>판매 관리</h1>
-      <p class="lead sub">주문 승인 · 입금 매칭 · 회원 · K bot 계정 · 설치한 방을 처리하는 관리자 화면입니다. 서버에 설정한 관리자 비밀번호(ADMIN_PASSWORD)로 들어갑니다.</p>
+      <p class="lead sub">주문 · 입금 · 회원 · K bot 계정 · 방을 관리하는 화면입니다. 서버에 설정한 관리자 비밀번호로 로그인해 주세요.</p>
     </div>
     <div id="loginNote" class="note warn" role="alert" hidden><span class="ic" aria-hidden="true">!</span><span id="loginNoteT"></span></div>
     <form id="loginForm" class="card" novalidate>
@@ -255,10 +259,10 @@
       </div>
       <p class="errt" id="loginErr" role="alert"></p>
       <p class="okt" id="loginInfo" role="status"></p>
-      <button type="submit" class="btn primary lg wide" id="loginBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">들어가기</span></button>
+      <button type="submit" class="btn primary lg wide" id="loginBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">로그인</span></button>
       <p class="hint">비밀번호는 이 브라우저 탭에만 보관되며, 탭을 닫거나 로그아웃하면 삭제됩니다. 연속으로 틀리면 일정 시간 접속이 차단됩니다.</p>
     </form>
-    <div class="mg-login-foot"><a href="/">K bot 홈</a><a href="/panel">콘솔</a></div>
+    <div class="mg-login-foot"><a href="/">K bot 홈</a><a href="/panel">패널</a></div>
   </div>
 </div>
 
@@ -280,7 +284,7 @@
     <div class="mg-head">
       <div>
         <h1>판매 관리</h1>
-        <p class="sub" id="prodSub">상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 15,000원/방 · 미니게임봇 15,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.</p>
+        <p class="sub" id="prodSub">상품: 카카오톡 매크로 1개월 20,000원 · 방 관리봇 방마다 15,000원 · 미니게임봇 방마다 15,000원. 직접 승인하거나 입금을 연결한 주문도 자동 입금 확인과 똑같이 처리됩니다.</p>
       </div>
       <span class="mg-upd" id="updAt" aria-live="polite"></span>
     </div>
@@ -288,12 +292,12 @@
     <section aria-label="요약">
       <div class="mg-stats" id="stats">
         <button type="button" class="mg-stat" data-go="orders" data-filter="open"><span class="k">처리 대기 주문</span><span class="v" data-v="pending">–</span><span class="s" data-s="pending"></span></button>
-        <button type="button" class="mg-stat" data-go="deposits" data-filter="attention"><span class="k">확인 필요 입금</span><span class="v" data-v="deposits">–</span><span class="s">미매칭 · 금액 중복</span></button>
+        <button type="button" class="mg-stat" data-go="deposits" data-filter="attention"><span class="k">확인할 입금</span><span class="v" data-v="deposits">–</span><span class="s">주문 못 찾음 · 금액 중복</span></button>
         <button type="button" class="mg-stat" data-go="members" data-filter="all"><span class="k">회원</span><span class="v" data-v="members">–</span><span class="s" data-s="members"></span></button>
-        <button type="button" class="mg-stat" data-go="members" data-filter="macro"><span class="k">이용 중 매크로</span><span class="v" data-v="macro">–</span><span class="s">만료 전 회원</span></button>
-        <button type="button" class="mg-stat" data-go="rooms" data-filter=""><span class="k">설치된 방</span><span class="v" data-v="rooms">–</span><span class="s" data-s="rooms"></span></button>
-        <button type="button" class="mg-stat" data-go="rooms" data-filter="waiting"><span class="k">부방장 대기</span><span class="v" data-v="waiting">–</span><span class="s">방장 지정 필요</span></button>
-        <button type="button" class="mg-stat" data-go="rooms" data-filter="attention"><span class="k">오류 방</span><span class="v" data-v="errors">–</span><span class="s">확인 필요</span></button>
+        <button type="button" class="mg-stat" data-go="members" data-filter="macro"><span class="k">매크로 이용 중</span><span class="v" data-v="macro">–</span><span class="s">만료 전 회원</span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter=""><span class="k">설치한 방</span><span class="v" data-v="rooms">–</span><span class="s" data-s="rooms"></span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter="waiting"><span class="k">부방장 지정 대기</span><span class="v" data-v="waiting">–</span><span class="s">방장이 지정해야 동작</span></button>
+        <button type="button" class="mg-stat" data-go="rooms" data-filter="attention"><span class="k">문제 있는 방</span><span class="v" data-v="errors">–</span><span class="s">오류 상태</span></button>
         <button type="button" class="mg-stat" data-go="bots"><span class="k">K bot 계정</span><span class="v" data-v="bots">–</span><span class="s" data-s="bots"></span></button>
       </div>
       <p class="mg-feat-sum" id="featSum"></p>
@@ -307,6 +311,7 @@
       <button type="button" class="mg-tab" role="tab" id="tab-rooms" data-tab="rooms" aria-controls="pane-rooms" aria-selected="false" tabindex="-1">방<span class="badge-n crit" data-badge="rooms" hidden></span></button>
       <button type="button" class="mg-tab" role="tab" id="tab-keys" data-tab="keys" aria-controls="pane-keys" aria-selected="false" tabindex="-1">키</button>
       <button type="button" class="mg-tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="pane-audit" aria-selected="false" tabindex="-1">기록</button>
+      <button type="button" class="mg-tab" role="tab" id="tab-settings" data-tab="settings" aria-controls="pane-settings" aria-selected="false" tabindex="-1">설정</button>
     </div>
 
     <!-- 주문 -->
@@ -363,7 +368,7 @@
       </div>
       <div id="botSys"></div>
       <div class="mg-list" id="botList"></div>
-      <p class="hint" id="botHint">방장이 진짜 K bot 계정을 구분할 수 있게 봇마다 다른 닉네임을 쓰십시오(예: K bot 1, K bot 2). 배정은 맡은 방이 가장 적은 계정부터 하며, 상한이 차면 다음 계정으로 넘어갑니다.</p>
+      <p class="hint" id="botHint">봇은 고객 방에 카카오톡 기본 프로필이 아니라 그 계정의 오픈프로필로 들어갑니다. 계정마다 카카오톡에서 오픈프로필을 하나 만들고, 방장이 구분할 수 있도록 오픈프로필 이름을 봇마다 다르게 정해 주세요(예: K bot 1, K bot 2). 오픈프로필이 없는 계정은 방에 들어가지 않습니다. 새 방은 오픈프로필이 있는 계정이 먼저 받고, 그중 맡은 방이 가장 적은 계정부터 받습니다. 최대 방 수가 차면 다음 계정이 받습니다.</p>
     </section>
 
     <!-- 설치한 방 -->
@@ -371,20 +376,20 @@
       <div class="mg-bar">
         <form class="mg-search grow" id="roomForm" role="search" novalidate>
           <label class="sr" for="roomQ">방 검색</label>
-          <input class="inp" type="search" id="roomQ" placeholder="방 이름 · 링크 · 회원 아이디 · 설치 번호" autocomplete="off" spellcheck="false" maxlength="200">
+          <input class="inp" type="search" id="roomQ" placeholder="방 이름 · 링크 · 회원 아이디 · 방 번호" autocomplete="off" spellcheck="false" maxlength="200">
           <button type="submit" class="btn"><svg width="14" height="14" aria-hidden="true"><use href="#i-search"></use></svg>검색</button>
         </form>
         <div class="mg-acts-top">
-          <button type="button" class="btn" id="roomGrantBtn"><svg width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>방 지급</button>
-          <button type="button" class="btn danger" id="roomBlockBtn">링크 금지</button>
+          <button type="button" class="btn" id="roomGrantBtn"><svg width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>봇 무료 설치</button>
+          <button type="button" class="btn danger" id="roomBlockBtn">링크 차단</button>
         </div>
       </div>
       <div class="mg-bar" style="margin-top:0">
         <div class="mg-filt" id="roomFilt" role="group" aria-label="방 상태">
           <button type="button" data-f="" aria-pressed="true">전체</button>
-          <button type="button" data-f="attention" aria-pressed="false">확인 필요</button>
-          <button type="button" data-f="hold" aria-pressed="false">확인 대기</button>
-          <button type="button" data-f="waiting" aria-pressed="false">부방장 대기</button>
+          <button type="button" data-f="attention" aria-pressed="false">오류</button>
+          <button type="button" data-f="hold" aria-pressed="false">검토 대기</button>
+          <button type="button" data-f="waiting" aria-pressed="false">부방장 지정 대기</button>
           <button type="button" data-f="active" aria-pressed="false">사용 중</button>
           <button type="button" data-f="pending" aria-pressed="false">입금 대기</button>
         </div>
@@ -392,13 +397,13 @@
       </div>
       <div class="mg-scope" id="roomScope" hidden></div>
       <div class="mg-list" id="roomList"></div>
-      <div class="mg-sub-h"><h2>금지한 방</h2><span class="mg-count" id="blockCount"></span></div>
+      <div class="mg-sub-h"><h2>차단한 방</h2><span class="mg-count" id="blockCount"></span></div>
       <div class="mg-list" id="blockList"></div>
     </section>
 
     <!-- 예전 라이선스 키 -->
     <section id="pane-keys" role="tabpanel" aria-labelledby="tab-keys" hidden>
-      <p class="hint" style="margin-top:18px">예전 라이선스 키입니다. 새 판매는 회원 계정으로 처리하며, 키는 기존 고객 지원용으로만 발급·연장합니다. 회원에게 이관된 키는 회원 화면에서 조정합니다.</p>
+      <p class="hint" style="margin-top:18px">예전 라이선스 키입니다. 새 판매는 회원 계정으로 처리하며, 키는 기존 고객 지원용으로만 발급·연장합니다. 회원 계정에 등록된 키는 회원 상세에서 관리해 주세요.</p>
       <div class="mg-bar">
         <form class="mg-search grow" id="keyForm" role="search" novalidate>
           <label class="sr" for="keyQ">키 검색</label>
@@ -427,6 +432,12 @@
       </div>
       <p class="mg-count" id="audCount" aria-live="polite"></p>
       <div class="mg-list" id="audList" style="margin-top:10px"></div>
+    </section>
+
+    <!-- 운영 한도 -->
+    <section id="pane-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <p class="hint" style="margin-top:18px">회원과 K bot 계정에 적용되는 기본 한도입니다. 바꾸면 사이트와 패널의 안내 숫자도 함께 바뀝니다.</p>
+      <div class="mg-list" id="setList" style="margin-top:10px"></div>
     </section>
   </main>
 </div>

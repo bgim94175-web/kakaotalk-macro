@@ -6,7 +6,7 @@
   var me = null;
   var account = null;
   var rooms = [];                 // RoomView[] (3.4.2) — /panel/api/me.rooms 와 /panel/api/bot-rooms
-  var roomSeen = {};              // install_id → 마지막으로 본 display (승격·강등 알림용)
+  var roomSeen = {};              // install_id → 마지막으로 본 {d: display, rb: 방 관리봇 여부} (승격·강등 알림용)
   var routeArg = '';              // #route/<arg> 의 arg (방 라우트의 install_id)
   var curId = '';                 // 지금 설정·기록을 보는 계정
   var images = [];                // 새로 고른 이미지 [{b64, name}]
@@ -61,7 +61,7 @@
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function fmtNum(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  function short(email) { var s = String(email || ''); var i = s.indexOf('@'); return i > 0 ? s.slice(0, i + 1) : s; }
+  function short(email) { var s = String(email || ''); var i = s.indexOf('@'); return i > 0 ? s.slice(0, i) : s; }
   function iga(w) {
     var c = w.charCodeAt(w.length - 1);
     if (c < 0xAC00 || c > 0xD7A3) return w + '이(가)';
@@ -130,13 +130,13 @@
   function loginId() { return (me && me.member && me.member.login_id) || ''; }
 
   function reasonText(row) {
-    if (!me || !me.sender_up) return (me && me.sender_reason) || '발송 프로세스가 멈춰 있습니다';
+    if (!me || !me.sender_up) return (me && me.sender_reason) || '발송 서버가 멈춰 있습니다';
     if (row.connected) return '이 서버에서 보내는 중';
     if (row.needs_register) return '다시 등록이 필요합니다';
-    if (row.linked) return '서버에 등록됨 · 접속을 붙이는 중';
+    if (row.linked) return '서버에 등록됨 · 접속하는 중';
     if (row.reason === 'kicked') return '다른 기기가 접속을 가져갔습니다';
     if (row.reason === 'unlinked') return '등록이 해제되었습니다';
-    return '아직 발송 세션이 없습니다';
+    return '아직 서버에 접속하지 않았습니다';
   }
 
   // ── 토스트 (4.3) ───────────────────────────────────────────
@@ -191,30 +191,30 @@
       } catch (e) { done = false; }
     }
     if (done) notify('복사했습니다.', txt);
-    else notify('복사하지 못했습니다.', '직접 선택하여 복사하십시오.', { kind: 'crit' });
+    else notify('복사하지 못했습니다.', '직접 선택해 복사해 주세요.', { kind: 'crit' });
   }
 
   // ── 화면 이름표 (1.4) ──────────────────────────────────────
   var ROUTES = {
     overview: { t: '개요', member: true, g: 'o', icon: 'overview' },
-    inbox: { t: '주요 알림', g: 'i', icon: 'inbox' },
+    inbox: { t: '받은 갠톡', g: 'i', icon: 'inbox' },
     accounts: { t: '카카오 계정', g: 'a', icon: 'accounts' },
     'account-add': { t: '카카오 계정 추가', nav: 'accounts' },
     rooms: { t: '내 방', member: true, g: 'b', icon: 'link' },
     macro: { t: '매크로', acct: true, feat: 'macro', sw: 'macro-on', g: 'm', icon: 'macro' },
-    visit: { t: '입장·퇴장 로그', acct: true, legacy: true, feat: 'visit', sw: 'visit-on', g: 'v', icon: 'visit' },
-    profile: { t: '프로필 로그', acct: true, legacy: true, feat: 'profile', sw: 'profile-on', g: 'p', icon: 'profile' },
-    guard: { t: '올킥 방지', acct: true, legacy: true, feat: 'guard', sw: 'guard-on', g: 'k', icon: 'guard' },
+    visit: { t: '입장·퇴장 기록', acct: true, legacy: true, feat: 'visit', sw: 'visit-on', g: 'v', icon: 'visit' },
+    profile: { t: '프로필 기록', acct: true, legacy: true, feat: 'profile', sw: 'profile-on', g: 'p', icon: 'profile' },
+    guard: { t: '올킥 감지', acct: true, legacy: true, feat: 'guard', sw: 'guard-on', g: 'k', icon: 'guard' },
     cover: { t: '금지어 검열', acct: true, legacy: true, feat: 'cover', sw: 'cover-on', g: 'c', icon: 'cover' },
     reply: { t: '갠톡 응답', acct: true, feat: 'autoreply', sw: 'reply-on', g: 'r', icon: 'reply' },
     snipe: { t: '저격 규칙', acct: true, feat: 'triggers', g: 's', icon: 'snipe' },
     // 내 방 (ACCOUNTS_V1 6.9 라우트 표) — 해시 #<route>/<install_id>
     room: { t: '방 상태', room: true, icon: 'overview' },
-    'r-visit': { t: '입장·퇴장 로그', room: true, roombot: true, sw: 'r-visit-on', icon: 'visit' },
-    'r-profile': { t: '프로필 로그', room: true, roombot: true, sw: 'r-profile-on', icon: 'profile' },
+    'r-visit': { t: '입장·퇴장 기록', room: true, roombot: true, sw: 'r-visit-on', icon: 'visit' },
+    'r-profile': { t: '프로필 기록', room: true, roombot: true, sw: 'r-profile-on', icon: 'profile' },
     'r-promo': { t: '홍보 금지', room: true, roombot: true, sw: 'r-promo-on', icon: 'alert' },
-    'r-cover': { t: '가리기·금지어 검열', room: true, roombot: true, sw: 'r-cover-on', icon: 'cover' },
-    'r-guard': { t: '올킥 방지', room: true, roombot: true, sw: 'r-guard-on', icon: 'guard' },
+    'r-cover': { t: '글 가리기·금지어 검열', room: true, roombot: true, sw: 'r-cover-on', icon: 'cover' },
+    'r-guard': { t: '올킥 감지', room: true, roombot: true, sw: 'r-guard-on', icon: 'guard' },
     'r-games': { t: '미니게임', room: true, minigame: true, sw: 'r-games-on', icon: 'game' },
   };
   var FEAT_ROUTES = ['macro', 'visit', 'profile', 'guard', 'cover', 'reply', 'snipe'];
@@ -268,7 +268,7 @@
     app.hidden = false;
     who.textContent = loginId();
     if (Array.isArray(me && me.rooms)) applyRooms(me.rooms, true);
-    // 띠는 발송 작업 상태 하나만 말한다. /inbox 응답이 오면 그 값으로 덮어쓴다.
+    // 띠는 발송 서버 상태 하나만 말한다. /inbox 응답이 오면 그 값으로 덮어쓴다.
     inboxSt.senderUp = !!(me && me.sender_up);
     inboxSt.senderReason = (me && me.sender_reason) || '';
     updateStrip();
@@ -401,7 +401,7 @@
     var off = !!me && !macroInfo().active;
     qsa('[data-macro-off]').forEach(function (b) {
       if (!off) { b.hidden = true; b.textContent = ''; return; }
-      b.innerHTML = ic('alert') + '<span class="grow">카카오톡 매크로 사용 기간이 아닙니다. 발송과 주요 알림이 멈춰 있습니다.</span>' +
+      b.innerHTML = ic('alert') + '<span class="grow">카카오톡 매크로 이용 기간이 아닙니다(구매 전 또는 기간 만료). 발송과 갠톡 받기가 멈춰 있습니다.</span>' +
         '<a class="btn sm" href="/buy?macro=1">구매</a>';
       b.hidden = false;
     });
@@ -719,7 +719,7 @@
         ? '<span>' + esc(curRoom() ? roomName(curRoom()) : '') + '</span>'
         : '<span class="mono">' + esc(a ? a.email : '') + '</span>';
       $('saveTxt').innerHTML = leave
-        ? '<b>저장하지 않은 변경사항이 있습니다.</b> <span class="ctx">이동하기 전에 저장하거나 버리십시오.</span>'
+        ? '<b>저장하지 않은 변경사항이 있습니다.</b> <span class="ctx">이동하기 전에 저장하거나 버려 주세요.</span>'
         : '<b>변경사항 ' + dirtyN + '건</b><span class="ctx"> · ' + where + ' · ' + esc(routeTitle(route)) + '</span>';
     }
     qsa('.nav-a[data-r]').forEach(function (x) { x.classList.toggle('is-dirty', show && x.dataset.r === route); });
@@ -872,7 +872,7 @@
       add.innerHTML = ic('plus');
       box.appendChild(add);
     }
-    if (savedImages) box.appendChild(el('p', 'hint w100', '저장된 이미지는 미리 보기 없이 표시합니다. 추가하거나 빼면 저장된 이미지를 모두 대체합니다.'));
+    if (savedImages) box.appendChild(el('p', 'hint w100', '저장된 이미지는 미리 볼 수 없습니다. 이미지를 새로 추가하거나 하나라도 빼면 저장된 이미지는 모두 빠지고, 새로 고른 이미지만 남습니다.'));
   }
 
   function roomRow(room, selected, cool) {
@@ -936,7 +936,7 @@
       box.appendChild(row);
       n += 1;
     });
-    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. 대화방 불러오기를 누르십시오.'));
+    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.'));
   }
 
   function checkedRooms(root) {
@@ -966,7 +966,7 @@
       box.appendChild(row);
       n += 1;
     });
-    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. 대화방 불러오기를 누르십시오.'));
+    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.'));
   }
 
   function selectedRooms() {
@@ -1139,7 +1139,7 @@
     rc.value = String(count);
     rangeFill(rs);
     rangeFill(rc);
-    $('guard-sent').innerHTML = '<b>' + secs + '초</b> 안에 <b>' + count + '건</b> 이상 강퇴되면 올킥으로 감지합니다.';
+    $('guard-sent').innerHTML = '<b>' + secs + '초</b> 안에 <b>' + count + '명</b> 이상 내보내면 올킥으로 감지합니다.';
     var span = Math.max(60, secs * 2);
     var strip = $('guard-strip');
     var inWin = KICKS.filter(function (k) { return -k <= secs; }).length;
@@ -1156,7 +1156,7 @@
     $('guard-ax0').innerHTML = '-' + span + '<span class="sans">초</span>';
     $('guard-ax1').innerHTML = '-' + Math.round(span / 2) + '<span class="sans">초</span>';
     $('guard-kt').classList.toggle('hit', hit);
-    $('guard-res').innerHTML = (hit ? '<i class="dot crit"></i>' : '<i class="dot"></i>') + '구간 안의 강퇴 ' + inWin + '건 · ' + (hit ? '올킥으로 감지됩니다' : '기준 미만이라 감지하지 않습니다');
+    $('guard-res').innerHTML = (hit ? '<i class="dot crit"></i>' : '<i class="dot"></i>') + '구간 안에 내보낸 인원 ' + inWin + '명 · ' + (hit ? '올킥으로 감지됩니다' : '기준 미만이라 감지하지 않습니다');
   }
 
   // ── 금지어 칩 (4.10) ──────────────────────────────────────
@@ -1186,7 +1186,7 @@
     String(raw).split(/[,\n]/).forEach(function (w) {
       w = w.trim();
       if (!w) return;
-      if (w.length > 30) { err = '30자를 넘는 단어는 추가되지 않습니다. 단어를 줄여 다시 입력하십시오.'; code = 'long'; return; }
+      if (w.length > 30) { err = '30자를 넘는 단어는 추가되지 않습니다. 단어를 줄여 다시 입력해 주세요.'; code = 'long'; return; }
       var lower = w.toLowerCase();
       if (coverWords.some(function (x) { return x.toLowerCase() === lower; })) {
         err = '이미 추가된 단어입니다.';
@@ -1195,7 +1195,7 @@
         if (c && !reducedMotion()) { c.classList.remove('dupe'); void c.offsetWidth; c.classList.add('dupe'); }
         return;
       }
-      if (coverWords.length >= 200) { err = '금지어는 200개까지 등록됩니다. 사용하지 않는 단어를 삭제하십시오.'; code = 'max'; return; }
+      if (coverWords.length >= 200) { err = '금지어는 200개까지 등록할 수 있습니다. 쓰지 않는 단어를 지워 주세요.'; code = 'max'; return; }
       coverWords.push(w);
       added = coverWords.length - 1;
     });
@@ -1207,17 +1207,17 @@
   // ── 갠톡 응답 미리 보기 (4.11) ────────────────────────────
   function updateReplyPreview() {
     var m = $('reply-message').value || '';
-    $('reply-preview').textContent = m ? m.replace(/\{이름\}/g, '민지').replace(/\{시간\}/g, '21:16').replace(/\{날짜\}/g, '10월 9일') : '응답 메시지를 입력하십시오.';
+    $('reply-preview').textContent = m ? m.replace(/\{이름\}/g, '민지').replace(/\{시간\}/g, '21:16').replace(/\{날짜\}/g, '10월 9일') : '응답 메시지를 입력해 주세요.';
   }
 
   // ── 저격 규칙 (4.12) ──────────────────────────────────────
-  var MODES = { contains: '포함', exact: '같음', starts: '앞글자', regex: '정규식(고급)' };
+  var MODES = { contains: '포함', exact: '정확히 일치', starts: '시작 부분 일치', regex: '정규식(고급)' };
   function ruleMeta(t) {
     var rn = (t.rooms || []).length ? t.rooms.length + '개 방' : '모든 방';
     var sep = '<span aria-hidden="true">·</span>';
-    return '<code' + (!t.pattern || hangul(t.pattern) ? ' class="sans"' : '') + '>' + esc(t.pattern || '말 없음') + '</code><span>' + (MODES[t.mode] || '포함') + '</span>' + sep + '<span>' + rn + '</span>' + sep +
+    return '<code' + (!t.pattern || hangul(t.pattern) ? ' class="sans"' : '') + '>' + esc(t.pattern || '감지할 말 없음') + '</code><span>' + (MODES[t.mode] || '포함') + '</span>' + sep + '<span>' + rn + '</span>' + sep +
       '<span class="tnum">쿨타임 ' + fmtNum(t.cooldown_sec == null ? 60 : t.cooldown_sec) + '초</span>' +
-      (t.target ? sep + '<span>' + esc(roomName(t.target)) + '에 답장</span>' : '') + (t.once ? sep + '<span>방마다 1회</span>' : '');
+      (t.target ? sep + '<span>' + esc(roomName(t.target)) + '에 답장</span>' : '') + (t.once ? sep + '<span>방마다 한 번만</span>' : '');
   }
   function swHtml(attrs, on, label) {
     return '<span class="swl"><input type="checkbox" role="switch" class="swi" ' + attrs + ' aria-label="' + esc(label) + '"' + (on ? ' checked' : '') + '><span class="sw" aria-hidden="true"></span></span>';
@@ -1228,7 +1228,7 @@
     try { base = JSON.parse(baseline.snipe || '[]'); } catch (e) { base = []; }
     $('snipe-count').textContent = '규칙 ' + triggers.length + ' / 30';
     $('add-trigger').disabled = triggers.length >= 30;
-    if (!triggers.length) { box.innerHTML = '<p class="empty">등록된 규칙이 없습니다. 규칙 추가를 눌러 첫 규칙을 만드십시오.</p>'; return; }
+    if (!triggers.length) { box.innerHTML = '<p class="empty">등록된 규칙이 없습니다. [규칙 추가]를 눌러 첫 규칙을 만들어 주세요.</p>'; return; }
     var choices = roomChoices();
     box.innerHTML = triggers.map(function (t, i) {
       var old = t.id ? base.filter(function (b) { return b.id === t.id; })[0] : null;
@@ -1238,19 +1238,19 @@
       var chosen = t.rooms || [];
       var picks = choices.length ? '<div class="rooms" role="group" aria-label="감지할 방">' + choices.map(function (r) {
         return '<label class="room"><input type="checkbox" data-rule-room="' + i + '" data-key="' + esc(r.key) + '"' + (chosen.indexOf(r.key) >= 0 ? ' checked' : '') + '><span class="ck" aria-hidden="true">' + ic('check', 10) + '</span><span class="nm">' + esc(r.name || '대화방') + '</span>' + (r.members ? '<span class="mem">' + r.members + '명</span>' : '') + '</label>';
-      }).join('') + '</div>' : '<p class="rooms-none">불러온 대화방이 없습니다. 대화방 불러오기를 누르십시오.</p>';
+      }).join('') + '</div>' : '<p class="rooms-none">불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.</p>';
       return '<div class="rule' + (t.enabled === false ? ' off' : '') + (open ? ' open' : '') + (i === newIdx ? ' new' : '') + '" data-ri="' + i + '">' +
         '<div class="rule-h" role="button" tabindex="0" aria-expanded="' + open + '"><div class="t"><b>' + esc(t.name || '이름 없는 규칙') + '</b><div class="meta">' + ruleMeta(t) + '</div></div>' +
         swHtml('data-rule="' + i + '" data-f="enabled"', t.enabled !== false, (t.name || '규칙') + ' 사용') + '<span class="chev">' + ic('down') + '</span></div>' +
         '<div class="rule-b"><div><div class="rule-form">' +
           '<div class="fld"><label for="tn' + i + '">이름</label><input class="inp" id="tn' + i + '" data-rule="' + i + '" data-f="name" value="' + esc(t.name || '') + '" maxlength="40" autocomplete="off"></div>' +
           '<div class="fld"><label for="tm' + i + '">찾는 방식</label><div class="sel"><select id="tm' + i + '" data-rule="' + i + '" data-f="mode">' + modes.map(function (md) { return '<option value="' + md + '"' + (md === (t.mode || 'contains') ? ' selected' : '') + '>' + MODES[md] + '</option>'; }).join('') + '</select>' + ic('down', 14) + '</div>' +
-            (t.mode === 'regex' ? '<span class="hint">정규식(고급)은 잘 모르면 「포함」을 선택하십시오.</span>' : '') + '</div>' +
+            (t.mode === 'regex' ? '<span class="hint">정규식이 익숙하지 않다면 「포함」을 골라 주세요.</span>' : '') + '</div>' +
           '<div class="fld"><label for="tp' + i + '">감지할 말</label><input class="inp" id="tp' + i + '" data-rule="' + i + '" data-f="pattern" value="' + esc(t.pattern || '') + '" maxlength="200" autocomplete="off"></div>' +
           '<div class="fld"><span class="lb">다시 반응하기까지</span><div class="num"><button type="button" data-step="-1" aria-label="쿨타임 줄이기">−</button><input type="text" inputmode="numeric" autocomplete="off" data-rule="' + i + '" data-f="cooldown_sec" data-min="0" data-max="86400" value="' + (t.cooldown_sec == null ? 60 : t.cooldown_sec) + '" aria-label="쿨타임"><button type="button" data-step="1" aria-label="쿨타임 늘리기">+</button><span class="unit">초</span></div></div>' +
           '<div class="fld full"><label for="tr' + i + '">답장</label><textarea class="ta" id="tr' + i + '" data-rule="' + i + '" data-f="reply" rows="2" maxlength="500">' + esc(t.reply || '') + '</textarea></div>' +
-          '<div class="fld full"><span class="lb">감지할 방</span>' + picks + '<div class="rooms-meta"><span>' + (chosen.length ? chosen.length + '개 방 선택' : '선택하지 않으면 저장 시점의 모든 오픈채팅방') + '</span></div></div>' +
-          '<div class="fld"><label for="tt' + i + '">답할 방</label><div class="sel"><select id="tt' + i + '" data-rule="' + i + '" data-f="target"><option value="">감지된 그 방</option>' + choices.map(function (r) { return '<option value="' + esc(r.key) + '"' + (t.target === r.key ? ' selected' : '') + '>' + esc(r.name || '대화방') + '</option>'; }).join('') + '</select>' + ic('down', 14) + '</div></div>' +
+          '<div class="fld full"><span class="lb">감지할 방</span>' + picks + '<div class="rooms-meta"><span>' + (chosen.length ? chosen.length + '개 방 선택' : '선택하지 않으면 저장할 때 참여 중인 모든 오픈채팅방') + '</span></div></div>' +
+          '<div class="fld"><label for="tt' + i + '">답할 방</label><div class="sel"><select id="tt' + i + '" data-rule="' + i + '" data-f="target"><option value="">말이 올라온 방</option>' + choices.map(function (r) { return '<option value="' + esc(r.key) + '"' + (t.target === r.key ? ' selected' : '') + '>' + esc(r.name || '대화방') + '</option>'; }).join('') + '</select>' + ic('down', 14) + '</div></div>' +
           '<div class="foot"><span class="once">' + swHtml('data-rule="' + i + '" data-f="once"', !!t.once, '방마다 한 번만 답장') + '방마다 한 번만 답장</span>' +
             '<span class="del-wrap" data-del="' + i + '"><button type="button" class="btn sm ghost danger" data-del-ask="' + i + '">' + ic('trash', 12) + '삭제</button></span></div>' +
         '</div></div></div></div>';
@@ -1264,7 +1264,7 @@
     qs('.rule-h .meta', r).innerHTML = ruleMeta(t);
     r.classList.toggle('off', t.enabled === false);
     var cnt = qs('.fld.full .rooms-meta span', r);
-    if (cnt) cnt.textContent = (t.rooms || []).length ? t.rooms.length + '개 방 선택' : '선택하지 않으면 저장 시점의 모든 오픈채팅방';
+    if (cnt) cnt.textContent = (t.rooms || []).length ? t.rooms.length + '개 방 선택' : '선택하지 않으면 저장할 때 참여 중인 모든 오픈채팅방';
   }
 
   // ── 계정 열기·전환 ────────────────────────────────────────
@@ -1365,10 +1365,10 @@
         '<td data-l="안 읽음">' + (u ? '<b class="badge-n">' + u + '</b>' : '<span class="muted mono">0</span>') + '</td>' +
         '<td class="c-acts"><div class="acts">' + (needsReg(r.device_id) ? '<a class="btn sm primary" href="#account-add" data-reg="' + id + '">재등록</a>' : '') +
         '<button type="button" class="btn sm" data-acct-set="' + id + '">설정</button>' +
-        '<button type="button" class="btn sm ghost" data-unlink="' + id + '" aria-label="' + esc(r.email) + ' 등록 해제">' + ic('unlink', 13) + '해제</button></div></td></tr>' +
+        '<button type="button" class="btn sm ghost" data-unlink="' + id + '" aria-label="' + esc(r.email) + ' 등록 해제">' + ic('unlink', 13) + '등록 해제</button></div></td></tr>' +
         '<tr class="confirm-row' + (openId === r.device_id ? ' open' : '') + '" data-confirm="' + id + '"><td colspan="4"><div class="confirm-in"><div><div class="confirm-box" role="group" aria-label="등록 해제 확인">' +
-        '<span class="grow"><b class="mono">' + esc(r.email) + '</b> 등록을 해제합니다. 이 계정의 서버 발송과 기록이 중지됩니다.</span>' +
-        '<button type="button" class="btn sm" data-unlink-no="' + id + '">취소</button><button type="button" class="btn sm danger solid" data-unlink-yes="' + id + '"><span class="spin"></span><span class="lbl-idle">해제</span></button>' +
+        '<span class="grow"><b class="mono">' + esc(r.email) + '</b> 등록을 해제합니다. 이 계정의 발송과 기록이 모두 멈춥니다.</span>' +
+        '<button type="button" class="btn sm" data-unlink-no="' + id + '">취소</button><button type="button" class="btn sm danger solid" data-unlink-yes="' + id + '"><span class="spin"></span><span class="lbl-idle">등록 해제</span></button>' +
         '<p class="errt" data-unlink-err="' + id + '" role="alert"></p></div></div></div></td></tr>';
     }).join('');
   }
@@ -1516,7 +1516,7 @@
   }
   function resetAddTitle() {
     $('add-title').textContent = '카카오 계정 추가';
-    $('add-desc').textContent = '카카오 계정을 입력한 뒤, 휴대폰 카카오톡에 표시된 입력란에 번호를 입력합니다.';
+    $('add-desc').textContent = '카카오 계정을 입력하면 확인 번호가 나옵니다. 이 번호를 휴대폰 카카오톡에 입력하면 등록이 끝납니다.';
   }
   function focusAddField() {
     if (addStep !== 1 || !$('add-full').hidden || !$('add-nomacro').hidden) { var h = $('add-title'); h.focus({ preventScroll: true }); return; }
@@ -1556,7 +1556,7 @@
         stopRing();
         confirmGen += 1;
         var row = $('code-wait-row');
-        row.innerHTML = '<i class="dot warn"></i><span class="grow">번호가 만료되었습니다. 다시 시도하십시오.</span><button type="button" class="btn primary" id="code-retry">다시 시도</button>';
+        row.innerHTML = '<i class="dot warn"></i><span class="grow">번호가 만료되었습니다. 다시 시도해 주세요.</span><button type="button" class="btn primary" id="code-retry">다시 시도</button>';
         $('code-retry').addEventListener('click', function () { hidePass(); focusAddField(); });
       }
     }, 1000);
@@ -1570,7 +1570,7 @@
     bindCancel();
     passcode.hidden = false;
     if (addStep !== 2) setStep(2);
-    $('code-title').textContent = hasCode ? '휴대폰 카카오톡에 아래 번호를 입력하십시오' : '카카오 응답';
+    $('code-title').textContent = hasCode ? '휴대폰 카카오톡에 아래 번호를 입력해 주세요' : '카카오 응답';
     var code = $('code');
     code.hidden = !hasCode;
     code.textContent = '';
@@ -1600,7 +1600,7 @@
 
   // 등록 시작이 ok 도 confirm_on_phone 도 아니면 1단계에 머물러 서버 문구를 보인다
   function showBeginFail(view) {
-    say('add-error', view.text || view.status || '등록하지 못했습니다. 입력한 계정을 확인한 뒤 다시 시도하십시오.');
+    say('add-error', view.text || view.status || '등록하지 못했습니다. 입력한 계정을 확인한 뒤 다시 시도해 주세요.');
     var box = $('force-box');
     box.hidden = !view.can_force;
     if (view.can_force) $('force').focus();
@@ -1633,10 +1633,9 @@
       try { await openAccount(doneDevice); } catch (e) { /* 설정 열기에서 다시 연다 */ }
     }
     $('add-done-title').textContent = reauth ? '재등록 완료' : '등록 완료';
-    $('add-done-msg').textContent = reauth ? '다시 연결되었습니다. 기존 설정과 기록이 그대로 적용됩니다.' : '등록되었습니다. 기능은 모두 꺼진 상태로 시작합니다.';
+    $('add-done-msg').textContent = reauth ? '다시 연결되었습니다. 기존 설정과 기록은 그대로 남아 있습니다.' : '등록되었습니다. 모든 기능은 꺼진 상태로 시작하니, 필요한 기능을 켜 주세요.';
     $('add-done-email').textContent = doneEmail;
     $('add-done-acct').textContent = doneEmail;
-    $('add-done-dev').textContent = doneDevice;
     $('add-done-at').textContent = fmtFull(Date.now());
     $('add-more').hidden = reauth;
     form.dataset.reauth = '';
@@ -1666,7 +1665,7 @@
       } catch (e) {
         if (!live()) return;
         if (authFail(e)) {
-          say('code-error', e.message || '로그인이 필요합니다. 다시 로그인하십시오.');
+          say('code-error', e.message || '로그인이 필요합니다. 다시 로그인해 주세요.');
           return;
         }
         $('code-wait').textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다.';
@@ -1722,8 +1721,8 @@
   var chatCount = $('chat-count');
   var chatLive = $('chat-live');
   var chatBack = $('chat-back');
-  var STATE_LABEL = { live: '접속 중', linking: '연결 대기', needs_register: '등록 필요', error: '응답 없음', sender_down: '발송 중지' };
-  var STRIP_DOWN = '발송 작업이 멈춰 있습니다. 작업이 다시 시작되면 저장된 계정으로 이어서 접속합니다.';
+  var STATE_LABEL = { live: '접속 중', linking: '접속 대기', needs_register: '등록 필요', error: '접속 오류', sender_down: '발송 서버 멈춤' };
+  var STRIP_DOWN = '발송 서버가 멈춰 있습니다. 서버가 다시 켜지면 등록한 계정으로 자동으로 다시 접속합니다.';
 
   function keyOf(device, id) { return device + '/' + id; }
   function openKey() { return chat.openId ? keyOf(chat.deviceId, chat.openId) : ''; }
@@ -1809,7 +1808,7 @@
     else {
       var st = stateOf(chat.deviceId);
       if (st === 'needs_register') ph = '다시 등록 필요';
-      else if (st === 'sender_down') ph = '발송 작업 중지';
+      else if (st === 'sender_down') ph = '발송 서버 멈춤';
     }
     chatText.placeholder = ph;
   }
@@ -1879,7 +1878,7 @@
   var lastNavUnread = -1;
   function updateUnread() {
     var total = totalUnread();
-    document.title = (total ? '(' + total + ') ' : '') + '관리 · K bot';
+    document.title = (total ? '(' + total + ') ' : '') + 'K bot 패널';
     var n = $('chat-unread-n');
     if (n) { n.textContent = total ? String(total) : ''; n.hidden = !total; }
     var nb = $('navUnread');
@@ -1906,7 +1905,7 @@
     var all = $('rail-all');
     if (all) {
       all.setAttribute('aria-pressed', ui.filter ? 'false' : 'true');
-      all.setAttribute('aria-label', '전체 대화' + (total ? ' · 안 읽음 ' + total : ''));
+      all.setAttribute('aria-label', '모든 계정' + (total ? ' · 안 읽음 ' + total : ''));
       var ab = all.querySelector('.rail-badge');
       if (ab) { ab.textContent = total ? badgeText(total) : ''; ab.hidden = !total; }
     }
@@ -2000,7 +1999,7 @@
       if (ui.query.trim()) chatRooms.appendChild(emptyBox('검색 결과 없음', '검색어에 맞는 대화가 없습니다.'));
       else if (ui.unreadOnly) chatRooms.appendChild(emptyBox('안 읽은 대화 없음', '모든 대화를 읽었습니다.'));
       else if (ui.filter) chatRooms.appendChild(emptyBox('받은 갠톡 없음', needsReg(ui.filter) ? '이 계정은 다시 등록해야 대화를 불러옵니다.' : '이 계정에 받은 갠톡이 없습니다.'));
-      else chatRooms.appendChild(emptyBox('받은 갠톡 없음', '오픈프로필 1:1 채팅(갠톡)이 오면 여기에 나타납니다.'));
+      else chatRooms.appendChild(emptyBox('받은 갠톡 없음', '오픈프로필로 갠톡(1:1 대화)이 오면 여기에 나타납니다.'));
       return;
     }
     rows.forEach(function (c, i) {
@@ -2099,11 +2098,11 @@
     });
     chatNotice.hidden = false;
   }
-  // 띠는 발송 작업 상태 하나만 말한다. 계정별 문제는 칩 점·알림·머리 칩·입력창이 맡는다.
+  // 띠는 발송 서버 상태 하나만 말한다. 계정별 문제는 칩 점·알림·머리 칩·입력창이 맡는다.
   function updateStrip() {
     var sync = $('sync');
     var up = inboxSt.senderUp;
-    sync.innerHTML = '<i class="dot ' + (up ? 'live' : 'warn') + '"></i><span class="txt">' + (up ? '발송 서버 정상' : '발송 중지') + '</span>';
+    sync.innerHTML = '<i class="dot ' + (up ? 'live' : 'warn') + '"></i><span class="txt">' + (up ? '발송 서버 정상' : '발송 서버 멈춤') + '</span>';
     if (!runstate) return;
     var text = runstate.querySelector('.strip-text');
     if (up || !inboxSt.accounts.length) {
@@ -2228,7 +2227,7 @@
       });
     }
     var a = accOf(ui.filter);
-    if (chatTitle) chatTitle.textContent = ui.filter ? (a ? a.email : ui.filter) : '전체 대화';
+    if (chatTitle) chatTitle.textContent = ui.filter ? (a ? a.email : ui.filter) : '받은 갠톡';
     // 열린 대화가 새 필터에서 보이지 않을 때만 닫는다. 전체로 바꾸거나 그 계정을 고르면 유지.
     if (chat.openId && ui.filter && chat.deviceId !== ui.filter) closeConversation();
     renderRail();
@@ -2348,7 +2347,7 @@
     acctSig = '';
     if (chatSearch) chatSearch.value = '';
     if (chatUnread) chatUnread.setAttribute('aria-pressed', 'false');
-    if (chatTitle) chatTitle.textContent = '전체 대화';
+    if (chatTitle) chatTitle.textContent = '받은 갠톡';
     closeConversation();
     if (chatRooms) chatRooms.textContent = '';
     if (railAccounts) railAccounts.textContent = '';
@@ -2411,11 +2410,11 @@
         setNote('reg', '카카오 로그인이 끊겼습니다. 계정 화면에서 다시 등록해 주세요.');
         setComposeEnabled(false);
       } else if (e && e.status === 503) {
-        setNote('', (e.body && e.body.error) || '발송 작업이 멈춰 있습니다.');
+        setNote('', (e.body && e.body.error) || '발송 서버가 멈춰 있습니다.');
       }
       if (initial) {
         chatLog.textContent = '';
-        chatLog.appendChild(logEmpty('대화를 불러오지 못했습니다. 잠시 뒤 자동으로 다시 읽습니다.'));
+        chatLog.appendChild(logEmpty('대화를 불러오지 못했습니다. 잠시 뒤 자동으로 다시 불러옵니다.'));
       }
     } finally {
       chat.roomBusy = false;
@@ -2508,8 +2507,8 @@
     } catch (e) {
       if (chat.deviceId !== dev || chat.openId !== room) return;
       if (e && e.status === 409) setNote('reg', '카카오 로그인이 끊겼습니다. 계정 화면에서 다시 등록해 주세요.');
-      else if (e && e.status === 503) setNote('', (e.body && e.body.error) || '발송 작업이 멈춰 있습니다.');
-      else setNote('', '메시지를 보내지 못했습니다. 잠시 뒤 다시 해 주세요.');
+      else if (e && e.status === 503) setNote('', (e.body && e.body.error) || '발송 서버가 멈춰 있습니다.');
+      else setNote('', '메시지를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
     } finally {
       chat.sending = false;
       // 보내는 사이에 방을 닫았을 수 있다. 그때는 입력창을 다시 켜지 않는다.
@@ -2586,9 +2585,9 @@
       if (seq !== logsSt.seq || dev !== curId) return;
       logsSt.fails += 1;
       if (authFail(e)) { showLogin(e); return; }
-      var msg = e && e.status === 503 ? '발송 작업이 멈춰 있어 기록을 불러오지 못했습니다.'
-        : e && e.status === 404 ? '없는 계정입니다.'
-        : (e && e.status === 502 ? (e.message || '기록을 가져오지 못했습니다.') : '기록을 가져오지 못했습니다.') + ' 잠시 뒤 새로고침을 눌러 주십시오.';
+      var msg = e && e.status === 503 ? '발송 서버가 멈춰 있어 기록을 불러오지 못했습니다.'
+        : e && e.status === 404 ? '계정을 찾을 수 없습니다.'
+        : (e && e.status === 502 ? (e.message || '기록을 가져오지 못했습니다.') : '기록을 가져오지 못했습니다.') + ' 잠시 뒤 새로고침을 눌러 주세요.';
       if (e && e.status === 503) { inboxSt.senderUp = false; inboxSt.senderReason = (e.body && e.body.error) || ''; updateStrip(); }
       ['visit-log-error', 'profile-log-error', 'guard-log-error', 'ov-log-error'].forEach(function (id) { say(id, msg); });
     } finally {
@@ -2693,7 +2692,7 @@
     var focusK = keepFocus(tb);
     var stagger = enter && !reducedMotion();
     if (!rows.length) {
-      tb.innerHTML = '<tr class="none"><td colspan="6"><p class="empty">' + (L.length ? '조건에 맞는 기록이 없습니다. 검색어나 필터를 바꾸십시오.' : (logsSt.data ? '기록이 없습니다. 위에서 기록을 켜고 방을 선택하면 이곳에 표시됩니다.' : '기록을 불러오고 있습니다.')) + '</p></td></tr>';
+      tb.innerHTML = '<tr class="none"><td colspan="6"><p class="empty">' + (L.length ? '조건에 맞는 기록이 없습니다. 검색어나 필터를 바꿔 주세요.' : (logsSt.data ? '기록이 없습니다. 위에서 기록을 켜고 방을 선택하면 이곳에 표시됩니다.' : '기록을 불러오고 있습니다.')) + '</p></td></tr>';
       return;
     }
     tb.innerHTML = rows.map(function (r, i) {
@@ -2849,7 +2848,7 @@
       var g = L.guard[0];
       return g ? '<span class="mono">' + fmtT(g.at) + '</span>올킥 감지 · ' + esc(guardRoom(g.text)) : '';
     }
-    if (key === 'cover') { var c = a.cover || {}; return '금지어 ' + (c.words || []).length + '개 · 링크 ' + (c.links !== false ? '가림' : '허용'); }
+    if (key === 'cover') { var c = a.cover || {}; return '금지어 ' + (c.words || []).length + '개 · 링크 ' + (c.links !== false ? '가리기' : '허용'); }
     if (key === 'autoreply') { var r = a.autoreply || {}; return '쿨타임 ' + (r.cooldown_hours == null ? 6 : r.cooldown_hours) + '시간'; }
     if (key === 'triggers') {
       var ts = a.triggers || [];
@@ -2867,7 +2866,7 @@
       var sw = qs('input[data-ov="' + key + '"]', row);
       if (sw && !sw.dataset.busy) sw.checked = on;
       var fr = qs('[data-rooms="' + key + '"]', row);
-      if (key === 'autoreply') fr.textContent = '1:1';
+      if (key === 'autoreply') fr.textContent = '모든 갠톡';
       else if (key === 'triggers') fr.textContent = ((account && account.triggers) || []).length + '개 규칙';
       else {
         var n = account && account[key] ? (account[key].rooms || []).length : 0;
@@ -2887,7 +2886,7 @@
     var g0 = legacyOn() ? logsData().guard[0] : null;
     if (g0 && Date.now() - g0.at < 86400000) {
       items.push('<div class="srow inline"><div class="srow-l"><span class="lb attn-lb"><i class="dot crit pulse"></i>올킥 감지 <span class="mono at">' + fmtT(g0.at) + '</span></span><p>' + esc(g0.text) + '</p></div>' +
-        '<div class="srow-r"><a class="btn sm" href="#guard">올킥 방지</a></div></div>');
+        '<div class="srow-r"><a class="btn sm" href="#guard">올킥 감지</a></div></div>');
     }
     meAccounts().forEach(function (r) {
       if (!needsReg(r.device_id)) return;
@@ -2927,7 +2926,7 @@
         '<span class="sq">' + ic('link', 13) + '</span>' +
         '<span class="meta"><b>' + esc(roomName(v)) + '</b><small>' + esc(productsText(v)) + '</small></span>' +
         stateHtmlRoom(v) + '</button>';
-    }).join('') : '<p class="empty">설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다.</p>';
+    }).join('') : '<p class="empty">봇을 설치한 방이 없습니다. [방 추가]에서 오픈채팅방 링크를 입력하고 구매할 수 있습니다.</p>';
   }
   // 개요 지표 4칸(6.9): 안 읽은 갠톡 · 매크로 · 사용 중인 방 · 확인 필요
   function renderMacroMetric() {
@@ -2959,7 +2958,7 @@
     var c = { joining: 0, waiting: 0, pending: 0, error: 0 };
     rooms.forEach(function (v) { if (c[v.display] !== undefined) c[v.display] += 1; });
     var parts = [];
-    if (c.waiting) parts.push('부방장 대기 ' + c.waiting);
+    if (c.waiting) parts.push('부방장 지정 대기 ' + c.waiting);
     if (c.joining) parts.push('입장 중 ' + c.joining);
     if (c.pending) parts.push('입금 대기 ' + c.pending);
     if (c.error) parts.push('오류 ' + c.error);
@@ -2977,13 +2976,13 @@
     var parts = [];
     if (reg) parts.push('등록 필요 ' + reg);
     if (err) parts.push('방 오류 ' + err);
-    if (wait) parts.push('부방장 대기 ' + wait);
+    if (wait) parts.push('부방장 지정 대기 ' + wait);
     qs('.d', m).textContent = parts.join(' · ') || '없음';
   }
   function renderFeed(enter) {
     var L = logsData();
     var f = [];
-    L.guard.forEach(function (g) { f.push({ at: g.at, ty: '올킥', crit: 1, tx: '강퇴 다발 감지', rm: guardRoom(g.text), fresh: logsSt.fresh['g:' + g.at] }); });
+    L.guard.forEach(function (g) { f.push({ at: g.at, ty: '올킥', crit: 1, tx: '여러 명 내보내기 감지', rm: guardRoom(g.text), fresh: logsSt.fresh['g:' + g.at] }); });
     L.profile.forEach(function (p) { var ch = last(p.changes); if (ch) f.push({ at: ch.at, ty: '프로필', tx: ch.name + ' → ' + p.name, rm: p.room, fresh: logsSt.fresh['p:' + profileKey(p)] }); });
     L.visit.forEach(function (v) {
       var fr = logsSt.fresh['v:' + visitKey(v)];
@@ -2995,7 +2994,7 @@
     var stagger = enter && !reducedMotion();
     $('ovFeed').innerHTML = f.length ? f.map(function (e, i) {
       return '<li class="' + (stagger ? 'in' : '') + (e.crit ? ' crit' : '') + (!enter && e.fresh ? ' fresh' : '') + '" style="--i:' + i + '"><time>' + fmtHM(e.at) + '</time><span class="ty">' + e.ty + '</span><span class="tx">' + esc(e.tx) + '<small>' + esc(e.rm || '') + '</small></span></li>';
-    }).join('') : '<li class="none"><p class="empty">' + (logsSt.data ? '기록이 없습니다. 입장·퇴장 로그나 프로필 로그를 켜면 이곳에 표시됩니다.' : '기록을 불러오고 있습니다.') + '</p></li>';
+    }).join('') : '<li class="none"><p class="empty">' + (logsSt.data ? '기록이 없습니다. 입장·퇴장 기록이나 프로필 기록을 켜면 이곳에 표시됩니다.' : '기록을 불러오고 있습니다.') + '</p></li>';
   }
   function renderOverview(enter, fromLogs) {
     var hasAcc = meAccounts().length > 0;
@@ -3007,8 +3006,8 @@
     if (empty) {
       var buy = macroOk();
       $('ov-empty-t').textContent = buy
-        ? '등록한 카카오 계정과 설치한 방이 없습니다. 카카오 계정을 등록하면 카카오톡 매크로로 발송합니다.'
-        : '구매한 상품이 없습니다.';
+        ? '등록한 카카오 계정도, 봇을 설치한 방도 없습니다. 매크로를 쓰려면 먼저 카카오 계정을 등록해 주세요.'
+        : '이용 중인 서비스가 없습니다.';
       $('ov-empty-acts').innerHTML = (buy
         ? '<a class="btn primary" href="#account-add">' + ic('plus', 14) + '카카오 계정 등록</a>'
         : '<a class="btn primary" href="/buy?macro=1">카카오톡 매크로 구매</a>') +
@@ -3083,13 +3082,13 @@
   // 방 목록은 /panel/api/bot-rooms(내 방·개요 10초, 그 밖 30초), 고른 방은 /panel/api/bot-room?id= 와
   // /panel/api/bot-room/logs?id= (방 화면이 보일 때 10초). 방 설정 저장은 기존 저장 바로 POST /panel/api/bot-room/settings.
   var PRODUCT_LABEL = { roombot: '방 관리봇', minigame: '미니게임봇' };
-  var LOG_KIND = { churn: '들낙 감지', kick: '내보냄', kick_fail: '내보내지 못함', unkick: '내보내기 해제', promo: '홍보 금지', hide: '가리기',
-    cover: '금지어 가림', perm: '권한', wave: '올킥 감지', state: '상태', skip: '한도 초과' };
-  var PROFILE_KIND = { name: '닉네임', photo: '프로필 사진', status: '상태 메시지' };
-  var NOT_ACTIVE = '부방장 지정을 기다리는 중입니다. 방장이 K bot 계정을 부방장으로 지정하면 설정할 수 있습니다.';
+  var LOG_KIND = { churn: '들낙 감지', kick: '내보내기', kick_fail: '내보내기 실패', unkick: '내보내기 해제', promo: '홍보 금지', hide: '글 가리기',
+    cover: '글 가리기 (금지어)', perm: '권한 변경', wave: '올킥 감지', state: '방 상태 변경', skip: '처리 건너뜀' };
+  var PROFILE_KIND = { name: '닉네임', link: '옾링', photo: '프로필 사진', status: '상태 메시지' };
+  var NOT_ACTIVE = '부방장 지정을 기다리는 중입니다. 방장이 K bot을 부방장으로 지정하면 설정할 수 있습니다.';
   var roomsSt = { timer: null, busy: false, seq: 0, fails: 0, sig: '' };
   var roomSt = blankRoom(0);
-  var exemptList = [];            // 제외할 사람(폼 값)
+  var exemptList = [];            // 제외 대상(폼 값)
   var rcWords = [];               // 방 금지어(폼 값)
   var expandedR = { visit: {}, profile: {} };
   var rUi = { vq: '', pq: '' };
@@ -3133,8 +3132,8 @@
     return out.join(' ') || '<span class="muted">—</span>';
   }
   function nickHtml(v) {
-    if (!v.bot) return '<span class="muted">배정 전</span>';
-    var n = v.bot.nickname || 'K bot 계정';
+    if (!v.bot) return '<span class="muted">입장 전</span>';
+    var n = v.bot.nickname && v.bot.nickname !== 'K bot 계정' ? v.bot.nickname : 'K bot';
     return '<span' + (hangul(n) ? '' : ' class="mono"') + '>' + esc(n) + '</span>';
   }
   function roombotLiveV(v) { return !!(v && v.products && v.products.roombot && v.display === 'active'); }
@@ -3147,14 +3146,18 @@
   // ── 목록 ──────────────────────────────────────────────────
   function noteTransition(v) {
     var prev = roomSeen[v.id];
-    roomSeen[v.id] = v.display;
-    if (!prev || prev === v.display) return;
-    if (prev === 'waiting' && v.display === 'active') notify('부방장 지정을 확인했습니다.', roomName(v) + ' · 이제 방 관리 기능을 설정할 수 있습니다.');
-    else if (prev === 'active' && v.display === 'waiting') notify('부방장 권한이 해제되었습니다.', roomName(v) + ' · 다시 지정하면 자동으로 이어집니다.', { kind: 'warn' });
+    roomSeen[v.id] = seenOf(v);
+    if (!prev || prev.d === v.display) return;
+    if (prev.d === 'waiting' && v.display === 'active') notify('부방장 지정을 확인했습니다.', roomName(v) + ' · 이제 방 관리 기능을 설정할 수 있습니다.');
+    /* 미니게임만 쓰던 방에 방 관리봇을 더해 부방장 대기가 된 것은 강등이 아니다 */
+    else if (prev.d === 'active' && v.display === 'waiting' && prev.rb) notify('부방장 권한이 해제되었습니다.', roomName(v) + ' · 다시 부방장으로 지정하면 방 관리 기능이 자동으로 다시 동작합니다.', { kind: 'warn' });
+  }
+  function seenOf(v) {
+    return { d: v.display, rb: !!(v.products && v.products.roombot) };
   }
   function applyRooms(list, quiet) {
     var next = Array.isArray(list) ? list.filter(function (v) { return v && v.id; }) : [];
-    next.forEach(function (v) { if (quiet && !roomSeen[v.id]) roomSeen[v.id] = v.display; else noteTransition(v); });
+    next.forEach(function (v) { if (quiet && !roomSeen[v.id]) roomSeen[v.id] = seenOf(v); else noteTransition(v); });
     var sig = JSON.stringify(next);
     var changed = sig !== roomsSt.sig;
     roomsSt.sig = sig;
@@ -3190,7 +3193,7 @@
     if (onRoom) {
       dirtyN = 0;
       paintSave();
-      notify('없는 방입니다.', '설치가 취소되었거나 해제된 방입니다.', { kind: 'warn' });
+      notify('방을 찾을 수 없습니다.', '봇 설치가 취소되었거나 해제된 방입니다.', { kind: 'warn' });
       location.hash = '#rooms';
     }
     updateRoomNav();
@@ -3234,7 +3237,7 @@
       var url = v.order && v.order.url ? v.order.url : '/account';
       return '<a class="btn sm" href="' + esc(url) + '">입금 안내</a>';
     }
-    if (v.display === 'waiting') return '<a class="btn sm" href="#room/' + id + '">안내 보기</a>';
+    if (v.display === 'waiting') return '<a class="btn sm" href="#room/' + id + '">지정 방법 보기</a>';
     if (v.can_retry && v.needs_passcode) return '<a class="btn sm" href="#room/' + id + '" data-focus="r-passcode">참여코드 입력</a>';
     if (v.can_retry) {
       var later = Number(v.retry_after) > Date.now();
@@ -3259,9 +3262,9 @@
       var nm = roomName(v);
       return '<tr class="rowx' + (stagger ? ' in' : '') + '" style="--i:' + Math.min(i, 14) + '" data-room="' + v.id + '" tabindex="0" role="link" aria-label="' + esc(nm) + ' 방 상태 열기">' +
         '<td data-l="대화방"><b>' + esc(nm) + '</b> <span class="mono dim">' + esc(linkText(v.link_url)) + '</span></td>' +
-        '<td data-l="상품">' + productTags(v) + '</td>' +
+        '<td data-l="봇">' + productTags(v) + '</td>' +
         '<td data-l="상태">' + stateHtmlRoom(v) + '</td>' +
-        '<td data-l="K bot 계정">' + nickHtml(v) + '</td>' +
+        '<td data-l="K bot">' + nickHtml(v) + '</td>' +
         '<td class="go">' + ic('right') + '</td></tr>';
     }).join('');
     if (focusId) { var f = qs('tr[data-room="' + focusId + '"]', tb); if (f) f.focus({ preventScroll: true }); }
@@ -3410,7 +3413,7 @@
       var res = await api('/panel/api/bot-room/logs?id=' + id);
       if (st !== roomSt || seq !== st.logSeq) return;
       var data = { visit: res.visit || [], profile: res.profile || [], guard: res.guard || [], actions: res.actions || [], sender_up: res.sender_up !== false };
-      var down = data.sender_up ? '' : '발송 작업이 멈춰 있어 K bot의 방 기록을 불러오지 못했습니다. 다시 시작되면 이어서 표시합니다.';
+      var down = data.sender_up ? '' : '서버가 멈춰 있어 K bot의 방 기록을 불러오지 못했습니다. 서버가 다시 켜지면 이어서 표시합니다.';
       ['r-visit-log-error', 'r-profile-log-error', 'r-guard-log-error'].forEach(function (x) { say(x, down); });
       say('r-log-error', '');
       var sig = JSON.stringify(data);
@@ -3423,7 +3426,7 @@
     } catch (e) {
       if (st !== roomSt) return;
       if (authFail(e)) { showLogin(e); return; }
-      var msg = '기록을 가져오지 못했습니다. 잠시 뒤 다시 확인합니다.';
+      var msg = '기록을 가져오지 못했습니다. 잠시 뒤 자동으로 다시 불러옵니다.';
       ['r-log-error', 'r-visit-log-error', 'r-profile-log-error', 'r-guard-log-error'].forEach(function (x) { say(x, msg); });
     } finally {
       st.logsBusy = false;
@@ -3641,7 +3644,7 @@
   // 제외할 사람·방 금지어 칩
   function renderExempt() {
     var box = $('r-exempt');
-    if (!exemptList.length) box.innerHTML = '<span class="chips-none">제외할 사람이 없습니다.</span>';
+    if (!exemptList.length) box.innerHTML = '<span class="chips-none">제외 대상이 없습니다.</span>';
     else box.innerHTML = exemptList.map(function (x) {
       var nm = x.name || '이름 없음';
       return '<span class="wchip" role="listitem" title="' + esc(nm + ' · ' + x.user_id) + '"><span>' + esc(nm) + '</span>' +
@@ -3654,7 +3657,7 @@
     say('r-exempt-err', '');
     if (!uid) return;
     if (exemptList.some(function (x) { return x.user_id === uid; })) { say('r-exempt-err', '이미 제외한 사람입니다.'); return; }
-    if (exemptList.length >= 50) { say('r-exempt-err', '제외할 사람은 50명까지 등록할 수 있습니다.'); return; }
+    if (exemptList.length >= 50) { say('r-exempt-err', '제외 대상은 50명까지 등록할 수 있습니다.'); return; }
     exemptList.push({ user_id: uid, name: String(name || '').slice(0, 40) });
     renderExempt();
     markDirty();
@@ -3684,7 +3687,7 @@
     String(raw).split(/[,\n]/).forEach(function (w) {
       w = w.trim();
       if (!w) return;
-      if (w.length > 30) { err = '30자를 넘는 단어는 추가되지 않습니다. 단어를 줄여 다시 입력하십시오.'; code = 'long'; return; }
+      if (w.length > 30) { err = '30자를 넘는 단어는 추가되지 않습니다. 단어를 줄여 다시 입력해 주세요.'; code = 'long'; return; }
       var lower = w.toLowerCase();
       if (rcWords.some(function (x) { return x.toLowerCase() === lower; })) {
         err = '이미 추가된 단어입니다.';
@@ -3693,7 +3696,7 @@
         if (c && !reducedMotion()) { c.classList.remove('dupe'); void c.offsetWidth; c.classList.add('dupe'); }
         return;
       }
-      if (rcWords.length >= 300) { err = '금지어는 300개까지 등록할 수 있습니다. 사용하지 않는 단어를 삭제하십시오.'; code = 'max'; return; }
+      if (rcWords.length >= 300) { err = '금지어는 300개까지 등록할 수 있습니다. 쓰지 않는 단어를 지워 주세요.'; code = 'max'; return; }
       rcWords.push(w);
       added = rcWords.length - 1;
     });
@@ -3722,7 +3725,8 @@
         t.classList.add('dim');
       } else {
         t.classList.remove('dim');
-        t.textContent = '[홍보 금지]\n이름 : @하늘\n경고 : ' + (kickAt > 0 ? '1/' + kickAt + '회' : '1회') + '\n조치 : ' + (kickAt === 1 ? '내보냄' : hide ? '글 가림' : '경고');
+        // sender/src/roomfeat.mjs promoNotice 와 같은 모양(첫 위반)
+        t.textContent = '[홍보 금지]\n이름 : @하늘\n경고 : ' + (kickAt > 1 ? '1회 (' + kickAt + '회가 되면 내보내요)' : '1회') + '\n조치 : ' + (kickAt === 1 ? '내보내기' : hide ? '글 가리기' : '경고');
       }
     }
     if (r === 'r-cover') {
@@ -3730,10 +3734,11 @@
       if (note) note.hidden = !(c && c.promo && c.promo.enabled && c.promo.links);
     }
     if (r === 'r-guard') {
-      $('r-guard-sent').innerHTML = '<b>' + (numVal('r-guard-secs') || 30) + '초</b> 안에 <b>' + (numVal('r-guard-count') || 5) + '명</b> 이상 내보내지면 올킥으로 감지합니다.';
+      $('r-guard-sent').innerHTML = '<b>' + (numVal('r-guard-secs') || 30) + '초</b> 안에 <b>' + (numVal('r-guard-count') || 5) + '명</b> 이상 내보내면 올킥으로 감지합니다.';
     }
     if (r === 'r-games') {
       $('r-games-preview-q').textContent = pfx + '도움';
+      // sender/src/roomfeat.mjs helpLine 과 같은 모양: [명령어] / 미니게임 : … / 방 관리 : …
       var out = [];
       if ($('r-games-word').checked) out.push(pfx + '끝말잇기');
       if ($('r-games-baseball').checked) out.push(pfx + '숫자야구');
@@ -3742,20 +3747,20 @@
       if ($('r-games-quiz').checked) out.push(pfx + '퀴즈', pfx + '힌트', pfx + '정답');
       if ($('r-games-word').checked || $('r-games-baseball').checked || $('r-games-quiz').checked) out.push(pfx + '포기');
       out.push(pfx + '랭킹');
+      var roomCmds = [];
       var v = curRoom();
       if (roombotLiveV(v) && c) {
-        if (c.hide && c.hide.command) out.push(pfx + '가리기');
-        if (c.profile && c.profile.enabled && c.profile.lookup !== 'off') out.push(pfx + '프로필');
+        if (c.hide && c.hide.command) roomCmds.push(pfx + '가리기');
+        if (c.profile && c.profile.enabled && c.profile.lookup !== 'off') roomCmds.push(pfx + '프로필');
       }
-      out.push(pfx + '도움');
-      $('r-games-preview-t').textContent = out.join(' ');
+      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') : '');
     }
   }
 
   // ── 화면 그리기 ───────────────────────────────────────────
   function notActiveGate(v) {
-    if (v.display === 'error') return { note: '방 상태가 「' + v.label + '」입니다. 방 상태에서 해결한 뒤 설정할 수 있습니다.', btn: { label: '방 상태', href: '#room/' + v.id } };
-    if (v.display === 'waiting') return { note: NOT_ACTIVE, btn: { label: '안내 보기', href: '#room/' + v.id } };
+    if (v.display === 'error') return { note: '방 상태가 「' + v.label + '」입니다. 방 상태 화면에서 문제를 해결한 뒤 설정할 수 있습니다.', btn: { label: '방 상태', href: '#room/' + v.id } };
+    if (v.display === 'waiting') return { note: NOT_ACTIVE, btn: { label: '지정 방법 보기', href: '#room/' + v.id } };
     return { note: NOT_ACTIVE, btn: { label: '방 상태', href: '#room/' + v.id } };
   }
   function roomGate(r, v) {
@@ -3767,7 +3772,7 @@
         if (v.pending_products && v.pending_products[p]) {
           return { all: true, lock: true, note: PRODUCT_LABEL[p] + '은 입금 대기 중입니다. 입금이 확인되면 설정할 수 있습니다.', btn: orderBtn };
         }
-        return { all: true, lock: true, note: '이 방에는 ' + PRODUCT_LABEL[p] + (p === 'roombot' ? '이' : '이') + ' 설치되어 있지 않습니다.', btn: { label: '상품 추가', href: '/buy?add=' + v.id } };
+        return { all: true, lock: true, note: '이 방에는 ' + PRODUCT_LABEL[p] + (p === 'roombot' ? '이' : '이') + ' 설치되어 있지 않습니다.', btn: { label: '봇 추가', href: '/buy?add=' + v.id } };
       }
       if (R.roombot && v.display !== 'active') {
         var g = notActiveGate(v);
@@ -3801,7 +3806,7 @@
     qsa('fieldset[data-rfs]', page).forEach(function (f) { f.disabled = !!g.lock || !roomSt.cfg; });
     var pfx = (roomSt.cfg && roomSt.cfg.cmdPrefix) || '!';
     qsa('[data-prefix]', page).forEach(function (x) { x.textContent = pfx; });
-    qsa('[data-r-who]', page).forEach(function (x) { x.textContent = roomName(v) + ' · K bot 계정이 보냄'; });
+    qsa('[data-r-who]', page).forEach(function (x) { x.textContent = roomName(v) + ' · K bot이 보냄'; });
     if (r === 'room') renderRoomPage();
     if (r === 'r-visit') { roomPreviews(r); renderRVisitTable(enter); renderKickTable(); }
     if (r === 'r-profile') renderRProfileTable(enter);
@@ -3817,8 +3822,8 @@
     $('room-title').textContent = roomName(v);
     $('room-link').textContent = linkText(v.link_url);
     // 닉네임이 없으면 서버가 'K bot 계정' 을 채워 준다 → 「K bot 계정」 을 겹쳐 쓰지 않는다
-    var bn = v.bot && v.bot.nickname && v.bot.nickname !== 'K bot 계정' ? v.bot.nickname : '';
-    $('room-bot').textContent = v.bot ? 'K bot 계정' + (bn ? ' 「' + bn + '」' : '') : 'K bot 계정 배정 전';
+    var bn = v.bot && v.bot.nickname && v.bot.nickname !== 'K bot 계정' && v.bot.nickname !== 'K bot' ? v.bot.nickname : '';
+    $('room-bot').textContent = v.bot ? 'K bot' + (bn ? ' 「' + bn + '」' : '') : 'K bot 입장 전';
     var st = $('room-state');
     st.dataset.state = v.display;
     st.innerHTML = '<i class="dot ' + dotOf(v.display) + '"></i>' + esc(v.label);
@@ -3857,7 +3862,7 @@
       if (v.products[p]) html = '<span class="tag line">설치됨</span>';
       else if (v.pending_products && v.pending_products[p]) html = '<span class="tag warn">입금 대기</span>';
       else if (v.display === 'pending') html = '<span class="muted">선택 안 함</span>';
-      else html = '<a class="btn sm" href="/buy?add=' + v.id + '">' + ic('plus', 12) + '상품 추가</a>';
+      else html = '<a class="btn sm" href="/buy?add=' + v.id + '">' + ic('plus', 12) + '봇 추가</a>';
       if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
     });
     renderRoomLog();
@@ -3888,7 +3893,7 @@
     var tb = qs('#r-log-tbl tbody');
     var L = roomSt.logs ? roomSt.logs.actions : null;
     if (!L) { tb.innerHTML = emptyRow(4, '기록을 불러오고 있습니다.'); return; }
-    if (!L.length) { tb.innerHTML = emptyRow(4, '조치 기록이 없습니다. K bot 계정이 방에 입장하거나 켠 기능이 동작하면 이곳에 표시됩니다.'); return; }
+    if (!L.length) { tb.innerHTML = emptyRow(4, '조치 기록이 없습니다. K bot이 방에 들어가거나 켠 기능이 동작하면 이곳에 표시됩니다.'); return; }
     tb.innerHTML = L.map(function (a) {
       return '<tr class="line"><td data-l="시각"><span class="t">' + fmtTL(a.at) + '</span></td>' +
         '<td data-l="종류" class="c-kind">' + esc(LOG_KIND[a.kind] || a.kind) + '</td>' +
@@ -3908,7 +3913,7 @@
     });
     $('r-visit-cnt').textContent = rows.length + '명' + (rows.length !== all.length ? ' · 전체 ' + all.length + '명' : '');
     if (!rows.length) {
-      tb.innerHTML = emptyRow(6, all.length ? '검색어와 일치하는 기록이 없습니다.' : '기록이 없습니다. 입장·퇴장 로그를 켜면 K bot 계정이 본 입장·퇴장이 이곳에 표시됩니다.');
+      tb.innerHTML = emptyRow(6, all.length ? '검색어와 일치하는 기록이 없습니다.' : '기록이 없습니다. 입장·퇴장 기록을 켜면 이후 입장·퇴장이 이곳에 표시됩니다.');
       return;
     }
     var focusK = keepFocus(tb);
@@ -3963,7 +3968,7 @@
       return '<tr class="line" data-uid="' + esc(a.user_id) + '"><td data-l="이름"><span class="nm">' + esc(nm) + '</span></td>' +
         '<td data-l="시각"><span class="t">' + fmtTL(a.at) + '</span></td>' +
         '<td data-l="내용" class="c-txt' + (a.ok === false ? ' crit' : '') + '">' + esc(a.text) + '</td>' +
-        '<td class="c-acts"><button type="button" class="btn sm" data-unkick="' + esc(a.user_id) + '" data-name="' + esc(nm) + '"' + (live ? '' : ' disabled title="K bot 계정이 부방장일 때 해제할 수 있습니다"') + '>' +
+        '<td class="c-acts"><button type="button" class="btn sm" data-unkick="' + esc(a.user_id) + '" data-name="' + esc(nm) + '"' + (live ? '' : ' disabled title="K bot이 부방장일 때 해제할 수 있습니다"') + '>' +
         '<span class="spin"></span><span class="lbl-idle">내보내기 해제</span></button></td></tr>';
     }).join('');
   }
@@ -3976,7 +3981,7 @@
     var rows = all.filter(function (r) { return !q || ((r.name || '') + ' ' + (r.changes || []).map(function (c) { return c.name || ''; }).join(' ')).toLowerCase().indexOf(q) >= 0; });
     $('r-profile-cnt').textContent = rows.length + '명';
     if (!rows.length) {
-      tb.innerHTML = emptyRow(6, all.length ? '검색어와 일치하는 이름이 없습니다.' : '감지된 변경이 없습니다. 프로필 로그를 켜면 이곳에 표시됩니다.');
+      tb.innerHTML = emptyRow(6, all.length ? '검색어와 일치하는 이름이 없습니다.' : '감지된 변경이 없습니다. 프로필 기록을 켜면 이곳에 표시됩니다.');
       return;
     }
     var focusK = keepFocus(tb);
@@ -4000,7 +4005,7 @@
         var kind = changeKind(c);
         var what;
         if (kind === 'photo') what = '변경됨';
-        else if (kind === 'status') what = '<span class="old">' + esc(c.from || '없음') + '</span><span class="arr">→</span>' + esc(c.to || '없음');
+        else if (kind === 'status' || kind === 'link') what = '<span class="old">' + esc(c.from || '없음') + '</span><span class="arr">→</span>' + esc(c.to || '없음');
         else {
           var nx = nameCh[nameCh.indexOf(c) + 1];
           what = '<span class="old">' + esc(c.name) + '</span><span class="arr">→</span>' + esc(nx ? nx.name : r.name);
@@ -4038,8 +4043,8 @@
     var rb = $('r-rank-reset');
     if (rb) rb.disabled = !canReset;
     if (!L) {
-      tb.innerHTML = emptyRow(3, v && v.display === 'pending' ? 'K bot 계정이 방에 입장한 뒤에 표시됩니다.'
-        : !roomSt.senderUp ? '발송 작업이 멈춰 있어 랭킹을 불러오지 못했습니다.' : '랭킹을 불러오고 있습니다.');
+      tb.innerHTML = emptyRow(3, v && v.display === 'pending' ? 'K bot이 방에 들어간 뒤에 표시됩니다.'
+        : !roomSt.senderUp ? '서버가 멈춰 있어 랭킹을 불러오지 못했습니다.' : '랭킹을 불러오고 있습니다.');
       return;
     }
     if (!L.length) { tb.innerHTML = emptyRow(3, '아직 점수가 없습니다. 방에서 게임을 하면 이곳에 표시됩니다.'); return; }
@@ -4077,7 +4082,7 @@
       q = '최근 글 ' + (Number($('r-hide-last').value) || 1) + '개를 가립니다.';
     } else {
       var sel = $('r-hide-who');
-      if (!sel.value) { setHideStatus('가릴 사람을 고르십시오.', true); sel.focus(); return; }
+      if (!sel.value) { setHideStatus('가릴 사람을 골라 주세요.', true); sel.focus(); return; }
       q = sel.options[sel.selectedIndex].text.split(' · ')[0] + '의 최근 글을 모두 가립니다.';
     }
     setHideStatus('');
@@ -4124,7 +4129,7 @@
     } catch (e) {
       if (roomSt.hide !== h) return;
       if (authFail(e)) { showLogin(e); return; }
-      if (e && e.status === 404) { roomSt.hide = null; renderHideControls(); setHideStatus('가리기 작업을 확인하지 못했습니다. 조치 기록에서 결과를 확인하십시오.', true); return; }
+      if (e && e.status === 404) { roomSt.hide = null; renderHideControls(); setHideStatus('가리기 진행 상황을 확인하지 못했습니다. 조치 기록에서 결과를 확인해 주세요.', true); return; }
     }
     h.timer = setTimeout(pollHide, 1200);
   }
@@ -4138,8 +4143,8 @@
       say('room-retry-err', '');
       if (v.needs_passcode) {
         var pc = $('r-passcode').value.trim();
-        if (!pc) { say('room-retry-err', '참여코드를 입력하십시오.'); $('r-passcode').focus(); return; }
-        if (pc.length > 20) { say('room-retry-err', '참여코드는 20자 이하로 입력하십시오.'); $('r-passcode').focus(); return; }
+        if (!pc) { say('room-retry-err', '참여코드를 입력해 주세요.'); $('r-passcode').focus(); return; }
+        if (pc.length > 20) { say('room-retry-err', '참여코드는 20자 이하로 입력해 주세요.'); $('r-passcode').focus(); return; }
         body.passcode = pc;
       }
     }
@@ -4148,7 +4153,7 @@
       var res = await api('/panel/api/bot-room/retry', body);
       if (fromPage) $('r-passcode').value = '';
       if (res.room) mergeRoom(res.room);
-      notify('다시 시도합니다.', roomName(v) + ' · K bot 계정이 다시 입장합니다.');
+      notify('다시 시도합니다.', roomName(v) + ' · K bot이 다시 입장을 시도합니다.');
     } catch (e) {
       if (authFail(e)) { showLogin(e); return; }
       if (e && e.body && e.body.retry_after) {
@@ -4211,13 +4216,13 @@
   // ── 팔레트 (4.3) ──────────────────────────────────────────
   var PAL = [
     { g: '이동', t: '개요', icon: 'overview', go: 'overview', k: 'G O' },
-    { g: '이동', t: '주요 알림', kw: '받은함 갠톡 1:1 대화', icon: 'inbox', go: 'inbox', k: 'G I' },
+    { g: '이동', t: '받은 갠톡', kw: '받은함 주요 알림 1:1 대화', icon: 'inbox', go: 'inbox', k: 'G I' },
     { g: '이동', t: '카카오 계정', kw: '계정', icon: 'accounts', go: 'accounts', k: 'G A' },
     { g: '이동', t: '내 방', kw: '방 관리봇 미니게임봇 설치', icon: 'link', go: 'rooms', k: 'G B' },
     { g: '이동', t: '매크로', icon: 'macro', go: 'macro', k: 'G M' },
-    { g: '이동', t: '입장·퇴장 로그', icon: 'visit', go: 'visit', k: 'G V', legacy: 1 },
-    { g: '이동', t: '프로필 로그', icon: 'profile', go: 'profile', k: 'G P', legacy: 1 },
-    { g: '이동', t: '올킥 방지', icon: 'guard', go: 'guard', k: 'G K', legacy: 1 },
+    { g: '이동', t: '입장·퇴장 기록', icon: 'visit', go: 'visit', k: 'G V', legacy: 1 },
+    { g: '이동', t: '프로필 기록', icon: 'profile', go: 'profile', k: 'G P', legacy: 1 },
+    { g: '이동', t: '올킥 감지', icon: 'guard', go: 'guard', k: 'G K', legacy: 1 },
     { g: '이동', t: '금지어 검열', icon: 'cover', go: 'cover', k: 'G C', legacy: 1 },
     { g: '이동', t: '갠톡 응답', icon: 'reply', go: 'reply', k: 'G R' },
     { g: '이동', t: '저격 규칙', icon: 'snipe', go: 'snipe', k: 'G S' },
@@ -4225,10 +4230,10 @@
     { g: '설정', t: '기본 간격', sub: '매크로', icon: 'macro', go: 'macro', focus: 'base-min', top: 1 },
     { g: '설정', t: '방별 간격', sub: '매크로', icon: 'macro', go: 'macro', focus: 'row-macro-rooms' },
     { g: '설정', t: '이미지', sub: '매크로', icon: 'macro', go: 'macro', focus: 'row-macro-img' },
-    { g: '설정', t: '기록할 대화방', sub: '입장·퇴장 로그', icon: 'visit', go: 'visit', focus: 'row-visit-rooms', legacy: 1 },
-    { g: '설정', t: '방에 보내는 안내', sub: '입장·퇴장 로그', icon: 'visit', go: 'visit', focus: 'row-visit-notice', legacy: 1 },
-    { g: '설정', t: '프로필 변경 감지', sub: '프로필 로그', icon: 'profile', go: 'profile', focus: 'row-profile-on', legacy: 1 },
-    { g: '설정', t: '감지 시간과 강퇴 수', sub: '올킥 방지', icon: 'guard', go: 'guard', focus: 'guard-secs', top: 1, legacy: 1 },
+    { g: '설정', t: '기록할 대화방', sub: '입장·퇴장 기록', icon: 'visit', go: 'visit', focus: 'row-visit-rooms', legacy: 1 },
+    { g: '설정', t: '방에 보내는 안내', sub: '입장·퇴장 기록', icon: 'visit', go: 'visit', focus: 'row-visit-notice', legacy: 1 },
+    { g: '설정', t: '프로필 변경 감지', sub: '프로필 기록', icon: 'profile', go: 'profile', focus: 'row-profile-on', legacy: 1 },
+    { g: '설정', t: '감지 시간과 내보낸 인원', sub: '올킥 감지', icon: 'guard', go: 'guard', focus: 'guard-secs', top: 1, legacy: 1 },
     { g: '설정', t: '추가 금지어', sub: '금지어 검열', icon: 'cover', go: 'cover', focus: 'cover-word-in', top: 1, legacy: 1 },
     { g: '설정', t: '링크 가리기', sub: '금지어 검열', icon: 'cover', go: 'cover', focus: 'row-cover-links', legacy: 1 },
     { g: '설정', t: '응답 메시지', sub: '갠톡 응답', icon: 'reply', go: 'reply', focus: 'reply-message' },
@@ -4241,11 +4246,11 @@
   // 고른 방의 설정 화면(방 설정 묶음) — 방을 고른 뒤에만
   var ROOM_PAL = [
     { t: '방 상태', r: 'room', icon: 'overview' },
-    { t: '입장·퇴장 로그', r: 'r-visit', icon: 'visit', kw: '들낙 감지 나갔을 때 내보내기 제외할 사람' },
-    { t: '프로필 로그', r: 'r-profile', icon: 'profile' },
+    { t: '입장·퇴장 기록', r: 'r-visit', icon: 'visit', kw: '들낙 감지 나간 사람 재입장 차단 제외 대상' },
+    { t: '프로필 기록', r: 'r-profile', icon: 'profile' },
     { t: '홍보 금지', r: 'r-promo', icon: 'alert' },
-    { t: '가리기·금지어 검열', r: 'r-cover', icon: 'cover' },
-    { t: '올킥 방지', r: 'r-guard', icon: 'guard' },
+    { t: '글 가리기·금지어 검열', r: 'r-cover', icon: 'cover' },
+    { t: '올킥 감지', r: 'r-guard', icon: 'guard' },
     { t: '미니게임', r: 'r-games', icon: 'game', kw: '랭킹' },
   ];
   var palIdx = 0;
@@ -4357,7 +4362,7 @@
       if (sw) {
         row = sw.closest('.srow');
         target = sw;
-        notify(iga(routeTitle(route)) + ' 꺼져 있습니다.', '켜면 이 설정이 표시됩니다. 스위치로 이동했습니다.', { kind: 'warn' });
+        notify(iga(routeTitle(route)) + ' 꺼져 있습니다.', '기능을 켜면 이 설정이 나타납니다. 켜기 스위치로 이동했습니다.', { kind: 'warn' });
       }
     }
     row.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
@@ -4406,9 +4411,9 @@
     var btn = $('loginBtn');
     var id = $('login-id').value.trim();
     var pw = $('login-pw').value;
-    if (/^KAKA-/i.test(id)) { loginErr('라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록하십시오.', 'login-id'); return; }
-    if (!id) { loginErr('아이디를 입력하십시오.', 'login-id'); return; }
-    if (!pw) { loginErr('비밀번호를 입력하십시오.', 'login-pw'); return; }
+    if (/^KAKA-/i.test(id)) { loginErr('라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록해 주세요.', 'login-id'); return; }
+    if (!id) { loginErr('아이디를 입력해 주세요.', 'login-id'); return; }
+    if (!pw) { loginErr('비밀번호를 입력해 주세요.', 'login-pw'); return; }
     addBusy(btn, true);
     try {
       await api('/api/auth/login', { login_id: id, password: pw });
@@ -4418,8 +4423,8 @@
     } catch (e) {
       var r = e && e.body ? e.body.reason : '';
       var text = r === 'locked' && e.body.retry_after
-        ? '로그인 실패 횟수를 초과했습니다. ' + Math.max(1, Math.ceil(Number(e.body.retry_after) / 60)) + '분 후 다시 시도하십시오.'
-        : (e && e.message) || '로그인하지 못했습니다. 잠시 뒤 다시 시도하십시오.';
+        ? '로그인 실패 횟수를 초과했습니다. ' + Math.max(1, Math.ceil(Number(e.body.retry_after) / 60)) + '분 후 다시 시도해 주세요.'
+        : (e && e.message) || '로그인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
       loginErr(text, r === 'bad_credentials' ? 'login-pw' : null);
     } finally {
       addBusy(btn, false);
@@ -4517,7 +4522,7 @@
     var add = e.target.closest('a[href="#account-add"]');
     if (add && macroOk() && meAccounts().length >= maxAcc()) {
       e.preventDefault();
-      notify('카카오 계정은 ' + maxAcc() + '개까지 등록할 수 있습니다.', '사용하지 않는 계정을 해제한 뒤 다시 시도하십시오.', { kind: 'warn' });
+      notify('카카오 계정은 ' + maxAcc() + '개까지 등록할 수 있습니다.', '쓰지 않는 계정의 등록을 해제한 뒤 다시 시도해 주세요.', { kind: 'warn' });
     }
   });
 
@@ -5178,8 +5183,8 @@
     clearAddErrors();
     var email = $('email').value.trim();
     var pw = $('password').value;
-    if (!email) { say('email-error', '카카오계정이 비어 있습니다. 이메일 또는 전화번호를 입력하십시오.'); $('email').classList.add('err'); }
-    if (!pw) { say('password-error', '비밀번호가 비어 있습니다. 비밀번호를 입력하십시오.'); $('password').classList.add('err'); }
+    if (!email) { say('email-error', '카카오 계정(이메일 또는 전화번호)을 입력해 주세요.'); $('email').classList.add('err'); }
+    if (!pw) { say('password-error', '비밀번호를 입력해 주세요.'); $('password').classList.add('err'); }
     if (!email || !pw) { (email ? $('password') : $('email')).focus(); return; }
     var btn = $('add-next');
     addBusy(btn, true);

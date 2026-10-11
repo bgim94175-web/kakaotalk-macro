@@ -27,25 +27,26 @@ const HARD_STATUS = {
 };
 
 const TEXT = {
-  no_account: '없는 계정입니다.',
-  no_room: '없는 방입니다.',
-  not_ready: '아직 준비 중입니다. 잠시 뒤 다시 시도하십시오.',
-  no_macro: '카카오 계정 등록은 카카오톡 매크로를 이용 중일 때 할 수 있습니다. 카카오톡 매크로를 구매한 뒤 다시 등록하십시오.',
-  legacy_only: '이 계정에서는 사용할 수 없는 기능입니다. 방 관리봇은 내 방에서 설정합니다.',
-  stale: '다른 화면에서 설정이 바뀌었습니다. 새로 불러온 뒤 다시 저장하십시오.',
-  busy: '가리기 작업이 진행 중입니다.',
+  no_account: '계정을 찾을 수 없습니다.',
+  no_room: '방을 찾을 수 없습니다.',
+  not_ready: '아직 준비 중입니다. 잠시 뒤 다시 시도해 주세요.',
+  no_macro: '카카오 계정은 카카오톡 매크로 이용 기간에만 등록할 수 있습니다. 매크로를 구매한 뒤 다시 시도해 주세요.',
+  legacy_only: '계정 설정에서는 쓸 수 없는 기능입니다. 방 관리 기능은 [내 방]에서 방마다 설정해 주세요.',
+  stale: '다른 화면에서 설정이 바뀌었습니다. 페이지를 새로고침한 뒤 다시 저장해 주세요.',
+  busy: '이미 글을 가리는 중입니다. 끝난 뒤 다시 시도해 주세요.',
   not_kicked: 'K bot이 내보낸 사람이 아닙니다.',
-  unkick_failed: '내보내기를 해제하지 못했습니다.',
-  bad_passcode: '참여코드는 20자 이하로 입력하십시오',
-  hide_target: '가릴 글 수 또는 사람 중 하나를 고르십시오.',
-  hide_last: '가릴 글 수는 1~300개로 입력하십시오.',
-  bad_user: '대상을 다시 고르십시오.',
-  no_job: '없는 가리기 작업입니다.',
-  bot_failed: 'K bot에 요청하지 못했습니다. 잠시 뒤 다시 시도하십시오.',
+  unkick_failed: '내보내기를 해제하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+  bad_passcode: '참여코드는 20자 이하로 입력해 주세요.',
+  hide_target: '가릴 글 개수나 사람 중 하나를 골라 주세요.',
+  hide_last: '가릴 글 개수는 1~300개로 입력해 주세요.',
+  bad_user: '사람을 다시 골라 주세요.',
+  no_job: '진행 중인 글 가리기를 찾을 수 없습니다.',
+  bot_failed: 'K bot에 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+  register_restart: '서버가 다시 시작되어 등록이 중단되었습니다. 처음부터 다시 등록해 주세요.',
 };
 
 function maxAccountsText() {
-  return '카카오 계정은 ' + entitle.MAX_ACCOUNTS + '개까지 등록할 수 있습니다. 사용하지 않는 계정을 해제한 뒤 다시 시도하십시오.';
+  return '카카오 계정은 ' + entitle.maxAccounts() + '개까지 등록할 수 있습니다. 쓰지 않는 계정을 등록 해제한 뒤 다시 시도해 주세요.';
 }
 
 function fail(res, status, reason, error, extra) {
@@ -57,7 +58,7 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
   if (e && e.code === 'NOT_IMPLEMENTED') return fail(res, 503, 'not_ready', TEXT.not_ready);
   console.error('[panel ' + req.method + ' ' + req.path + '] ' + (e && e.stack ? e.stack : e));
-  if (!res.headersSent) res.status(500).json({ ok: false, error: '처리하지 못했습니다.' });
+  if (!res.headersSent) res.status(500).json({ ok: false, error: '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
 });
 
 // 다른 작업의 모듈이 아직 틀이면 기본값으로(그 밖의 오류는 그대로 던진다)
@@ -105,7 +106,7 @@ function senderDown(res) {
   res.status(503).json({
     ok: false,
     reason: 'sender_down',
-    error: sender.reason() || '발송 프로세스가 지금 멈춰 있습니다.',
+    error: sender.customerReason() || '발송 서버가 잠시 멈춰 있습니다. 복구되면 등록한 카카오 계정으로 자동으로 다시 접속합니다.',
     sender_up: false,
   });
 }
@@ -234,11 +235,11 @@ router.get('/panel/api/me', wrap(async (req, res) => {
     member: { id: Number(m.id), login_id: m.login_id, google_linked: !!g },
     macro: entitle.macroView(m),
     legacy_room_until: Number(m.legacy_room_until) || 0,
-    max_accounts: entitle.MAX_ACCOUNTS,
+    max_accounts: entitle.maxAccounts(),
     accounts: accounts,
     rooms: Array.isArray(rooms) ? rooms : [],
     sender_up: up,
-    sender_reason: up ? '' : sender.reason(),
+    sender_reason: up ? '' : sender.customerReason(),
   });
 }));
 
@@ -272,12 +273,12 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
       return fail(res, 403, 'no_macro', TEXT.no_macro);
     }
     const n = await db.one('SELECT count(*)::int AS n FROM panel_accounts WHERE member_id=$1', [memberId]);
-    if (n && Number(n.n) >= entitle.MAX_ACCOUNTS) return fail(res, 400, 'max_accounts', maxAccountsText());
+    if (n && Number(n.n) >= entitle.maxAccounts()) return fail(res, 400, 'max_accounts', maxAccountsText());
     deviceId = ids.newMemberDeviceId(memberId);
   }
   const email = cleanEmail(req.body && req.body.email);
   const password = cleanPassword(req.body && req.body.password);
-  if (!email || !password) return fail(res, 400, 'bad_input', '카카오계정과 비밀번호를 입력해 주세요.');
+  if (!email || !password) return fail(res, 400, 'bad_input', '카카오 계정과 비밀번호를 입력해 주세요.');
   if (!sender.up()) return senderDown(res);
   const now = Date.now();
   await db.q('DELETE FROM panel_pending WHERE expires_at < $1 OR (member_id=$2 AND device_id=$3)', [now, memberId, deviceId]);
@@ -309,11 +310,14 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
   res.json({ ok: true, ...view });
 }));
 
-async function sessionReady(deviceId) {
+// 이 등록 대기가 시작된 뒤(since)에 저장된 세션이어야 끝난 것으로 본다. 재등록은 예전 세션이 아직 붙어 있을 수 있어서
+// '붙어 있다'만으로는 휴대폰 확인을 마쳤는지 알 수 없다. 저장할 때 sender 가 features.reg_at 을 찍는다.
+async function sessionReady(deviceId, since) {
   if (!sender.up()) return false;
   try {
     const snap = await snapshot(deviceId);
-    return !!(snap && snap.linked && !snap.needs_register);
+    const regAt = Number(snap && snap.features && snap.features.reg_at) || 0;
+    return !!(snap && snap.linked && !snap.needs_register && regAt >= Number(since || 0));
   } catch (e) {
     return false;
   }
@@ -333,43 +337,39 @@ router.post('/panel/api/register/confirm', wrap(async (req, res) => {
   const memberId = s.member.id;
   const pendingId = String((req.body && req.body.pending_id) || '');
   const row = await db.one(
-    'SELECT pending_id, device_id, email, expires_at FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
+    'SELECT pending_id, device_id, email, created_at, expires_at FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
     [pendingId, memberId]);
-  if (row && await accountRow(memberId, row.device_id)) return res.json(okView(row.device_id));
+  // 앞선 확인이 이미 끝냈다: 새 계정은 성공한 순간 panel_accounts 행이 생긴다.
+  // 재등록은 예전 행이 그대로라(created_at 을 바꾸지 않는다) 여기서 끝내지 않고 sender 에 묻는다.
+  const acct = row ? await accountRow(memberId, row.device_id) : null;
+  if (acct && Number(acct.created_at) >= Number(row.created_at)) return res.json(okView(row.device_id));
+  const since = row ? Number(row.created_at) : 0;
+  const finish = async () => {
+    await rememberAccount(memberId, row.device_id, row.email, Date.now());
+    return res.json(okView(row.device_id));
+  };
   const expired = !row || Number(row.expires_at) < Date.now();
   if (expired) {
     if (row && !sender.up()) return res.json(waitingView(row.device_id));
-    if (row && await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (row && await sessionReady(row.device_id, since)) return finish();
     if (row) await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
     return res.json({ ok: true, state: 'expired', text: text.customerText({ state: 'expired' }) });
   }
-  if (await sessionReady(row.device_id)) {
-    await rememberAccount(memberId, row.device_id, row.email, Date.now());
-    return res.json(okView(row.device_id));
-  }
+  if (await sessionReady(row.device_id, since)) return finish();
   if (!sender.up()) return res.json(waitingView(row.device_id));
   let out;
   try {
     const r = await senderCall('POST', '/v1/register/confirm', { pending_id: pendingId }, 20000);
     out = r.json;
   } catch (e) {
-    if (await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (await sessionReady(row.device_id, since)) return finish();
     return res.json(waitingView(row.device_id));
   }
   if (!out || out.ok === false) {
-    if (await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (await sessionReady(row.device_id, since)) return finish();
     return res.json(waitingView(row.device_id));
   }
-  if (out.state === 'ok' || (out.state === 'expired' && await sessionReady(row.device_id))) {
+  if (out.state === 'ok' || (out.state === 'expired' && await sessionReady(row.device_id, since))) {
     const still = await db.one(
       'SELECT pending_id FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
       [pendingId, memberId]);
@@ -381,6 +381,10 @@ router.post('/panel/api/register/confirm', wrap(async (req, res) => {
     out = { state: 'ok' };
   } else if (out.state !== 'waiting') {
     await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
+    // sender 가 다시 시작해 대기 목록을 잃었다 → 시간이 지났다고 하지 않고 그대로 말한다
+    if (out.state === 'expired' && out.reason === 'unknown_pending') {
+      return res.json({ ok: true, state: 'expired', text: TEXT.register_restart, device_id: row.device_id });
+    }
   }
   const view = publicLogin(out);
   view.device_id = row.device_id;
@@ -411,7 +415,7 @@ router.post('/panel/api/unlink', wrap(async (req, res) => {
   if (!row) return fail(res, 404, 'not_found', TEXT.no_account);
   if (!sender.up()) return senderDown(res);
   const r = await senderCall('POST', '/v1/unlink', { device_id: deviceId }, 20000);
-  if (!r.json.ok) return res.status(502).json({ ok: false, error: '등록을 해제하지 못했습니다. 잠시 뒤 다시 해 주세요.' });
+  if (!r.json.ok) return res.status(502).json({ ok: false, error: '등록을 해제하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   await db.q('DELETE FROM panel_accounts WHERE device_id=$1 AND member_id=$2', [deviceId, s.member.id]);
   forgetAccounts(s.member.id);
   res.json({ ok: true });
@@ -533,7 +537,7 @@ router.get('/panel/api/inbox', wrap(async (req, res) => {
   res.json({
     ok: true,
     sender_up: up,
-    sender_reason: up ? '' : sender.reason(),
+    sender_reason: up ? '' : sender.customerReason(),
     at: Date.now(),
     accounts: merged.accounts,
     chats: merged.chats,
@@ -565,7 +569,7 @@ router.get('/panel/api/chat', wrap(async (req, res) => {
   if (!sender.up()) return senderDown(res);
   const deviceId = String(req.query.device_id || '');
   const chatId = String(req.query.chat_id || '');
-  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
+  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '대화방을 찾을 수 없습니다.' });
   if (!(await ownsMemberDevice(s.member.id, deviceId))) return fail(res, 404, 'not_found', TEXT.no_account);
   try {
     const r = await senderCall('GET',
@@ -591,7 +595,7 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
   const chatId = String(body.chat_id || '');
   // 이름을 text 로 두면 위쪽의 auth-text 모듈(const text)을 가린다.
   const msg = (typeof body.text === 'string' ? body.text : '').slice(0, 1000);
-  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '없는 대화방입니다.' });
+  if (!/^[1-9][0-9]*$/.test(chatId)) return res.status(400).json({ ok: false, error: '대화방을 찾을 수 없습니다.' });
   if (!msg.trim()) return res.status(400).json({ ok: false, error: '보낼 내용을 입력해 주세요.' });
   const row = await accountRow(s.member.id, deviceId);
   if (!row) return fail(res, 404, 'not_found', TEXT.no_account);
@@ -599,7 +603,7 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
     const r = await senderCall('POST', '/v1/send', { device_id: deviceId, chat_id: chatId, text: msg }, 20000);
     if (!r.json.ok) {
       if (r.json.needs_register) return chatNeedsRegister(res);
-      return res.status(502).json({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 뒤 다시 해 주세요.' });
+      return res.status(502).json({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
     }
     res.json({ ok: true, log_id: r.json.log_id || '' });
   } catch (e) {
@@ -609,7 +613,7 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
 }));
 
 // ── 기록 ──────────────────────────────────────────────────────────────────
-// 계정 단위 옛 기능의 입장·퇴장 기록, 프로필 변경 기록, 올킥 방지 알림(유예 회원). 기능을 켠 방만 남는다.
+// 계정 단위 옛 기능의 입장·퇴장 기록, 프로필 변경 기록, 올킥 감지 알림(유예 회원). 기능을 켠 방만 남는다.
 // sender 가 저장된 기록에서 바로 읽으므로 카카오 연결이 끊겨 있어도 보인다.
 function logList(v) {
   return Array.isArray(v) ? v : [];
@@ -799,7 +803,9 @@ router.post('/panel/api/bot-room/retry', wrap(async (req, res) => {
 
 // ── 조치 기록 한 줄 (7.8). detail 칸은 sender(작업 3)가 쓴다 — 아래 이름들을 읽는다.
 const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '수동' };
-const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '가리기', rewrite: '가리기' };
+const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '글 가리기', rewrite: '글 가리기' };
+// 건너뛴 까닭(sender 의 detail.note). note 가 없으면 K bot 자체 한도(방·시간·하루)를 넘은 것이다.
+const SKIP_WHY = { wave: '올킥 감지 중이라 건너뜀', paused: '실패가 이어져 잠시 멈춤', stale: '늦어져서 건너뜀' };
 
 function pick(o, names) {
   for (let i = 0; i < names.length; i++) {
@@ -821,13 +827,13 @@ function roomLogText(row) {
   if (kind === 'churn') {
     const min = pick(d, ['windowMin', 'min', 'minutes']);
     const n = pick(d, ['joins', 'n', 'count']);
-    const act = pick(d, ['action']) === 'kick' ? (row.ok === false ? '내보내지 못함' : '내보냄') : '경고';
+    const act = pick(d, ['action']) === 'kick' ? (row.ok === false ? '내보내기 실패' : '내보내기') : '경고';
     return '들낙 감지 · ' + name + (min !== undefined ? ' ' + min + '분' : '') + (n !== undefined ? ' ' + n + '회' : '') + ' · ' + act;
   }
   if (kind === 'kick' || kind === 'kick_fail') {
     const why = KICK_WHY[pick(d, ['why', 'reason', 'source'])] || '';
     const note = kind === 'kick_fail' ? pick(d, ['note', 'error']) : undefined;
-    return (kind === 'kick' ? '내보냄' : '내보내지 못함') + ' · ' + name + (why ? ' · ' + why : '') +
+    return (kind === 'kick' ? '내보내기' : '내보내기 실패') + ' · ' + name + (why ? ' · ' + why : '') +
       (note && typeof note === 'string' && note.length <= 20 ? ' · ' + note : '');
   }
   if (kind === 'unkick') return '내보내기 해제 · ' + name;
@@ -838,10 +844,10 @@ function roomLogText(row) {
   if (kind === 'hide') {
     const n = Number(pick(d, ['n', 'count', 'done', 'total'])) || 0;
     const failed = Number(pick(d, ['failed', 'fail'])) || 0;
-    const by = pick(d, ['by']) === 'panel' ? '콘솔' : '방장';
-    return '가리기 · ' + n + '개' + (failed ? ' (실패 ' + failed + '개)' : '') + ' · ' + by;
+    const by = pick(d, ['by']) === 'panel' ? '패널' : '방에서';
+    return '글 가리기 · ' + n + '개' + (failed ? ' (실패 ' + failed + '개)' : '') + ' · ' + by;
   }
-  if (kind === 'cover') return '금지어 가림 · ' + name;
+  if (kind === 'cover') return '글 가리기 (금지어) · ' + name;
   if (kind === 'perm') {
     const to = pick(d, ['to', 'state']);
     const perm = pick(d, ['perm', 'mt']);
@@ -858,12 +864,12 @@ function roomLogText(row) {
     const st = pick(d, ['state', 'to', 'event']);
     const code = pick(d, ['code', 'error_code']);
     if (st === 'error' || (code && st !== 'active')) return '오류(' + shortErr(code) + ')';
-    if (st === 'retry' || st === 'queued') return '다시 시도';
-    return '입장';
+    if (st === 'retry' || st === 'queued') return 'K bot 입장 다시 시도';
+    return 'K bot 입장 완료';
   }
   if (kind === 'skip') {
     const what = pick(d, ['what', 'action', 'kind']);
-    return '한도 초과로 건너뜀' + (what ? ' · ' + (SKIP_WHAT[what] || what) : '');
+    return (SKIP_WHY[pick(d, ['note'])] || 'K bot 한도 초과로 건너뜀') + (what ? ' · ' + (SKIP_WHAT[what] || what) : '');
   }
   return String(kind || '');
 }
@@ -951,7 +957,7 @@ router.post('/panel/api/bot-room/hide', wrap(async (req, res) => {
     if (r.json.error === 'cooldown') {
       const at = Number(r.json.retry_at) || Date.now() + 600000;
       return fail(res, 429, 'hide_cooldown',
-        '가리기는 방마다 10분에 한 번 할 수 있습니다. ' + hhmm(at) + ' 이후에 다시 시도하십시오.', { retry_at: at });
+        '글 가리기는 방마다 10분에 한 번 할 수 있습니다. ' + hhmm(at) + ' 이후에 다시 시도해 주세요.', { retry_at: at });
     }
     return botError(res, r.json);
   }

@@ -1,6 +1,6 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
-import { profileObserve } from './roomfeat.mjs'
+import { branch, foldedNotice, josa, kstShort, personLines, profileObserve, RULE, stayText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -165,7 +165,7 @@ function renderReply(cfg, name, now) {
 
 function nameOf(who) {
   const n = who == null ? '' : String(who).trim()
-  return n || '누군가'
+  return n || '참가자'
 }
 
 function renderBot(tpl, room, who, now, count, word) {
@@ -441,11 +441,8 @@ function isAdmin(cfg, who) {
 
 function adminCall(cfg, n) {
   if (n < ADMIN_CALL_AT) return ''
-  const names = (cfg.adminNames || []).map((a) => String(a || '').trim()).filter(Boolean).join(', ')
-  let s = `\n경고 ${n}회 누적. `
-  s += names ? `관리자 ${names}의 확인이 필요합니다.` : '관리자 확인이 필요합니다.'
-  s += ' (봇은 강제퇴장을 수행할 수 없습니다.)'
-  return s
+  const names = (cfg.adminNames || []).map((a) => String(a || '').trim()).filter(Boolean).map((a) => a + '님').join(', ')
+  return `\n경고가 ${n}회 쌓였어요. ${names ? '관리자 ' + names : '관리자님'} 확인 부탁드려요.`
 }
 
 function cooldownMs(macro, roomKey) {
@@ -676,7 +673,7 @@ function roomBot(record, out, room, parsed, who, text, group, now, state) {
     const n = bumpWarn(state, room.key, who, now)
     let msg
     const tpl = String(cfg.warnMsg || '').trim()
-    if (!tpl) msg = `${nameOf(who)}님, 금지어가 포함되어 있습니다 (경고 ${n}회, ${ban})`
+    if (!tpl) msg = `${nameOf(who)}님, 금지어를 쓰셨어요. (경고 ${n}회)`
     else {
       msg = renderBot(tpl, parsed.name, who, now, n, ban)
       if (!tpl.includes('{횟수}')) msg += ` (경고 ${n}회)`
@@ -689,7 +686,7 @@ function roomBot(record, out, room, parsed, who, text, group, now, state) {
     const tpl = String(cfg.linkMsg || '').trim()
     let msg = tpl
       ? renderBot(tpl, parsed.name, who, now, n, '')
-      : `${nameOf(who)}님, 링크 및 초대링크 공유는 금지되어 있습니다 (경고 ${n}회)`
+      : `${nameOf(who)}님, 이 방에서는 링크를 올릴 수 없어요. (경고 ${n}회)`
     if (tpl && !tpl.includes('{횟수}')) msg += ` (경고 ${n}회)`
     botSend(state, cfg, room, msg + adminCall(cfg, n), now, out)
     return
@@ -698,7 +695,7 @@ function roomBot(record, out, room, parsed, who, text, group, now, state) {
     const tpl = String(cfg.floodMsg || '').trim()
     const msg = tpl
       ? renderBot(tpl, parsed.name, who, now, 0, '')
-      : `${nameOf(who)}님, 연속 발송을 자제하십시오 (${cfg.floodSecs}초 ${cfg.floodCount}개 초과)`
+      : `${nameOf(who)}님, 도배는 삼가 주세요.`
     botSend(state, cfg, room, msg, now, out)
   }
 }
@@ -729,34 +726,34 @@ function roomCommand(state, cfg, room, parsed, who, line, prefix, now, out) {
   if (cmd === '공지') {
     if (!arg) {
       const n = String(cfg.notice || '').trim()
-      botSend(state, cfg, room, n ? `[공지]\n${n}` : `등록된 공지가 없습니다. 관리자는 「${prefix}공지 내용」 으로 등록할 수 있습니다.`, now, out)
+      botSend(state, cfg, room, n ? `[공지]\n${n}` : `등록된 공지가 없어요. 관리자는 「${prefix}공지 내용」으로 등록할 수 있어요.`, now, out)
       return
     }
     if (!isAdmin(cfg, who)) {
-      botSend(state, cfg, room, '공지는 관리자만 등록할 수 있습니다.', now, out)
+      botSend(state, cfg, room, '공지는 관리자만 등록할 수 있어요.', now, out)
       return
     }
     cfg.notice = arg
-    botSend(state, cfg, room, `공지를 등록했습니다. 「${prefix}공지」 로 확인할 수 있습니다.`, now, out)
+    botSend(state, cfg, room, `공지를 등록했어요. 「${prefix}공지」로 볼 수 있어요.`, now, out)
     return
   }
   if (cmd === '규칙') {
-    botSend(state, cfg, room, `금지어·링크·도배를 경고합니다. 경고 ${ADMIN_CALL_AT}회 누적 시 관리자를 부릅니다. 강제퇴장은 방장이 카카오톡에서 합니다.`, now, out)
+    botSend(state, cfg, room, `금지어·링크를 올리거나 도배하면 경고해요. 경고가 ${ADMIN_CALL_AT}회 쌓이면 관리자를 불러요. 내보내기는 방장님이 카카오톡에서 직접 해요.`, now, out)
     return
   }
   if (cmd === '도움' || cmd === '명령' || cmd === '방도움') {
-    botSend(state, cfg, room, `${prefix}공지 ${prefix}규칙 ${prefix}경고 ${prefix}경고초기화 ${prefix}도움`, now, out)
+    botSend(state, cfg, room, `[명령어]\n${prefix}공지 ${prefix}규칙 ${prefix}경고 ${prefix}경고초기화 ${prefix}도움`, now, out)
     return
   }
   if (cmd === '경고') {
     const target = arg && isAdmin(cfg, who) ? arg : who
     const n = warnCount(state, room.key, target)
-    botSend(state, cfg, room, `${nameOf(target)}님, 누적 경고 ${n}회입니다.${n >= ADMIN_CALL_AT ? ' 관리자 확인이 필요합니다.' : ''}`, now, out)
+    botSend(state, cfg, room, `${nameOf(target)}님의 누적 경고는 ${n}회예요.${n >= ADMIN_CALL_AT ? ' 관리자 확인이 필요해요.' : ''}`, now, out)
     return
   }
   if (cmd === '경고초기화') {
     if (!isAdmin(cfg, who)) {
-      botSend(state, cfg, room, '경고 초기화는 관리자만 실행할 수 있습니다.', now, out)
+      botSend(state, cfg, room, '경고 초기화는 관리자만 할 수 있어요.', now, out)
       return
     }
     let cleared = 0
@@ -768,7 +765,7 @@ function roomCommand(state, cfg, room, parsed, who, line, prefix, now, out) {
         cleared++
       }
     }
-    botSend(state, cfg, room, `이 대화방의 경고 기록 ${cleared}건을 삭제했습니다.`, now, out)
+    botSend(state, cfg, room, `이 방의 경고 기록 ${cleared}건을 지웠어요.`, now, out)
   }
 }
 
@@ -868,7 +865,7 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
   const arg = sp < 0 ? '' : line.slice(sp).trim()
   if (cmd === '끝말잇기') return startWord(state, cfg, room, who, prefix, now, out)
   if (cmd === '숫자야구' || cmd === '야구') return startBaseball(state, cfg, room, who, prefix, now, out)
-  if (cmd === '주사위') return dice(state, cfg, room, who, arg, now, out)
+  if (cmd === '주사위') return dice(state, cfg, room, who, arg, prefix, now, out)
   if (cmd === '가위바위보' || cmd === '묵찌빠') return rps(state, cfg, room, who, arg, prefix, now, out)
   if (cmd === '퀴즈') return startQuiz(state, cfg, room, who, prefix, now, out)
   if (cmd === '힌트') return hint(state, cfg, room, now, out)
@@ -876,15 +873,15 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
   if (cmd === '포기') return giveUp(state, cfg, room, now, out)
   if (cmd === '점수') {
     const n = (state.scores[room.key] && state.scores[room.key][scoreKey(state, who)]) || 0
-    gameSend(state, cfg, room, `${nameOf(who)}님 누적 점수 ${n}점입니다.`, now, out)
+    gameSend(state, cfg, room, `${nameOf(who)}님의 누적 점수는 ${n}점이에요.`, now, out)
     return
   }
   if (cmd === '랭킹' || cmd === '순위') {
     const board = state.scores[room.key] || {}
     const rows = Object.entries(board).sort((a, b) => b[1] - a[1]).slice(0, 10)
     const text = rows.length
-      ? rows.map((r, i) => `${i + 1}. ${nameOf(scoreName(state, room.key, r[0]))} ${r[1]}점`).join('\n')
-      : '아직 점수가 없습니다.'
+      ? '[랭킹]\n' + rows.map((r, i) => `${i + 1}. ${nameOf(scoreName(state, room.key, r[0]))} ${r[1]}점`).join('\n')
+      : '아직 점수가 없어요.'
     gameSend(state, cfg, room, text, now, out)
     return
   }
@@ -899,17 +896,17 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
       if (gameOn(cfg, 'rps')) on.push(prefix + '가위바위보')
       if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
       on.push(prefix + '포기', prefix + '랭킹')
-      gameSend(state, cfg, room, on.join(' '), now, out)
+      gameSend(state, cfg, room, '[명령어]\n미니게임 : ' + on.join(' '), now, out)
       return
     }
-    gameSend(state, cfg, room, `${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
+    gameSend(state, cfg, room, `[명령어]\n미니게임 : ${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
   }
 }
 
 function busy(state, cfg, room, prefix, now, out, kind) {
   const g = game(state, room.key)
   if (g.kind && g.kind !== kind) {
-    gameSend(state, cfg, room, `다른 게임이 진행 중입니다. ${prefix}포기 입력 후 시작하십시오.`, now, out)
+    gameSend(state, cfg, room, `다른 게임이 진행 중이에요. 「${prefix}포기」로 끝낸 뒤 시작해 주세요.`, now, out)
     return true
   }
   return false
@@ -917,7 +914,7 @@ function busy(state, cfg, room, prefix, now, out, kind) {
 
 function startWord(state, cfg, room, who, prefix, now, out) {
   if (!gameOn(cfg, 'word')) {
-    gameSend(state, cfg, room, '「끝말잇기」는 사용 중지 상태입니다.', now, out)
+    gameSend(state, cfg, room, '이 방에서는 끝말잇기가 꺼져 있어요.', now, out)
     return
   }
   if (busy(state, cfg, room, prefix, now, out, 'word')) return
@@ -931,12 +928,13 @@ function startWord(state, cfg, room, who, prefix, now, out) {
   g.word = first
   g.tries = 0
   g.at = now
-  gameSend(state, cfg, room, `끝말잇기를 시작합니다. 첫 단어 → 「${first}」\n'${Word.variantsText(Word.tail(first))}' 로 시작하는 단어를 ${WORD_TURN_MS / 1000}초 내에 입력하십시오. (사전 ${Word.size()}단어 · 종료 ${prefix}포기)`, now, out)
+  const v = Word.variantsText(Word.tail(first))
+  gameSend(state, cfg, room, `끝말잇기를 시작해요. 첫 단어는 「${first}」${josa(first, '이에요')}.\n'${v}'${josa(v, '으로')} 시작하는 단어를 ${WORD_TURN_MS / 1000}초 안에 입력해 주세요. (그만하기 : ${prefix}포기)`, now, out)
 }
 
 function startBaseball(state, cfg, room, who, prefix, now, out) {
   if (!gameOn(cfg, 'baseball')) {
-    gameSend(state, cfg, room, '「숫자야구」는 사용 중지 상태입니다.', now, out)
+    gameSend(state, cfg, room, '이 방에서는 숫자야구가 꺼져 있어요.', now, out)
     return
   }
   if (busy(state, cfg, room, prefix, now, out, 'baseball')) return
@@ -961,19 +959,19 @@ function startBaseball(state, cfg, room, who, prefix, now, out) {
   g.secret = `${a}${b}${e}`
   g.tries = 0
   g.at = now
-  gameSend(state, cfg, room, `숫자야구를 시작합니다. 서로 다른 3자리 숫자를 입력하십시오 (첫 자리 0 제외).\n자리와 숫자 일치 S, 숫자만 일치 B. 기회 ${BASEBALL_TRIES}회 · 종료 ${prefix}포기`, now, out)
+  gameSend(state, cfg, room, `숫자야구를 시작해요. 숫자가 겹치지 않는 세 자리 수를 맞혀 주세요. (첫 자리는 0이 아니에요)\n숫자와 자리가 맞으면 S, 숫자만 맞으면 B예요. 기회 ${BASEBALL_TRIES}번 · 그만하기 : ${prefix}포기`, now, out)
 }
 
-function dice(state, cfg, room, who, arg, now, out) {
+function dice(state, cfg, room, who, arg, prefix, now, out) {
   if (!gameOn(cfg, 'dice')) {
-    gameSend(state, cfg, room, '「주사위」는 사용 중지 상태입니다.', now, out)
+    gameSend(state, cfg, room, '이 방에서는 주사위가 꺼져 있어요.', now, out)
     return
   }
   let faces = 6
   if (arg) {
     const n = Number(arg)
     if (!Number.isInteger(n) || n < 1 || n > 100) {
-      gameSend(state, cfg, room, '주사위 면 수는 1~100 범위로 입력하십시오. (예: 주사위 20)', now, out)
+      gameSend(state, cfg, room, `주사위 면 수는 1~100 사이로 입력해 주세요. (예: 「${prefix}주사위 20」)`, now, out)
       return
     }
     faces = n
@@ -984,7 +982,7 @@ function dice(state, cfg, room, who, arg, now, out) {
 
 function rps(state, cfg, room, who, arg, prefix, now, out) {
   if (!gameOn(cfg, 'rps')) {
-    gameSend(state, cfg, room, '「가위바위보」는 사용 중지 상태입니다.', now, out)
+    gameSend(state, cfg, room, '이 방에서는 가위바위보가 꺼져 있어요.', now, out)
     return
   }
   let mine = -1
@@ -993,13 +991,13 @@ function rps(state, cfg, room, who, arg, prefix, now, out) {
   else if (v.startsWith('바위') || v.startsWith('묵')) mine = 1
   else if (v.startsWith('보')) mine = 2
   if (mine < 0) {
-    gameSend(state, cfg, room, `「${prefix}가위바위보 가위」 형식으로 입력하십시오. (가위 · 바위 · 보)`, now, out)
+    gameSend(state, cfg, room, `「${prefix}가위바위보 가위」처럼 입력해 주세요. (가위 · 바위 · 보)`, now, out)
     return
   }
   const bot = Math.floor(Math.random() * 3)
   const name = ['가위', '바위', '보']
   const diff = (mine - bot + 3) % 3
-  let line = `봇 ${name[bot]} · ${nameOf(who)}님 ${name[mine]} → `
+  let line = `봇 : ${name[bot]} / ${nameOf(who)}님 : ${name[mine]} → `
   if (diff === 0) line += '무승부'
   else if (diff === 1) {
     const total = scoreAdd(state, room.key, who, P_RPS)
@@ -1010,7 +1008,7 @@ function rps(state, cfg, room, who, arg, prefix, now, out) {
 
 function startQuiz(state, cfg, room, who, prefix, now, out) {
   if (!gameOn(cfg, 'quiz')) {
-    gameSend(state, cfg, room, '「퀴즈」는 사용 중지 상태입니다.', now, out)
+    gameSend(state, cfg, room, '이 방에서는 퀴즈가 꺼져 있어요.', now, out)
     return
   }
   if (busy(state, cfg, room, prefix, now, out, 'quiz')) return
@@ -1024,26 +1022,27 @@ function startQuiz(state, cfg, room, who, prefix, now, out) {
   g.owner = who
   g.quiz = idx
   g.at = now
-  gameSend(state, cfg, room, `[퀴즈] ${Quiz.question(idx)}\n정답을 채팅으로 입력하십시오. (힌트 ${prefix}힌트 · 정답 공개 ${prefix}정답)`, now, out)
+  gameSend(state, cfg, room, `[퀴즈] ${Quiz.question(idx)}\n정답을 입력해 주세요. (힌트 : ${prefix}힌트 · 정답 보기 : ${prefix}정답)`, now, out)
 }
 
 function play(state, cfg, room, who, body, prefix, now, out) {
   const g = state.games[room.key]
   if (!g || !g.kind) return
   if (g.kind === 'word' && now - g.at > WORD_TURN_MS) {
-    const msg = `시간 초과. 「${g.word}」 에서 끝말잇기를 종료했습니다. 재시작 ${prefix}끝말잇기`
+    const msg = `${WORD_TURN_MS / 1000}초가 지나 끝말잇기가 끝났어요. 마지막 단어는 「${g.word}」${josa(g.word, '이었어요')}. (다시 하기 : ${prefix}끝말잇기)`
     g.kind = ''
     gameSend(state, cfg, room, msg, now, out)
     return
   }
   if (g.kind === 'baseball' && now - g.at > BASEBALL_TTL_MS) {
-    const msg = `장시간 입력이 없어 숫자야구를 종료했습니다. 정답 ${g.secret}`
+    const msg = `${BASEBALL_TTL_MS / 60000}분 동안 입력이 없어 숫자야구가 끝났어요. 정답은 ${g.secret}${josa(g.secret, '이었어요')}.`
     g.kind = ''
     gameSend(state, cfg, room, msg, now, out)
     return
   }
   if (g.kind === 'quiz' && now - g.at > QUIZ_TTL_MS) {
-    const msg = `퀴즈 제한 시간이 지났습니다. 정답 「${Quiz.answer(g.quiz)}」`
+    const ans = Quiz.answer(g.quiz)
+    const msg = `${QUIZ_TTL_MS / 60000}분이 지나 퀴즈가 끝났어요. 정답은 「${ans}」${josa(ans, '이었어요')}.`
     g.kind = ''
     gameSend(state, cfg, room, msg, now, out)
     return
@@ -1059,15 +1058,16 @@ function wordTurn(state, cfg, room, who, body, prefix, now, out) {
   if (g.kind !== 'word') return
   const used = new Set(g.used || [])
   if (used.has(body)) {
-    gameSend(state, cfg, room, `「${body}」는 이미 사용된 단어입니다. 다른 단어를 입력하십시오.`, now, out)
+    gameSend(state, cfg, room, `「${body}」${josa(body, '은')} 이미 나온 단어예요. 다른 단어를 입력해 주세요.`, now, out)
     return
   }
   if (!Word.has(body)) {
-    gameSend(state, cfg, room, `「${body}」는 사전에 없는 단어입니다. 다른 단어를 입력하십시오.`, now, out)
+    gameSend(state, cfg, room, `「${body}」${josa(body, '은')} 사전에 없는 단어예요. 다른 단어를 입력해 주세요.`, now, out)
     return
   }
   if (!Word.linkable(g.word, body)) {
-    gameSend(state, cfg, room, `「${g.word}」 다음 단어는 '${Word.variantsText(Word.tail(g.word))}' 로 시작해야 합니다.`, now, out)
+    const v = Word.variantsText(Word.tail(g.word))
+    gameSend(state, cfg, room, `「${g.word}」 다음에는 '${v}'${josa(v, '으로')} 시작하는 단어를 입력해 주세요.`, now, out)
     return
   }
   used.add(body)
@@ -1078,14 +1078,15 @@ function wordTurn(state, cfg, room, who, body, prefix, now, out) {
     g.kind = ''
     g.used = [...used]
     const total = scoreAdd(state, room.key, who, P_WORD + P_WORD_WIN)
-    gameSend(state, cfg, room, `이을 단어가 없습니다. ${nameOf(who)}님 승리 (+${P_WORD + P_WORD_WIN}점, 누적 ${total}점)\n재시작 ${prefix}끝말잇기`, now, out)
+    gameSend(state, cfg, room, `봇이 이을 단어를 찾지 못했어요. ${nameOf(who)}님 승리 (+${P_WORD + P_WORD_WIN}점, 누적 ${total}점)\n다시 하기 : ${prefix}끝말잇기`, now, out)
     return
   }
   used.add(botWord)
   g.word = botWord
   g.used = [...used].slice(-120)
   const total = scoreAdd(state, room.key, who, P_WORD)
-  gameSend(state, cfg, room, `통과. 「${botWord}」\n다음 시작 글자 '${Word.variantsText(Word.tail(botWord))}' (${nameOf(who)}님 ${total}점)`, now, out)
+  const v = Word.variantsText(Word.tail(botWord))
+  gameSend(state, cfg, room, `봇 : 「${botWord}」\n'${v}'${josa(v, '으로')} 시작하는 단어를 입력해 주세요. (${nameOf(who)}님 누적 ${total}점)`, now, out)
 }
 
 function baseballTurn(state, cfg, room, who, body, now, out) {
@@ -1093,7 +1094,7 @@ function baseballTurn(state, cfg, room, who, body, now, out) {
   const g = game(state, room.key)
   if (g.kind !== 'baseball') return
   if (body[0] === body[1] || body[1] === body[2] || body[0] === body[2]) {
-    gameSend(state, cfg, room, '숫자 3개는 서로 달라야 합니다.', now, out)
+    gameSend(state, cfg, room, '숫자 3개는 서로 달라야 해요.', now, out)
     return
   }
   g.at = now
@@ -1109,13 +1110,13 @@ function baseballTurn(state, cfg, room, who, body, now, out) {
   if (s === 3) {
     const total = scoreAdd(state, room.key, who, P_BASEBALL)
     g.kind = ''
-    gameSend(state, cfg, room, `정답입니다. ${body} · ${g.tries}회 시도. ${nameOf(who)}님 +${P_BASEBALL}점 (누적 ${total}점)`, now, out)
+    gameSend(state, cfg, room, `정답이에요. ${body} (${g.tries}번 만에) · ${nameOf(who)}님 +${P_BASEBALL}점 (누적 ${total}점)`, now, out)
     return
   }
   if (g.tries >= BASEBALL_TRIES) {
     const secret = g.secret
     g.kind = ''
-    gameSend(state, cfg, room, `${body} → ${s}S ${b}B\n기회를 모두 사용했습니다. 정답 ${secret}`, now, out)
+    gameSend(state, cfg, room, `${body} → ${s}S ${b}B\n기회를 모두 썼어요. 정답은 ${secret}${josa(secret, '이었어요')}.`, now, out)
     return
   }
   gameSend(state, cfg, room, `${body} → ${s}S ${b}B (${g.tries}/${BASEBALL_TRIES})`, now, out)
@@ -1129,41 +1130,45 @@ function quizTurn(state, cfg, room, who, body, prefix, now, out) {
   g.kind = ''
   g.quiz = -1
   const total = scoreAdd(state, room.key, who, P_QUIZ)
-  gameSend(state, cfg, room, `정답입니다. 「${ans}」 · ${nameOf(who)}님 +${P_QUIZ}점 (누적 ${total}점)\n다음 문제 ${prefix}퀴즈`, now, out)
+  gameSend(state, cfg, room, `정답이에요. 「${ans}」 · ${nameOf(who)}님 +${P_QUIZ}점 (누적 ${total}점)\n다음 문제 : ${prefix}퀴즈`, now, out)
 }
 
 function hint(state, cfg, room, now, out) {
   const g = game(state, room.key)
-  let msg = '진행 중인 게임이 없습니다.'
-  if (g.kind === 'quiz' && Quiz.valid(g.quiz)) msg = `힌트 · ${Quiz.hint(g.quiz)}`
+  let msg = '진행 중인 게임이 없어요.'
+  if (g.kind === 'quiz' && Quiz.valid(g.quiz)) msg = `힌트 : ${Quiz.hint(g.quiz)}`
   else if (g.kind === 'word') {
     const cand = Word.nextStarting(Word.tail(g.word), new Set(g.used || []))
-    msg = cand ? `힌트 · ${cand[0]}…로 시작하는 ${cand.length}글자 단어` : '봇이 이을 수 있는 단어가 없습니다. 먼저 입력하면 승리합니다.'
-  } else if (g.kind === 'baseball') msg = `힌트 · 숫자는 서로 다르며 첫 자리는 0이 아닙니다. 현재 ${g.tries}회 시도.`
+    msg = cand ? `힌트 : '${cand[0]}'${josa(cand[0], '으로')} 시작하는 ${cand.length}글자 단어` : '봇이 이을 수 있는 단어가 없어요. 먼저 이으면 이겨요.'
+  } else if (g.kind === 'baseball') msg = `힌트 : 숫자는 모두 다르고 첫 자리는 0이 아니에요. 지금까지 ${g.tries}번 시도했어요.`
   gameSend(state, cfg, room, msg, now, out)
 }
 
 function reveal(state, cfg, room, now, out) {
   const g = game(state, room.key)
-  let msg = '진행 중인 게임이 없습니다.'
+  let msg = '진행 중인 게임이 없어요.'
   if (g.kind === 'quiz' && Quiz.valid(g.quiz)) {
-    msg = `정답 「${Quiz.answer(g.quiz)}」`
+    const ans = Quiz.answer(g.quiz)
+    msg = `정답은 「${ans}」${josa(ans, '이에요')}.`
     g.kind = ''
   } else if (g.kind === 'baseball') {
-    msg = `정답 ${g.secret}`
+    msg = `정답은 ${g.secret}${josa(g.secret, '이에요')}.`
     g.kind = ''
-  } else if (g.kind === 'word') msg = `현재 이어야 하는 단어는 「${g.word}」 입니다.`
+  } else if (g.kind === 'word') msg = `지금 이을 단어는 「${g.word}」${josa(g.word, '이에요')}.`
   gameSend(state, cfg, room, msg, now, out)
 }
 
 function giveUp(state, cfg, room, now, out) {
   const g = game(state, room.key)
-  let msg = '진행 중인 게임이 없습니다.'
+  let msg = '진행 중인 게임이 없어요.'
   if (g.kind) {
-    msg = `게임을 종료했습니다.`
-    if (g.kind === 'baseball') msg += ` 정답 ${g.secret}.`
-    if (g.kind === 'quiz' && Quiz.valid(g.quiz)) msg += ` 정답 「${Quiz.answer(g.quiz)}」.`
-    if (g.kind === 'word') msg += ` 마지막 단어 「${g.word}」.`
+    msg = '게임을 끝냈어요.'
+    if (g.kind === 'baseball') msg += ` 정답은 ${g.secret}${josa(g.secret, '이었어요')}.`
+    if (g.kind === 'quiz' && Quiz.valid(g.quiz)) {
+      const ans = Quiz.answer(g.quiz)
+      msg += ` 정답은 「${ans}」${josa(ans, '이었어요')}.`
+    }
+    if (g.kind === 'word') msg += ` 마지막 단어는 「${g.word}」${josa(g.word, '이었어요')}.`
     g.kind = ''
   }
   gameSend(state, cfg, room, msg, now, out)
@@ -1620,7 +1625,7 @@ function uniqTimes(list, now) {
   return out
 }
 
-function rememberPerson(v, chatId, who, now, kind, link) {
+function rememberPerson(v, chatId, who, now, kind, link, photo) {
   const keys = []
   if (who.id) keys.push(`${chatId}${SEP}${who.id}`)
   if (who.name) keys.push(`${chatId}${SEP}n:${who.name}`)
@@ -1631,6 +1636,7 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     if (!row || typeof row !== 'object') continue
     if (!prev.name && row.name) prev.name = row.name
     if (!prev.link && row.link) prev.link = row.link
+    if (prev.photo === undefined && typeof row.photo === 'string') prev.photo = row.photo
     if (!prev.userId && row.userId) prev.userId = String(row.userId)
     if (Array.isArray(row.joins)) prev.joins = prev.joins.concat(row.joins)
     if (Array.isArray(row.leaves)) prev.leaves = prev.leaves.concat(row.leaves)
@@ -1648,6 +1654,8 @@ function rememberPerson(v, chatId, who, now, kind, link) {
   if (nameChanged || linkChanged) {
     changes.push({ at: now, name: prevName, link: prevLink })
   }
+  // 사진: 주소(없으면 ''). 모르면(옛 계정 기능) 칸을 두지 않아 안내에서 사진 줄이 빠진다.
+  const freshPhoto = typeof photo === 'string' ? photo : undefined
   const row = {
     name: freshName || prevName,
     link: freshLink || prevLink,
@@ -1656,6 +1664,8 @@ function rememberPerson(v, chatId, who, now, kind, link) {
     leaves: uniqTimes(prev.leaves, now),
     changes: trimChanges(changes, now),
   }
+  const keepPhoto = freshPhoto !== undefined ? freshPhoto : prev.photo
+  if (typeof keepPhoto === 'string') row.photo = keepPhoto
   // 시각이 같아도 이벤트마다 센다(7.2(a)). 같은 값은 합칠 때 하나로 줄어드므로 1ms 씩 민다.
   const list = kind === 'join' ? row.joins : row.leaves
   let t = now
@@ -1699,35 +1709,36 @@ function timeLines(times) {
   return times.map((t) => '- ' + kstStamp(t))
 }
 
+// 입장·퇴장 안내(7.2(a)): 사람 정보(👤 🆔 🔗 옾링 🖼 사진) + 이번 종류의 기록(최근 5번) + 예전 프로필(닉네임·옾링이 바뀐 적).
+// 입장 안내에는 입장 시각만, 퇴장 안내에는 퇴장 시각과 머문 시간만 적는다. 사진을 모르면(옛 계정 기능) 사진 줄을 뺀다.
+const VISIT_SHOW_N = 5
+
 function visitNotice(row, kind) {
-  const name = String(row && row.name || '').replace(/[\r\n]/g, '').trim()
-  const userId = /^[1-9][0-9]*$/.test(String(row && row.userId || '')) ? String(row.userId) : ''
-  const link = row && row.link ? row.link : '찾지 못했습니다'
-  const mentioned = !!(userId && name)
-  const nameLine = mentioned ? ('이름 : @' + name) : ('이름 : ' + (name || '이름 없음'))
+  const r = row || {}
   const leave = kind === 'leave'
-  const times = timeLines(leave ? (row && row.leaves) : (row && row.joins))
-  const lines = [
-    leave ? '[퇴장안내]' : '[입장안내]',
-    nameLine,
-    '옾링 : ' + link,
-    leave ? '퇴장로그' : '입장로그',
-    ...times,
-  ]
-  const changes = Array.isArray(row && row.changes) ? row.changes : []
-  if (changes.length) {
-    lines.push('프로필 변경')
-    for (const c of changes) {
-      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-      const pastLink = c && c.link ? String(c.link) : '링크 없음'
-      lines.push('- ' + kstStamp(c && c.at) + '  ' + past + ' / ' + pastLink)
-    }
+  const userId = /^[1-9][0-9]*$/.test(String(r.userId || '')) ? String(r.userId) : ''
+  const cur = { userId, name: r.name, link: r.link, photo: typeof r.photo === 'string' ? r.photo : null }
+  const lines = [RULE, ...personLines(cur)]
+  const times = (leave ? r.leaves : r.joins) || []
+  if (leave && times.length) {
+    const out = Number(times[times.length - 1])
+    const joinedAt = (Array.isArray(r.joins) ? r.joins : []).map(Number).filter((t) => t <= out).pop()
+    if (joinedAt) lines.push('⏳ 머문 시간 : ' + stayText(out - joinedAt) + ' (' + kstShort(joinedAt) + ' 입장)')
   }
-  const text = lines.join('\n')
-  if (!mentioned) return { text, mention: null }
-  const at = text.indexOf('\n이름 : @')
-  const start = at + '\n이름 : @'.length
-  return { text, mention: { userId, at: start, len: name.length } }
+  const shown = times.slice(-VISIT_SHOW_N)
+  lines.push('', (leave ? '🕒 퇴장 기록 · ' : '🕒 입장 기록 · ') + times.length + '회' + (times.length > shown.length ? ' · 최근 ' + shown.length + '번' : ''))
+  lines.push(...branch(shown.map((t) => kstStamp(t))))
+  const changes = Array.isArray(r.changes) ? r.changes : []
+  if (changes.length) {
+    lines.push('', '📝 예전 프로필 · ' + changes.length + '회')
+    lines.push(...branch(changes.slice(-VISIT_SHOW_N).map((c) => {
+      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
+      const pastLink = openProfileLink(c && c.link)
+      return kstStamp(c && c.at) + ' · ' + past + (pastLink && pastLink !== r.link ? ' · ' + pastLink : '')
+    })))
+  }
+  lines.push(RULE)
+  return foldedNotice(leave ? '📤 퇴장 안내' : '📥 입장 안내', r.name, userId, lines)
 }
 
 function mentionIdJson(id) {
@@ -1777,7 +1788,8 @@ export function visitMentionExtra(text, mention) {
   const mark = text.indexOf('@')
   if (mark < 0 || text.indexOf('@', mark + 1) >= 0) return ''
   if (text.slice(mark + 1, mark + 1 + len).length !== len) return ''
-  if (text.charAt(mark + 1 + len) && text.charAt(mark + 1 + len) !== '\n') return ''
+  const after = text.charAt(mark + 1 + len)
+  if (after && after !== '\n' && after !== '\u200b') return ''
   return `{"mentions":[{"user_id":${idJson},"at":[1],"len":${len}}]}`
 }
 
@@ -1838,9 +1850,11 @@ function applyProfile(record, ev, sends) {
   const chatId = String(room.chat_id)
   const cfg = record.config.profile
   // 이름(메시지·입장의 작성자 닉), 사진 서명·상태 메시지(회원 카드)를 한 곳에서 비교한다(7.2(c)).
-  const notes = profileObserve(rt(record), chatId, cfg, { userId: id, name, photo: ev.photo, status: ev.status }, now)
+  const notes = profileObserve(rt(record), chatId, cfg, { userId: id, name, photo: ev.photo, status: ev.status, link: ev.profileLink }, now)
   for (const n of notes) {
-    sends.push({ chatId, text: n.text, mention: n.mention, delayMs: profileDelay(p, chatId, now), kind: 'profile' })
+    const send = { chatId, text: n.text, mention: n.mention, delayMs: profileDelay(p, chatId, now), kind: 'profile' }
+    if (n.linkFor) send.linkFor = n.linkFor   // 옾링을 몰랐다 → 보내는 쪽이 찾아 채운다(withProfileLink)
+    sends.push(send)
   }
   return notes.length > 0
 }
@@ -1850,22 +1864,6 @@ export function profileOnly(record, ev) {
   const sends = []
   applyProfile(record, ev, sends)
   return sends
-}
-
-function profileNotice(name, userId, prevName, changes, now) {
-  const nm = String(name || '').replace(/[\r\n]/g, '').trim()
-  const uid = /^[1-9][0-9]*$/.test(String(userId || '')) ? String(userId) : ''
-  const old = String(prevName || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-  const mentioned = !!(uid && nm)
-  const nameLine = mentioned ? ('이름 : @' + nm) : ('이름 : ' + (nm || '이름 없음'))
-  const lines = ['[프로필 변경 감지]', nameLine, '이전 : ' + old, '변경 : ' + kstStamp(now)]
-  const n = Array.isArray(changes) ? changes.length : 0
-  if (n >= 2) lines.push('누적 : ' + n + '회')
-  const text = lines.join('\n')
-  if (!mentioned) return { text, mention: null }
-  const at = text.indexOf('\n이름 : @')
-  const start = at + '\n이름 : @'.length
-  return { text, mention: { userId: uid, at: start, len: nm.length } }
 }
 
 /**
@@ -1883,7 +1881,7 @@ function applyVisit(record, ev, sends) {
   const at = Number(ev.at) || now
   const v = visitState(record)
   if (visitSeen(v, String(room.chat_id), who, ev.kind, at, ev.logId ? String(ev.logId) : '', now)) return true
-  const row = rememberPerson(v, String(room.chat_id), who, at, ev.kind, ev.profileLink)
+  const row = rememberPerson(v, String(room.chat_id), who, at, ev.kind, ev.profileLink, ev.photo)
   const notice = visitNotice(row, ev.kind)
   sends.push({
     chatId: String(room.chat_id),
@@ -1973,17 +1971,21 @@ export function guardOnChat(record, ev) {
   return { sends, askHalt, active: true }
 }
 
-/** Record that this account has stopped kicking, and the sentence for the customer. */
-export function guardFinishHalt(record, chatId, allowed, now, roomName, count) {
+/**
+ * Record that this account has stopped kicking, and the sentence for the customer.
+ * who: 문장의 주어. 고객 계정은 '이 계정', 운영 봇(botpool)은 'K bot'. 둘 다 받침이 있어 은/에는 이 맞다.
+ */
+export function guardFinishHalt(record, chatId, allowed, now, roomName, count, who) {
   const g = gstate(record)
   const id = String(chatId || '')
   g.halt[id] = now + GUARD_HALT_MS
   g.kickAsked[id] = 0
   const room = roomName && String(roomName).trim() ? String(roomName).trim() : '대화방'
   const n = Number(count) || 0
+  const subj = who === 'K bot' ? 'K bot' : '이 계정'
   const text = allowed
-    ? `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 이후 강퇴하지 않습니다.`
-    : `「${room}」에서 짧은 시간에 강퇴가 ${n}건 있었습니다. 이 계정은 강퇴를 멈출 권한이 없습니다.`
+    ? `「${room}」에서 짧은 시간에 ${n}명을 내보냈습니다. ${subj}은 ${GUARD_HALT_MS / 60000}분 동안 사람을 내보내지 않습니다.`
+    : `「${room}」에서 짧은 시간에 ${n}명을 내보냈습니다. ${subj}에는 내보내기를 멈출 권한이 없습니다.`
   pushNotice(g, now, text)
   return text
 }
@@ -2013,15 +2015,15 @@ function logChanges(list, withLink) {
     if (!Number.isFinite(at) || at <= 0) continue
     const name = String(c.name || '')
     const link = String(c.link || '')
-    const kind = c.kind === 'photo' || c.kind === 'status' ? c.kind : 'name'
-    const sig = at + SEP + name + SEP + (withLink ? link : kind)
+    const kind = c.kind === 'photo' || c.kind === 'status' || c.kind === 'link' ? c.kind : 'name'
+    const sig = at + SEP + name + SEP + (withLink ? link : kind + SEP + String(c.to || ''))
     if (seen.has(sig)) continue
     seen.add(sig)
     if (withLink) out.push({ at, name, link })
     else {
       // 프로필 기록 행은 항목(kind)을 같이 낸다(7.5). 사진은 바뀐 사실만, 주소는 내보내지 않는다(8.11).
       const row = { at, name, kind }
-      if (kind === 'status') {
+      if (kind === 'status' || kind === 'link') {
         row.from = String(c.from || '').slice(0, 200)
         row.to = String(c.to || '').slice(0, 200)
       }

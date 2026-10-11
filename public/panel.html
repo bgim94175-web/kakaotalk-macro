@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<title>관리 · K bot</title>
+<title>K bot 패널</title>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#09090b">
 <meta name="color-scheme" content="dark">
@@ -12,9 +12,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/panel.css?v=14">
+<link rel="stylesheet" href="/panel.css?v=15">
 <script src="/support.js?v=1" defer></script>
-<script src="/panel.js?v=17" defer></script>
+<script src="/panel.js?v=19" defer></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -65,9 +65,9 @@
   <div class="login-card">
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>K bot</a>
     <div>
-      <h1>K bot 콘솔</h1>
-      <p class="lead">회원 아이디로 로그인합니다. 콘솔 로그인은 기기에 묶지 않으며, 동시에 기기 3대까지 로그인할 수 있습니다.</p>
-      <p class="lead">결제가 확인되면 그때부터 카카오톡 매크로 사용 기간이 시작됩니다.</p>
+      <h1>K bot 패널</h1>
+      <p class="lead">K bot 회원 아이디로 로그인합니다. 한 아이디로 기기 <span data-limit="sessions">3</span>대까지 동시에 로그인할 수 있습니다.</p>
+      <p class="lead">카카오톡 매크로 이용 기간은 입금 확인 시점부터 시작됩니다.</p>
     </div>
     <form id="login-form" novalidate>
       <div class="fld"><label for="login-id">아이디</label>
@@ -81,13 +81,13 @@
       <p class="or">또는</p>
       <a class="btn lg wide" id="loginGoogle" href="/auth/google/start?mode=login&amp;next=%2Fpanel"><svg class="g-mark" width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Google 계정으로 로그인</a>
     </div>
-    <p class="note dim" id="login-keynote"><span>라이선스 키로 사용하던 경우 회원가입 후 내 계정에서 키를 등록하십시오. <a class="lnk-u" href="/signup?next=%2Faccount%23claim">회원가입</a></span></p>
-    <div class="login-foot"><a href="/signup?next=/panel">회원가입</a><a href="/account">내 계정</a><button type="button" data-support data-support-ctx="콘솔 로그인"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></div>
+    <p class="note dim" id="login-keynote"><span>기존 라이선스 키가 있다면 회원가입 후 내 계정에서 등록해 주세요. <a class="lnk-u" href="/signup?next=%2Faccount%23claim">회원가입</a></span></p>
+    <div class="login-foot"><a href="/signup?next=/panel">회원가입</a><a href="/account">내 계정</a><button type="button" data-support data-support-ctx="패널 로그인"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></div>
   </div>
 </div>
 
 <div id="app" data-route="" hidden>
-  <aside class="side" id="side" aria-label="콘솔 메뉴">
+  <aside class="side" id="side" aria-label="패널 메뉴">
     <div class="acct-wrap">
       <button type="button" class="acct-btn" id="acctBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="acctMenu">
         <span class="sq inv" id="acctSq">K</span>
@@ -96,33 +96,33 @@
       </button>
       <div class="menu closed" id="acctMenu" role="menu" aria-label="계정 전환"></div>
     </div>
-    <button type="button" class="side-search" id="openPal"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-search"></use></svg>이동 및 검색<kbd id="kbdHint">Ctrl K</kbd></button>
+    <button type="button" class="side-search" id="openPal"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-search"></use></svg>빠른 이동<kbd id="kbdHint">Ctrl K</kbd></button>
     <nav class="side-nav" id="nav" aria-label="화면">
       <span class="nav-ind" id="navInd"></span>
       <a class="nav-a" href="#overview" data-r="overview"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-overview"></use></svg>개요<span class="r"><span class="kb" aria-hidden="true">G O</span></span></a>
-      <a class="nav-a" href="#inbox" data-r="inbox"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-inbox"></use></svg>주요 알림<span class="r"><span class="kb" aria-hidden="true">G I</span><b class="badge-n" id="navUnread" hidden></b></span></a>
+      <a class="nav-a" href="#inbox" data-r="inbox"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-inbox"></use></svg>받은 갠톡<span class="r"><span class="kb" aria-hidden="true">G I</span><b class="badge-n" id="navUnread" hidden></b></span></a>
       <a class="nav-a" href="#accounts" data-r="accounts"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-accounts"></use></svg>카카오 계정<span class="r"><span class="kb" aria-hidden="true">G A</span><span class="cnt mono" id="navAcctN"></span></span></a>
       <a class="nav-a" href="#rooms" data-r="rooms"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-link"></use></svg>내 방<span class="r"><span class="kb" aria-hidden="true">G B</span><span class="cnt mono" id="navRoomN"></span><i class="rd" id="navRoomRd" hidden></i></span></a>
       <p class="nav-cap" id="navCapMacro"><span>매크로 설정</span><span class="mono" id="navCapAcct"></span></p>
       <a class="nav-a" href="#macro" data-r="macro"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-macro"></use></svg>매크로<span class="r"><span class="kb" aria-hidden="true">G M</span><span class="dirty">수정됨</span><i class="fs" data-fs="macro"></i></span></a>
       <a class="nav-a" href="#reply" data-r="reply"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-reply"></use></svg>갠톡 응답<span class="r"><span class="kb" aria-hidden="true">G R</span><span class="dirty">수정됨</span><i class="fs" data-fs="autoreply"></i></span></a>
       <a class="nav-a" href="#snipe" data-r="snipe"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-snipe"></use></svg>저격 규칙<span class="r"><span class="kb" aria-hidden="true">G S</span><span class="dirty">수정됨</span><i class="fs" data-fs="triggers"></i></span></a>
-      <a class="nav-a" href="#visit" data-r="visit" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-visit"></use></svg>입장·퇴장 로그<span class="r"><span class="kb" aria-hidden="true">G V</span><span class="dirty">수정됨</span><i class="fs" data-fs="visit"></i></span></a>
-      <a class="nav-a" href="#profile" data-r="profile" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-profile"></use></svg>프로필 로그<span class="r"><span class="kb" aria-hidden="true">G P</span><span class="dirty">수정됨</span><i class="fs" data-fs="profile"></i></span></a>
-      <a class="nav-a" href="#guard" data-r="guard" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-guard"></use></svg>올킥 방지<span class="r"><span class="kb" aria-hidden="true">G K</span><span class="dirty">수정됨</span><i class="fs" data-fs="guard"></i></span></a>
+      <a class="nav-a" href="#visit" data-r="visit" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-visit"></use></svg>입장·퇴장 기록<span class="r"><span class="kb" aria-hidden="true">G V</span><span class="dirty">수정됨</span><i class="fs" data-fs="visit"></i></span></a>
+      <a class="nav-a" href="#profile" data-r="profile" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-profile"></use></svg>프로필 기록<span class="r"><span class="kb" aria-hidden="true">G P</span><span class="dirty">수정됨</span><i class="fs" data-fs="profile"></i></span></a>
+      <a class="nav-a" href="#guard" data-r="guard" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-guard"></use></svg>올킥 감지<span class="r"><span class="kb" aria-hidden="true">G K</span><span class="dirty">수정됨</span><i class="fs" data-fs="guard"></i></span></a>
       <a class="nav-a" href="#cover" data-r="cover" data-legacy hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-cover"></use></svg>금지어 검열<span class="r"><span class="kb" aria-hidden="true">G C</span><span class="dirty">수정됨</span><i class="fs" data-fs="cover"></i></span></a>
       <p class="nav-cap" id="navCapRoom" hidden><span>방 설정</span><span id="navCapRoomName"></span></p>
       <a class="nav-a" href="#room" data-r="room" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-overview"></use></svg>방 상태<span class="r"></span></a>
-      <a class="nav-a" href="#r-visit" data-r="r-visit" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-visit"></use></svg>입장·퇴장 로그<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="visit"></i></span></a>
-      <a class="nav-a" href="#r-profile" data-r="r-profile" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-profile"></use></svg>프로필 로그<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="profile"></i></span></a>
+      <a class="nav-a" href="#r-visit" data-r="r-visit" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-visit"></use></svg>입장·퇴장 기록<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="visit"></i></span></a>
+      <a class="nav-a" href="#r-profile" data-r="r-profile" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-profile"></use></svg>프로필 기록<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="profile"></i></span></a>
       <a class="nav-a" href="#r-promo" data-r="r-promo" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-alert"></use></svg>홍보 금지<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="promo"></i></span></a>
-      <a class="nav-a" href="#r-cover" data-r="r-cover" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-cover"></use></svg>가리기·금지어 검열<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="cover"></i></span></a>
-      <a class="nav-a" href="#r-guard" data-r="r-guard" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-guard"></use></svg>올킥 방지<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="guard"></i></span></a>
+      <a class="nav-a" href="#r-cover" data-r="r-cover" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-cover"></use></svg>글 가리기·금지어 검열<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="cover"></i></span></a>
+      <a class="nav-a" href="#r-guard" data-r="r-guard" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-guard"></use></svg>올킥 감지<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="guard"></i></span></a>
       <a class="nav-a" href="#r-games" data-r="r-games" data-room-nav hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-game"></use></svg>미니게임<span class="r"><span class="dirty">수정됨</span><i class="fs" data-rfs="games"></i></span></a>
     </nav>
     <div class="side-foot">
       <div class="lic" id="lic"><div class="row1"><span class="mono" id="who"></span><span id="licLeft"></span></div><span class="track" aria-hidden="true"><i id="licBar"></i></span></div>
-      <div class="links"><a href="/"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-home"></use></svg>사이트</a><button type="button" data-support data-support-ctx="콘솔"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button><button type="button" id="logout"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-logout"></use></svg>나가기</button></div>
+      <div class="links"><a href="/"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-home"></use></svg>사이트</a><button type="button" data-support data-support-ctx="패널"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button><button type="button" id="logout"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-logout"></use></svg>로그아웃</button></div>
     </div>
   </aside>
   <div class="scrim" id="scrim"></div>
@@ -132,23 +132,23 @@
       <div class="crumbs"><span class="c-acct" id="crAcct"></span><span class="sl" aria-hidden="true">/</span><b id="crPage"></b></div>
       <div class="top-r">
         <span class="sync" id="sync"><i class="dot live"></i><span class="txt">발송 서버 정상</span></span>
-        <button type="button" class="top-search" id="topSearch" aria-label="이동 및 검색"><svg class="ic" width="18" height="18" aria-hidden="true"><use href="#i-search"></use></svg></button>
+        <button type="button" class="top-search" id="topSearch" aria-label="빠른 이동"><svg class="ic" width="18" height="18" aria-hidden="true"><use href="#i-search"></use></svg></button>
       </div>
     </header>
     <div class="runstate" id="runstate" role="status" hidden><i class="dot warn"></i><span class="strip-text"></span></div>
-    <main class="view" id="view" tabindex="-1" aria-label="K bot 콘솔">
+    <main class="view" id="view" tabindex="-1" aria-label="K bot 패널">
 
 <!-- ===== 개요 (4.4) ===== -->
 <section class="page" data-route="overview" id="page-overview" aria-labelledby="ov-title" hidden>
  <div class="col">
   <div class="ph"><div><h1 id="ov-title" tabindex="-1">개요</h1>
-      <p>카카오톡 매크로와 설치한 방의 상태입니다. 기능 스위치는 누르는 즉시 저장됩니다.</p></div>
-    <div class="ph-r"><a class="btn" href="#inbox"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-inbox"></use></svg>주요 알림 <b class="badge-n" id="ov-unread" hidden></b></a>
+      <p>카카오톡 매크로와 봇을 설치한 방의 상태입니다. 기능 스위치는 누르면 바로 저장됩니다.</p></div>
+    <div class="ph-r"><a class="btn" href="#inbox"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-inbox"></use></svg>받은 갠톡 <b class="badge-n" id="ov-unread" hidden></b></a>
       <a class="btn primary" href="#account-add" id="ov-add"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>계정 추가</a></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <div class="grp" id="ov-attn" hidden><h2 class="grp-t">확인 필요<span id="ov-attn-n"></span></h2>
     <section class="sec" aria-label="확인 필요" id="ov-attn-list"></section></div>
-  <div class="sec ov-empty" id="ov-empty" hidden><p class="empty" id="ov-empty-t">구매한 상품이 없습니다.</p><div class="acts-c" id="ov-empty-acts"></div></div>
+  <div class="sec ov-empty" id="ov-empty" hidden><p class="empty" id="ov-empty-t">이용 중인 서비스가 없습니다.</p><div class="acts-c" id="ov-empty-acts"></div></div>
   <div class="metrics" role="list" id="ov-metrics">
     <div class="metric" role="listitem" data-metric="unread"><span class="k">안 읽은 갠톡<span>전체 계정</span></span><div class="v"><b class="tnum">0</b></div><span class="d"></span></div>
     <div class="metric" role="listitem" data-metric="macro"><span class="k">카카오톡 매크로<span>남은 기간</span></span><div class="v"><b class="tnum"></b></div><span class="d"></span></div>
@@ -160,32 +160,32 @@
       <section class="sec" aria-label="기능">
         <div class="feat-h" aria-hidden="true"><span>기능</span><span class="h-r">대화방</span><span class="h-l">요약</span><span>사용</span><span></span></div>
         <div class="feat" data-feat="macro" data-go="macro" role="link" tabindex="0" aria-label="매크로 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="macro"></i>매크로</b><span>홍보 메시지 주기 발송</span></div>
+          <div class="fn"><b><i class="fs" data-ovdot="macro"></i>매크로</b><span>홍보 메시지 자동 발송</span></div>
           <div class="fr" data-rooms="macro"></div><div class="fl" data-sum="macro"></div>
           <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="macro" aria-label="매크로 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
-        <div class="feat" data-legacy hidden data-feat="visit" data-go="visit" role="link" tabindex="0" aria-label="입장·퇴장 로그 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="visit"></i>입장·퇴장 로그</b><span>입장·퇴장 기록과 방 안내</span></div>
+        <div class="feat" data-legacy hidden data-feat="visit" data-go="visit" role="link" tabindex="0" aria-label="입장·퇴장 기록 설정 열기">
+          <div class="fn"><b><i class="fs" data-ovdot="visit"></i>입장·퇴장 기록</b><span>들어오고 나간 사람 기록·방 안내</span></div>
           <div class="fr" data-rooms="visit"></div><div class="fl" data-sum="visit"></div>
-          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="visit" aria-label="입장·퇴장 로그 사용"><span class="sw" aria-hidden="true"></span></span></div>
+          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="visit" aria-label="입장·퇴장 기록 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
-        <div class="feat" data-legacy hidden data-feat="profile" data-go="profile" role="link" tabindex="0" aria-label="프로필 로그 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="profile"></i>프로필 로그</b><span>닉네임 변경 기록과 방 안내</span></div>
+        <div class="feat" data-legacy hidden data-feat="profile" data-go="profile" role="link" tabindex="0" aria-label="프로필 기록 설정 열기">
+          <div class="fn"><b><i class="fs" data-ovdot="profile"></i>프로필 기록</b><span>닉네임 변경 기록과 방 안내</span></div>
           <div class="fr" data-rooms="profile"></div><div class="fl" data-sum="profile"></div>
-          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="profile" aria-label="프로필 로그 사용"><span class="sw" aria-hidden="true"></span></span></div>
+          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="profile" aria-label="프로필 기록 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
-        <div class="feat" data-legacy hidden data-feat="guard" data-go="guard" role="link" tabindex="0" aria-label="올킥 방지 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="guard"></i>올킥 방지</b><span>강퇴 다발 감지·기록</span></div>
+        <div class="feat" data-legacy hidden data-feat="guard" data-go="guard" role="link" tabindex="0" aria-label="올킥 감지 설정 열기">
+          <div class="fn"><b><i class="fs" data-ovdot="guard"></i>올킥 감지</b><span>여러 명 내보내기 감지·기록</span></div>
           <div class="fr" data-rooms="guard"></div><div class="fl" data-sum="guard"></div>
-          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="guard" aria-label="올킥 방지 사용"><span class="sw" aria-hidden="true"></span></span></div>
+          <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="guard" aria-label="올킥 감지 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
         <div class="feat" data-legacy hidden data-feat="cover" data-go="cover" role="link" tabindex="0" aria-label="금지어 검열 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="cover"></i>금지어 검열</b><span>욕설·금지어·링크 가림</span></div>
+          <div class="fn"><b><i class="fs" data-ovdot="cover"></i>금지어 검열</b><span>욕설·금지어·링크 글 가리기</span></div>
           <div class="fr" data-rooms="cover"></div><div class="fl" data-sum="cover"></div>
           <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="cover" aria-label="금지어 검열 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
         <div class="feat" data-feat="autoreply" data-go="reply" role="link" tabindex="0" aria-label="갠톡 응답 설정 열기">
-          <div class="fn"><b><i class="fs" data-ovdot="autoreply"></i>갠톡 응답</b><span>1:1 대화 자동 응답</span></div>
+          <div class="fn"><b><i class="fs" data-ovdot="autoreply"></i>갠톡 응답</b><span>갠톡(1:1 대화) 자동 응답</span></div>
           <div class="fr" data-rooms="autoreply"></div><div class="fl" data-sum="autoreply"></div>
           <div><span class="swl"><input type="checkbox" role="switch" class="swi" data-ov="autoreply" aria-label="갠톡 응답 사용"><span class="sw" aria-hidden="true"></span></span></div>
           <span class="go"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-right"></use></svg></span></div>
@@ -198,10 +198,10 @@
     <div class="ov-side">
       <div class="grp" id="ov-rooms-grp"><h2 class="grp-t">내 방<span id="ov-rooms-n"></span></h2>
         <section class="sec"><div id="ov-rooms"></div>
-          <div class="sec-f"><span>누르면 그 방의 상태를 엽니다.</span><a class="btn sm" href="#rooms">전체 보기</a></div></section></div>
+          <div class="sec-f"><span>방을 누르면 방 상태 화면으로 이동합니다.</span><a class="btn sm" href="#rooms">전체 보기</a></div></section></div>
       <div class="grp" id="ov-acct-grp"><h2 class="grp-t">카카오 계정<span id="ov-acct-n"></span></h2>
         <section class="sec"><div id="ov-accts"></div>
-          <div class="sec-f"><span>누르면 그 계정으로 전환합니다.</span><a class="btn sm" href="#account-add" data-add-link><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-plus"></use></svg>추가</a></div></section></div>
+          <div class="sec-f"><span>계정을 누르면 그 계정으로 바뀝니다.</span><a class="btn sm" href="#account-add" data-add-link><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-plus"></use></svg>추가</a></div></section></div>
       <div class="grp" id="ov-feed-grp" data-legacy hidden><h2 class="grp-t">최근 기록</h2>
         <section class="sec clip"><ul class="feed" id="ovFeed"></ul>
           <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><a class="btn sm" href="#visit">전체 기록</a></div>
@@ -211,9 +211,9 @@
  </div>
 </section>
 
-<!-- ===== 주요 알림 (4.5) ===== -->
+<!-- ===== 받은 갠톡 (4.5) ===== -->
 <section class="page full" data-route="inbox" id="inbox" data-view="list" aria-labelledby="chat-title" hidden>
- <h1 class="sr" id="chat-title" tabindex="-1">전체 대화</h1>
+ <h1 class="sr" id="chat-title" tabindex="-1">받은 갠톡</h1>
  <div class="ib">
   <div class="ib-list kkt-list" id="kkt">
     <div class="ib-lh">
@@ -258,41 +258,41 @@
 <!-- ===== 카카오 계정 (4.6 · ACCOUNTS_V1 6.9) ===== -->
 <section class="page" data-route="accounts" id="account-block" aria-labelledby="acc-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="acc-title" tabindex="-1">카카오 계정</h1><p>카카오톡 매크로로 발송할 내 카카오 계정을 최대 <span data-max-acc></span>개까지 등록합니다. 등록된 계정의 발송과 기록은 서버가 수행합니다.</p></div>
+  <div class="ph"><div><h1 id="acc-title" tabindex="-1">카카오 계정</h1><p>카카오톡 매크로로 발송할 내 카카오 계정을 최대 <span data-max-acc></span>개까지 등록할 수 있습니다. 등록한 뒤 발송과 기록은 K bot 서버가 알아서 합니다.</p></div>
     <div class="ph-r"><a class="btn primary" href="#account-add" id="acc-add"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>계정 추가</a></div></div>
   <div class="cap-bar"><span class="track"><i id="acc-cap"></i></span><span class="mono" id="acc-cap-n"></span><span>등록됨</span></div>
   <section class="sec clip"><div class="tbl-wrap" id="acc-tbl-wrap">
     <table class="tbl acct-tbl stack"><thead><tr><th>계정</th><th>상태</th><th>안 읽음</th><th style="text-align:right">관리</th></tr></thead>
       <tbody id="account-list"></tbody></table></div>
-    <p class="empty" id="acc-empty" hidden>등록된 카카오 계정이 없습니다. 계정 추가를 눌러 첫 계정을 등록하십시오.</p>
-    <div class="sec-f"><span>카카오 비밀번호는 저장하지 않습니다. 로그인이 끊긴 계정은 재등록이 필요합니다.</span></div></section>
-  <footer class="limit" aria-labelledby="limitT"><h2 class="grp-t" id="limitT">서버 운영 조건</h2>
-    <p>발송은 K bot 서버가 수행합니다. 계정을 등록한 뒤에는 휴대폰을 꺼도 서버 프로세스가 동작하는 동안 해당 계정으로 발송합니다. 휴대폰은 등록할 때 카카오톡에 확인 번호를 입력하는 데에만 필요합니다.</p>
-    <p>서버는 약 10분마다 자기 주소를 호출해 유휴 상태로 잠드는 것을 방지합니다. 이 호출이 실패하거나, 프로세스가 메모리 부족으로 종료되거나, 무료 사용 한도로 인스턴스가 중지되면 그 사이에는 발송하지 않습니다. 항상 켜져 있다고 보장하지 않습니다. 계정은 데이터베이스에 남으며, 프로세스가 다시 시작되면 이어서 접속합니다.</p></footer>
+    <p class="empty" id="acc-empty" hidden>등록된 카카오 계정이 없습니다. [계정 추가]를 눌러 첫 계정을 등록해 주세요.</p>
+    <div class="sec-f"><span>카카오 비밀번호는 저장하지 않습니다. 로그인이 끊긴 계정은 다시 등록해야 합니다.</span></div></section>
+  <footer class="limit" aria-labelledby="limitT"><h2 class="grp-t" id="limitT">서버 이용 안내</h2>
+    <p>발송은 K bot 서버가 합니다. 계정을 등록한 뒤에는 휴대폰을 꺼도 그 계정으로 발송합니다. 휴대폰은 등록할 때 카카오톡에 확인 번호를 입력하는 데에만 필요합니다.</p>
+    <p>서버 점검이나 장애가 있으면 그동안 발송이 잠시 멈출 수 있습니다. 등록한 계정은 그대로 남아 있어, 서버가 다시 켜지면 자동으로 이어서 접속합니다.</p></footer>
  </div>
 </section>
 
 <!-- ===== 카카오 계정 추가 (4.6) ===== -->
 <section class="page" data-route="account-add" id="page-add" aria-labelledby="add-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="add-title" tabindex="-1">카카오 계정 추가</h1><p id="add-desc">카카오 계정을 입력한 뒤, 휴대폰 카카오톡에 표시된 입력란에 번호를 입력합니다.</p></div>
+  <div class="ph"><div><h1 id="add-title" tabindex="-1">카카오 계정 추가</h1><p id="add-desc">카카오 계정을 입력하면 확인 번호가 나옵니다. 이 번호를 휴대폰 카카오톡에 입력하면 등록이 끝납니다.</p></div>
     <div class="ph-r"><span class="cap-bar"><span class="mono" id="add-cap"></span><span>사용</span></span></div></div>
   <ol class="stepper" id="add-steps" aria-label="진행 단계">
     <li class="stp cur" data-s="1" aria-current="step"><span class="bar"><i></i></span><span class="lbl"><span class="num-c"><span>1</span><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="t">계정 입력</span></span></li>
     <li class="stp" data-s="2"><span class="bar"><i></i></span><span class="lbl"><span class="num-c"><span>2</span><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="t">카카오톡에 번호 입력</span></span></li>
     <li class="stp" data-s="3"><span class="bar"><i></i></span><span class="lbl"><span class="num-c"><span>3</span><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="t">완료</span></span></li>
   </ol>
-  <p class="empty sec add-full" id="add-full" hidden><span>카카오 계정은 <span data-max-acc></span>개까지 등록할 수 있습니다. 사용하지 않는 계정을 해제한 뒤 다시 시도하십시오.</span> <a class="btn sm" href="#accounts">카카오 계정</a></p>
-  <div class="sec gate" id="add-nomacro" hidden><div class="off-note"><span>카카오 계정 등록은 카카오톡 매크로를 이용 중일 때 할 수 있습니다.</span><a class="btn sm primary" href="/buy?macro=1">구매</a></div></div>
+  <p class="empty sec add-full" id="add-full" hidden><span>카카오 계정은 <span data-max-acc></span>개까지 등록할 수 있습니다. 쓰지 않는 계정의 등록을 해제한 뒤 다시 시도해 주세요.</span> <a class="btn sm" href="#accounts">카카오 계정</a></p>
+  <div class="sec gate" id="add-nomacro" hidden><div class="off-note"><span>카카오 계정은 카카오톡 매크로 이용 기간에만 등록할 수 있습니다.</span><a class="btn sm primary" href="/buy?macro=1">구매</a></div></div>
   <div class="wz-grid" id="add-grid">
    <div class="wz-stage" id="add-stage">
     <form class="wz-card wz-pane" id="add-form" data-step="1" novalidate>
       <div class="wz-body">
-        <div class="fld"><label for="email">카카오계정</label><input class="inp" id="email" type="email" autocomplete="username" placeholder="name@kakao.com 또는 전화번호"><span class="errt" id="email-error" role="alert"></span></div>
-        <div class="fld"><label for="password">비밀번호</label><input class="inp" id="password" type="password" autocomplete="current-password" placeholder="카카오계정 비밀번호"><span class="errt" id="password-error" role="alert"></span></div>
+        <div class="fld"><label for="email">카카오 계정</label><input class="inp" id="email" type="email" autocomplete="username" placeholder="name@kakao.com 또는 전화번호"><span class="errt" id="email-error" role="alert"></span></div>
+        <div class="fld"><label for="password">비밀번호</label><input class="inp" id="password" type="password" autocomplete="current-password" placeholder="카카오 계정 비밀번호"><span class="errt" id="password-error" role="alert"></span></div>
         <p class="errt" id="add-error" role="alert"></p>
         <div id="force-box" class="conflict" role="alert" hidden>
-          <span><b>같은 계정이 다른 태블릿·PC에 접속되어 있어 등록하지 못했습니다.</b> 다른 기기 접속을 끊으면 그 기기의 카카오톡이 로그아웃되고 이 계정을 다시 등록합니다.</span>
+          <span><b>같은 계정이 다른 태블릿·PC에 접속되어 있어 등록하지 못했습니다.</b> 다른 기기 접속을 끊으면 그 기기의 카카오톡이 로그아웃되고, 이 계정의 등록을 이어서 진행합니다.</span>
           <div class="row"><button type="button" class="btn primary sm" id="force"><span class="spin"></span><span class="lbl-idle">다른 기기 끊기</span></button><a class="btn sm ghost" href="#accounts">취소</a></div>
         </div>
       </div>
@@ -301,8 +301,8 @@
     <div class="wz-card wz-pane" id="passcode" data-step="2" hidden>
       <div class="pass-grid">
         <div class="pass-l">
-          <h3 id="code-title">휴대폰 카카오톡에 아래 번호를 입력하십시오</h3>
-          <p>카카오톡에 표시된 입력란에 입력하면 등록이 자동으로 완료됩니다. 이 화면에는 입력하지 않습니다.</p>
+          <h3 id="code-title">휴대폰 카카오톡에 아래 번호를 입력해 주세요</h3>
+          <p>번호는 이 화면이 아니라 휴대폰 카카오톡에 뜬 입력란에 입력합니다. 입력하면 등록이 자동으로 끝납니다.</p>
           <div class="pass-code" id="code" aria-live="polite"></div>
           <div class="pass-copy"><button type="button" class="btn sm" id="code-copy"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-copy"></use></svg>번호 복사</button><span class="mono" id="code-email"></span><span id="code-left"></span></div>
           <p class="errt" id="code-error" role="alert"></p>
@@ -314,17 +314,17 @@
     <div class="wz-card wz-pane" id="add-done" data-step="3" hidden>
       <div class="done-box"><span class="done-mk" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         <h3 id="add-done-title" tabindex="-1">등록 완료</h3>
-        <p><span class="mono" id="add-done-email"></span> 계정이 <span id="add-done-msg">등록되었습니다. 기능은 모두 꺼진 상태로 시작합니다.</span></p>
-        <dl class="kvs"><dt>계정</dt><dd class="mono" id="add-done-acct"></dd><dt>기기 ID</dt><dd class="mono" id="add-done-dev"></dd><dt>등록 시각</dt><dd class="mono" id="add-done-at"></dd><dt>상태</dt><dd id="add-done-state"><span class="state"><i class="dot live"></i>접속 중</span></dd></dl>
-        <div class="acts start"><button type="button" class="btn primary" id="add-open">설정 열기</button><a class="btn" href="#inbox">주요 알림</a><button type="button" class="btn ghost" id="add-more">다른 계정 추가</button></div>
+        <p><span class="mono" id="add-done-email"></span> 계정이 <span id="add-done-msg">등록되었습니다. 모든 기능은 꺼진 상태로 시작하니, 필요한 기능을 켜 주세요.</span></p>
+        <dl class="kvs"><dt>계정</dt><dd class="mono" id="add-done-acct"></dd><dt>등록 시각</dt><dd class="mono" id="add-done-at"></dd><dt>상태</dt><dd id="add-done-state"><span class="state"><i class="dot live"></i>접속 중</span></dd></dl>
+        <div class="acts start"><button type="button" class="btn primary" id="add-open">설정 열기</button><a class="btn" href="#inbox">받은 갠톡</a><button type="button" class="btn ghost" id="add-more">다른 계정 추가</button></div>
       </div>
     </div>
    </div>
    <aside class="explain" id="add-ex" aria-label="안내">
      <div data-ex="1"><h4>비밀번호</h4><p>카카오 로그인 확인에만 사용하며 저장하지 않습니다.</p></div>
-     <div data-ex="2"><h4>확인 번호</h4><p>휴대폰 카카오톡에 입력란이 표시됩니다. 이 화면에는 입력하지 않습니다. 확인이 끝나면 다음 단계로 넘어갑니다.</p></div>
-     <div data-ex="1"><h4>다른 기기 접속</h4><p>같은 계정이 다른 태블릿·PC에 접속되어 있으면 등록이 거부될 수 있습니다. 이 경우 다른 기기 끊기를 선택하십시오.</p></div>
-     <div data-ex="3"><h4>등록 후</h4><p>발송과 기록은 K bot 서버가 수행합니다. 휴대폰을 꺼도 동작하며, 기능은 모두 꺼진 상태로 시작합니다.</p></div>
+     <div data-ex="2"><h4>확인 번호</h4><p>휴대폰 카카오톡에 입력란이 뜹니다. 번호는 이 화면이 아니라 그 입력란에 입력합니다. 확인이 끝나면 다음 단계로 넘어갑니다.</p></div>
+     <div data-ex="1"><h4>다른 기기 접속</h4><p>같은 계정이 다른 태블릿·PC에 접속되어 있으면 등록이 거부될 수 있습니다. 이때는 [다른 기기 끊기]를 눌러 주세요.</p></div>
+     <div data-ex="3"><h4>등록 후</h4><p>발송과 기록은 K bot 서버가 합니다. 휴대폰이 꺼져 있어도 동작합니다. 모든 기능은 꺼진 상태로 시작하니, 필요한 기능을 직접 켜 주세요.</p></div>
    </aside>
   </div>
  </div>
@@ -333,7 +333,7 @@
 <!-- ===== 매크로 (4.7) ===== -->
 <section class="page" data-route="macro" id="page-macro" aria-labelledby="macro-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="macro-title" tabindex="-1">매크로</h1><p>선택한 오픈채팅방에 메시지를 정해진 간격으로 발송합니다. 발송은 K bot 서버가 수행합니다.</p></div></div>
+  <div class="ph"><div><h1 id="macro-title" tabindex="-1">매크로</h1><p>고른 오픈채팅방에 메시지를 정해 둔 간격마다 보냅니다. 발송은 K bot 서버가 합니다.</p></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <div class="banner" data-macro-off role="status" hidden></div>
   <form id="macro-form" class="stack" novalidate>
@@ -344,16 +344,16 @@
       <div class="srow stack" id="row-macro-msg"><div class="srow-l"><label class="lb" for="macro-message">메시지</label><p>줄바꿈이 그대로 발송됩니다.</p></div>
         <div class="srow-r"><div class="w100"><textarea class="ta" id="macro-message" maxlength="2000" rows="4"></textarea>
           <div class="chips-meta"><span>최대 2,000자</span><span class="mono" id="macro-count">0 / 2,000</span></div></div></div></div>
-      <div class="srow stack" id="row-macro-img"><div class="srow-l"><span class="lb">이미지</span><p>최대 5장. 첨부하면 매번 메시지와 함께 발송합니다.</p></div>
+      <div class="srow stack" id="row-macro-img"><div class="srow-l"><span class="lb">이미지</span><p>최대 5장까지 첨부할 수 있습니다. 첨부하면 매번 메시지와 함께 보냅니다.</p></div>
         <div class="srow-r"><div class="imgs" id="thumbs"></div><input type="file" id="images" accept="image/jpeg,image/png,image/webp" multiple hidden></div></div>
     </div></div>
     <div class="dep" data-dep-off="macro-on" data-open="true"><div class="dep-in"><div class="off-note"><span>매크로가 꺼져 있습니다. 켜면 메시지, 발송 간격, 보낼 방이 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="macro-on">켜기</button></div></div></div>
    </section>
    <div class="dep" data-dep="macro-on" data-open="false"><div class="dep-in"><div class="stack-24">
      <div class="grp"><h2 class="grp-t">발송 간격</h2><section class="sec">
-       <div class="srow" id="row-macro-base"><div class="srow-l"><span class="lb">기본 간격</span><p>방마다 발송과 발송 사이의 기본 시간입니다. 1~1,440분.</p></div>
+       <div class="srow" id="row-macro-base"><div class="srow-l"><span class="lb">기본 간격</span><p>같은 방에 다시 보내기까지의 기본 시간입니다. 1~1,440분.</p></div>
          <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="기본 간격 줄이기">−</button><input id="base-min" type="text" inputmode="numeric" autocomplete="off" data-min="1" data-max="1440" aria-label="기본 간격"><button type="button" data-step="1" aria-label="기본 간격 늘리기">+</button><span class="unit">분</span></div></div></div>
-       <div class="srow" id="row-macro-rand"><div class="srow-l"><span class="lb">랜덤 간격</span><p>기본 간격에 0분부터 이 값까지를 무작위로 더합니다. 0~1,440분.</p></div>
+       <div class="srow" id="row-macro-rand"><div class="srow-l"><span class="lb">랜덤 간격</span><p>기본 간격에 0분부터 이 값까지를 무작위로 더해, 보내는 시각을 조금씩 바꿉니다. 0~1,440분.</p></div>
          <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="랜덤 간격 줄이기">−</button><input id="random-min" type="text" inputmode="numeric" autocomplete="off" data-min="0" data-max="1440" aria-label="랜덤 간격"><button type="button" data-step="1" aria-label="랜덤 간격 늘리기">+</button><span class="unit">분</span></div></div></div>
        <div class="srow stack" id="row-macro-viz"><div class="srow-l"><span class="lb">예상 발송</span><p>지금부터 24시간 동안의 예상입니다. 실제 시각은 서버가 정합니다.</p></div><div class="srow-r"><div class="mviz" id="macro-viz"></div></div></div>
      </section></div>
@@ -372,7 +372,7 @@
 <!-- ===== 입장·퇴장 로그 (4.8) ===== -->
 <section class="page" data-route="visit" id="page-visit" aria-labelledby="visit-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="visit-title" tabindex="-1">입장·퇴장 로그</h1><p>선택한 방에 누가 언제 들어오고 나갔는지 기록합니다. 켜져 있는 동안 방에 입장·퇴장 안내도 보냅니다.</p></div></div>
+  <div class="ph"><div><h1 id="visit-title" tabindex="-1">입장·퇴장 기록</h1><p>선택한 방에 누가 언제 들어오고 나갔는지 기록합니다. 켜져 있는 동안 방에 입장·퇴장 안내도 보냅니다.</p></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <div class="metrics" role="list" id="visit-metrics">
     <div class="metric" role="listitem" data-metric="join"><span class="k">오늘 입장<span>24시간</span></span><div class="v"><b class="tnum">0</b><svg class="spark" width="72" height="26" viewBox="0 0 72 26" aria-hidden="true"></svg></div><span class="d"></span></div>
@@ -387,8 +387,8 @@
       <div class="srow stack" id="row-visit-rooms"><div class="srow-l"><span class="lb">대화방</span><p>기록하고 안내를 보낼 오픈채팅방을 선택합니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="rooms" id="visit-open" role="group" aria-label="대화방"></div>
           <div class="rooms-meta"><span data-rooms-count="visit"></span><button type="button" class="btn sm ghost" data-load-rooms><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>대화방 불러오기</button></div></div></div></div>
-      <div class="srow stack" id="row-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 시 예시입니다. 퇴장 시에는 [퇴장안내]와 퇴장 시각을 적습니다. 이름이 바뀐 적이 있으면 이전 이름도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="visit"></span><div class="bub notice">[입장안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;입장로그&#10;- 2026-10-09 21:14</div></div></div></div>
+      <div class="srow stack" id="row-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 방에는 첫 줄만 보이고, [전체보기]를 누르면 그 사람의 ID·옾링·프로필 사진과 기록이 보입니다. 퇴장 때는 퇴장 시각과 머문 시간을, 닉네임이나 옾링이 바뀐 적이 있으면 예전 프로필도 적습니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="visit"></span><div class="bub notice fold">📥 입장 안내 · @하늘<details class="more"><summary><span class="o">전체보기</span><span class="c">접기</span></summary><div class="more-b">━━━━━━━━━━━━━━&#10;👤 하늘&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;🕒 입장 기록 · 2회&#10; ├ 2026-10-08 20:02&#10; └ 2026-10-09 21:14&#10;━━━━━━━━━━━━━━</div></details></div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 기록이 꺼져 있습니다. 켜면 기록할 방과 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="visit-on">켜기</button></div></div></div>
     <div class="sec-f"><span>기록은 이 기능을 켠 방에서만 남습니다. K bot은 사람을 내보내지 않습니다.</span></div>
@@ -407,7 +407,7 @@
     </div>
     <p class="errt pad" id="visit-log-error" role="alert"></p>
     <div class="tbl-wrap"><table class="tbl stack" id="visit-tbl"><thead><tr><th>이름 · 방</th><th>최근 입장</th><th>최근 퇴장</th><th>이름 변경</th><th>오픈프로필 링크</th><th class="chev-c"><span class="sr">펼치기</span></th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span id="visit-cnt"></span><span>행을 누르면 시간순 기록이 펼쳐집니다.</span></div>
+    <div class="sec-f"><span id="visit-cnt"></span><span>이름을 누르면 시간순 기록이 펼쳐집니다.</span></div>
    </section></div>
  </div>
 </section>
@@ -415,21 +415,21 @@
 <!-- ===== 프로필 로그 (4.8) ===== -->
 <section class="page" data-route="profile" id="page-profile" aria-labelledby="profile-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="profile-title" tabindex="-1">프로필 로그</h1><p>선택한 방에서 닉네임이 바뀐 사람을 이전 이름과 함께 기록합니다. 켜져 있는 동안 방에 변경 안내도 보냅니다.</p></div></div>
+  <div class="ph"><div><h1 id="profile-title" tabindex="-1">프로필 기록</h1><p>선택한 방에서 닉네임이 바뀐 사람을 이전 이름과 함께 기록합니다. 켜져 있는 동안 방에 변경 안내도 보냅니다.</p></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <form id="profile-form" class="stack" novalidate>
    <section class="sec" aria-label="프로필 변경 감지">
-    <div class="srow inline main" id="row-profile-on"><div class="srow-l"><span class="lb">프로필 변경 감지</span><p>켜면 선택한 방에서 닉네임을 바꾼 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다. 처음 본 사람은 기준만 잡고, 그 뒤 이름이 바뀔 때부터 기록합니다.</p></div>
+    <div class="srow inline main" id="row-profile-on"><div class="srow-l"><span class="lb">프로필 변경 감지</span><p>켜면 선택한 방에서 닉네임을 바꾼 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다. 처음 확인한 사람은 지금 이름만 저장하고, 그 뒤 이름이 바뀔 때부터 기록합니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="profile-on" aria-label="프로필 변경 감지"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="profile-on" data-open="false"><div class="dep-in">
       <div class="srow stack" id="row-profile-rooms"><div class="srow-l"><span class="lb">대화방</span><p>기록하고 안내를 보낼 오픈채팅방을 선택합니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="rooms" id="profile-open" role="group" aria-label="대화방"></div>
           <div class="rooms-meta"><span data-rooms-count="profile"></span><button type="button" class="btn sm ghost" data-load-rooms><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>대화방 불러오기</button></div></div></div></div>
-      <div class="srow stack" id="row-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>두 번 이상 바꾼 사람은 누적 횟수도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="profile"></span><div class="bub notice">[프로필 변경 감지]&#10;이름 : @하늘_판매&#10;이전 : 하늘&#10;변경 : 2026-10-09 21:15</div></div></div></div>
+      <div class="srow stack" id="row-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>방에는 첫 줄만 보이고, [전체보기]를 누르면 그 사람의 ID·옾링·프로필 사진과 바뀐 내용(전·후)이 보입니다. 닉네임, 옾링(다른 오픈프로필로 바꿈), 프로필 사진이 바뀔 때마다 알립니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-notice-who="profile"></span><div class="bub notice fold">🔔 프로필 변경 감지 · @하늘_판매<details class="more"><summary><span class="o">전체보기</span><span class="c">접기</span></summary><div class="more-b">━━━━━━━━━━━━━━&#10;👤 하늘_판매&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;✏️ 바뀐 내용&#10;▸ 닉네임&#10; ├ 전 : 하늘&#10; └ 후 : 하늘_판매&#10;━━━━━━━━━━━━━━</div></details></div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 변경 감지가 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="profile-on">켜기</button></div></div></div>
-    <div class="sec-f"><span>기록은 이 기능을 켠 방에서만 남습니다. 입장·퇴장 로그와 따로 켜고 끕니다.</span></div>
+    <div class="sec-f"><span>기록은 이 기능을 켠 방에서만 남습니다. 입장·퇴장 기록과 따로 켜고 끕니다.</span></div>
    </section>
    <p class="errt" id="profile-error" role="alert"></p>
   </form>
@@ -441,7 +441,7 @@
     </div>
     <p class="errt pad" id="profile-log-error" role="alert"></p>
     <div class="tbl-wrap"><table class="tbl stack" id="profile-tbl"><thead><tr><th>현재 이름 · 방</th><th>최근 변경</th><th>변경 이력</th><th style="text-align:right">횟수</th><th class="chev-c"><span class="sr">펼치기</span></th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span id="profile-cnt"></span><span>마지막으로 본 시각은 펼친 기록에 표시됩니다.</span></div>
+    <div class="sec-f"><span id="profile-cnt"></span><span>마지막으로 확인한 시각은 펼친 기록에 표시됩니다.</span></div>
    </section></div>
  </div>
 </section>
@@ -449,21 +449,21 @@
 <!-- ===== 올킥 방지 (4.9) ===== -->
 <section class="page" data-route="guard" id="page-guard" aria-labelledby="guard-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="guard-title" tabindex="-1">올킥 방지</h1><p>짧은 시간에 강퇴가 몰리면 올킥으로 감지하여 기록합니다.</p></div></div>
+  <div class="ph"><div><h1 id="guard-title" tabindex="-1">올킥 감지</h1><p>짧은 시간에 여러 명을 내보내면 올킥으로 감지해 기록합니다.</p></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <form id="guard-form" class="stack" novalidate>
    <section class="sec" aria-label="올킥 감지">
-    <div class="srow inline main" id="row-guard-on"><div class="srow-l"><span class="lb">올킥 감지</span><p>켜면 선택한 방에서 정해진 시간 안에 정해진 수 이상 강퇴가 일어날 때 감지 기록을 남깁니다.</p></div>
+    <div class="srow inline main" id="row-guard-on"><div class="srow-l"><span class="lb">올킥 감지</span><p>켜면 선택한 방에서 정해진 시간 안에 정해진 인원 이상을 내보내면 감지 기록을 남깁니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="guard-on" aria-label="올킥 감지"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="guard-on" data-open="false"><div class="dep-in">
       <div class="srow stack" id="row-guard-rooms"><div class="srow-l"><span class="lb">대화방</span><p>감지할 오픈채팅방을 선택합니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="rooms" id="guard-open" role="group" aria-label="대화방"></div>
           <div class="rooms-meta"><span data-rooms-count="guard"></span><button type="button" class="btn sm ghost" data-load-rooms><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>대화방 불러오기</button></div></div></div></div>
-      <div class="srow" id="row-guard-secs"><div class="srow-l"><span class="lb">감지 시간</span><p>이 시간 안의 강퇴 수를 셉니다. 5~300초.</p></div>
+      <div class="srow" id="row-guard-secs"><div class="srow-l"><span class="lb">감지 시간</span><p>이 시간 안에 내보낸 인원을 셉니다. 5~300초.</p></div>
         <div class="srow-r"><input type="range" class="range" id="guard-secs-range" min="5" max="300" step="5" value="30" aria-label="감지 시간 조절" data-twin="guard-secs"><div class="num"><button type="button" data-step="-1" aria-label="감지 시간 줄이기">−</button><input id="guard-secs" type="text" inputmode="numeric" autocomplete="off" data-min="5" data-max="300" data-stepby="5" aria-label="감지 시간"><button type="button" data-step="1" aria-label="감지 시간 늘리기">+</button><span class="unit">초</span></div></div></div>
-      <div class="srow" id="row-guard-count"><div class="srow-l"><span class="lb">강퇴 수</span><p>이 수 이상이면 올킥으로 감지합니다. 3~30건.</p></div>
-        <div class="srow-r"><input type="range" class="range" id="guard-count-range" min="3" max="30" step="1" value="5" aria-label="강퇴 수 조절" data-twin="guard-count"><div class="num"><button type="button" data-step="-1" aria-label="강퇴 수 줄이기">−</button><input id="guard-count" type="text" inputmode="numeric" autocomplete="off" data-min="3" data-max="30" aria-label="강퇴 수"><button type="button" data-step="1" aria-label="강퇴 수 늘리기">+</button><span class="unit">건</span></div></div></div>
-      <div class="srow stack" id="row-guard-preview"><div class="srow-l"><span class="lb">미리 보기</span><p>예시 강퇴 기록에 지금 기준을 적용한 결과입니다.</p></div>
+      <div class="srow" id="row-guard-count"><div class="srow-l"><span class="lb">내보낸 인원</span><p>이 인원 이상이면 올킥으로 감지합니다. 3~30명.</p></div>
+        <div class="srow-r"><input type="range" class="range" id="guard-count-range" min="3" max="30" step="1" value="5" aria-label="내보낸 인원 조절" data-twin="guard-count"><div class="num"><button type="button" data-step="-1" aria-label="내보낸 인원 줄이기">−</button><input id="guard-count" type="text" inputmode="numeric" autocomplete="off" data-min="3" data-max="30" aria-label="내보낸 인원"><button type="button" data-step="1" aria-label="내보낸 인원 늘리기">+</button><span class="unit">명</span></div></div></div>
+      <div class="srow stack" id="row-guard-preview"><div class="srow-l"><span class="lb">미리 보기</span><p>예시 내보내기 기록에 지금 기준을 적용한 결과입니다.</p></div>
         <div class="srow-r"><div class="kt" id="guard-kt">
           <p class="sentence" id="guard-sent"></p>
           <div class="kt-strip" id="guard-strip" aria-hidden="true"><span class="kt-win" id="guard-win"></span><span class="kt-cap">예시 기록</span></div>
@@ -471,14 +471,14 @@
           <span class="kt-res" id="guard-res" role="status"></span></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="guard-on" data-open="true"><div class="dep-in"><div class="off-note"><span>올킥 감지가 꺼져 있습니다. 켜면 감지할 방과 감지 기준이 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="guard-on">켜기</button></div></div></div>
-    <div class="sec-f"><span>K bot은 강퇴를 막거나 강퇴된 사람을 다시 초대하지 않습니다. 감지와 기록만 합니다.</span></div>
+    <div class="sec-f"><span>K bot은 내보내기를 막거나 내보내진 사람을 다시 초대하지 않습니다. 감지와 기록만 합니다.</span></div>
    </section>
    <p class="errt" id="guard-error" role="alert"></p>
   </form>
   <div class="grp"><h2 class="grp-t">최근 감지<span>최근 20건 · 최신순</span></h2>
    <section class="sec clip"><ul class="alerts" id="guard-list"></ul>
     <p class="errt pad" id="guard-log-error" role="alert"></p>
-    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>감지 문구는 서버가 기록한 그대로 표시합니다.</span></div></section></div>
+    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span></div></section></div>
  </div>
 </section>
 
@@ -501,7 +501,7 @@
    </section>
    <div class="dep" data-dep="cover-on" data-open="false"><div class="dep-in">
     <div class="grp"><h2 class="grp-t">가릴 내용</h2><section class="sec">
-      <div class="srow inline" id="row-cover-base"><div class="srow-l"><span class="lb">기본 욕설 목록</span><p>서버에 내장된 욕설 목록입니다. 검열이 켜져 있으면 항상 적용됩니다.</p></div>
+      <div class="srow inline" id="row-cover-base"><div class="srow-l"><span class="lb">기본 욕설 목록</span><p>K bot이 기본으로 제공하는 욕설 목록입니다. 검열이 켜져 있으면 항상 적용됩니다.</p></div>
         <div class="srow-r"><span class="tag line">항상 적용</span></div></div>
       <div class="srow stack" id="row-cover-words"><div class="srow-l"><label class="lb" for="cover-word-in">추가 금지어</label><p>Enter 또는 쉼표로 추가합니다. 띄어쓰기, 기호, 대소문자를 바꿔 쓴 글도 가립니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="chips" id="cover-words"><input id="cover-word-in" type="text" maxlength="30" placeholder="단어 입력" autocomplete="off" aria-describedby="cover-word-err cover-word-cnt"></div>
@@ -519,12 +519,12 @@
 <!-- ===== 갠톡 응답 (4.11) ===== -->
 <section class="page" data-route="reply" id="page-reply" aria-labelledby="reply-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="reply-title" tabindex="-1">갠톡 응답</h1><p>오픈프로필 1:1 대화(갠톡)에 등록한 문구로 자동 응답합니다. 매크로의 보낼 방과는 따로 동작합니다.</p></div></div>
+  <div class="ph"><div><h1 id="reply-title" tabindex="-1">갠톡 응답</h1><p>오픈프로필로 갠톡(1:1 대화)이 오면 미리 등록한 문구로 자동 답장합니다. 매크로 설정과는 따로 동작합니다.</p></div></div>
   <div class="banner" data-banner role="status" hidden></div>
   <div class="banner" data-macro-off role="status" hidden></div>
   <form id="reply-form" class="stack" novalidate>
    <section class="sec" aria-label="자동 응답">
-    <div class="srow inline main" id="row-reply-on"><div class="srow-l"><span class="lb">자동 응답</span><p>켜면 새 1:1 대화에 응답 메시지를 보냅니다. 주요 알림에서 직접 답장하는 것은 영향받지 않습니다.</p></div>
+    <div class="srow inline main" id="row-reply-on"><div class="srow-l"><span class="lb">자동 응답</span><p>켜면 새로 온 갠톡에 응답 메시지를 보냅니다. 받은 갠톡에서 직접 보내는 답장은 자동 응답과 상관없이 언제든 보낼 수 있습니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="reply-on" aria-label="자동 응답"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="reply-on" data-open="false"><div class="dep-in">
       <div class="srow stack" id="row-reply-msg"><div class="srow-l"><label class="lb" for="reply-message">응답 메시지</label><p>아래 표시를 넣으면 보낼 때 실제 값으로 바뀝니다.</p></div>
@@ -551,7 +551,7 @@
   <div class="banner" data-macro-off role="status" hidden></div>
   <form id="snipe-form" class="stack" novalidate>
    <section class="sec" aria-label="규칙"><div id="triggers"></div>
-    <div class="sec-f"><span id="snipe-count">규칙 0 / 30</span><span>새 규칙의 찾는 방식은 포함과 같음 중에서 고릅니다.</span></div></section>
+    <div class="sec-f"><span id="snipe-count">규칙 0 / 30</span><span>새 규칙의 찾는 방식은 「포함」과 「정확히 일치」 중에서 고를 수 있습니다.</span></div></section>
    <p class="errt" id="snipe-error" role="alert"></p>
   </form>
  </div>
@@ -565,10 +565,10 @@
   <div class="grp" id="rooms-attn-grp" hidden><h2 class="grp-t">확인 필요</h2>
     <section class="sec" id="rooms-attn" aria-label="확인이 필요한 방"></section></div>
   <section class="sec clip"><div class="tbl-wrap">
-    <table class="tbl stack" id="rooms-tbl"><thead><tr><th>대화방</th><th>상품</th><th>상태</th><th>K bot 계정</th><th><span class="sr">열기</span></th></tr></thead>
+    <table class="tbl stack" id="rooms-tbl"><thead><tr><th>대화방</th><th>봇</th><th>상태</th><th>K bot</th><th><span class="sr">열기</span></th></tr></thead>
       <tbody id="rooms-list"></tbody></table></div>
-    <p class="empty" id="rooms-empty" hidden>설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다. 방 1개 · 상품당 15,000원입니다.</p>
-    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>부방장 지정은 1~2분 안에 자동으로 감지합니다.</span></div></section>
+    <p class="empty" id="rooms-empty" hidden>봇을 설치한 방이 없습니다. [방 추가]에서 오픈채팅방 링크를 입력하고 구매할 수 있습니다. 방 관리봇·미니게임봇은 방마다 각각 15,000원입니다.</p>
+    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>방장이 K bot을 부방장으로 지정하면 1~2분 안에 자동으로 확인됩니다.</span></div></section>
  </div>
 </section>
 
@@ -594,18 +594,18 @@
     <li class="stp" data-s="host"><span class="bar"><i></i></span><span class="lbl"><span class="num-c"><span class="n">3</span><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="t">부방장 지정</span></span></li>
     <li class="stp" data-s="use"><span class="bar"><i></i></span><span class="lbl"><span class="num-c"><span class="n">4</span><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"></use></svg></span><span class="t">사용</span></span></li>
   </ol>
-  <section class="sec" id="room-pending" hidden><div class="srow stack"><div class="srow-l"><span class="lb">입금 대기</span><p>입금이 확인되면 K bot 계정이 입장합니다.</p></div>
+  <section class="sec" id="room-pending" hidden><div class="srow stack"><div class="srow-l"><span class="lb">입금 대기</span><p>입금이 확인되면 K bot이 방에 들어갑니다.</p></div>
       <div class="srow-r"><a class="btn sm" id="room-order" href="/account"><svg class="ic" width="13" height="13" aria-hidden="true"><use href="#i-receipt"></use></svg>입금 안내</a></div></div></section>
   <section class="sec" id="room-join" hidden><div class="wait"><i class="dot warn"></i><span class="grow" id="room-join-t"></span></div></section>
   <div class="stack-24" id="room-wait" hidden>
     <section class="sec"><div class="srow stack"><div class="srow-l"><span class="lb">부방장 지정</span><p id="room-wait-t"></p></div></div>
-      <div class="wait"><i class="dot live pulse"></i><span class="grow">부방장 지정을 기다리는 중입니다 <span class="dim">· 1~2분 안에 감지</span></span></div></section>
+      <div class="wait"><i class="dot live pulse"></i><span class="grow">부방장 지정을 기다리는 중입니다</span></div></section>
     <p class="note" id="room-wait-mg" hidden><span>미니게임봇은 지금 사용할 수 있습니다.</span><a class="btn sm" id="room-wait-mg-go" href="#r-games"><svg class="ic" width="13" height="13" aria-hidden="true"><use href="#i-game"></use></svg>미니게임</a></p>
   </div>
-  <p class="note" id="room-off" hidden><span>방 관리 기능이 모두 꺼져 있습니다.</span><a class="btn sm" id="room-off-go" href="#r-visit">입장·퇴장 로그 설정</a></p>
-  <div class="grp"><h2 class="grp-t">상품</h2>
+  <p class="note" id="room-off" hidden><span>방 관리 기능이 모두 꺼져 있습니다.</span><a class="btn sm" id="room-off-go" href="#r-visit">입장·퇴장 기록 설정</a></p>
+  <div class="grp"><h2 class="grp-t">봇</h2>
    <section class="sec" id="room-products">
-    <div class="srow inline" data-prod="roombot"><div class="srow-l"><span class="lb">방 관리봇</span><p>입장·퇴장 로그 · 들낙 감지 · 나갔을 때 내보내기 · 프로필 로그 · 홍보 금지 · 가리기 · 금지어 검열 · 올킥 방지</p></div><div class="srow-r" data-prod-r="roombot"></div></div>
+    <div class="srow inline" data-prod="roombot"><div class="srow-l"><span class="lb">방 관리봇</span><p>입장·퇴장 기록 · 들낙 감지 · 나간 사람 재입장 차단 · 프로필 기록 · 홍보 금지 · 글 가리기 · 금지어 검열 · 올킥 감지</p></div><div class="srow-r" data-prod-r="roombot"></div></div>
     <div class="srow inline" data-prod="minigame"><div class="srow-l"><span class="lb">미니게임봇</span><p>끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹</p></div><div class="srow-r" data-prod-r="minigame"></div></div>
    </section></div>
   <form id="room-form" class="stack" novalidate>
@@ -628,21 +628,21 @@
 <!-- ===== 방 · 입장·퇴장 로그 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-visit" id="page-r-visit" aria-labelledby="r-visit-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-visit-title" tabindex="-1">입장·퇴장 로그</h1><p>K bot 계정이 방에 누가 언제 들어오고 나갔는지 기록하고 방에 안내합니다. 들낙 감지와 나갔을 때 내보내기도 이 화면에서 설정합니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-visit-title" tabindex="-1">입장·퇴장 기록</h1><p>누가 언제 들어오고 나갔는지 기록하고, 방에 입장·퇴장 안내를 보냅니다. 들낙 감지와 나간 사람 재입장 차단도 이 화면에서 설정합니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-visit-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
-   <section class="sec" aria-label="입장·퇴장 로그">
-    <div class="srow inline main" id="row-r-visit-on"><div class="srow-l"><span class="lb">입장·퇴장 로그</span><p>켜면 누군가 들어오거나 나갈 때 그 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다.</p></div>
-      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-visit-on" aria-label="입장·퇴장 로그"><span class="sw" aria-hidden="true"></span></span></div></div>
+   <section class="sec" aria-label="입장·퇴장 기록">
+    <div class="srow inline main" id="row-r-visit-on"><div class="srow-l"><span class="lb">입장·퇴장 기록</span><p>켜면 누군가 들어오거나 나갈 때 그 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다.</p></div>
+      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-visit-on" aria-label="입장·퇴장 기록"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-visit-on" data-open="false"><div class="dep-in">
-      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 시 예시입니다. 퇴장 시에는 [퇴장안내]와 퇴장 시각을 적습니다. 이름이 바뀐 적이 있으면 이전 이름도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[입장안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;입장로그&#10;- 2026-10-09 21:14</div></div></div></div>
+      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 방에는 첫 줄만 보이고, [전체보기]를 누르면 그 사람의 ID·옾링·프로필 사진과 기록이 보입니다. 퇴장 때는 퇴장 시각과 머문 시간을, 닉네임이나 옾링이 바뀐 적이 있으면 예전 프로필도 적습니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice fold">📥 입장 안내 · @하늘<details class="more"><summary><span class="o">전체보기</span><span class="c">접기</span></summary><div class="more-b">━━━━━━━━━━━━━━&#10;👤 하늘&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;🕒 입장 기록 · 2회&#10; ├ 2026-10-08 20:02&#10; └ 2026-10-09 21:14&#10;━━━━━━━━━━━━━━</div></details></div></div></div></div>
     </div></div>
-    <div class="dep" data-dep-off="r-visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 로그가 꺼져 있습니다. 켜면 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-visit-on">켜기</button></div></div></div>
+    <div class="dep" data-dep-off="r-visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 기록이 꺼져 있습니다. 켜면 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-visit-on">켜기</button></div></div></div>
    </section>
    <section class="sec" aria-label="들낙 감지">
-    <div class="srow inline main" id="row-r-churn-on"><div class="srow-l"><span class="lb">들낙 감지</span><p>짧은 시간에 여러 번 들어오는 사람을 감지하여 방에 안내하고 조치 기록에 남깁니다.</p></div>
+    <div class="srow inline main" id="row-r-churn-on"><div class="srow-l"><span class="lb">들낙 감지</span><p>짧은 시간에 여러 번 들어오는 사람을 감지해 조치 기록에 남깁니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-churn-on" aria-label="들낙 감지"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-churn-on" data-open="false"><div class="dep-in">
       <div class="srow" id="row-r-churn-joins"><div class="srow-l"><span class="lb">입장 횟수</span><p>이 횟수 이상 들어오면 감지합니다. 2~20회.</p></div>
@@ -658,19 +658,19 @@
     </div></div>
     <div class="dep" data-dep-off="r-churn-on" data-open="true"><div class="dep-in"><div class="off-note"><span>들낙 감지가 꺼져 있습니다. 켜면 감지 기준과 조치가 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-churn-on">켜기</button></div></div></div>
    </section>
-   <section class="sec" aria-label="나갔을 때 내보내기">
-    <div class="srow inline main" id="row-r-leave-on"><div class="srow-l"><span class="lb">나갔을 때 내보내기</span><p>방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.</p></div>
-      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-leave-on" aria-label="나갔을 때 내보내기"><span class="sw" aria-hidden="true"></span></span></div></div>
+   <section class="sec" aria-label="나간 사람 재입장 차단">
+    <div class="srow inline main" id="row-r-leave-on"><div class="srow-l"><span class="lb">나간 사람 재입장 차단</span><p>방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 목록에 바로 올리지 못하면, 30일 안에 다시 들어올 때 바로 내보냅니다.</p></div>
+      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-leave-on" aria-label="나간 사람 재입장 차단"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-leave-on" data-open="false"><div class="dep-in">
-      <div class="srow inline" id="row-r-leave-notice"><div class="srow-l"><span class="lb">방에 안내</span><p>내보내면 [퇴장 후 내보냄] 안내를 방에 보냅니다.</p></div>
-        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-leave-notice" aria-label="나갔을 때 내보내기 방에 안내"><span class="sw" aria-hidden="true"></span></span></div></div>
+      <div class="srow inline" id="row-r-leave-notice"><div class="srow-l"><span class="lb">방에 안내</span><p>차단하면 [재입장 차단] 안내를 방에 보냅니다.</p></div>
+        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-leave-notice" aria-label="나간 사람 재입장 차단 방에 안내"><span class="sw" aria-hidden="true"></span></span></div></div>
     </div></div>
    </section>
-   <section class="sec" aria-label="제외할 사람">
-      <div class="srow stack" id="row-r-exempt"><div class="srow-l"><span class="lb">제외할 사람</span><p>들낙 감지·나갔을 때 내보내기·홍보 금지에서 제외합니다. 방장과 부방장은 항상 제외합니다. 최근 글을 쓴 사람 중에서 고릅니다.</p></div>
-        <div class="srow-r"><div class="w100"><div class="chips" id="r-exempt" role="list" aria-label="제외할 사람"></div><div class="pick-row"><div class="sel"><select id="r-exempt-pick" aria-label="제외할 사람 고르기"><option value="">최근 작성자에서 고르기</option></select><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></div></div><div class="chips-meta"><span class="errt" id="r-exempt-err" role="alert"></span><span class="mono" id="r-exempt-n">0 / 50</span></div></div></div></div>
+   <section class="sec" aria-label="제외 대상">
+      <div class="srow stack" id="row-r-exempt"><div class="srow-l"><span class="lb">제외 대상</span><p>들낙 감지·나간 사람 재입장 차단·홍보 금지에서 제외합니다. 방장과 부방장은 항상 제외합니다. 최근 글을 쓴 사람 중에서 고를 수 있습니다.</p></div>
+        <div class="srow-r"><div class="w100"><div class="chips" id="r-exempt" role="list" aria-label="제외 대상"></div><div class="pick-row"><div class="sel"><select id="r-exempt-pick" aria-label="제외 대상 고르기"><option value="">최근 작성자에서 고르기</option></select><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></div></div><div class="chips-meta"><span class="errt" id="r-exempt-err" role="alert"></span><span class="mono" id="r-exempt-n">0 / 50</span></div></div></div></div>
    </section>
-   <footer class="limit"><p>내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.</p></footer>
+   <footer class="limit"><p>내보내기는 K bot이 부방장일 때만 동작합니다. 방장·부방장·제외 대상은 내보내지 않습니다.</p></footer>
    </fieldset>
    <p class="errt" id="r-visit-error" role="alert"></p>
   </form>
@@ -682,12 +682,12 @@
     </div>
     <p class="errt pad" id="r-visit-log-error" role="alert"></p>
     <div class="tbl-wrap"><table class="tbl stack" id="r-visit-tbl"><thead><tr><th>이름</th><th>최근 입장</th><th>최근 퇴장</th><th>이름 변경</th><th>오픈프로필 링크</th><th class="chev-c"><span class="sr">펼치기</span></th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span id="r-visit-cnt"></span><span>행을 누르면 시간순 기록이 펼쳐집니다.</span></div>
+    <div class="sec-f"><span id="r-visit-cnt"></span><span>이름을 누르면 시간순 기록이 펼쳐집니다.</span></div>
    </section></div>
   <div class="grp"><h2 class="grp-t">K bot이 내보낸 사람<span>최근 조치 기록 기준</span></h2>
    <section class="sec clip">
     <div class="tbl-wrap"><table class="tbl stack" id="r-kick-tbl"><thead><tr><th>이름</th><th>시각</th><th>내용</th><th><span class="sr">해제</span></th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span>내보내기를 해제하면 그 사람이 다시 들어올 수 있습니다. 방장이 직접 내보낸 사람은 여기에서 해제하지 않습니다.</span></div>
+    <div class="sec-f"><span>내보내기를 해제하면 그 사람이 다시 들어올 수 있습니다. 방장이 직접 내보낸 사람은 여기에서 해제할 수 없습니다.</span></div>
    </section></div>
  </div>
 </section>
@@ -695,27 +695,27 @@
 <!-- ===== 방 · 프로필 로그 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-profile" id="page-r-profile" aria-labelledby="r-profile-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-profile-title" tabindex="-1">프로필 로그</h1><p>닉네임·프로필 사진·상태 메시지를 바꾼 사람을 방에 안내하고 기록합니다. 방에서 기록을 조회할 수도 있습니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-profile-title" tabindex="-1">프로필 기록</h1><p>닉네임·프로필 사진·상태 메시지를 바꾼 사람을 방에 안내하고 기록합니다. 방에서 명령어로 기록을 조회할 수도 있습니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-profile-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
-   <section class="sec" aria-label="프로필 로그">
-    <div class="srow inline main" id="row-r-profile-on"><div class="srow-l"><span class="lb">프로필 로그</span><p>켜면 프로필을 바꾼 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다. 처음 본 사람은 기준만 잡고, 그 뒤 바뀔 때부터 기록합니다.</p></div>
-      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-on" aria-label="프로필 로그"><span class="sw" aria-hidden="true"></span></span></div></div>
+   <section class="sec" aria-label="프로필 기록">
+    <div class="srow inline main" id="row-r-profile-on"><div class="srow-l"><span class="lb">프로필 기록</span><p>켜면 프로필을 바꾼 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다. 처음 확인한 사람은 현재 프로필만 저장하고, 이후 바뀔 때부터 기록합니다.</p></div>
+      <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-on" aria-label="프로필 기록"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-profile-on" data-open="false"><div class="dep-in">
-      <div class="srow inline" id="row-r-profile-name"><div class="srow-l"><span class="lb">닉네임 변경</span><p>이전 닉네임과 함께 안내합니다.</p></div>
-        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-name" aria-label="닉네임 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
+      <div class="srow inline" id="row-r-profile-name"><div class="srow-l"><span class="lb">닉네임·옾링 변경</span><p>바뀌기 전 닉네임·옾링과 함께 안내합니다.</p></div>
+        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-name" aria-label="닉네임·옾링 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-profile-photo"><div class="srow-l"><span class="lb">프로필 사진 변경</span><p>바뀐 사실만 기록합니다. 사진은 저장하거나 표시하지 않습니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-photo" aria-label="프로필 사진 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-profile-status"><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>이전 상태 메시지와 함께 안내합니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-status" aria-label="상태 메시지 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow" id="row-r-profile-status-na" hidden><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.</p></div></div>
-      <div class="srow" id="row-r-profile-lookup"><div class="srow-l"><span class="lb">기록 조회 명령</span><p>방에서 <span class="mono" data-prefix>!</span>프로필 @닉네임 으로 그 사람의 기록을 조회합니다.</p></div>
-        <div class="srow-r"><div class="seg" id="r-profile-lookup" role="group" aria-label="기록 조회 명령"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">관리자만</button><button type="button" data-v="all" aria-pressed="false">모두</button><button type="button" data-v="off" aria-pressed="false">끄기</button></div></div></div>
-      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>두 번 이상 바꾼 사람은 누적 횟수도 적습니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[프로필 변경 감지]&#10;이름 : @하늘_판매&#10;이전 : 하늘&#10;변경 : 2026-10-09 21:15</div></div></div></div>
+      <div class="srow" id="row-r-profile-lookup"><div class="srow-l"><span class="lb">기록 조회 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>프로필 @닉네임」으로 그 사람의 기록을 볼 수 있습니다.</p></div>
+        <div class="srow-r"><div class="seg" id="r-profile-lookup" role="group" aria-label="기록 조회 명령어"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">방장·부방장만</button><button type="button" data-v="all" aria-pressed="false">모두</button><button type="button" data-v="off" aria-pressed="false">끄기</button></div></div></div>
+      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>방에는 첫 줄만 보이고, [전체보기]를 누르면 그 사람의 ID·옾링·프로필 사진과 바뀐 내용(전·후)이 보입니다. 닉네임, 옾링(다른 오픈프로필로 바꿈), 프로필 사진이 바뀔 때마다 알립니다.</p></div>
+        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice fold">🔔 프로필 변경 감지 · @하늘_판매<details class="more"><summary><span class="o">전체보기</span><span class="c">접기</span></summary><div class="more-b">━━━━━━━━━━━━━━&#10;👤 하늘_판매&#10;🆔 5403424069319106087&#10;🔗 옾링 : https://open.kakao.com/o/sH7k2Lb&#10;🖼 사진 : https://k.kakaocdn.net/dn/bR4x/img_s.jpg&#10;&#10;✏️ 바뀐 내용&#10;▸ 닉네임&#10; ├ 전 : 하늘&#10; └ 후 : 하늘_판매&#10;━━━━━━━━━━━━━━</div></details></div></div></div></div>
     </div></div>
-    <div class="dep" data-dep-off="r-profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 로그가 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-profile-on">켜기</button></div></div></div>
+    <div class="dep" data-dep-off="r-profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 기록이 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-profile-on">켜기</button></div></div></div>
    </section>
    </fieldset>
    <p class="errt" id="r-profile-error" role="alert"></p>
@@ -736,12 +736,12 @@
 <!-- ===== 방 · 홍보 금지 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-promo" id="page-r-promo" aria-labelledby="r-promo-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-promo-title" tabindex="-1">홍보 금지</h1><p>오픈채팅 링크·외부 주소·공유 카드 같은 홍보 글을 막습니다. 방장·부방장·제외할 사람의 글은 막지 않습니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-promo-title" tabindex="-1">홍보 금지</h1><p>오픈채팅 링크·외부 주소·공유 카드 같은 홍보 글을 막습니다. 방장·부방장·제외 대상의 글은 막지 않습니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-promo-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
    <section class="sec" aria-label="홍보 금지">
-    <div class="srow inline main" id="row-r-promo-on"><div class="srow-l"><span class="lb">홍보 금지</span><p>켜면 아래에서 고른 종류의 글을 위반으로 보고 경고를 셉니다. 경고가 기준에 이르면 내보낼 수 있습니다.</p></div>
+    <div class="srow inline main" id="row-r-promo-on"><div class="srow-l"><span class="lb">홍보 금지</span><p>켜면 아래에서 고른 종류의 글이 올라올 때마다 올린 사람의 경고가 1회씩 쌓입니다. 경고가 내보내기 기준에 이르면 내보냅니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-promo-on" aria-label="홍보 금지"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-promo-on" data-open="false"><div class="dep-in">
       <div class="srow inline" id="row-r-promo-links"><div class="srow-l"><span class="lb">링크</span><p>오픈채팅 링크와 외부 주소가 들어간 글입니다.</p></div>
@@ -750,7 +750,7 @@
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-promo-cards" aria-label="공유 카드·프로필 공유"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-promo-media"><div class="srow-l"><span class="lb">사진·동영상·파일</span><p>사진·동영상·파일을 올린 글입니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-promo-media" aria-label="사진·동영상·파일"><span class="sw" aria-hidden="true"></span></span></div></div>
-      <div class="srow inline" id="row-r-promo-hide"><div class="srow-l"><span class="lb">위반 글 가리기</span><p>K bot 계정이 위반 글을 가립니다.</p></div>
+      <div class="srow inline" id="row-r-promo-hide"><div class="srow-l"><span class="lb">위반 글 가리기</span><p>K bot이 위반 글을 가립니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-promo-hide" aria-label="위반 글 가리기"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow" id="row-r-promo-kick"><div class="srow-l"><span class="lb">내보내기 기준</span><p>경고가 이 횟수에 이르면 내보냅니다. 0~10회.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="내보내기 기준 줄이기">−</button><input id="r-promo-kick" type="text" inputmode="numeric" autocomplete="off" data-min="0" data-max="10" aria-label="내보내기 기준"><button type="button" data-step="1" aria-label="내보내기 기준 늘리기">+</button><span class="unit">회</span></div><span class="hint">0이면 내보내지 않습니다</span></div></div>
@@ -763,7 +763,7 @@
     </div></div>
     <div class="dep" data-dep-off="r-promo-on" data-open="true"><div class="dep-in"><div class="off-note"><span>홍보 금지가 꺼져 있습니다. 켜면 막을 글의 종류와 조치가 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-promo-on">켜기</button></div></div></div>
    </section>
-   <footer class="limit"><p>내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.</p></footer>
+   <footer class="limit"><p>내보내기는 K bot이 부방장일 때만 동작합니다. 방장·부방장·제외 대상은 내보내지 않습니다.</p></footer>
    </fieldset>
    <p class="errt" id="r-promo-error" role="alert"></p>
   </form>
@@ -773,7 +773,7 @@
 <!-- ===== 방 · 가리기·금지어 검열 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-cover" id="page-r-cover" aria-labelledby="r-cover-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-cover-title" tabindex="-1">가리기·금지어 검열</h1><p>금지어와 링크가 들어간 글을 가리고, 최근 글을 한꺼번에 가립니다. 글만 가리며 사람을 내보내지 않습니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-cover-title" tabindex="-1">글 가리기·금지어 검열</h1><p>욕설·금지어·링크가 들어간 글을 가립니다. 필요하면 최근 글을 한 번에 가릴 수도 있습니다. 글만 가리며 사람을 내보내지 않습니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-cover-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
@@ -782,26 +782,26 @@
     <div class="srow inline main" id="row-r-cover-on"><div class="srow-l"><span class="lb">금지어 검열</span><p>켜면 기본 욕설, 추가 금지어, 링크가 들어간 글을 가립니다. 방장과 부방장이 올린 글은 가리지 않습니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-cover-on" aria-label="금지어 검열"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-cover-on" data-open="false"><div class="dep-in">
-      <div class="srow inline" id="row-r-cover-base"><div class="srow-l"><span class="lb">기본 욕설 목록</span><p>서버에 내장된 욕설 목록입니다. 검열이 켜져 있으면 항상 적용됩니다.</p></div>
+      <div class="srow inline" id="row-r-cover-base"><div class="srow-l"><span class="lb">기본 욕설 목록</span><p>K bot이 기본으로 제공하는 욕설 목록입니다. 검열이 켜져 있으면 항상 적용됩니다.</p></div>
         <div class="srow-r"><span class="tag line">항상 적용</span></div></div>
       <div class="srow stack" id="row-r-cover-words"><div class="srow-l"><label class="lb" for="r-cover-word-in">추가 금지어</label><p>Enter 또는 쉼표로 추가합니다. 띄어쓰기, 기호, 대소문자를 바꿔 쓴 글도 가립니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="chips" id="r-cover-words"><input id="r-cover-word-in" type="text" maxlength="30" placeholder="단어 입력" autocomplete="off" aria-describedby="r-cover-word-err r-cover-word-n"></div><div class="chips-meta"><span class="errt" id="r-cover-word-err" role="alert"></span><span class="mono" id="r-cover-word-n">0 / 300</span></div></div></div></div>
-      <div class="srow inline" id="row-r-cover-links"><div class="srow-l"><span class="lb">링크 가리기</span><p>오픈채팅 링크와 외부 주소가 들어간 글을 가립니다. <span id="r-cover-links-note" hidden>홍보 금지의 링크가 켜져 있어 링크는 홍보 금지가 맡습니다.</span></p></div>
+      <div class="srow inline" id="row-r-cover-links"><div class="srow-l"><span class="lb">링크 가리기</span><p>오픈채팅 링크와 외부 주소가 들어간 글을 가립니다. <span id="r-cover-links-note" hidden>홍보 금지에서 링크를 이미 막고 있어, 링크는 홍보 금지 설정을 따릅니다.</span></p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-cover-links" aria-label="링크 가리기"><span class="sw" aria-hidden="true"></span></span></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-cover-on" data-open="true"><div class="dep-in"><div class="off-note"><span>금지어 검열이 꺼져 있습니다. 켜면 가릴 내용이 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-cover-on">켜기</button></div></div></div>
     <div class="sec-f"><span>단어당 30자 · 최대 300개 · 대소문자를 구분하지 않고 같은 단어는 한 번만 저장합니다.</span></div>
    </section></div>
-    <div class="grp"><h2 class="grp-t">가리기</h2>
-   <section class="sec" aria-label="가리기">
-      <div class="srow inline" id="row-r-hide-cmd"><div class="srow-l"><span class="lb">방 안 가리기 명령</span><p>방장과 부방장이 방에서 <span class="mono" data-prefix>!</span>가리기 30 또는 <span class="mono" data-prefix>!</span>가리기 @닉네임 으로 글을 가립니다.</p></div>
-        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-hide-cmd" aria-label="방 안 가리기 명령"><span class="sw" aria-hidden="true"></span></span></div></div>
+    <div class="grp"><h2 class="grp-t">글 가리기</h2>
+   <section class="sec" aria-label="글 가리기">
+      <div class="srow inline" id="row-r-hide-cmd"><div class="srow-l"><span class="lb">방에서 가리기 명령어</span><p>방장과 부방장이 방에서 「<span class="mono" data-prefix>!</span>가리기 30」 또는 「<span class="mono" data-prefix>!</span>가리기 @닉네임」으로 글을 가릴 수 있습니다.</p></div>
+        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-hide-cmd" aria-label="방에서 가리기 명령어"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow" id="row-r-hide-last"><div class="srow-l"><span class="lb">최근 글 가리기</span><p>방장·부방장·K bot의 글과 이미 가린 글은 빼고 최근 글을 가립니다. 1~300개.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="가릴 글 수 줄이기">−</button><input id="r-hide-last" type="text" inputmode="numeric" autocomplete="off" data-min="1" data-max="300" aria-label="가릴 글 수" value="30"><button type="button" data-step="1" aria-label="가릴 글 수 늘리기">+</button><span class="unit">개</span></div><span class="del-wrap" id="r-hide-last-act"><button type="button" class="btn sm" id="r-hide-last-btn">가리기</button></span></div></div>
       <div class="srow" id="row-r-hide-who"><div class="srow-l"><span class="lb">사람별 가리기</span><p>최근 글 300개 중 고른 사람의 글을 모두 가립니다.</p></div>
         <div class="srow-r"><div class="sel"><select id="r-hide-who" aria-label="가릴 사람"><option value="">최근 작성자에서 고르기</option></select><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></div><span class="del-wrap" id="r-hide-who-act"><button type="button" class="btn sm" id="r-hide-who-btn">가리기</button></span></div></div>
       <div class="srow" id="row-r-hide-status" hidden><div class="srow-l"><span class="lb">가리기 진행</span><p id="r-hide-status" role="status"></p></div></div>
-    <div class="sec-f"><span>콘솔의 가리기는 방마다 10분에 한 번 할 수 있습니다. 가린 글은 되돌리지 못합니다.</span></div>
+    <div class="sec-f"><span>이 화면의 가리기는 방마다 10분에 한 번 쓸 수 있습니다. 가린 글은 되돌릴 수 없습니다.</span></div>
    </section></div>
    </fieldset>
    <p class="errt" id="r-cover-error" role="alert"></p>
@@ -812,18 +812,18 @@
 <!-- ===== 방 · 올킥 방지 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-guard" id="page-r-guard" aria-labelledby="r-guard-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-guard-title" tabindex="-1">올킥 방지</h1><p>짧은 시간에 내보내기가 몰리면 올킥으로 감지하여 기록합니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-guard-title" tabindex="-1">올킥 감지</h1><p>짧은 시간에 여러 명을 내보내면 올킥으로 감지해 기록합니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-guard-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
-   <section class="sec" aria-label="올킥 방지">
-    <div class="srow inline main" id="row-r-guard-on"><div class="srow-l"><span class="lb">올킥 감지</span><p>켜면 정해진 시간 안에 정해진 수 이상 내보내지면 감지 기록을 남깁니다. K bot 계정이 내보낸 사람은 세지 않습니다.</p></div>
+   <section class="sec" aria-label="올킥 감지">
+    <div class="srow inline main" id="row-r-guard-on"><div class="srow-l"><span class="lb">올킥 감지</span><p>켜면 정해진 시간 안에 정해진 인원 이상을 내보내면 감지 기록을 남깁니다. K bot이 내보낸 사람은 세지 않습니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-guard-on" aria-label="올킥 감지"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-guard-on" data-open="false"><div class="dep-in">
-      <div class="srow" id="row-r-guard-secs"><div class="srow-l"><span class="lb">감지 시간</span><p>이 시간 안에 내보내진 사람 수를 셉니다. 5~300초.</p></div>
+      <div class="srow" id="row-r-guard-secs"><div class="srow-l"><span class="lb">감지 시간</span><p>이 시간 안에 내보낸 인원을 셉니다. 5~300초.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="감지 시간 줄이기">−</button><input id="r-guard-secs" type="text" inputmode="numeric" autocomplete="off" data-min="5" data-max="300" data-stepby="5" aria-label="감지 시간"><button type="button" data-step="1" aria-label="감지 시간 늘리기">+</button><span class="unit">초</span></div></div></div>
-      <div class="srow" id="row-r-guard-count"><div class="srow-l"><span class="lb">내보내진 사람 수</span><p>이 수 이상이면 올킥으로 감지합니다. 3~30명.</p></div>
-        <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="내보내진 사람 수 줄이기">−</button><input id="r-guard-count" type="text" inputmode="numeric" autocomplete="off" data-min="3" data-max="30" aria-label="내보내진 사람 수"><button type="button" data-step="1" aria-label="내보내진 사람 수 늘리기">+</button><span class="unit">명</span></div></div></div>
+      <div class="srow" id="row-r-guard-count"><div class="srow-l"><span class="lb">내보낸 인원</span><p>이 인원 이상이면 올킥으로 감지합니다. 3~30명.</p></div>
+        <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="내보낸 인원 줄이기">−</button><input id="r-guard-count" type="text" inputmode="numeric" autocomplete="off" data-min="3" data-max="30" aria-label="내보낸 인원"><button type="button" data-step="1" aria-label="내보낸 인원 늘리기">+</button><span class="unit">명</span></div></div></div>
       <div class="srow stack" id="row-r-guard-preview"><div class="srow-l"><span class="lb">기준</span></div>
         <div class="srow-r"><p class="sentence" id="r-guard-sent"></p></div></div>
     </div></div>
@@ -837,19 +837,19 @@
    <section class="sec clip">
     <p class="errt pad" id="r-guard-log-error" role="alert"></p>
     <div class="tbl-wrap"><table class="tbl stack" id="r-guard-tbl"><thead><tr><th>시각</th><th>내용</th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>감지 문구는 서버가 기록한 그대로 표시합니다.</span></div></section></div>
+    <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span></div></section></div>
  </div>
 </section>
 
 <!-- ===== 방 · 미니게임 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-games" id="page-r-games" aria-labelledby="r-games-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-games-title" tabindex="-1">미니게임</h1><p>K bot 계정이 방에서 미니게임을 진행합니다. 방장이 부방장으로 지정하지 않아도 동작합니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-games-title" tabindex="-1">미니게임</h1><p>K bot이 방에서 미니게임을 진행합니다. K bot을 부방장으로 지정하지 않아도 동작합니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-games-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
    <section class="sec" aria-label="미니게임">
-    <div class="srow inline main" id="row-r-games-on"><div class="srow-l"><span class="lb">미니게임</span><p>켜면 방에서 게임 명령어에 답합니다. <span class="mono" data-prefix>!</span>도움 으로 켜진 게임을 확인합니다.</p></div>
+    <div class="srow inline main" id="row-r-games-on"><div class="srow-l"><span class="lb">미니게임</span><p>켜면 방에서 게임 명령어에 답합니다. 「<span class="mono" data-prefix>!</span>도움」으로 켜진 게임을 확인할 수 있습니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-on" aria-label="미니게임"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-games-on" data-open="false"><div class="dep-in">
       <div class="srow inline" id="row-r-games-word"><div class="srow-l"><span class="lb">끝말잇기</span></div>
@@ -862,11 +862,11 @@
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-rps" aria-label="가위바위보"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-games-quiz"><div class="srow-l"><span class="lb">퀴즈</span></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-quiz" aria-label="퀴즈"><span class="sw" aria-hidden="true"></span></span></div></div>
-      <div class="srow" id="row-r-games-cool"><div class="srow-l"><span class="lb">쿨타임</span><p>K bot이 게임 답을 보낸 뒤 다음 답을 보내기까지의 최소 간격입니다. 1~60초.</p></div>
+      <div class="srow" id="row-r-games-cool"><div class="srow-l"><span class="lb">쿨타임</span><p>K bot이 게임 응답을 보낸 뒤 다음 응답을 보내기까지의 최소 간격입니다. 1~60초.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="쿨타임 줄이기">−</button><input id="r-games-cool" type="text" inputmode="numeric" autocomplete="off" data-min="1" data-max="60" aria-label="쿨타임"><button type="button" data-step="1" aria-label="쿨타임 늘리기">+</button><span class="unit">초</span></div></div></div>
-      <div class="srow" id="row-r-games-limit"><div class="srow-l"><span class="lb">하루 횟수</span><p>하루에 보내는 게임 답의 수입니다. 0~5,000회.</p></div>
-        <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="하루 횟수 줄이기">−</button><input id="r-games-limit" type="text" inputmode="numeric" autocomplete="off" data-min="0" data-max="5000" aria-label="하루 횟수"><button type="button" data-step="1" aria-label="하루 횟수 늘리기">+</button><span class="unit">회</span></div><span class="hint">0이면 제한 없음</span></div></div>
-      <div class="srow stack" id="row-r-games-preview"><div class="srow-l"><span class="lb">미리 보기</span><p>방에서 도움 명령을 입력한 경우입니다.</p></div>
+      <div class="srow" id="row-r-games-limit"><div class="srow-l"><span class="lb">하루 최대 응답 수</span><p>하루에 보내는 게임 응답의 최대 수입니다. 0~5,000회.</p></div>
+        <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="하루 최대 응답 수 줄이기">−</button><input id="r-games-limit" type="text" inputmode="numeric" autocomplete="off" data-min="0" data-max="5000" aria-label="하루 최대 응답 수"><button type="button" data-step="1" aria-label="하루 최대 응답 수 늘리기">+</button><span class="unit">회</span></div><span class="hint">0이면 제한 없음</span></div></div>
+      <div class="srow stack" id="row-r-games-preview"><div class="srow-l"><span class="lb">미리 보기</span><p>방에서 「<span class="mono" data-prefix>!</span>도움」을 입력한 경우입니다.</p></div>
         <div class="srow-r"><div class="preview-chat" id="r-games-preview"><div class="bub" id="r-games-preview-q">!도움</div><span class="who-l" data-r-who></span><div class="bub notice" id="r-games-preview-t"></div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-games-on" data-open="true"><div class="dep-in"><div class="off-note"><span>미니게임이 꺼져 있습니다. 켜면 게임 목록과 쿨타임이 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-games-on">켜기</button></div></div></div>
@@ -877,7 +877,7 @@
   <div class="grp"><h2 class="grp-t">랭킹<span>상위 10명</span></h2>
    <section class="sec clip">
     <div class="tbl-wrap"><table class="tbl stack" id="r-rank-tbl"><thead><tr><th>순위</th><th>이름</th><th style="text-align:right">점수</th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span>방에서 <span class="mono" data-prefix>!</span>랭킹 으로도 확인합니다.</span><span class="del-wrap" id="r-rank-act"><button type="button" class="btn sm ghost danger" id="r-rank-reset"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-trash"></use></svg>랭킹 초기화</button></span></div>
+    <div class="sec-f"><span>방에서 「<span class="mono" data-prefix>!</span>랭킹」으로도 확인할 수 있습니다.</span><span class="del-wrap" id="r-rank-act"><button type="button" class="btn sm ghost danger" id="r-rank-reset"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-trash"></use></svg>랭킹 초기화</button></span></div>
    </section></div>
  </div>
 </section>
@@ -898,10 +898,10 @@
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="pal-wrap closed" id="palWrap" aria-hidden="true">
-  <div class="pal" role="dialog" aria-modal="true" aria-label="이동 및 검색">
+  <div class="pal" role="dialog" aria-modal="true" aria-label="빠른 이동">
     <div class="pal-in"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-search"></use></svg><input id="palIn" type="text" placeholder="화면 또는 설정 이름 입력" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list"><kbd>Esc</kbd></div>
     <div class="pal-list" id="palList" role="listbox" aria-label="결과"></div>
-    <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> 이동</span><span><kbd>Enter</kbd> 열기</span><span><kbd>Esc</kbd> 닫기</span><span style="margin-left:auto"><kbd>G</kbd> 다음 글자로 바로 이동</span></div>
+    <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> 이동</span><span><kbd>Enter</kbd> 열기</span><span><kbd>Esc</kbd> 닫기</span><span style="margin-left:auto"><kbd>G</kbd> 누른 뒤 글자 키로 바로 이동</span></div>
   </div>
 </div>
 </body>
