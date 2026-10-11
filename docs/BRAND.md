@@ -39,6 +39,6 @@ K bot 을 대표하는 로고는 **검은 바탕(#111111) 위 흰색 K** 하나�
 ## 링크 미리보기 — 2026-10 결정
 
 - 모든 손님 화면의 `<head>` 에 `og:image` 와 `twitter:card`(`summary_large_image`) 가 있고, 그림은 `public/og-image.png` 하나다. 디스코드는 `twitter:card` 가 있어야 큰 그림으로 보여 준다.
-- 배너 글자: `K bot` · `카카오톡 오픈채팅방을 패널 하나로 운영합니다` · `카카오톡 매크로 · 방 관리봇 · 미니게임봇` · `kmacro.cloud`. 가격은 넣지 않는다(가격은 `og:description` 에 있다).
+- 배너 글자: `K bot` · `카카오톡 오픈채팅방을 사이트 하나로 운영합니다` · 상품 칩 3개(`카카오톡 매크로` `방 관리봇` `미니게임봇`) · `kmacro.cloud`. 가격은 넣지 않는다(가격은 `og:description` 에 있다).
 - 그림을 바꾸면 모든 화면의 `og-image.png?v=N` 숫자를 함께 올리고, 카카오톡은 [카카오 공유 디버거](https://developers.kakao.com/tool/debugger/sharing)에서 `https://kmacro.cloud` 캐시를 지워 주세요.
 - 미리보기 봇(카카오톡·디스코드 등)은 `Accept: text/html` 없이 `/` 를 요청하기도 한다. 그래서 `server.js` 의 `PREVIEW_BOT` 에 든 User-Agent 에는 랜딩 페이지를 준다. curl 같은 연결 확인은 기존 JSON 그대로다.
