@@ -58,6 +58,10 @@
   /* 탭 */
   .mg-tabs { display: flex; gap: 2px; margin-top: 28px; border-bottom: 1px solid var(--line-2); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
   .mg-tabs::-webkit-scrollbar { display: none; }
+  /* 좁은 화면에서 탭이 넘치면 가려진 쪽 가장자리를 흐리게 해 옆으로 밀 수 있다는 것을 보인다(manage.js tabFade) */
+  .mg-tabs.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+  .mg-tabs.fade-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+  .mg-tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
   .mg-tab { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 14px; color: var(--fg-3); font-size: var(--t-14); font-weight: 500; white-space: nowrap; transition: color var(--d1); }
   .mg-tab:hover { color: var(--fg-2); }
   .mg-tab[aria-selected="true"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--fg); }
@@ -199,7 +203,7 @@
     .mg-stat { padding: 12px 14px; }
     .mg-stat .v { font-size: var(--t-18); }
     .mg-tabs { margin-top: 22px; }
-    .mg-tab { padding: 0 12px; gap: 6px; }
+    .mg-tab { padding: 0 8px; gap: 4px; }
     .mg-item { padding: 14px; }
     .mg-filt button { height: 36px; }
     .mg-search .sel { flex: 1 1 100%; }
@@ -307,6 +311,7 @@
       <button type="button" class="mg-tab" role="tab" id="tab-rooms" data-tab="rooms" aria-controls="pane-rooms" aria-selected="false" tabindex="-1">방<span class="badge-n crit" data-badge="rooms" hidden></span></button>
       <button type="button" class="mg-tab" role="tab" id="tab-keys" data-tab="keys" aria-controls="pane-keys" aria-selected="false" tabindex="-1">키</button>
       <button type="button" class="mg-tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="pane-audit" aria-selected="false" tabindex="-1">기록</button>
+      <button type="button" class="mg-tab" role="tab" id="tab-settings" data-tab="settings" aria-controls="pane-settings" aria-selected="false" tabindex="-1">설정</button>
     </div>
 
     <!-- 주문 -->
@@ -427,6 +432,12 @@
       </div>
       <p class="mg-count" id="audCount" aria-live="polite"></p>
       <div class="mg-list" id="audList" style="margin-top:10px"></div>
+    </section>
+
+    <!-- 운영 한도 -->
+    <section id="pane-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <p class="hint" style="margin-top:18px">회원과 K bot 계정에 적용되는 기본 한도입니다. 바꾸면 사이트와 패널의 안내 숫자도 함께 바뀝니다.</p>
+      <div class="mg-list" id="setList" style="margin-top:10px"></div>
     </section>
   </main>
 </div>

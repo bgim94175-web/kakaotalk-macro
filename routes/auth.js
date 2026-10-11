@@ -14,6 +14,7 @@ const memberAuth = require('../lib/member-auth');
 const oauth = require('../lib/google-oauth');
 const audit = require('../lib/audit');
 const entitle = require('../lib/entitle');
+const settings = require('../lib/settings');
 const installs = require('../lib/installs');
 const pricing = require('../lib/pricing');
 const panelRoutes = require('./panel');
@@ -180,6 +181,8 @@ router.get('/api/site', wrap(async (req, res) => {
     channel: memberAuth.channelConfig(member),
     contact: contactInfo(),
     member: member,
+    // 화면 안내 숫자(관리자가 /manage [설정]에서 바꾼다). [data-limit] 칸을 support.js 가 채운다.
+    limits: { kakao_accounts: settings.get('kakao_accounts'), sessions: settings.get('sessions') },
   });
 }));
 
@@ -398,7 +401,7 @@ router.get('/api/me', wrap(async (req, res) => {
   let accounts = sum && sum.accounts;
   if (!accounts) {
     const n = await db.one('SELECT count(*)::int AS n FROM panel_accounts WHERE member_id=$1', [id]);
-    accounts = { n: n ? Number(n.n) : 0, max: entitle.MAX_ACCOUNTS };
+    accounts = { n: n ? Number(n.n) : 0, max: entitle.maxAccounts() };
   }
   const member = memberAuth.publicMember(row, g);
   member.created_at = Number(row.created_at);

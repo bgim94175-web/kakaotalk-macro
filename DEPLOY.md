@@ -101,8 +101,8 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 | 변수명 | 기본값 | 설명 |
 |---|:---:|---|
-| `MEMBER_MAX_SESSIONS` | `3` | 동시에 로그인할 수 있는 기기 수. 4번째 로그인은 가장 오래 쓰지 않은 기기를 로그아웃합니다 |
-| `MEMBER_MAX_ACCOUNTS` | `3` | 회원당 카카오 계정 수(카카오톡 매크로) |
+| `MEMBER_MAX_SESSIONS` | `3` | 동시에 로그인할 수 있는 기기 수의 처음 값. 운영 중에는 판매 관리 **[설정]** 탭에서 바꿉니다(그 값이 우선) |
+| `MEMBER_MAX_ACCOUNTS` | `3` | 회원당 카카오 계정 수의 처음 값. 운영 중에는 **[설정]** 탭에서 바꿉니다 |
 | `MEMBER_SESSION_TTL_MS` | `2592000000` (30일) | 쓰지 않은 기간이 이 시간을 넘으면 로그아웃됩니다 |
 | `AUTH_RESET_WINDOW_MS` | `900000` (15분) | Google 로그인 뒤 현재 비밀번호 없이 새 비밀번호를 정할 수 있는 시간. Google 계정 연결도 아이디·비밀번호로 로그인한 지 이 시간이 지나지 않은 세션에서만 할 수 있습니다(지나면 비밀번호로 다시 로그인한 뒤 이어집니다) |
 | `AUTH_SCRYPT_LOG_N` | `15` | 비밀번호 해시 강도(10~17). 바꾸면 다음 로그인 때 자동으로 다시 해시합니다 |
@@ -116,7 +116,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 | `ROOM_RETRY_BASE_MS` | `120000` (2분) | 고객 `다시 시도` 첫 간격. 연속 시도마다 두 배(최대 6시간), 연속 10번 뒤에는 관리자만 다시 시도할 수 있습니다 |
 | `ROOM_HOLD_WORDS` | (없음) | 쉼표 목록. 방 이름에 걸리면 결제 뒤 입장하지 않고 `/manage` 의 **확인 후 입장**을 기다립니다 |
 | `ROOM_LOG_KEEP_DAYS` | `30` | 방 조치 기록 보존 일수. 서버가 하루 1번 지웁니다 |
-| `BOT_ROOM_CAP` | `20` | 새 K bot 계정의 기본 방 상한 |
+| `BOT_ROOM_CAP` | `20` | 새 K bot 계정의 기본 방 상한의 처음 값. 운영 중에는 **[설정]** 탭에서 바꿉니다 |
 | `BOT_JOIN_GAP_MS` · `BOT_PERM_POLL_MS` · `BOT_ACTIVE_CHECK_MS` | `45000` · `60000` · `600000` | 입장 간격 · 부방장 지정 대기 방 권한 확인 주기 · 사용 중 방 생존 확인 주기 |
 | `BOT_JOIN_PER_HOUR` · `BOT_JOIN_PER_DAY` · `BOT_RESOLVE_PER_MIN` · `BOT_RESOLVE_PER_DAY` | `20` · `80` · `10` · `300` | K bot 계정마다 입장·링크 조회 한도(계정 제재 방지) |
 | `BOT_PROFILE_CONVERT` | `off` | 기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸는 방식. `off` 는 `/manage` 방 상세의 **오픈프로필로 바꾸기**를 누를 때만, `auto` 는 점검 때 자동으로 바꿉니다(아래 8 의 실측을 마친 뒤 켜 주세요) |
@@ -246,7 +246,7 @@ Render **Logs** 에 `license server on :10000` 과 `셀프핑 켜짐 → ...` �
 | `/manage` **401 unauthorized** | 비밀번호 불일치 | `/manage` 에 입력한 비밀번호를 Render 값과 맞춰 주세요. 서버가 `bad_admin_pw` 로 [기록] 에 남깁니다 |
 | `/manage` **429 비밀번호 입력 초과** | 동일 IP 에서 분당 `ADMIN_FAIL_PER_MIN`(기본 10) 회 이상 틀렸습니다 | 15분 대기하거나 재배포하면 즉시 해제됩니다 |
 | 로그인 **429 로그인 실패 횟수를 초과했습니다** | 같은 IP 에서 같은 아이디로 15분에 10회 틀렸습니다 | 15분 대기, 다른 네트워크, 또는 Google 로그인. 재배포하면 즉시 해제됩니다 |
-| 고객이 "다른 기기에서 로그인하여 로그아웃되었습니다" | 동시 로그인 3대(`MEMBER_MAX_SESSIONS`)를 넘어 가장 오래 쓰지 않은 기기가 밀려났습니다 | 정상 동작입니다. `/account` 의 로그인 기기에서 쓰지 않는 기기를 로그아웃하도록 안내합니다 |
+| 고객이 "다른 기기에서 로그인하여 로그아웃되었습니다" | 동시 로그인 기기 수(**[설정]** 탭, 기본 3대)를 넘어 가장 오래 쓰지 않은 기기가 밀려났습니다 | 정상 동작입니다. `/account` 의 로그인 기기에서 쓰지 않는 기기를 로그아웃하도록 안내합니다 |
 | Google 로그인이 `?g=error` | 리디렉션 URI 불일치, 클라이언트 비밀 오류 | 부팅 로그 `[google] redirect URI = …` 를 Google Cloud 콘솔 값과 맞춰 주세요 |
 | Google 버튼이 보이지 않음 | `GOOGLE_CLIENT_ID`·`GOOGLE_CLIENT_SECRET`·`CONFIG_SECRET` 중 하나가 없습니다 | 세 값을 확인하고 재배포 |
 | 상담 버튼이 보이지 않음 | `CHANNEL_PLUGIN_KEY` 와 `CONTACT_INFO` 가 둘 다 없습니다 | 하나 이상 설정 |

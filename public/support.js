@@ -132,10 +132,23 @@
     }
   }
 
+  /* 관리자가 바꾸는 한도(카카오 계정 수·동시 로그인 기기 수)를 화면 숫자에 채운다.
+     HTML 에는 기본값을 적어 두고 /api/site 의 limits 로 [data-limit] 칸을 바꾼다. 나중에 그린 칸은 fillLimits(node). */
+  function fillLimits(node) {
+    var lim = site && site.limits;
+    if (!lim) return;
+    var list = (node || document).querySelectorAll('[data-limit]');
+    for (var i = 0; i < list.length; i++) {
+      var v = lim[list[i].getAttribute('data-limit')];
+      if (typeof v === 'number' && v > 0) list[i].textContent = String(v);
+    }
+  }
+
   /* 1~3: /api/site 를 받아 방식을 정한다 */
   function decide(s, g) {
     if (g !== gen) return;
     site = s && s.ok !== false ? s : null;
+    fillLimits();
     var ch = site && site.channel && site.channel.plugin_key ? site.channel : null;
     if (ch && LINK_MODE) { setState('chat'); settle(); return; }   // 콘솔: SDK 없이 새 창 /support
     if (ch) { bootWidget(ch, g); return; }
@@ -205,7 +218,8 @@
     reboot: reboot,
     ready: function () { return readyP; },
     state: function () { return state; },
-    site: function () { return site; }
+    site: function () { return site; },
+    fillLimits: fillLimits
   };
 
   setState('off');

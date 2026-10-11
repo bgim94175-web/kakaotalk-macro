@@ -46,7 +46,7 @@ const TEXT = {
 };
 
 function maxAccountsText() {
-  return '카카오 계정은 ' + entitle.MAX_ACCOUNTS + '개까지 등록할 수 있습니다. 쓰지 않는 계정을 등록 해제한 뒤 다시 시도해 주세요.';
+  return '카카오 계정은 ' + entitle.maxAccounts() + '개까지 등록할 수 있습니다. 쓰지 않는 계정을 등록 해제한 뒤 다시 시도해 주세요.';
 }
 
 function fail(res, status, reason, error, extra) {
@@ -235,7 +235,7 @@ router.get('/panel/api/me', wrap(async (req, res) => {
     member: { id: Number(m.id), login_id: m.login_id, google_linked: !!g },
     macro: entitle.macroView(m),
     legacy_room_until: Number(m.legacy_room_until) || 0,
-    max_accounts: entitle.MAX_ACCOUNTS,
+    max_accounts: entitle.maxAccounts(),
     accounts: accounts,
     rooms: Array.isArray(rooms) ? rooms : [],
     sender_up: up,
@@ -273,7 +273,7 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
       return fail(res, 403, 'no_macro', TEXT.no_macro);
     }
     const n = await db.one('SELECT count(*)::int AS n FROM panel_accounts WHERE member_id=$1', [memberId]);
-    if (n && Number(n.n) >= entitle.MAX_ACCOUNTS) return fail(res, 400, 'max_accounts', maxAccountsText());
+    if (n && Number(n.n) >= entitle.maxAccounts()) return fail(res, 400, 'max_accounts', maxAccountsText());
     deviceId = ids.newMemberDeviceId(memberId);
   }
   const email = cleanEmail(req.body && req.body.email);

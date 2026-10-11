@@ -19,6 +19,7 @@ const sender = require('../lib/sender-child');
 const memberAuth = require('../lib/member-auth');
 const entitle = require('../lib/entitle');
 const installs = require('../lib/installs');
+const settings = require('../lib/settings');
 
 const router = express.Router();
 
@@ -1408,10 +1409,42 @@ router.get('/admin/bots', wrap(async (req, res) => {
              default_cap: botCapDefault() });
 }));
 
+// 새 K bot 계정의 최대 방 수 기본값 — [설정] 탭에서 바꾼다(lib/settings.js)
 function botCapDefault() {
-  const n = Math.floor(Number(process.env.BOT_ROOM_CAP));
-  return Number.isFinite(n) && n >= 1 && n <= 200 ? n : 20;
+  return settings.get('bot_room_cap');
 }
+
+// ── 운영 한도 ([설정] 탭) ───────────────────────────────────────────────────
+router.get('/admin/settings', wrap(async (req, res) => {
+  await settings.load().catch(() => { /* 메모리 값으로 보여 준다 */ });
+  const bots = await db.one('SELECT count(*)::int AS n FROM bot_accounts WHERE removed_at IS NULL');
+  res.json({ ok: true, settings: settings.view(), bots_n: bots ? Number(bots.n) || 0 : 0 });
+}));
+
+// body: {values: {key: 정수}, apply_bots?: true} — apply_bots 면 등록한 K bot 계정 모두의 최대 방 수도 같은 값으로 바꾼다
+router.post('/admin/settings', wrap(async (req, res) => {
+  const b = req.body || {};
+  const raw = b.values && typeof b.values === 'object' && !Array.isArray(b.values) ? b.values : null;
+  if (!raw || !Object.keys(raw).length) return fail(res, 400, 'bad_input', '바꿀 값을 입력해 주세요.');
+  const values = {};
+  for (const k of Object.keys(raw)) {
+    const v = raw[k] === '' || raw[k] === null ? NaN : Number(raw[k]);
+    const p = settings.problem(k, v);
+    if (p) return fail(res, 400, 'bad_setting', p);
+    values[k] = v;
+  }
+  const changed = await settings.save(values);
+  let applied = 0;
+  if (b.apply_bots === true && values.bot_room_cap !== undefined) {
+    const r = await db.q('UPDATE bot_accounts SET room_cap=$1 WHERE removed_at IS NULL AND room_cap <> $1', [values.bot_room_cap]);
+    applied = r && r.rowCount ? r.rowCount : 0;
+    if (applied) forgetBotStatus();
+  }
+  const parts = changed.map((c) => settings.LABELS[c.key] + ' ' + c.from + ' → ' + c.to);
+  if (applied) parts.push('K bot 계정 ' + applied + '개의 최대 방 수를 ' + values.bot_room_cap + '개로');
+  if (parts.length) await audit.record(req, 'settings', { detail: parts.join(', ') });
+  res.json({ ok: true, settings: settings.view(), changed: changed, applied_bots: applied });
+}));
 
 function cleanEmail(v) {
   const s = String(v || '').trim();

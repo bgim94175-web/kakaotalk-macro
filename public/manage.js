@@ -52,6 +52,7 @@
     member: '회원',
     install: '방 설치',
     bot: 'K bot 계정',
+    settings: '운영 한도',
     member_lockout: '로그인 잠금',
     activate: '사용 시작',
     revoked: '회수 · 차단 · 삭제',
@@ -64,7 +65,7 @@
     expired: '기간 만료',
     reset: '기기 초기화'
   };
-  var KIND_BASE = ['order', 'member', 'install', 'bot', 'member_lockout', 'activate', 'revoked', 'bad_deposit_token', 'bad_admin_pw'];
+  var KIND_BASE = ['order', 'member', 'install', 'bot', 'settings', 'member_lockout', 'activate', 'revoked', 'bad_deposit_token', 'bad_admin_pw'];
   var KIND_LEGACY = ['mismatch', 'takeover', 'bad_sig', 'tamper', 'expired', 'reset'];
   var ALERT_KINDS = ['bad_deposit_token', 'bad_admin_pw', 'member_lockout'];   // 서버 alert_kinds 가 오면 그걸로 바꾼다
 
@@ -771,6 +772,15 @@
     b.textContent = n > 99 ? '99+' : String(n || 0);
     var tab = b.parentNode;
     tab.setAttribute('aria-label', base + (n > 0 ? ' (확인할 항목 ' + n + '건)' : ''));
+    tabFade();
+  }
+
+  // 탭이 화면보다 넓으면 가려진 쪽 가장자리를 흐리게 한다(.fade-l / .fade-r)
+  function tabFade() {
+    var t = $('.mg-tabs');
+    if (!t) return;
+    t.classList.toggle('fade-l', t.scrollLeft > 2);
+    t.classList.toggle('fade-r', t.scrollLeft + t.clientWidth < t.scrollWidth - 2);
   }
 
   function startPoll() {
@@ -790,7 +800,7 @@
 
   /* ══════════════════ 7. 탭 ══════════════════ */
 
-  var TABS = ['orders', 'deposits', 'members', 'bots', 'rooms', 'keys', 'audit'];
+  var TABS = ['orders', 'deposits', 'members', 'bots', 'rooms', 'keys', 'audit', 'settings'];
   var TAB = 'orders';
 
   function tabFromHash() {
@@ -814,6 +824,7 @@
     }
     var tb = $('#tab-' + name);
     if (tb && tb.scrollIntoView && changed) { try { tb.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* 없음 */ } }
+    tabFade();
     if (changed || force) loadTab(name);
     if (changed && STARTED) loadStats();      // 탭을 옮기면 요약 숫자도 새로 읽는다(30초 주기를 기다리지 않게)
   }
@@ -826,6 +837,7 @@
     else if (name === 'rooms') loadRooms();
     else if (name === 'keys') loadKeys(false);
     else if (name === 'audit') loadAudit();
+    else if (name === 'settings') loadSettings();
   }
 
   function onTabKey(e) {
@@ -2121,6 +2133,74 @@
   }
 
   function afterBotChange() { loadStats(); if (TAB === 'bots') loadBots(); }
+
+  /* ══════════════════ 운영 한도 ([설정] 탭) ══════════════════
+     GET/POST /admin/settings. 값은 서버(lib/settings.js)가 검사한다. */
+  var SETS = { gen: 0, botsN: 0 };
+  var SET_HINT = {
+    bot_room_cap: '새로 등록하는 K bot 계정이 맡을 수 있는 방의 수입니다. 이미 등록한 계정은 [봇] 탭에서 계정마다 바꿀 수 있습니다.',
+    kakao_accounts: '회원 1명이 패널에 등록할 수 있는 카카오 계정 수입니다. 줄여도 이미 등록한 계정은 그대로 두고, 새로 등록할 때만 막습니다.',
+    sessions: '한 아이디로 동시에 로그인할 수 있는 기기 수입니다. 넘으면 가장 오래 쓰지 않은 기기부터 로그아웃됩니다. 줄이면 다음 로그인부터 적용됩니다.'
+  };
+
+  function loadSettings() {
+    var my = ++SETS.gen;
+    var box = $('#setList');
+    if (isLoadingBox(box)) listState(box, '불러오는 중…');
+    return api('GET', '/admin/settings').then(function (r) {
+      if (my !== SETS.gen) return;
+      if (kicked(r)) return;
+      if (!r.ok) { listState(box, '설정을 불러오지 못했습니다\n' + errText(r), true); return; }
+      SETS.botsN = num(r.json.bots_n) || 0;
+      clear(box);
+      (r.json.settings || []).forEach(function (s) { box.appendChild(settingItem(s)); });
+    });
+  }
+
+  function settingItem(s) {
+    var item = el('article', { cls: 'mg-item', 'aria-label': s.label });
+    item.appendChild(el('div', { cls: 'mg-r1' }, [
+      el('span', { cls: 'mg-name grow', text: s.label }),
+      el('span', { cls: 'mono', text: s.value + s.unit })
+    ]));
+    item.appendChild(el('p', { cls: 'hint', style: 'margin-top:0', text: SET_HINT[s.key] || '' }));
+    item.appendChild(el('div', { cls: 'mg-meta', text: s.min + '~' + s.max + s.unit + ' · 기본값 ' + s.default + s.unit }));
+    item.appendChild(el('div', { cls: 'mg-acts' }, [btn('변경', 'sm', function () { openSetting(s); })]));
+    return item;
+  }
+
+  function openSetting(s) {
+    var inp = textInput({ type: 'number', mono: true, inputmode: 'numeric', min: String(s.min), maxv: s.max, step: '1', value: String(s.value), autofocus: true });
+    var apply = s.key === 'bot_room_cap' && SETS.botsN
+      ? checkRow('이미 등록한 K bot 계정 ' + SETS.botsN + '개에도 적용', '계정마다 따로 정한 최대 방 수를 이 값으로 바꿉니다. 맡은 방이 이 값보다 많아도 옮기지 않습니다.', false)
+      : null;
+    function parse() {
+      var n = Math.floor(Number(inp.value));
+      return isFinite(n) && n >= s.min && n <= s.max && String(inp.value).indexOf('.') < 0 ? n : 0;
+    }
+    confirmAct({
+      title: s.label + ' 변경',
+      body: [
+        para(SET_HINT[s.key] || ''),
+        el('div', { cls: 'fld' }, [el('label', { text: s.label }), el('div', { cls: 'mg-numrow' }, [inp, el('span', { cls: 'dim tiny', text: s.unit + ' (' + s.min + '~' + s.max + ')' })])]),
+        apply ? apply.node : null
+      ],
+      ok: '변경',
+      check: function () { return parse() ? '' : s.label + '는 ' + s.min + '~' + s.max + s.unit + '로 입력해 주세요'; },
+      run: function () {
+        var values = {};
+        values[s.key] = parse();
+        return api('POST', '/admin/settings', { values: values, apply_bots: !!(apply && apply.input.checked) });
+      },
+      failMsg: '바꾸지 못했습니다',
+      done: function (r) {
+        var n = r && r.json ? num(r.json.applied_bots) || 0 : 0;
+        toast(s.label + '를 ' + parse() + s.unit + '로 바꿨습니다' + (n ? ' · K bot 계정 ' + n + '개에도 적용' : ''), 'ok');
+        loadSettings();
+        if (n) loadStats();
+      }
+    });
+  }
 
   function profileDone(r) {
     var bot = r && r.json && r.json.bot;
@@ -3565,6 +3645,8 @@
       b.addEventListener('keydown', onTabKey);
     });
     window.addEventListener('hashchange', function () { if (STARTED) switchTab(tabFromHash()); });
+    $('.mg-tabs').addEventListener('scroll', tabFade, { passive: true });
+    window.addEventListener('resize', tabFade);
 
     $$('.mg-stat').forEach(function (b) {
       b.addEventListener('click', function () {

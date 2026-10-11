@@ -1703,8 +1703,8 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `CHANNEL_PLUGIN_KEY` | — | 없으면 상담 버튼이 `CONTACT_INFO` 안내로 바뀌고, 그것도 없으면 숨김(6.10) |
 | `CHANNEL_MEMBER_SECRET` | — | hex. 있으면 memberId+memberHash 부팅. **채널 데스크에서 회원 해시(Member Hash) 검증을 먼저 켠 뒤에** 넣는다(8.8). DEPLOY.md 에 순서를 쓰고 `warnEnv` 가 설정될 때마다 알린다 |
 | `CONTACT_INFO` | — | 기존. 상담 창이 없을 때 보일 연락처 |
-| `MEMBER_MAX_SESSIONS` | 3 | |
-| `MEMBER_MAX_ACCOUNTS` | 3 | |
+| `MEMBER_MAX_SESSIONS` | 3 | 처음 값. 운영 값은 `app_settings.sessions`(판매 관리 [설정]) |
+| `MEMBER_MAX_ACCOUNTS` | 3 | 처음 값. 운영 값은 `app_settings.kakao_accounts` |
 | `MEMBER_SESSION_TTL_MS` | 2592000000 | 30일 |
 | `AUTH_RESET_WINDOW_MS` | 900000 | |
 | `AUTH_SCRYPT_LOG_N` | 15 | |
@@ -1715,7 +1715,7 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `ROOM_RETRY_BASE_MS` | 120000 | 고객 다시 시도 첫 간격(3.4.3) |
 | `ROOM_HOLD_WORDS` | — | 쉼표 목록. 방 이름이 걸리면 확인 대기(D28) |
 | `RATE_AUTH_PER_MIN` `RATE_SIGNUP_PER_MIN` `RATE_OAUTH_PER_MIN` `RATE_PREVIEW_PER_MIN` `RATE_MEMBER_PER_MIN` | 10/5/20/20/180 | |
-| `BOT_ROOM_CAP` | 20 | 새 봇 기본 상한 |
+| `BOT_ROOM_CAP` | 20 | 새 봇 기본 상한의 처음 값. 운영 값은 `app_settings.bot_room_cap`(저장할 때 등록한 봇 모두에 적용할 수 있음) |
 | `BOT_JOIN_GAP_MS` `BOT_PERM_POLL_MS` `BOT_ACTIVE_CHECK_MS` | 45000 / 60000 / 600000 | sender |
 | `BOT_JOIN_PER_HOUR` `BOT_JOIN_PER_DAY` `BOT_RESOLVE_PER_MIN` `BOT_RESOLVE_PER_DAY` | 20 / 80 / 10 / 300 | sender, 봇마다(5.3) |
 | `BOT_PROFILE_CONVERT` | `off` | 기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸기. `off` = 관리자 버튼만, `auto` = 점검 때 자동(5.8) |

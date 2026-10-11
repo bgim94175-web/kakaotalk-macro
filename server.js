@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const db = require('./lib/db');
+const settings = require('./lib/settings');
 const rl = require('./lib/ratelimit');
 const senderChild = require('./lib/sender-child');
 const memberAuth = require('./lib/member-auth');
@@ -282,6 +283,8 @@ function startLoops() {
 
 warnEnv();
 db.migrate()
+  // 운영 한도(/manage [설정])를 먼저 읽는다. 못 읽어도 기본값으로 뜬다.
+  .then(() => settings.load().catch((e) => console.error('[boot] 운영 한도를 읽지 못해 기본값으로 시작합니다: ' + (e && e.message ? e.message : e))))
   .then(() => app.listen(PORT, () => {
     console.log('license server on :' + PORT);
     startSelfPing();

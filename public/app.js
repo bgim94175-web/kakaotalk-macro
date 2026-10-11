@@ -42,7 +42,7 @@
   var MSG_BROKEN = '화면을 표시하지 못했습니다. 새로고침 후에도 같으면 문의해 주세요.';
   var MSG_LOGIN = '로그인이 필요합니다.';
   var MSG_BAD_LINK = '오픈채팅방 링크 형식이 아닙니다. https://open.kakao.com/o/로 시작하는 링크를 입력해 주세요.';
-  var MSG_UNVERIFIED = '방을 지금 확인하지 못했습니다. 결제 후 K bot이 들어갈 때 다시 확인하며, 들어갈 수 없는 방이면 링크 변경이나 환불을 안내합니다.';
+  var MSG_UNVERIFIED = '방을 지금 확인하지 못했습니다. 결제 후 K bot이 들어갈 때 다시 확인하며, 들어가지 못하면 그 이유를 패널에 표시합니다.';
   var MSG_PROFILE_ONLY = 'K bot은 방의 프로필 설정과 관계없이 오픈프로필로 들어갑니다.';   // 미리 보기는 profile_only 를 늘 false 로 준다(D12). 호환용으로만 남긴다.
 
   /* ── 자동 입금확인이 꺼져 있으면(DEPOSIT_AUTO_APPROVE=0 또는 DEPOSIT_TOKEN 미설정)
@@ -605,10 +605,20 @@
      카드 3개를 가로로 늘어놓지 않는다 — .prods 안의 행 3개(6.8). */
 
   var PROD_BULLETS = {
-    macro:    ['카카오 계정 최대 3개', '다시 구매하면 현재 만료일에 이어서 연장'],
+    macro:    [['카카오 계정 최대 ', { limit: 'kakao_accounts', text: '3' }, '개'], '다시 구매하면 현재 만료일에 이어서 연장'],
     roombot:  ['방장이 K bot을 부방장으로 지정하면 동작'],
     minigame: ['K bot이 방에 들어가면 바로 동작']
   };
+
+  /* 글 또는 [글, {limit, text}, 글] — limit 칸은 관리자가 바꾸는 한도 숫자(support.js fillLimits 가 채운다) */
+  function bulletLi(t) {
+    if (!Array.isArray(t)) return el('li', { text: t });
+    var li = el('li', null, t.map(function (x) {
+      return typeof x === 'string' ? x : el('span', { 'data-limit': x.limit, text: x.text });
+    }));
+    if (window.kbSupport && window.kbSupport.fillLimits) window.kbSupport.fillLimits(li);
+    return li;
+  }
 
   /* 모노 칸 안의 한글은 산세리프 span 으로 */
   function sans(t) { return el('span', { cls: 'sans', text: t }); }
@@ -625,7 +635,7 @@
           p.desc ? el('p', { cls: 'desc', text: gloss ? glossDm(p.desc) : p.desc }) : null
         ])
       ]),
-      el('ul', { cls: 'bul' }, (PROD_BULLETS[p.id] || []).map(function (t) { return el('li', { text: t }); })),
+      el('ul', { cls: 'bul' }, (PROD_BULLETS[p.id] || []).map(bulletLi)),
       el('div', { cls: 'prices' }, [
         el('div', { cls: 'pr', 'data-on': '1' }, [
           el('span', { cls: 'pl', text: room ? '방 1개' : '1개월(' + days + '일)' }),
@@ -2039,7 +2049,7 @@
       g.rooms.forEach(function (rm) {
         var v = views[rm.install_id] || null;
         var sk = rm.install_id !== null ? skipped[rm.install_id] : null;
-        var label = sk ? '설치하지 못함 · 환불 대상' : (v ? str(v.label) : st.kr);
+        var label = sk ? '설치하지 못함' : (v ? str(v.label) : st.kr);
         var disp = v ? v.display : '';
         var showDetail = !sk && v && v.detail && (disp === 'waiting' || disp === 'error' || disp === 'joining');
         var ctx = '주문 ' + showId + (rm.install_id !== null ? ' · 방 #' + rm.install_id : '') + ' · ' + label;
