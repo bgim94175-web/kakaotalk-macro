@@ -517,10 +517,51 @@ function nameChanges(changes) {
   return (Array.isArray(changes) ? changes : []).filter((c) => c && (!c.kind || c.kind === 'name'))
 }
 
+// 옾링 = 그 사람의 오픈프로필 링크. 관찰한 곳에서 몰랐으면 '없음'으로 쓰고 linkFor(사람 id)를 붙인다.
+// 봇이 보내기 직전에 찾아 withProfileLink 로 채운다. 끝내 못 찾으면 '없음' 그대로 나간다.
+export const NO_LINK = '없음'
+const LINK_LABEL = '옾링 : '
+
+export function profileUrl(link) {
+  const s = String(link == null ? '' : link).trim()
+  return /^https:\/\/open\.kakao\.com\/[^\s@]+$/i.test(s) && s.length <= 200 ? s : ''
+}
+
+// 멘션 위치는 그 줄의 @ 바로 뒤다(앞줄에 @ 가 있어도 틀리지 않게 줄로 찾는다)
+function mentionIn(text, nm) {
+  if (!nm.mention) return null
+  const i = text.indexOf('\n' + nm.line)
+  if (i < 0) return null
+  return Object.assign({}, nm.mention, { at: i + 1 + nm.line.indexOf('@') + 1 })
+}
+
+function profileNote(lines, nm, kind, link, userId) {
+  const text = lines.join('\n')
+  const note = { text, mention: mentionIn(text, nm), kind }
+  if (!profileUrl(link) && userId) note.linkFor = String(userId)
+  return note
+}
+
+/** 보내기 전 옾링 채우기: '옾링 : 없음' 줄을 링크로 바꾸고, 그 뒤에 있는 멘션 위치를 그만큼 민다. */
+export function withProfileLink(send, link) {
+  const url = profileUrl(link)
+  if (!url || !send || typeof send.text !== 'string') return send
+  const from = '\n' + LINK_LABEL + NO_LINK
+  const i = send.text.indexOf(from)
+  if (i < 0) return send
+  const text = send.text.slice(0, i) + '\n' + LINK_LABEL + url + send.text.slice(i + from.length)
+  const out = Object.assign({}, send, { text })
+  delete out.linkFor
+  if (send.mention && typeof send.mention.at === 'number' && send.mention.at > i) {
+    out.mention = Object.assign({}, send.mention, { at: send.mention.at + url.length - NO_LINK.length })
+  }
+  return out
+}
+
 /**
- * 한 사람의 관찰(이름·사진 서명·상태 메시지). 첫 관찰은 기준만 저장한다. 바뀐 칸마다 안내 1개.
+ * 한 사람의 관찰(이름·사진 서명·상태 메시지, 알면 옾링). 첫 관찰은 기준만 저장한다. 바뀐 칸마다 안내 1개.
  * pcfg: {name, photo, status} (없으면 켜짐). runtime 은 방(또는 계정) runtime.
- * → [{text, mention, kind}]
+ * → [{text, mention, kind, linkFor?}]
  */
 export function profileObserve(runtime, chatId, pcfg, ob, now) {
   const out = []
@@ -547,31 +588,31 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
   const changes = Array.isArray(prev.changes) ? prev.changes.slice() : []
   const cur = String(prev.name).trim()
   const nowName = name || cur
+  const link = profileUrl(ob.link)
+  const linkLine = LINK_LABEL + (link || NO_LINK)
   if (name && name !== cur) {
     changes.push({ at: now, kind: 'name', name: cur })
     if (on('name')) {
       const n = nameChanges(changes).length
-      const nm = mentionLine('이름', name, userId)
-      const lines = ['[프로필 변경 감지]', nm.line, '이전 : ' + (cur.replace(/@/g, '') || '이름 없음'), '시각 : ' + kstStamp(now)]
+      const nm = mentionLine('지금 닉', name, userId)
+      const lines = ['[프로필 변경 감지]', '이전닉 : ' + (cur.replace(/@/g, '') || '이름 없음'), linkLine, nm.line]
       if (n >= 2) lines.push('누적 : ' + n + '회')
-      const text = lines.join('\n')
-      out.push({ text, mention: withAt(text, nm.mention), kind: 'name' })
+      out.push(profileNote(lines, nm, 'name', link, userId))
     }
   }
   if (photo && prev.photo && photo !== prev.photo) {
     changes.push({ at: now, kind: 'photo' })
     if (on('photo')) {
-      const nm = mentionLine('이름', nowName, userId)
-      const text = ['[프로필 변경 감지]', nm.line, '항목 : 프로필 사진', '시각 : ' + kstStamp(now)].join('\n')
-      out.push({ text, mention: withAt(text, nm.mention), kind: 'photo' })
+      const nm = mentionLine('지금 닉', nowName, userId)
+      out.push(profileNote(['[프로필 변경 감지]', nm.line, linkLine, '변경 : 프로필 사진'], nm, 'photo', link, userId))
     }
   }
   if (status != null && prev.status != null && status !== prev.status) {
     changes.push({ at: now, kind: 'status', from: String(prev.status).slice(0, 200), to: status })
     if (on('status')) {
-      const nm = mentionLine('이름', nowName, userId)
-      const text = ['[프로필 변경 감지]', nm.line, '항목 : 상태 메시지', '이전 : ' + (oneLine(prev.status, 60) || '없음'), '시각 : ' + kstStamp(now)].join('\n')
-      out.push({ text, mention: withAt(text, nm.mention), kind: 'status' })
+      const nm = mentionLine('지금 닉', nowName, userId)
+      const lines = ['[프로필 변경 감지]', nm.line, linkLine, '변경 : 상태 메시지', '이전 : ' + (oneLine(prev.status, 60) || '없음')]
+      out.push(profileNote(lines, nm, 'status', link, userId))
     }
   }
   p.people[key] = {

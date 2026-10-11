@@ -35,7 +35,7 @@ import {
 import { BotPool } from './botpool.mjs'
 import { FakeKakaoClient, fakeOn } from './fake.mjs'
 import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
-import { isBotId, locoOk } from './roomfeat.mjs'
+import { isBotId, locoOk, withProfileLink } from './roomfeat.mjs'
 import { dbStore, listFeatureRows, listIds, loadRecord, saveRecord, updateFeatures } from './store.mjs'
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
@@ -1148,6 +1148,17 @@ class Slot {
     return { name, link, userId: memberUserId }
   }
 
+  // [프로필 변경 감지]의 옾링을 관찰한 곳에서 몰랐다 → 그 사람 카드에서 찾아 채운다. 못 찾으면 '없음' 그대로.
+  async withLink(s) {
+    try {
+      const card = await this.memberCard(s.chatId, s.linkFor)
+      if (card.link && (!card.userId || card.userId === String(s.linkFor))) return withProfileLink(s, card.link)
+    } catch (e) {
+      await this.onError(e)
+    }
+    return s
+  }
+
   async openProfileLink(linkId) {
     const id = String(linkId || '').trim()
     if (!/^[1-9][0-9]*$/.test(id)) return ''
@@ -1164,7 +1175,7 @@ class Slot {
 
   async finishGuard(guard) {
     if (!guard || !guard.active) return
-    for (const s of guard.sends || []) await this.deliver(s)
+    for (const s of guard.sends || []) await this.deliver(s.linkFor ? await this.withLink(s) : s)
     if (guard.askHalt) await this.stopKickWave(guard.askHalt)
     await saveRecord(this.id, this.record)
   }

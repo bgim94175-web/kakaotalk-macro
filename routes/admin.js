@@ -44,6 +44,7 @@ const TEXT = {
   bad_profile_url: 'open.kakao.com/me/로 시작하는 오픈프로필 링크를 넣어 주세요.',
   kakao_down: '카카오 서버에 연결하지 못했습니다.',
   failed: '요청을 처리하지 못했습니다.',
+  register_restart: '서버가 다시 시작되어 등록이 중단되었습니다. 처음부터 다시 등록해 주세요.',
 };
 
 // 등록 실패 문구에서 "다른 기기 끊기"를 권하지 않을 카카오 상태(routes/panel.js 와 같은 목록)
@@ -289,7 +290,7 @@ async function pendingMap(installIds) {
   return out;
 }
 
-// bot_nickname = 방장에게 보일 봇 이름(그 방에서 읽은 이름 → 오픈프로필 이름 → 닉네임, installs.BOT_NAME_SQL, D12)
+// bot_nickname = 방장에게 보일 봇 이름(그 방에서 읽은 이름 → v6 때 들어간 방은 닉네임 → 오픈프로필 이름 → 닉네임, installs.BOT_NAME_SQL, D12)
 const ROOM_SELECT = `
   SELECT r.*, ` + installs.BOT_NAME_SQL + ` AS bot_nickname, b.label AS bot_label, b.email AS bot_email,
          m.login_id AS member_login, o.token AS order_token
@@ -1275,8 +1276,8 @@ function logText(kind, who, d, ok) {
     case 'unkick': return '내보내기 해제 · ' + name;
     case 'promo': return '홍보 금지 · ' + name + (d.n !== undefined ? ' · 경고 ' + d.n + '회' : '');
     case 'hide': return '글 가리기 · ' + (Number(d.n || d.done || d.count) || 0) + '개' +
-      (Number(d.failed) ? ' (실패 ' + Number(d.failed) + '개)' : '') + ' · ' + (d.by === 'panel' ? '패널' : '방장');
-    case 'cover': return '금지어 가림 · ' + name;
+      (Number(d.failed) ? ' (실패 ' + Number(d.failed) + '개)' : '') + ' · ' + (d.by === 'panel' ? '패널' : '방에서');
+    case 'cover': return '글 가리기 (금지어) · ' + name;
     case 'perm': return (d.granted === true || d.to === 'active' || (Number(d.perm) & 5)) ? '부방장 지정 감지' : '부방장 해제 감지';
     case 'wave': return '올킥 감지' + (d.n !== undefined ? ' · ' + d.n + '명' : '');
     case 'state': {
@@ -1467,30 +1468,24 @@ async function upsertBot(deviceId, email, label, cap) {
   forgetBotStatus();
 }
 
-// 봇 기록이 등록을 마쳤나 — /v1/snapshot 은 bot. 에 404 라서 /v1/status 로 본다(3.5)
-async function botReady(deviceId) {
-  if (!sender.up()) return false;
+// 봇 기록이 붙어 있나 — /v1/snapshot 은 bot. 에 404 라서 /v1/status 로 본다(3.5). 확인하지 못하면 null.
+async function botLinked(deviceId) {
+  if (!sender.up()) return null;
   try {
     const r = await sender.call('GET', '/v1/status?device_id=' + encodeURIComponent(deviceId), null, 8000);
-    return !!(r && r.status === 200 && r.json && r.json.linked && !r.json.needs_register);
+    if (!r || r.status !== 200 || !r.json) return null;
+    return !!(r.json.linked && !r.json.needs_register);
   } catch (e) {
-    return false;
+    return null;
   }
 }
-
-// 재등록이면 시작할 때 이미 붙어 있던 기록일 수 있다 → 그때는 /v1/status 만으로 끝났다고 보지 않는다
-const linkedAtBegin = new Map();   // pending_id → true
-function noteLinkedAtBegin(pendingId, on) {
-  if (!pendingId) return;
-  if (on) linkedAtBegin.set(pendingId, Date.now());
-  else linkedAtBegin.delete(pendingId);
-  for (const [k, at] of linkedAtBegin) if (Date.now() - at > BOT_PENDING_MS) linkedAtBegin.delete(k);
+async function botReady(deviceId) {
+  return (await botLinked(deviceId)) === true;
 }
 
 async function finishBot(req, row, how) {
   await upsertBot(row.device_id, row.email, row.label || null, row.room_cap == null ? null : Number(row.room_cap));
   await db.q('DELETE FROM bot_pending WHERE pending_id=$1', [row.pending_id]);
-  noteLinkedAtBegin(row.pending_id, false);
   await audit.record(req, 'bot', { detail: 'register ' + row.device_id + ' ' + row.email + (how ? ' (' + how + ')' : '') });
 }
 
@@ -1517,7 +1512,9 @@ router.post('/admin/bot-register/begin', wrap(async (req, res) => {
   if (!sender.up()) return fail(res, 503, 'sender_down', sender.reason() || TEXT.sender_down);
   const now = Date.now();
   await db.q('DELETE FROM bot_pending WHERE expires_at < $1 OR device_id = $2', [now, deviceId]);
-  const wasLinked = existing ? await botReady(deviceId) : false;
+  // 재등록이면 시작할 때 이미 붙어 있던 기록일 수 있다 → 그때는 /v1/status 만으로 끝났다고 보지 않는다.
+  // 붙어 있는지 확인하지 못했으면 붙어 있던 것으로 본다(sender 의 확인 답만 믿는다).
+  const wasLinked = existing ? (await botLinked(deviceId)) !== false : false;
   let out;
   try {
     const r = await sender.call('POST', '/v1/register/begin', {
@@ -1531,10 +1528,9 @@ router.post('/admin/bot-register/begin', wrap(async (req, res) => {
   }
   if (out.state === 'confirm_on_phone' && out.pending_id) {
     await db.q(
-      `INSERT INTO bot_pending (pending_id, device_id, email, label, room_cap, created_at, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (pending_id) DO NOTHING`,
-      [out.pending_id, deviceId, email, label, c.cap, now, now + BOT_PENDING_MS]);
-    noteLinkedAtBegin(out.pending_id, wasLinked);
+      `INSERT INTO bot_pending (pending_id, device_id, email, label, room_cap, created_at, expires_at, was_linked)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (pending_id) DO NOTHING`,
+      [out.pending_id, deviceId, email, label, c.cap, now, now + BOT_PENDING_MS, wasLinked]);
   }
   if (out.state === 'ok') {
     await upsertBot(deviceId, email, label, c.cap);
@@ -1556,14 +1552,13 @@ router.post('/admin/bot-register/confirm', wrap(async (req, res) => {
   if (!row) return res.json(expiredView());
   const ok = () => ({ ok: true, state: 'ok', text: '', device_id: row.device_id });
   const waiting = () => ({ ok: true, state: 'waiting', text: '', device_id: row.device_id });
-  const trustStatus = !linkedAtBegin.has(pendingId);
+  const trustStatus = !row.was_linked;
   const ready = async () => trustStatus && await botReady(row.device_id);
 
   if (Number(row.expires_at) < Date.now()) {
     if (!sender.up()) return res.json(waiting());
     if (await ready()) { await finishBot(req, row, '확인 시간 경과 뒤 상태 확인'); return res.json(ok()); }
     await db.q('DELETE FROM bot_pending WHERE pending_id=$1', [pendingId]);
-    noteLinkedAtBegin(pendingId, false);
     return res.json(expiredView());
   }
   if (await ready()) { await finishBot(req, row, '상태 확인'); return res.json(ok()); }
@@ -1591,7 +1586,10 @@ router.post('/admin/bot-register/confirm', wrap(async (req, res) => {
   }
   if (out.state !== 'waiting') {
     await db.q('DELETE FROM bot_pending WHERE pending_id=$1', [pendingId]);
-    noteLinkedAtBegin(pendingId, false);
+    // sender 가 다시 시작해 대기 목록을 잃었다 → 시간이 지났다고 하지 않고 그대로 말한다
+    if (out.state === 'expired' && out.reason === 'unknown_pending') {
+      return res.json({ ok: true, state: 'expired', text: TEXT.register_restart, device_id: row.device_id });
+    }
   }
   const view = publicLogin(out);
   view.device_id = row.device_id;
@@ -1603,7 +1601,6 @@ router.post('/admin/bot-register/cancel', wrap(async (req, res) => {
   const row = pendingId ? await db.one('SELECT pending_id FROM bot_pending WHERE pending_id=$1', [pendingId]) : null;
   if (row) {
     await db.q('DELETE FROM bot_pending WHERE pending_id=$1', [pendingId]);
-    noteLinkedAtBegin(pendingId, false);
     if (sender.up()) {
       try { await sender.call('POST', '/v1/register/cancel', { pending_id: pendingId }, 10000); } catch (e) { /* 자식이 없어도 화면은 닫는다 */ }
     }
@@ -1693,14 +1690,17 @@ router.post('/admin/bot-open-profile', wrap(async (req, res) => {
   forgetBotStatus();
   const shaped = await allBotsShaped();
   const bot = shaped.bots.find((x) => x.device_id === deviceId) || null;
-  res.json({ ok: true, bot: bot, picked: picked, read_ok: out && out.ok ? !!out.read_ok : null });
+  // read_ok·read_status: 이번 요청의 SYNCLINK 결과(refresh 일 때만, 아니면 null). 실패해도 남긴 목록·판정은 그대로다.
+  const readOk = out && out.ok && typeof out.read_ok === 'boolean' ? out.read_ok : null;
+  res.json({ ok: true, bot: bot, picked: picked, read_ok: readOk,
+    read_status: readOk === false && Number.isFinite(Number(out.read_status)) ? Number(out.read_status) : null });
 }));
 
 // 들어가 있는 방의 봇 프로필(D12): how 'switch' = 오픈프로필로 바꾸기(UPLINKPROF, 나가지 않음 · 부방장 유지 기대),
 // 'rejoin' = 나갔다가 오픈프로필로 다시 입장(방장이 부방장을 다시 지정해야 함). sender 가 봇의 입장 줄에서 차례로 처리한다.
 const ROOM_PROFILE_ERR = {
   not_joined: 'K bot이 이 방에 들어가 있지 않습니다. 사용 중이거나 부방장 지정 대기인 방만 바꿀 수 있습니다.',
-  no_open_profile: '이 방의 K bot 계정에 쓸 오픈프로필이 없습니다. [K bot 계정] 탭에서 먼저 확인해 주세요.',
+  no_open_profile: '이 방의 K bot 계정에 쓸 오픈프로필이 없습니다. [봇] 탭에서 먼저 확인해 주세요.',
   not_connected: '이 방의 K bot 계정이 지금 카카오에 연결되어 있지 않습니다. 연결된 뒤 다시 시도해 주세요.',
   already_open: '이미 오픈프로필로 들어가 있습니다.',
 };

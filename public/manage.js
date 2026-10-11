@@ -2126,7 +2126,12 @@
     var bot = r && r.json && r.json.bot;
     var s = bot ? bot.open_profile_state : '';
     var pn = str(bot && bot.open_profile && bot.open_profile.name);
-    if (s === 'ok') toast('오픈프로필 「' + pn + '」' + ro(pn) + ' 입장합니다', 'ok');
+    // 다시 읽기에서 이번 SYNCLINK 가 실패하면 남긴 판정이 그대로라, 판정 대신 읽기 실패를 알린다
+    if (r && r.json && r.json.read_ok === false) {
+      var st = r.json.read_status;
+      toast('카카오에서 오픈프로필 목록을 읽지 못했습니다' + (typeof st === 'number' ? '(카카오 상태 ' + st + ')' : '') +
+        '. 저장된 목록을 그대로 씁니다', 'bad');
+    } else if (s === 'ok') toast('오픈프로필 「' + pn + '」' + ro(pn) + ' 입장합니다', 'ok');
     else if (s === 'none') toast('오픈프로필이 없습니다. 카카오톡에서 먼저 만들어 주세요', 'bad');
     else if (s === 'gone') toast('고른 오픈프로필을 찾지 못했습니다. 다시 골라 주세요', 'bad');
     else toast('오픈프로필을 아직 확인하지 못했습니다', 'bad');
@@ -2333,7 +2338,8 @@
         if (kicked(r)) return;
         if (!r.ok) { m.error(errText(r, '등록하지 못했습니다')); return; }
         var v = r.json;
-        if (v.device_id) st.deviceId = v.device_id;
+        // 새 봇은 등록을 마친 뒤에만 id 를 쥔다. 실패·취소 뒤 다시 [다음]을 누르면 서버가 새 id 를 다시 만든다.
+        if (v.device_id && (bot || v.state === 'ok')) st.deviceId = v.device_id;
         if (v.state === 'ok') { pw.value = ''; done(); return; }
         if (v.state === 'confirm_on_phone') { step2(v); return; }
         m.error(v.text || '등록하지 못했습니다. 입력한 계정을 확인한 뒤 다시 시도해 주세요.');
@@ -2398,7 +2404,7 @@
           }
           var v2 = r.json;
           m.error('');
-          if (v2.state === 'ok') { clearInterval(tick); pw.value = ''; done(); return; }
+          if (v2.state === 'ok') { clearInterval(tick); pw.value = ''; if (v2.device_id) st.deviceId = v2.device_id; done(); return; }
           if (v2.state === 'waiting') { waitTxt.textContent = '아직 카카오톡에서 확인되지 않았습니다. 계속 기다립니다'; sleep(2000).then(loop); return; }
           if (v2.state === 'confirm_on_phone') { clearInterval(tick); step2(v2); return; }
           clearInterval(tick);

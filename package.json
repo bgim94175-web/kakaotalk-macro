@@ -15,7 +15,7 @@
     "check:w2": "node --check lib/db.js && node --check lib/pricing.js && node --check lib/keys.js && node --check lib/entitle.js && node --check lib/installs.js && node --check lib/openchat.js && node --check lib/secretbox.js && node --check lib/sender-child.js && node --check routes/purchase.js && node lib/purchase-check.js",
     "check:w3": "npm --prefix sender run check",
     "check:w4": "node --check public/app.js && node --check public/support.js",
-    "check:w5": "node --check public/panel.js && node lib/panel-check.js",
+    "check:w5": "node --check public/panel.js && node lib/panel-check.js && node lib/register-check.js",
     "check:w6": "node --check routes/admin.js && node --check public/manage.js"
   },
   "dependencies": {

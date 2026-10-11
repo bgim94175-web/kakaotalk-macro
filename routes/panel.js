@@ -42,6 +42,7 @@ const TEXT = {
   bad_user: '사람을 다시 골라 주세요.',
   no_job: '진행 중인 글 가리기를 찾을 수 없습니다.',
   bot_failed: 'K bot에 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+  register_restart: '서버가 다시 시작되어 등록이 중단되었습니다. 처음부터 다시 등록해 주세요.',
 };
 
 function maxAccountsText() {
@@ -309,11 +310,14 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
   res.json({ ok: true, ...view });
 }));
 
-async function sessionReady(deviceId) {
+// 이 등록 대기가 시작된 뒤(since)에 저장된 세션이어야 끝난 것으로 본다. 재등록은 예전 세션이 아직 붙어 있을 수 있어서
+// '붙어 있다'만으로는 휴대폰 확인을 마쳤는지 알 수 없다. 저장할 때 sender 가 features.reg_at 을 찍는다.
+async function sessionReady(deviceId, since) {
   if (!sender.up()) return false;
   try {
     const snap = await snapshot(deviceId);
-    return !!(snap && snap.linked && !snap.needs_register);
+    const regAt = Number(snap && snap.features && snap.features.reg_at) || 0;
+    return !!(snap && snap.linked && !snap.needs_register && regAt >= Number(since || 0));
   } catch (e) {
     return false;
   }
@@ -333,43 +337,39 @@ router.post('/panel/api/register/confirm', wrap(async (req, res) => {
   const memberId = s.member.id;
   const pendingId = String((req.body && req.body.pending_id) || '');
   const row = await db.one(
-    'SELECT pending_id, device_id, email, expires_at FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
+    'SELECT pending_id, device_id, email, created_at, expires_at FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
     [pendingId, memberId]);
-  if (row && await accountRow(memberId, row.device_id)) return res.json(okView(row.device_id));
+  // 앞선 확인이 이미 끝냈다: 새 계정은 성공한 순간 panel_accounts 행이 생긴다.
+  // 재등록은 예전 행이 그대로라(created_at 을 바꾸지 않는다) 여기서 끝내지 않고 sender 에 묻는다.
+  const acct = row ? await accountRow(memberId, row.device_id) : null;
+  if (acct && Number(acct.created_at) >= Number(row.created_at)) return res.json(okView(row.device_id));
+  const since = row ? Number(row.created_at) : 0;
+  const finish = async () => {
+    await rememberAccount(memberId, row.device_id, row.email, Date.now());
+    return res.json(okView(row.device_id));
+  };
   const expired = !row || Number(row.expires_at) < Date.now();
   if (expired) {
     if (row && !sender.up()) return res.json(waitingView(row.device_id));
-    if (row && await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (row && await sessionReady(row.device_id, since)) return finish();
     if (row) await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
     return res.json({ ok: true, state: 'expired', text: text.customerText({ state: 'expired' }) });
   }
-  if (await sessionReady(row.device_id)) {
-    await rememberAccount(memberId, row.device_id, row.email, Date.now());
-    return res.json(okView(row.device_id));
-  }
+  if (await sessionReady(row.device_id, since)) return finish();
   if (!sender.up()) return res.json(waitingView(row.device_id));
   let out;
   try {
     const r = await senderCall('POST', '/v1/register/confirm', { pending_id: pendingId }, 20000);
     out = r.json;
   } catch (e) {
-    if (await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (await sessionReady(row.device_id, since)) return finish();
     return res.json(waitingView(row.device_id));
   }
   if (!out || out.ok === false) {
-    if (await sessionReady(row.device_id)) {
-      await rememberAccount(memberId, row.device_id, row.email, Date.now());
-      return res.json(okView(row.device_id));
-    }
+    if (await sessionReady(row.device_id, since)) return finish();
     return res.json(waitingView(row.device_id));
   }
-  if (out.state === 'ok' || (out.state === 'expired' && await sessionReady(row.device_id))) {
+  if (out.state === 'ok' || (out.state === 'expired' && await sessionReady(row.device_id, since))) {
     const still = await db.one(
       'SELECT pending_id FROM panel_pending WHERE pending_id=$1 AND member_id=$2',
       [pendingId, memberId]);
@@ -381,6 +381,10 @@ router.post('/panel/api/register/confirm', wrap(async (req, res) => {
     out = { state: 'ok' };
   } else if (out.state !== 'waiting') {
     await db.q('DELETE FROM panel_pending WHERE pending_id=$1', [pendingId]);
+    // sender 가 다시 시작해 대기 목록을 잃었다 → 시간이 지났다고 하지 않고 그대로 말한다
+    if (out.state === 'expired' && out.reason === 'unknown_pending') {
+      return res.json({ ok: true, state: 'expired', text: TEXT.register_restart, device_id: row.device_id });
+    }
   }
   const view = publicLogin(out);
   view.device_id = row.device_id;
@@ -840,10 +844,10 @@ function roomLogText(row) {
   if (kind === 'hide') {
     const n = Number(pick(d, ['n', 'count', 'done', 'total'])) || 0;
     const failed = Number(pick(d, ['failed', 'fail'])) || 0;
-    const by = pick(d, ['by']) === 'panel' ? '패널' : '방장';
+    const by = pick(d, ['by']) === 'panel' ? '패널' : '방에서';
     return '글 가리기 · ' + n + '개' + (failed ? ' (실패 ' + failed + '개)' : '') + ' · ' + by;
   }
-  if (kind === 'cover') return '금지어 가림 · ' + name;
+  if (kind === 'cover') return '글 가리기 (금지어) · ' + name;
   if (kind === 'perm') {
     const to = pick(d, ['to', 'state']);
     const perm = pick(d, ['perm', 'mt']);

@@ -74,6 +74,7 @@
   /* 서버가 48시간 방치된 pending 주문을 자동 취소한다 (ORDER_PENDING_TTL_MS).
      접수 결과 화면과 주문 상태 페이지에서 같은 문구를 쓴다. */
   var TTL_MSG = '48시간 안에 입금하지 않으면 주문이 자동으로 취소됩니다. 입금 전에는 내 계정의 구매 내역에서 직접 취소할 수 있습니다.';
+  var TTL_MSG_HERE = '48시간 안에 입금하지 않으면 주문이 자동으로 취소됩니다. 입금 전에는 위 [주문 취소]로 취소할 수 있습니다.';
   var TTL_CANCELED_MSG = '48시간 안에 입금되지 않아 자동으로 취소되었습니다. 이미 입금했다면 주문번호를 적어 문의해 주세요.';
   var CANCEL_WARN = '주문을 취소합니다. 이미 입금했다면 취소하지 말고 문의해 주세요.';
 
@@ -566,6 +567,10 @@
     return P;
   }
 
+  /* 갠톡은 페이지마다 처음 한 번 '갠톡(1:1 대화)'로 쓴다(docs/TONE.md). 상품 설명이 그 페이지의 첫 언급인 곳
+     (구매 화면)에만 [data-gloss] 를 붙인다. 홈은 머리글에서 이미 풀어 썼다. */
+  function glossDm(t) { return String(t || '').replace(/갠톡(?!\()/, '갠톡(1:1 대화)'); }
+
   /* 정적 문구 안의 [data-bind] 자리에 서버 값을 채운다 (HTML 에 적힌 값은 스크립트가 꺼졌을 때의 대체 문구).
      price-<상품> 은 숫자만(쉼표 포함) — '원' 은 HTML 에 있다 */
   function bindPrice() {
@@ -577,6 +582,7 @@
       var p = PRICE.products[m[2]];
       if (!p) return;
       var v = m[1] === 'price' ? comma(p.price) : (m[1] === 'desc' ? p.desc : (m[1] === 'label' ? p.label : (p.days ? String(p.days) : '')));
+      if (v && m[1] === 'desc' && n.hasAttribute('data-gloss')) v = glossDm(v);
       if (v) n.textContent = v;
     });
   }
@@ -609,14 +615,14 @@
 
   /* 매크로 `20,000원 / 1개월(30일)`, 방 상품 `15,000원 / 방 1개 · 기간 제한 없음` (부록 A.1) —
      가격 칸 두 줄로 나눠 보인다 */
-  function prodRow(p) {
+  function prodRow(p, gloss) {
     var room = p.unit === 'room';
     var days = p.days || DAYS_FALLBACK;
     return el('article', { cls: 'card prod one', 'data-prod': p.id }, [
       el('div', { cls: 'head' }, [
         el('div', { cls: 't' }, [
           el('h3', { text: p.label }),
-          p.desc ? el('p', { cls: 'desc', text: p.desc }) : null
+          p.desc ? el('p', { cls: 'desc', text: gloss ? glossDm(p.desc) : p.desc }) : null
         ])
       ]),
       el('ul', { cls: 'bul' }, (PROD_BULLETS[p.id] || []).map(function (t) { return el('li', { text: t }); })),
@@ -636,7 +642,8 @@
     if (!mount || !PRICE) return;
     mount.removeAttribute('aria-busy');
     clear(mount);
-    PRICE.order.forEach(function (id) { mount.appendChild(prodRow(PRICE.products[id])); });
+    var gloss = mount.hasAttribute('data-gloss');
+    PRICE.order.forEach(function (id) { mount.appendChild(prodRow(PRICE.products[id], gloss)); });
   }
 
   function prodRowsError(mount, msg) {
@@ -1721,9 +1728,17 @@
 
   /* order.html 오른쪽 안내 — HTML 기본은 회원 주문 문구. 예전 키 주문이면 그때 문구로 바꿔 끼운다(부록 A.3) */
   var LEGACY_ORDER_NOTE = {
-    auto: '입금은 금액으로 자동 확인됩니다. 안내된 금액을 1원 단위까지 정확히 입금하면 보통 1~2분 안에 키가 발급됩니다. 입금 금액이 다르거나 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.',
-    manual: '관리자가 입금을 확인한 뒤 키를 발급합니다. 안내된 금액을 1원 단위까지 정확히 입금해 주세요. 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.'
+    auto: '입금은 금액으로 자동 확인되며, 보통 1~2분 안에 키가 발급됩니다. 금액이 다르거나 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.',
+    manual: '관리자가 입금을 확인한 뒤 키를 발급합니다. 30분이 지나도 상태가 바뀌지 않으면 주문번호와 입금자명을 적어 문의해 주세요.'
   };
+  /* 끝난 주문(완료·취소)에는 입금 안내 대신 이 문구를 둔다 */
+  var ORDER_NOTE_END = '주문에 궁금한 점이 있으면 주문번호를 적어 문의해 주세요.';
+  function setOrderNote(text) {
+    var nt = $('#orderNoteT');
+    if (!nt) return;
+    if (!nt.hasAttribute('data-live-text')) nt.setAttribute('data-live-text', nt.textContent);
+    nt.textContent = text == null ? nt.getAttribute('data-live-text') : text;
+  }
 
   function pageOrder() {
     var out = $('#result'), form = $('#findForm'), idIn = $('#oid');
@@ -1997,6 +2012,7 @@
       var done = o.status === 'done';
       var canceled = o.status === 'canceled' || o.status === 'cancelled';
       var autoCanceled = canceled && o.autoCanceled;
+      setOrderNote(done || canceled ? ORDER_NOTE_END : null);
       var g = groupItems(o.items);
       var views = {};
       o.rooms.forEach(function (r) { if (r && r.install_id !== undefined) views[Number(r.install_id)] = r; });
@@ -2036,7 +2052,11 @@
             ]),
             el('div', { cls: 'mono dim tiny', text: shortLink(rm.link_url) }),
             showDetail ? el('div', { cls: 'dim tiny room-d', text: v.detail }) : null,
-            (sk || disp === 'error') ? el('div', { cls: 'btn-row' }, [supportBtn('문의하기', ctx)]) : null
+            (sk || disp === 'error') ? el('div', { cls: 'btn-row' }, [
+              // 오류 문구가 말하는 [다시 시도]·참여코드 입력은 패널의 방 상태 화면에 있다
+              !sk && v && v.can_retry ? el('a', { cls: 'btn sm', href: '/panel#room/' + rm.install_id },
+                v.needs_passcode ? '패널에서 참여코드 입력' : '패널에서 다시 시도') : null,
+              supportBtn('문의하기', ctx)]) : null
           ])
         ]));
       });
@@ -2057,8 +2077,7 @@
         ];
       } else {
         acts = [
-          el('button', { type: 'button', cls: 'btn', onclick: function () { fetchOrder(true); } }, [icon('i-refresh', 14), '상태 새로고침']),
-          el('a', { cls: 'btn ghost', href: '/account' }, '내 계정')
+          el('button', { type: 'button', cls: 'btn', onclick: function () { fetchOrder(true); } }, [icon('i-refresh', 14), '상태 새로고침'])
         ];
       }
 
@@ -2087,10 +2106,10 @@
         tip = timedOut
           ? null
           : (o.needsReview
-              ? '이 화면은 상태를 계속 확인합니다. 열어 두면 처리 결과가 바로 표시됩니다.'
+              ? '관리자가 확인을 마치면 이 화면에 바로 표시됩니다.'
               : (AUTO_APPROVE
-                  ? '입금하면 보통 1~2분 안에 자동으로 확인됩니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'
-                  : '관리자가 입금을 확인한 뒤 처리합니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'));
+                  ? '입금이 확인되면 이 화면에 바로 표시됩니다.'
+                  : '관리자가 입금을 확인하면 이 화면에 바로 표시됩니다.'));
       } else if (paid) {
         tip = '입금이 확인되었습니다. 처리가 끝나면 이 화면에 바로 표시됩니다.';
       } else if (done) {
@@ -2107,7 +2126,7 @@
         tip = '상태를 계속 확인하고 있습니다. 오래 바뀌지 않으면 주문번호를 적어 문의해 주세요.';
       }
       if (tip) out.appendChild(noteEl(warn ? 'warn' : '', [tip, autoCanceled ? ' ' : null, autoCanceled ? supportBtn('문의하기', '주문 ' + showId + ' · 자동 취소') : null]));
-      if (pending) out.appendChild(noteEl('dim', [TTL_MSG]));
+      if (pending) out.appendChild(noteEl('dim', [o.canCancel ? TTL_MSG_HERE : TTL_MSG]));
       if (o.needsReview && pending) {
         out.appendChild(noteEl('warn', ['입금 후 주문번호를 적어 문의해 주시면 더 빨리 처리됩니다. 금액은 안내된 그대로 입금해 주세요.',
           ' ', supportBtn('문의하기', '주문 ' + showId + ' · 금액 확인')]));
@@ -2128,8 +2147,8 @@
       out.hidden = false;
       var fw = $('#findWrap');
       if (fw) fw.hidden = true;
-      var nt = $('#orderNoteT');
-      if (nt) nt.textContent = AUTO_APPROVE ? LEGACY_ORDER_NOTE.auto : LEGACY_ORDER_NOTE.manual;
+      var lDone = o.status === 'done' || o.status === 'canceled' || o.status === 'cancelled';
+      setOrderNote(lDone ? ORDER_NOTE_END : (AUTO_APPROVE ? LEGACY_ORDER_NOTE.auto : LEGACY_ORDER_NOTE.manual));
 
       var showId = o.id || oid;
       var acct = o.account || (PRICE && PRICE.bank) || '';
@@ -2186,10 +2205,10 @@
       var tip;
       if (pending) {
         tip = timedOut ? null
-          : (AUTO_APPROVE ? '입금하면 보통 1~2분 안에 키가 자동으로 발급됩니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.'
-                          : '관리자가 입금을 확인한 뒤 키를 발급합니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.');
+          : (AUTO_APPROVE ? '키가 발급되면 이 화면에 바로 표시됩니다.'
+                          : '관리자가 입금을 확인하면 이 화면에 바로 표시됩니다.');
       } else if (paid) {
-        tip = '입금이 확인되었습니다. 키 발급을 기다리는 중입니다. 이 화면을 열어 두면 결과가 바로 표시됩니다.';
+        tip = '입금이 확인되었습니다. 키가 발급되면 이 화면에 바로 표시됩니다.';
       } else if (done) {
         tip = '이제 패널은 아이디로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록해 주세요.';
       } else if (autoCanceled) {

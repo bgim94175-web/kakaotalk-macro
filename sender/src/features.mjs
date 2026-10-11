@@ -1715,7 +1715,7 @@ function visitNotice(row, kind) {
   const lines = [
     leave ? '[퇴장 안내]' : '[입장 안내]',
     nameLine,
-    '오픈프로필 : ' + link,
+    '옾링 : ' + link,
     leave ? '퇴장 기록' : '입장 기록',
     ...times,
   ]
@@ -1724,7 +1724,7 @@ function visitNotice(row, kind) {
     lines.push('프로필 변경')
     for (const c of changes) {
       const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-      const pastLink = c && c.link ? String(c.link) : '오픈프로필 없음'
+      const pastLink = c && c.link ? String(c.link) : '옾링 없음'
       lines.push('- ' + kstStamp(c && c.at) + '  ' + past + ' / ' + pastLink)
     }
   }
@@ -1843,9 +1843,11 @@ function applyProfile(record, ev, sends) {
   const chatId = String(room.chat_id)
   const cfg = record.config.profile
   // 이름(메시지·입장의 작성자 닉), 사진 서명·상태 메시지(회원 카드)를 한 곳에서 비교한다(7.2(c)).
-  const notes = profileObserve(rt(record), chatId, cfg, { userId: id, name, photo: ev.photo, status: ev.status }, now)
+  const notes = profileObserve(rt(record), chatId, cfg, { userId: id, name, photo: ev.photo, status: ev.status, link: ev.profileLink }, now)
   for (const n of notes) {
-    sends.push({ chatId, text: n.text, mention: n.mention, delayMs: profileDelay(p, chatId, now), kind: 'profile' })
+    const send = { chatId, text: n.text, mention: n.mention, delayMs: profileDelay(p, chatId, now), kind: 'profile' }
+    if (n.linkFor) send.linkFor = n.linkFor   // 옾링을 몰랐다 → 보내는 쪽이 찾아 채운다(withProfileLink)
+    sends.push(send)
   }
   return notes.length > 0
 }
@@ -1855,22 +1857,6 @@ export function profileOnly(record, ev) {
   const sends = []
   applyProfile(record, ev, sends)
   return sends
-}
-
-function profileNotice(name, userId, prevName, changes, now) {
-  const nm = String(name || '').replace(/[\r\n]/g, '').trim()
-  const uid = /^[1-9][0-9]*$/.test(String(userId || '')) ? String(userId) : ''
-  const old = String(prevName || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-  const mentioned = !!(uid && nm)
-  const nameLine = mentioned ? ('이름 : @' + nm) : ('이름 : ' + (nm || '이름 없음'))
-  const lines = ['[프로필 변경 감지]', nameLine, '이전 : ' + old, '시각 : ' + kstStamp(now)]
-  const n = Array.isArray(changes) ? changes.length : 0
-  if (n >= 2) lines.push('누적 : ' + n + '회')
-  const text = lines.join('\n')
-  if (!mentioned) return { text, mention: null }
-  const at = text.indexOf('\n이름 : @')
-  const start = at + '\n이름 : @'.length
-  return { text, mention: { userId: uid, at: start, len: nm.length } }
 }
 
 /**
@@ -1991,8 +1977,8 @@ export function guardFinishHalt(record, chatId, allowed, now, roomName, count, w
   const n = Number(count) || 0
   const subj = who === 'K bot' ? 'K bot' : '이 계정'
   const text = allowed
-    ? `「${room}」에서 짧은 시간에 내보내기가 ${n}번 있었습니다. ${subj}은 ${GUARD_HALT_MS / 60000}분 동안 사람을 내보내지 않습니다.`
-    : `「${room}」에서 짧은 시간에 내보내기가 ${n}번 있었습니다. ${subj}에는 내보내기를 멈출 권한이 없습니다.`
+    ? `「${room}」에서 짧은 시간에 ${n}명을 내보냈습니다. ${subj}은 ${GUARD_HALT_MS / 60000}분 동안 사람을 내보내지 않습니다.`
+    : `「${room}」에서 짧은 시간에 ${n}명을 내보냈습니다. ${subj}에는 내보내기를 멈출 권한이 없습니다.`
   pushNotice(g, now, text)
   return text
 }

@@ -936,7 +936,7 @@
       box.appendChild(row);
       n += 1;
     });
-    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. 「대화방 불러오기」를 눌러 주세요.'));
+    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.'));
   }
 
   function checkedRooms(root) {
@@ -966,7 +966,7 @@
       box.appendChild(row);
       n += 1;
     });
-    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. 「대화방 불러오기」를 눌러 주세요.'));
+    if (!n) box.appendChild(el('p', 'rooms-none', '불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.'));
   }
 
   function selectedRooms() {
@@ -1228,7 +1228,7 @@
     try { base = JSON.parse(baseline.snipe || '[]'); } catch (e) { base = []; }
     $('snipe-count').textContent = '규칙 ' + triggers.length + ' / 30';
     $('add-trigger').disabled = triggers.length >= 30;
-    if (!triggers.length) { box.innerHTML = '<p class="empty">등록된 규칙이 없습니다. 「규칙 추가」를 눌러 첫 규칙을 만들어 주세요.</p>'; return; }
+    if (!triggers.length) { box.innerHTML = '<p class="empty">등록된 규칙이 없습니다. [규칙 추가]를 눌러 첫 규칙을 만들어 주세요.</p>'; return; }
     var choices = roomChoices();
     box.innerHTML = triggers.map(function (t, i) {
       var old = t.id ? base.filter(function (b) { return b.id === t.id; })[0] : null;
@@ -1238,7 +1238,7 @@
       var chosen = t.rooms || [];
       var picks = choices.length ? '<div class="rooms" role="group" aria-label="감지할 방">' + choices.map(function (r) {
         return '<label class="room"><input type="checkbox" data-rule-room="' + i + '" data-key="' + esc(r.key) + '"' + (chosen.indexOf(r.key) >= 0 ? ' checked' : '') + '><span class="ck" aria-hidden="true">' + ic('check', 10) + '</span><span class="nm">' + esc(r.name || '대화방') + '</span>' + (r.members ? '<span class="mem">' + r.members + '명</span>' : '') + '</label>';
-      }).join('') + '</div>' : '<p class="rooms-none">불러온 대화방이 없습니다. 「대화방 불러오기」를 눌러 주세요.</p>';
+      }).join('') + '</div>' : '<p class="rooms-none">불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.</p>';
       return '<div class="rule' + (t.enabled === false ? ' off' : '') + (open ? ' open' : '') + (i === newIdx ? ' new' : '') + '" data-ri="' + i + '">' +
         '<div class="rule-h" role="button" tabindex="0" aria-expanded="' + open + '"><div class="t"><b>' + esc(t.name || '이름 없는 규칙') + '</b><div class="meta">' + ruleMeta(t) + '</div></div>' +
         swHtml('data-rule="' + i + '" data-f="enabled"', t.enabled !== false, (t.name || '규칙') + ' 사용') + '<span class="chev">' + ic('down') + '</span></div>' +
@@ -1633,7 +1633,7 @@
       try { await openAccount(doneDevice); } catch (e) { /* 설정 열기에서 다시 연다 */ }
     }
     $('add-done-title').textContent = reauth ? '재등록 완료' : '등록 완료';
-    $('add-done-msg').textContent = reauth ? '다시 연결되었습니다. 기존 설정과 기록이 그대로 적용됩니다.' : '등록되었습니다. 모든 기능은 꺼진 상태로 시작하니, 필요한 기능을 켜 주세요.';
+    $('add-done-msg').textContent = reauth ? '다시 연결되었습니다. 기존 설정과 기록은 그대로 남아 있습니다.' : '등록되었습니다. 모든 기능은 꺼진 상태로 시작하니, 필요한 기능을 켜 주세요.';
     $('add-done-email').textContent = doneEmail;
     $('add-done-acct').textContent = doneEmail;
     $('add-done-at').textContent = fmtFull(Date.now());
@@ -2848,7 +2848,7 @@
       var g = L.guard[0];
       return g ? '<span class="mono">' + fmtT(g.at) + '</span>올킥 감지 · ' + esc(guardRoom(g.text)) : '';
     }
-    if (key === 'cover') { var c = a.cover || {}; return '금지어 ' + (c.words || []).length + '개 · 링크 ' + (c.links !== false ? '가림' : '허용'); }
+    if (key === 'cover') { var c = a.cover || {}; return '금지어 ' + (c.words || []).length + '개 · 링크 ' + (c.links !== false ? '가리기' : '허용'); }
     if (key === 'autoreply') { var r = a.autoreply || {}; return '쿨타임 ' + (r.cooldown_hours == null ? 6 : r.cooldown_hours) + '시간'; }
     if (key === 'triggers') {
       var ts = a.triggers || [];
@@ -2926,7 +2926,7 @@
         '<span class="sq">' + ic('link', 13) + '</span>' +
         '<span class="meta"><b>' + esc(roomName(v)) + '</b><small>' + esc(productsText(v)) + '</small></span>' +
         stateHtmlRoom(v) + '</button>';
-    }).join('') : '<p class="empty">봇을 설치한 방이 없습니다. 「방 추가」에서 오픈채팅방 링크를 입력하고 구매할 수 있습니다.</p>';
+    }).join('') : '<p class="empty">봇을 설치한 방이 없습니다. [방 추가]에서 오픈채팅방 링크를 입력하고 구매할 수 있습니다.</p>';
   }
   // 개요 지표 4칸(6.9): 안 읽은 갠톡 · 매크로 · 사용 중인 방 · 확인 필요
   function renderMacroMetric() {
@@ -3083,7 +3083,7 @@
   // /panel/api/bot-room/logs?id= (방 화면이 보일 때 10초). 방 설정 저장은 기존 저장 바로 POST /panel/api/bot-room/settings.
   var PRODUCT_LABEL = { roombot: '방 관리봇', minigame: '미니게임봇' };
   var LOG_KIND = { churn: '들낙 감지', kick: '내보내기', kick_fail: '내보내기 실패', unkick: '내보내기 해제', promo: '홍보 금지', hide: '글 가리기',
-    cover: '금지어 가림', perm: '권한 변경', wave: '올킥 감지', state: '방 상태 변경', skip: '처리 건너뜀' };
+    cover: '글 가리기 (금지어)', perm: '권한 변경', wave: '올킥 감지', state: '방 상태 변경', skip: '처리 건너뜀' };
   var PROFILE_KIND = { name: '닉네임', photo: '프로필 사진', status: '상태 메시지' };
   var NOT_ACTIVE = '부방장 지정을 기다리는 중입니다. 방장이 K bot을 부방장으로 지정하면 설정할 수 있습니다.';
   var roomsSt = { timer: null, busy: false, seq: 0, fails: 0, sig: '' };

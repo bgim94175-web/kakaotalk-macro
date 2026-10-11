@@ -451,6 +451,7 @@ export class BotPool {
     const s = this.bots.get(String(botId || ''))
     if (!s || s.dead || s.stopped) return { ok: false, error: 'not_connected' }
     const b = body || {}
+    let read = null
     if (this.store.botProfileRows) {
       try {
         const rows = await this.store.botProfileRows([s.id])
@@ -464,9 +465,15 @@ export class BotPool {
       if (!r.ok) return r
     } else if (b.refresh) {
       if (!s.live()) return { ok: false, error: 'not_connected' }
-      await s.readOpenProfiles('admin', true)
+      read = await s.readOpenProfiles('admin', true)
     }
-    return { ok: true, read_ok: s.profileReadAt > 0, ...s.profileView() }
+    // read_ok·read_status: 이번 요청의 SYNCLINK 결과(다시 읽기만). 실패하면 남긴 목록을 그대로 쓰므로 판정만으로는 실패를 알 수 없다.
+    return {
+      ok: true,
+      read_ok: read && typeof read.ok === 'boolean' ? read.ok : null,
+      read_status: read && read.ok === false ? read.status : null,
+      ...s.profileView(),
+    }
   }
 
   // ── /v1/bot/room-profile ────────────────────────────────────────────────
@@ -918,15 +925,19 @@ export class BotSlot {
     this.profileState = state
   }
 
+  // 돌려주는 값 { ok, status, state }: 이번 SYNCLINK 가 됐는지(읽지 않았으면 null), 실패 status, 그 뒤의 판정
   readOpenProfiles(why, force) {
     if (this.profileReading) return this.profileReading
     const now = this.now()
-    if (!this.client || (!force && now - this.profileTryAt < this.opts.profileReadGapMs)) return Promise.resolve(this.profileState)
+    if (!this.client || (!force && now - this.profileTryAt < this.opts.profileReadGapMs)) {
+      return Promise.resolve({ ok: null, status: null, state: this.profileState })
+    }
     this.profileTryAt = now
     this.profileReading = (async () => {
       await this.loadProfileCache()
       const r = await this.raw('SYNCLINK', { ltk: 0 })
-      if (R.locoOk(r)) {
+      const ok = R.locoOk(r)
+      if (ok) {
         const found = ownOpenProfiles(r.body && r.body.ols, this.userId)
         // 링크로 직접 등록한 오픈프로필(src url)은 SYNCLINK 가 오픈프로필을 하나도 보여 주지 않을 때만 남긴다
         const manual = found.length ? [] : (this.openProfiles || []).filter((p) => p.src === 'url')
@@ -936,7 +947,7 @@ export class BotSlot {
         log(this.id, `open profile read failed (${why}): status ${R.locoStatus(r)}${this.openProfiles ? ', keeping the saved list' : ''}`)
       }
       await this.applyProfile(why)
-      return this.profileState
+      return { ok, status: ok ? 0 : R.locoStatus(r), state: this.profileState }
     })().finally(() => { this.profileReading = null })
     return this.profileReading
   }
@@ -1208,6 +1219,12 @@ export class BotSlot {
     const changed = hadRoombot !== null && hadRoombot !== v.products.roombot
     const stale = v.products.roombot ? (v.state === 'active' && !(Number(v.perm) & 5)) : v.state === 'waiting_host'
     if (inRoom && (changed || stale)) this.soon(v)
+    // 이 봇이 이 방에서 어떤 프로필로 보이는지 모르는 방(v6 때 기본 프로필로 들어간 방): 정기 점검(최대 10분)까지
+    // 기다리지 않고 1분쯤 뒤에 읽어 runtime.prof 를 남긴다(부모가 방장에게 보일 이름으로 쓴다, 5.8)
+    if (created && inRoom && !(opts && opts.joining) && !this.profOf(v)) {
+      const at = now + jitter(this.opts.permPollMs, 0.25)
+      if (!v.nextCheckAt || v.nextCheckAt > at) v.nextCheckAt = at
+    }
     return v
   }
 
@@ -1679,8 +1696,10 @@ export class BotSlot {
     const v = await this.upsertView(Object.assign({}, row, fields, { link_id: row.link_id || li, state }), { joining: true })
     v.nextCheckAt = now + (state === 'waiting_host' ? jitter(this.opts.permPollMs, 0.25) : this.opts.activeCheckMs)
     if (ch.pv != null && Number.isFinite(Number(ch.pv))) v.linkPv = Number(ch.pv)
-    // 이 방에서 봇이 어떤 프로필로 보이는지 남긴다(오픈프로필이 아니면 관리자 화면에 바꾸기 대상으로 보인다)
+    // 이 방에서 봇이 어떤 프로필로 보이는지 남긴다(오픈프로필이 아니면 관리자 화면에 바꾸기 대상으로 보인다).
+    // 바로 저장한다: 부모는 이 기록이 없는 입장 완료 방을 v6 때 기본 프로필로 들어간 방으로 본다(installs.BOT_NAME_SQL)
     this.noteSelf(v, self)
+    await this.flushView(v)
     // 미니게임봇으로 안내했던 방에 방 관리봇을 더한 뒤 다시 들어왔으면 방 관리봇 안내(지정할 계정 이름)를 한 번 더 한다
     const welcomed = this.noticed(v, 'welcomed') && (!products.roombot || v.runtime.welcomed.roombot)
     if (!welcomed && v.licensed) {
@@ -2305,7 +2324,7 @@ export class BotSlot {
     })
     this.sendAll(v, g.sends)
     if (card && cfg.profile.enabled) {
-      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: ev.userId, authorName: card.name, photo: card.photo, status: card.status, now }))
+      this.sendAll(v, profileOnly(adapter, { chatId: v.chat_id, authorId: ev.userId, authorName: card.name, photo: card.photo, status: card.status, profileLink: link, now }))
     }
     const ctx = this.ctxFor(v)
     if (ev.kind === 'join') {
@@ -2700,7 +2719,18 @@ export class BotSlot {
   }
 
   sendAll(v, sends, what) {
-    for (const s of sends || []) this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+    for (const s of sends || []) {
+      // [프로필 변경 감지]의 옾링을 관찰한 곳에서 몰랐다 → 그 사람 카드에서 찾아 채운 뒤 보낸다
+      if (s && s.linkFor) this.bg(this.sayWithLink(v, s, what), 'profile link')
+      else this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+    }
+  }
+
+  async sayWithLink(v, s, what) {
+    const card = await this.memberCard(v, s.linkFor)
+    const link = card && card.pli ? await this.profileLink(card.pli) : ''
+    const t = link ? R.withProfileLink(s, link) : s
+    this.say(v, t.text, { mention: t.mention, delayMs: t.delayMs, what: what || 'notice' })
   }
 
   scheduleSend(at) {

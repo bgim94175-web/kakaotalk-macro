@@ -864,15 +864,21 @@ export function fakeBegin(input) {
   return { result: Object.assign({ state: 'ok' }, tablet), credentials: fakeCreds(deviceId), deviceId, email }
 }
 
+// 실제처럼 첫 확인(FAKE_CONFIRM_WAITS 번, 기본 1번)은 '아직 휴대폰에서 확인 전'인 waiting 이다.
+// 끝난 결과는 실제 sender 처럼 대기 시간 동안 남아, 늦게 온 확인도 같은 ok 를 받는다.
 export async function fakeConfirm(input) {
   const id = String(input.pending_id || '')
   const row = fakePending.get(id)
-  if (!row) return { result: { state: 'expired' } }
+  if (!row) return { result: { state: 'expired', reason: 'unknown_pending' } }
+  if (row.result) return { result: row.result }
+  const waits = process.env.FAKE_CONFIRM_WAITS == null ? 1 : (Number(process.env.FAKE_CONFIRM_WAITS) || 0)
+  row.seen = (row.seen || 0) + 1
+  if (row.seen <= waits) return { result: { state: 'waiting' } }
   const wait = Number(process.env.FAKE_CONFIRM_MS) || 0
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait))
-  fakePending.delete(id)
+  row.result = { state: 'ok', device_name: 'Galaxy Tab S9', device_model: 'SM-X710' }
   return {
-    result: { state: 'ok', device_name: 'Galaxy Tab S9', device_model: 'SM-X710' },
+    result: row.result,
     credentials: fakeCreds(row.deviceId),
     deviceId: row.deviceId,
     email: row.email,
