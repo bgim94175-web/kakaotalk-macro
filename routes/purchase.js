@@ -10,7 +10,6 @@ const features = require('../lib/features');
 const pricing = require('../lib/pricing');
 const audit = require('../lib/audit');
 const signer = require('../lib/sign');
-const openchat = require('../lib/openchat');
 const installs = require('../lib/installs');
 const entitle = require('../lib/entitle');
 const memberAuth = require('../lib/member-auth');
@@ -677,6 +676,14 @@ router.post('/api/deposit-hook',
     if (rd.amount === null) {
       await setStatus('unmatched', null);
       return res.json({ ok: true, status: 'unmatched', amount: null });
+    }
+
+    // 금액으로 읽힌 숫자가 여럿인데 어느 것인지 확실하지 않다: 입금자명 칸의 숫자일 수 있으니
+    // 금액도 후보 주문도 붙이지 않고 확인 필요로만 남긴다(관리자가 원문을 보고 연결한다)
+    if (!rd.sure && rd.cands.length > 1) {
+      await db.q("UPDATE deposits SET status='ambiguous', amount=NULL, matched_order=NULL WHERE id=$1", [depositId]);
+      return res.json({ ok: true, status: 'ambiguous', amount: null,
+                        why: '금액을 확실히 읽지 못했습니다. 관리자 확인이 필요합니다' });
     }
 
     // 읽은 금액 하나로만 대기 주문을 찾는다. 다른 숫자로 다시 찾지 않는다 —

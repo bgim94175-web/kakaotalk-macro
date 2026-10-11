@@ -257,8 +257,8 @@
   /* 붙여넣은 글에서 오픈채팅 링크를 뽑아 https://open.kakao.com/o/<code> 로 맞춘다. 없으면 ''.
      lib/openchat.js 와 같은 식이다(lib/purchase-check.js 가 두 쪽 결과를 맞춰 본다).
      서버(lib/openchat.normLink)가 최종 판정한다 — 이건 화면 안내용 */
-  var LINK_RE = /(?:(?:^|[^\/.@:])https?:\/\/|(?:^|[^A-Za-z0-9.\-_@\/]))open\.kakao\.com\/o\/([A-Za-z0-9]{1,40})(?![A-Za-z0-9_\-])/i;
-  var ZW_RE = /[\u200B-\u200D\u2060\uFEFF]/g;
+  var LINK_RE = /(?:(?:^|[^\/])https?:\/\/|(?:^|[^A-Za-z0-9.\-_@\/]))open\.kakao\.com\/o\/([A-Za-z0-9]{1,40})(?![A-Za-z0-9_\-])/i;
+  var ZW_RE = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
   function normLink(text) {
     var m = LINK_RE.exec(String(text || '').slice(0, 2000).replace(ZW_RE, ''));
     return m ? 'https://open.kakao.com/o/' + m[1] : '';

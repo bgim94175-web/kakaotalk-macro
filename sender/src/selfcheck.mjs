@@ -4,7 +4,7 @@ import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from
 import { Hub, Slot } from './runner.mjs'
 import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
-import { FOLD, withProfileLink } from './roomfeat.mjs'
+import { FOLD, groupLinkType, withProfileLink } from './roomfeat.mjs'
 
 // 접힌 사람 안내: 첫 줄(제목 · @닉네임) + 보이지 않는 글자 + 줄바꿈 + 자세한 내용([전체보기])
 const folded = (head, lines) => head + FOLD + '\n' + lines.join('\n')
@@ -125,6 +125,10 @@ const kinds = [
 for (const [ch, want] of kinds) {
   const got = roomListKind(ch)
   if (got !== want) throw new Error(`room kind ${JSON.stringify(ch)} -> ${got}, want ${want}`)
+}
+// 오픈링크 종류: 1(1:1·오픈프로필)만 그룹이 아니다. 커뮤니티(3)·모르는 값·빠진 값은 들어가 본다
+for (const [lt, want] of [[1, false], ['1', false], [2, true], [3, true], [0, true], [undefined, true], [null, true]]) {
+  if (groupLinkType(lt) !== want) throw new Error(`groupLinkType(${lt}) -> ${!want}`)
 }
 
 const roomKey = parseRoomKey('0\u0001공지').key
@@ -950,12 +954,13 @@ async function withLog(fn) {
   // 첫 쪽만 되풀이되면 끝까지 읽을 수 없다 → 예전 길(로그인 때 목록)
   stuck = true
   const { value: rep, lines: repLines } = await withLog(() => listHub.chats('list-dev'))
-  if (rep.length !== 1 || !repLines.some((s) => s.indexOf('chats login (LCHATLIST page repeats)') >= 0)) throw new Error('chats: a repeating page falls back to getChats')
+  // 로그인 때 목록(101)에 마지막으로 읽은 카카오 목록에만 있던 방(102~104)을 더한다 — 매크로 방이 사라지지 않게
+  if (rep.length !== 4 || !repLines.some((s) => s.indexOf('chats login (LCHATLIST page repeats) + kept 3') >= 0)) throw new Error('chats: a repeating page falls back to getChats and keeps the last live rooms: ' + rep.length + ' ' + repLines.join(' | '))
   // LCHATLIST 가 실패하면 예전 길로 읽는다
   stuck = false
   listFail = true
   const { value: old, lines: oldLines } = await withLog(() => listHub.chats('list-dev'))
-  if (old.length !== 1 || old[0].chat_id !== '101' || old[0].title !== '검 Fam') throw new Error('chats: LCHATLIST failure falls back to getChats')
+  if (old.length !== 4 || old[0].chat_id !== '101' || old[0].title !== '검 Fam') throw new Error('chats: LCHATLIST failure falls back to getChats (+ last live rooms)')
   if (!oldLines.some((s) => s.indexOf('chats login (LOCO packet timeout') >= 0)) throw new Error('chats: the fallback is logged')
 }
 // 가짜 연결: getChats 는 로그인 때 목록, LCHATLIST 는 지금 목록 — 로그인 뒤 들어간 방도 불러오고 폰에서 나간 방은 뺀다
@@ -987,7 +992,8 @@ async function withLog(fn) {
   if (rows.length !== 3 || !rows.some((r) => r.title === '가짜 오픈채팅 2')) throw new Error('fake: customer rooms are listed (' + rows.length + ')')
   fs.chatListFail = true
   const { value: old } = await withLog(() => custHub.chats('cust-list'))
-  if (!old.some((r) => r.chat_id === before.chatId) || old.some((r) => r.chat_id === after.chatId)) throw new Error('fake: LCHATLIST failure uses the login list')
+  // 카카오 목록을 못 읽으면 로그인 때 목록 + 마지막으로 읽은 카카오 목록에만 있던 방(로그인 뒤 들어간 방)
+  if (!old.some((r) => r.chat_id === before.chatId) || !old.some((r) => r.chat_id === after.chatId)) throw new Error('fake: LCHATLIST failure uses the login list and keeps the room joined after login')
   custSlot.client.close()
 }
 

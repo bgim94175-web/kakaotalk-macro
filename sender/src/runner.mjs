@@ -115,7 +115,8 @@ function longText(v) {
 // 오픈 단체방 이름(오픈링크 ln)을 INFOLINK 로 읽는다. 방마다 CHATINFO 를 보내면 대화방 불러오기가
 // 브라우저가 끊을 때까지 멈췄다. 20개씩 묻고, 이름은 답에 든 링크 id(li)로만 붙인다(답의 순서는 믿지 않는다).
 // 묶음이 실패하거나 일부만 오면 이름을 못 받은 링크를 하나씩 다시 묻는다(최대 20개, 30초 안에서).
-async function openLinkNames(client, list, stat) {
+async function openLinkNames(client, list, stat, opt) {
+  const maxRetry = opt && opt.retry === false ? 0 : 20
   const names = new Map()
   const ids = []
   const seen = new Set()
@@ -149,14 +150,18 @@ async function openLinkNames(client, list, stat) {
       if (key && name) names.set(key, name)
     }
   }
-  const until = Date.now() + 30000
   for (let i = 0; i < ids.length; i += 20) await ask(ids.slice(i, i + 20))
+  // 하나씩 다시 묻기는 다 합쳐 15초 안에서만(한 번이 카카오 답 기다림 15초를 다 써도 넘지 않게)
+  const until = Date.now() + 15000
   let retried = 0
   for (const id of ids) {
     if (names.has(id)) continue
-    if (retried >= 20 || Date.now() > until) break
+    const left = until - Date.now()
+    if (retried >= maxRetry || left <= 0) break
     retried++
-    await ask([id])
+    let timer = null
+    await Promise.race([ask([id]), new Promise((ok) => { timer = setTimeout(ok, left) })])
+    clearTimeout(timer)
   }
   if (stat) {
     stat.retried = retried
@@ -227,6 +232,7 @@ async function liveChats(client, stat) {
       }
       if (body.eof === true) break
       // 같은 쪽이 되풀이되면(다음 위치가 0 으로 돌아감) 끝까지 읽을 수 없다
+      if (!body.chatDatas.length) throw new Error('LCHATLIST empty page without eof')
       if (!fresh) throw new Error('LCHATLIST page repeats')
       token = cursorLong(body.lastTokenId)
       last = cursorLong(body.lastChatId)
@@ -268,7 +274,7 @@ function chatsLine(stat, rows) {
     const t = String(r.type).slice(0, 16)
     types[t] = (types[t] || 0) + 1
   }
-  const from = stat.source === 'live' ? `live ${stat.pages}p` : `login (${stat.why || '?'})`
+  const from = stat.source === 'live' ? `live ${stat.pages}p` : `login (${stat.why || '?'})${stat.kept ? ' + kept ' + stat.kept : ''}`
   const typeText = Object.keys(types).map((t) => `${t}:${types[t]}`).join(' ')
   return `chats ${from} rows ${rows.length} bad ${stat.bad || 0}` +
     ` · open ${kinds.open_room} (unnamed ${unnamed}) dm ${kinds.open_dm} normal ${kinds.normal}` +
@@ -903,12 +909,29 @@ class Slot {
   }
 
   // 방 목록. maxAge 안에 읽은 목록이 있으면 그대로 쓴다(0 이면 늘 새로 읽는다).
+  // 지금 읽는 중이면 그 결과를 같이 쓴다. 카카오 목록(LCHATLIST)을 못 읽어 로그인 때 목록으로 대신하면
+  // 마지막으로 읽은 카카오 목록에만 있던 방(로그인 뒤 들어간 방)을 더해 준다 — 매크로 방이 사라지지 않게.
   async chatList(maxAge, stat) {
     const c = this.liveChats
     if (maxAge > 0 && c.at && Date.now() - c.at < maxAge) return c.list
-    const list = await liveChats(this.client, stat)
-    this.liveChats = { at: Date.now(), list }
-    return list
+    if (this.liveChatsP) return this.liveChatsP
+    const st = stat || {}
+    this.liveChatsP = (async () => {
+      let list = await liveChats(this.client, st)
+      if (st.source === 'live') {
+        this.lastLive = list
+      } else if (this.lastLive && this.lastLive.length) {
+        const have = new Set(list.map((ch) => String(ch && ch.chat_id)))
+        const kept = this.lastLive.filter((ch) => !have.has(String(ch.chat_id)))
+        if (kept.length) {
+          list = list.concat(kept)
+          st.kept = kept.length
+        }
+      }
+      this.liveChats = { at: Date.now(), list }
+      return list
+    })().finally(() => { this.liveChatsP = null })
+    return this.liveChatsP
   }
 
   // getChats 는 resolveTitles 를 주지 않으면 title 을 채우지 않는다.
@@ -918,7 +941,8 @@ class Slot {
     const now = Date.now()
     if (now - this.linkNames.at > 600000) {
       try {
-        this.linkNames = { at: now, map: await openLinkNames(this.client, list) }
+        // 채팅 화면용 이름은 하나씩 다시 묻지 않는다(대화방 불러오기가 다시 묻는다)
+        this.linkNames = { at: now, map: await openLinkNames(this.client, list, null, { retry: false }) }
       } catch {
         this.linkNames = { at: now, map: this.linkNames.map }
       }
@@ -979,7 +1003,11 @@ class Slot {
     // 처음 보는 방은 일단 담되, 목록을 다시 읽어 종류를 알아낸다 (새로 생긴 갠톡일 수 있다).
     const kind = this.kindOf(id)
     if (kind && kind !== 'open_dm') return
-    if (!kind) this.catalogCache.at = 0
+    if (!kind) {
+      this.catalogCache.at = 0
+      // 카카오 목록은 5분씩 들고 있으니, 처음 보는 방이면 1분에 한 번까지 새로 읽게 한다
+      if (Date.now() - this.liveChats.at > 60000) this.liveChats.at = 0
+    }
     const logId = m.logId ? String(m.logId) : ''
     const conv = this.convFor(id)
     if (logId && conv.list.some((x) => x.log_id === logId)) return
@@ -1016,8 +1044,9 @@ class Slot {
     const run = () => {
       if (this.catalogPromise) return this.catalogPromise
       this.catalogPromise = (async () => {
-        // 채팅 화면은 3초마다 목록을 본다. 카카오에는 30초에 한 번만 묻는다.
-        const raw = await this.chatList(30000)
+        // 채팅 화면은 몇 초마다 목록을 본다. 카카오 목록(LCHATLIST)은 5분에 한 번만 다시 읽는다
+        // (처음 보는 방의 글이 오면 noteChat 이 1분에 한 번까지 앞당긴다). 자주 물으면 카카오가 연결을 끊는다.
+        const raw = await this.chatList(300000)
         const list = await this.stampNames(Array.isArray(raw) ? raw : [])
         const mapped = list.map((ch) => {
           const listKind = roomListKind(ch)
