@@ -4,7 +4,7 @@ import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from
 import { Hub, Slot } from './runner.mjs'
 import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
-import { FOLD, groupLinkType, withProfileLink } from './roomfeat.mjs'
+import { FOLD, groupLinkType, personLines, withProfileLink } from './roomfeat.mjs'
 
 // 접힌 사람 안내: 첫 줄(제목 · @닉네임) + 보이지 않는 글자 + 줄바꿈 + 자세한 내용([전체보기])
 const folded = (head, lines) => head + FOLD + '\n' + lines.join('\n')
@@ -300,7 +300,7 @@ const firstVisit = visitRecord()
 const firstLeft = guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
 if (firstLeft.sends.length !== 1) throw new Error('a leave posts one notice')
 const leftNote = firstLeft.sends[0].text
-// 새 모양: 제목 · 줄 · 👤 🆔 🔗(🖼 은 사진을 알 때만) · 기록(가지 줄) · 줄. 옛 계정 기능은 사진을 몰라 사진 줄이 없다.
+// 새 모양: 제목 · 줄 · 👤 🆔 🔗 · 기록(가지 줄) · 줄. 사진은 넘겨받아도 적지 않는다.
 const expectedLeave = folded('📤 퇴장 안내 · @홍길동', [
   '━━━━━━━━━━━━━━',
   '👤 홍길동',
@@ -324,7 +324,6 @@ const expected = folded('📥 입장 안내 · @홍길동', [
   '👤 홍길동',
   '🆔 7',
   '🔗 옾링 : https://open.kakao.com/o/abc',
-  '🖼 사진 : https://k.kakaocdn.net/dn/a/b/img_s.jpg',
   '',
   '🕒 입장 기록 · 1회',
   ' └ 2023-11-15 07:14',
@@ -352,7 +351,15 @@ if (laterJoin.sends.length !== 1) throw new Error('a later join posts again')
 const laterText = laterJoin.sends[0].text
 if (laterText.indexOf('📥 입장 안내') !== 0 || laterText.indexOf('퇴장') >= 0) throw new Error('a later join is only an enter notice')
 if (laterText.indexOf('🕒 입장 기록 · 2회\n ├ 2023-11-15 07:14\n └ 2023-11-15 07:15') < 0) throw new Error('every join time is listed')
-if (laterText.indexOf('🖼 사진 : https://k.kakaocdn.net/dn/a/b/img_s.jpg') < 0) throw new Error('the photo is kept from the last time')
+if (laterText.indexOf('🖼') >= 0 || laterText.indexOf('img_s.jpg') >= 0) throw new Error('visit notices never show a photo')
+// 옾링: 주소 → 주소, '' → 없음, null(오픈프로필인데 읽지 못함) → 확인 못 함
+if (personLines({ userId: '1', name: 'a', link: null })[2] !== '🔗 옾링 : 확인 못 함') throw new Error('unknown link is not shown as none')
+if (personLines({ userId: '1', name: 'a', link: '' })[2] !== '🔗 옾링 : 없음' || personLines({ userId: '1', name: 'a' })[2] !== '🔗 옾링 : 없음') throw new Error('no link is 없음')
+if (personLines({ userId: '1', name: 'a', link: '', photo: 'https://k.kakaocdn.net/x.jpg' }).length !== 3) throw new Error('person lines have no photo')
+{
+  const unk = guardOnChat(firstVisit, { kind: 'join', chatId: '555', authorId: '9', authorName: '모름', profileLink: null, now: t0 + 130000 })
+  if (unk.sends.length !== 1 || unk.sends[0].text.indexOf('\n🔗 옾링 : 확인 못 함\n') < 0) throw new Error('visit notice with an unread link ' + JSON.stringify(unk.sends[0] && unk.sends[0].text))
+}
 if (!laterJoin.sends[0].mention || laterJoin.sends[0].mention.userId !== '7') throw new Error('still one mention')
 const laterLeft = guardOnChat(firstVisit, {
   kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 + 3 * 3600000 + 120000,
@@ -1129,18 +1136,16 @@ async function withLog(fn) {
     const kicked = F.visitEventsFromMessage({ message_type: 0, message: '{"feedType":6,"members":[{"userId":7,"nickName":"홍"}]}' })
     if (kicked.length !== 0) throw new Error('7.7#5 kick feed is not a leave')
   }
-  // #6 사진 변경 → 프로필 변경 안내 1개(사진 전·후). 상태 null → 없음. 첫 관찰 → 없음. 바로 또 바뀌어도 매번 안내
+  // #6 사진만 바뀜 → 안내·기록 없음(사진은 뺐다. 예전 설정 photo:true 도). 상태 null → 없음. 첫 관찰 → 없음. 바로 또 바뀌어도 매번 안내
   {
     const rt = {}
     const pcfg = { name: true, photo: true, status: true }
     const P1 = 'https://k.kakaocdn.net/dn/a/1.jpg'
     const P2 = 'https://k.kakaocdn.net/dn/a/2.jpg'
     if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P1 + '?t=1', status: null }, T).length) throw new Error('7.7#6 first')
-    const ph = RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2 + '?t=2', status: null }, T + 1000)
-    const PH = folded('🔔 프로필 변경 감지 · @홍', [RF.RULE, '👤 홍', '🆔 7', '🔗 옾링 : 없음', '🖼 사진 : ' + P2, '', '✏️ 바뀐 내용', '▸ 사진',
-      ' ├ 전 : ' + P1, ' └ 후 : ' + P2, RF.RULE])
-    if (ph.length !== 1 || ph[0].text !== PH || ph[0].mention.userId !== '7' || ph[0].text.slice(ph[0].mention.at, ph[0].mention.at + 1) !== '홍') throw new Error('7.7#6 photo ' + JSON.stringify(ph[0] && ph[0].text))
+    if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2 + '?t=2', status: null }, T + 1000).length) throw new Error('7.7#6 photo change is not announced')
     if (RF.profileObserve(rt, '555', pcfg, { userId: '7', name: '홍', photo: P2, status: null }, T + 2000).length) throw new Error('7.7#6 status null')
+    if (JSON.stringify(rt).indexOf('kakaocdn') >= 0) throw new Error('7.7#6 photos are not stored')
     RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '안녕' }, T)
     const stc = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '바이' }, T + 1)
     if (stc.length !== 1 || stc[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 안녕\n └ 후 : 바이') < 0) throw new Error('7.7#6 status')
@@ -1152,9 +1157,14 @@ async function withLog(fn) {
     if (wl.length !== 1 || wl[0].text.indexOf('\n👤 김새닉\n🆔 8\n🔗 옾링 : https://open.kakao.com/me/kim\n') < 0 || wl[0].text.indexOf('▸ 닉네임\n ├ 전 : 김\n └ 후 : 김새닉') < 0 || wl[0].linkFor) throw new Error('7.7#6 known link is written at once ' + JSON.stringify(wl[0] && wl[0].text))
     if (wl[0].text.slice(wl[0].mention.at, wl[0].mention.at + wl[0].mention.len) !== '김새닉') throw new Error('7.7#6 mention points at the current name')
     if (wl[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('7.7#6 cumulative changes ' + JSON.stringify(wl[0].text))
-    if (RF.photoSig('https://x.kakao.com/p/1.jpg?t=9', '') !== '/p/1.jpg') throw new Error('7.7#6 photo signature is the path without the query')
+    // 예전에 저장된 사진 변경 기록은 기록 화면에도, 누적 변경 수에도 나오지 않는다
+    const k8 = Object.keys(rt.profile.people).find((k) => rt.profile.people[k].userId === '8')
+    rt.profile.people[k8].changes.unshift({ at: T - 5, kind: 'photo' })
     const rows = F.logsView({ rooms: [{ key: 'r', chat_id: '555', name: '방' }], runtime: rt }).profile
-    if (!rows.some((r) => r.changes.some((c) => c.kind === 'photo'))) throw new Error('7.7#5 profile log has kind')
+    if (!rows.some((r) => r.changes.some((c) => c.kind === 'status')) || rows.some((r) => r.changes.some((c) => c.kind === 'photo'))) throw new Error('7.7#5 profile log has kind, no photo')
+    const wl2 = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김새닉', status: '또' }, T + 7 * 60000)
+    if (wl2.length !== 1 || wl2[0].text.indexOf('🔁 누적 변경 : 4회') < 0) throw new Error('7.7#6 old photo changes are not counted ' + JSON.stringify(wl2[0] && wl2[0].text))
+    if (RF.normRoomConfig({ profile: { enabled: true, photo: true } }).profile.photo !== undefined) throw new Error('7.7#6 a saved photo option is dropped')
   }
   // #7 조회: 방장 → 기록 문구, staff 에서 일반 → 없음, 멘션 id 우선, 동명이인 → 같은 이름 문구
   {
@@ -1440,10 +1450,10 @@ async function withLog(fn) {
     }
   }
 
-  // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링·사진을 안다(GETMEM + INFOLINK)
-  //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링·사진 · 명부는 저장소에 남는다
-  //   · 메시지 닉네임이 바뀌면 카드를 다시 읽어 프로필 변경 안내(닉네임 전·후 + 지금 옾링·사진)
-  //   · 주기 동기화가 옾링(다른 오픈프로필로 바꿈)·사진 변경을 찾는다 · 바뀔 때마다 알린다
+  // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링을 안다(GETMEM + INFOLINK)
+  //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링 · 명부는 저장소에 남는다 · 사진은 어디에도 적지 않는다
+  //   · 메시지 닉네임이 바뀌면 카드를 다시 읽어 프로필 변경 안내(닉네임 전·후 + 지금 옾링)
+  //   · 주기 동기화가 닉네임·옾링(다른 오픈프로필로 바꿈) 변경을 찾는다(사진만 바뀌면 안내 없음) · 바뀔 때마다 알린다
   {
     const code = 'bookx28'
     const room0 = fs.room(code)
@@ -1461,14 +1471,14 @@ async function withLog(fn) {
     const vb = botA.slot.byInstall.get(iBook)
     await waitFor(() => vb.members.get('701') && vb.members.get('701').link && vb.members.get('702') && vb.members.get('702').link, 5000, '#28 member book')
     const m701 = vb.members.get('701')
-    if (m701.link !== 'https://open.kakao.com/o/first701' || m701.photo !== 'https://k.kakaocdn.net/dn/p/701a.jpg' || m701.name !== '먼저온사람') throw new Error('#28 book row ' + JSON.stringify(m701))
-    if (vb.members.get('703').link !== '' || vb.members.get('703').photo !== '') throw new Error('#28 default profile has no link and no photo')
+    if (m701.link !== 'https://open.kakao.com/o/first701' || m701.pli !== '7101' || m701.name !== '먼저온사람' || 'photo' in m701) throw new Error('#28 book row ' + JSON.stringify(m701))
+    if (vb.members.get('703').link !== '' || vb.members.get('703').pli !== '') throw new Error('#28 default profile has no link')
     if (sentIn(iBook).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28 the first read only sets a baseline')
-    // 먼저 있던 사람이 나간다 → 퇴장 안내에 옾링·사진(예전에는 '없음'이었다)
+    // 먼저 있던 사람이 나간다 → 퇴장 안내에 옾링(예전에는 '없음'이었다)
     fs.event(chat, botA.uid, { kind: 'leave', user_id: '701', name: '먼저온사람' })
     await waitFor(() => sentIn(iBook).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28 leave notice')
     const out = sentIn(iBook).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-    if (out.indexOf('\n👤 먼저온사람\n🆔 701\n🔗 옾링 : https://open.kakao.com/o/first701\n🖼 사진 : https://k.kakaocdn.net/dn/p/701a.jpg\n') < 0) throw new Error('#28 leave notice has the link of someone who was there before the bot ' + JSON.stringify(out))
+    if (out.indexOf('\n👤 먼저온사람\n🆔 701\n🔗 옾링 : https://open.kakao.com/o/first701\n\n') < 0 || out.indexOf('🖼') >= 0) throw new Error('#28 leave notice has the link of someone who was there before the bot ' + JSON.stringify(out))
     await pool.flush()
     const saved = await store.loadMembers(iBook, chat, 0)
     if (!saved.some((r) => r.user_id === '701' && r.link === 'https://open.kakao.com/o/first701')) throw new Error('#28 the book is saved ' + JSON.stringify(saved))
@@ -1477,22 +1487,21 @@ async function withLog(fn) {
     fs.event(chat, botA.uid, { kind: 'message', user_id: '702', name: '둘째새닉', text: '닉 바꿨어요' })
     await waitFor(() => sentIn(iBook).some((t) => t.indexOf('🔔 프로필 변경 감지') === 0), 8000, '#28 rename notice')
     const rn = sentIn(iBook).find((t) => t.indexOf('🔔 프로필 변경 감지') === 0)
-    const RN = folded('🔔 프로필 변경 감지 · @둘째새닉', [RF.RULE, '👤 둘째새닉', '🆔 702', '🔗 옾링 : https://open.kakao.com/o/second702', '🖼 사진 : https://k.kakaocdn.net/dn/p/702a.jpg',
+    const RN = folded('🔔 프로필 변경 감지 · @둘째새닉', [RF.RULE, '👤 둘째새닉', '🆔 702', '🔗 옾링 : https://open.kakao.com/o/second702',
       '', '✏️ 바뀐 내용', '▸ 닉네임', ' ├ 전 : 둘째', ' └ 후 : 둘째새닉', RF.RULE])
     if (rn !== RN) throw new Error('#28 rename notice ' + JSON.stringify(rn))
-    // 주기 동기화: 703 은 사진을 바꾸고, 702 는 닉네임을 또 바꿨다(바뀔 때마다 알린다)
+    // 주기 동기화: 703 은 사진만 바꾸고(안내 없음), 702 는 닉네임을 또 바꿨다(바뀔 때마다 알린다)
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
     // 봇 전체 발송 한도(분당 30)에 걸리면 다음 1분 창까지 기다린다
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0), 70000, '#28 photo notice').catch((e) => {
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 둘째또닉\n') >= 0), 70000, '#28 second rename notice').catch((e) => {
       const sl = botA.slot
       throw new Error(e.message + ' DIAG ' + JSON.stringify({ live: sl.live(), syncing: vb.memberSyncing, syncAt: vb.memberSyncAt, now: Date.now(), checking: vb.checking,
-        sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m703: vb.members.get('703'), m702: vb.members.get('702') && vb.members.get('702').name }))
+        sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m702: vb.members.get('702') && vb.members.get('702').name }))
     })
-    const pc = sentIn(iBook).find((t) => t.indexOf('\n👤 기본프로필\n') >= 0)
-    if (pc.indexOf('🔗 옾링 : 없음\n🖼 사진 : https://k.kakaocdn.net/dn/p/703b.jpg\n') < 0 || pc.indexOf('▸ 사진\n ├ 전 : 없음\n └ 후 : https://k.kakaocdn.net/dn/p/703b.jpg') < 0) throw new Error('#28 photo change ' + JSON.stringify(pc))
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 둘째또닉\n') >= 0), 8000, '#28 second rename notice')
+    await sleep(300)
+    if (sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0 || t.indexOf('🖼') >= 0 || t.indexOf('▸ 사진') >= 0)) throw new Error('#28 a photo-only change is not announced')
     const rn2 = sentIn(iBook).find((t) => t.indexOf('\n👤 둘째또닉\n') >= 0)
     if (rn2.indexOf('▸ 닉네임\n ├ 전 : 둘째새닉\n └ 후 : 둘째또닉') < 0 || rn2.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('#28 a quick second rename is announced ' + JSON.stringify(rn2))
     const hist = vb.runtime.profile.people[chat + '\u0001702']
@@ -1558,7 +1567,8 @@ async function withLog(fn) {
         await waitFor(() => rowOf(iHeal).state === 'waiting_host', 5000, '#28-3 join')
         const chat = rowOf(iHeal).chat_id
         const vh = botA.slot.byInstall.get(iHeal)
-        if (!vh.members.get('732') || vh.members.get('732').link !== '') throw new Error('#28-3 saved row loaded ' + JSON.stringify(vh.members.get('732')))
+        // 저장된 '없음'('', pli 있음)은 예전 읽기 실패일 수 있어 모름(null)으로 읽는다 → 안내는 '확인 못 함', 다시 읽기 대상
+        if (!vh.members.get('732') || vh.members.get('732').link !== null || !vh.memberWant.has('732')) throw new Error('#28-3 saved row loaded ' + JSON.stringify(vh.members.get('732')))
         fs.setPerm(chat, botA.uid, 4)
         await waitFor(() => rowOf(iHeal).state === 'active', 3000, '#28-3 promotion')
         await waitFor(() => vh.memberOkAt > 0, 5000, '#28-3 first sync')
@@ -1566,7 +1576,7 @@ async function withLog(fn) {
         if (!m731 || m731.pli !== '7311' || m731.link !== null) throw new Error('#28-3 a failed link read stays unknown, not 없음 ' + JSON.stringify(m731))
         if (botA.slot.linkCache.has('7311') || botA.slot.linkCache.has('7321')) throw new Error('#28-3 a failed link read is not cached')
         if (!hasLine(lines, 'open link read failed: status -805')) throw new Error('#28-3 failed link read is logged')
-        if (!hasLine(lines, `member sync ${iHeal}: 2 members, 2 with pli, 0 with link, 2 with photo, `)) throw new Error('#28-3 one summary line per sync ' + JSON.stringify(lines))
+        if (!hasLine(lines, `member sync ${iHeal}: 2 members, 2 with pli, 0 with link, `)) throw new Error('#28-3 one summary line per sync ' + JSON.stringify(lines))
         // 속도 제한 동안은 명부를 읽지 않는다(GETMEM·MEMBER·INFOLINK 모두 쉼 — 실패한 INFOLINK 가 늘지 않음)
         const failed = () => packets('INFOLINK', (p) => p.status === -805).length
         const n0 = failed()
@@ -1589,7 +1599,7 @@ async function withLog(fn) {
       }
     })
   }
-  // #28-4 GETMEM 이 빠뜨린 사람: 글을 쓰면 이름만 적어 두었다가 카드 채우기(MEMBER)가 옾링·사진을 채운다(방마다 60초에 20명까지).
+  // #28-4 GETMEM 이 빠뜨린 사람: 글을 쓰면 이름만 적어 두었다가 카드 채우기(MEMBER)가 옾링을 채운다(방마다 60초에 20명까지).
   //   명부에 없는 사람이 나가면 로그 한 줄 + 안내를 만들기 전에 MEMBER 를 한 번 읽어 본다(나간 사람에게도 답하는 경우)
   {
     const code = 'bookx31'
@@ -1620,28 +1630,28 @@ async function withLog(fn) {
     for (let i = 0; i < many.length; i++) fs.event(chat, botA.uid, { kind: 'message', user_id: many[i], name: '손님' + (i + 1), text: '안녕' })
     await waitFor(() => vf.memberWant.size === 25, 5000, '#28-4 25 name-only rows')
     const stub = vf.members.get('741')
-    if (stub.name !== '빠진사람' || stub.pli !== null || stub.link !== null || stub.photo !== null) throw new Error('#28-4 name-only row ' + JSON.stringify(stub))
+    if (stub.name !== '빠진사람' || stub.pli !== null || stub.link !== null) throw new Error('#28-4 name-only row ' + JSON.stringify(stub))
     vf.memberFillAt = 0
     await waitFor(() => vf.memberWant.size === 5, 3000, '#28-4 first fill')
     await sleep(300)
     if (vf.memberWant.size !== 5) throw new Error('#28-4 at most 20 per room per minute, left ' + vf.memberWant.size)
     const m741 = vf.members.get('741')
-    if (m741.link !== 'https://open.kakao.com/o/a741' || m741.photo !== 'https://k.kakaocdn.net/dn/p/741.jpg' || m741.pli !== '7411') throw new Error('#28-4 filled row ' + JSON.stringify(m741))
+    if (m741.link !== 'https://open.kakao.com/o/a741' || m741.pli !== '7411') throw new Error('#28-4 filled row ' + JSON.stringify(m741))
     vf.memberFillAt = 0
-    await waitFor(() => vf.memberWant.size === 0 && many.every((id) => vf.members.get(id).photo === ''), 3000, '#28-4 the rest is filled a minute later')
+    await waitFor(() => vf.memberWant.size === 0 && many.every((id) => vf.members.get(id).pli === ''), 3000, '#28-4 the rest is filled a minute later')
     if (sentIn(iFill).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28-4 filling a name-only row is not a profile change')
     await pool.flush()
     if (!(await store.loadMembers(iFill, chat, 0)).some((r) => r.user_id === '741' && r.link === 'https://open.kakao.com/o/a741')) throw new Error('#28-4 filled row saved')
-    // 명부에 없는 742 가 나간다 → 로그 한 줄 + MEMBER 로 읽어 퇴장 안내에 옾링·사진
+    // 명부에 없는 742 가 나간다 → 로그 한 줄 + MEMBER 로 읽어 퇴장 안내에 옾링
     await withLog(async (lines) => {
       fs.event(chat, botA.uid, { kind: 'leave', user_id: '742', name: '조용한사람' })
       await waitFor(() => sentIn(iFill).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-4 leave notice')
       const out = sentIn(iFill).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-      if (out.indexOf('\n👤 조용한사람\n🆔 742\n🔗 옾링 : https://open.kakao.com/o/a742\n🖼 사진 : https://k.kakaocdn.net/dn/p/742.jpg\n') < 0) throw new Error('#28-4 leave notice of someone not in the book ' + JSON.stringify(out))
+      if (out.indexOf('\n👤 조용한사람\n🆔 742\n🔗 옾링 : https://open.kakao.com/o/a742\n\n') < 0 || out.indexOf('🖼') >= 0) throw new Error('#28-4 leave notice of someone not in the book ' + JSON.stringify(out))
       if (!hasLine(lines, `leave ${iFill}: 742 not in the member book`, 'member read: card')) throw new Error('#28-4 leave line ' + JSON.stringify(lines))
     })
   }
-  // #28-7 GETMEM 이 빠뜨린 사람의 카드를 옾링 읽기가 실패하는 동안 채웠다(pli·사진은 있고 옾링만 모름):
+  // #28-7 GETMEM 이 빠뜨린 사람의 카드를 옾링 읽기가 실패하는 동안 채웠다(pli 는 있고 옾링만 모름):
   //   목록에서 빠지지 않고 다음 채우기가 옾링만(INFOLINK) 다시 읽는다. 옾링을 모른 채 나가면 나갈 때 옾링을 한 번 읽는다.
   {
     const code = 'bookx34'
@@ -1666,10 +1676,10 @@ async function withLog(fn) {
       fs.event(chat, botA.uid, { kind: 'message', user_id: '771', name: '늦은사람', text: '안녕' })
       fs.event(chat, botA.uid, { kind: 'message', user_id: '772', name: '나갈사람', text: '안녕' })
       await waitFor(() => vt.memberWant.size === 2, 5000, '#28-7 name-only rows')
-      // 옾링 읽기가 실패하는(속도 제한 아님) 동안 카드를 채운다 → 사진·pli 는 채워지고 옾링은 모름
+      // 옾링 읽기가 실패하는(속도 제한 아님) 동안 카드를 채운다 → pli 는 채워지고 옾링은 모름
       fs.infolinkFail = -500
       vt.memberFillAt = 0
-      await waitFor(() => vt.members.get('771').photo && vt.members.get('772').photo, 3000, '#28-7 cards filled')
+      await waitFor(() => vt.members.get('771').pli && vt.members.get('772').pli, 3000, '#28-7 cards filled')
       const half = vt.members.get('771')
       if (half.pli !== '7711' || half.link !== null) throw new Error('#28-7 link unknown while INFOLINK fails ' + JSON.stringify(half))
       if (!vt.memberWant.has('771') || !vt.memberWant.has('772')) throw new Error('#28-7 rows with unknown link stay in the fill list')
@@ -1724,32 +1734,95 @@ async function withLog(fn) {
       fs.infolinkBad = new Set([plis[3]])
       await withLog(async (lines) => {
         const got = await slot.linksFor(plis.slice(0, 25))
-        check(got, plis.slice(0, 25).map((li, k) => [li, k === 3 ? '' : urlOf(k)]), '#28-8 split read')
-        if (!hasLine(lines, 'open link read failed: status -500', '1 unreadable set to no link')) throw new Error('#28-8 log ' + JSON.stringify(lines))
+        check(got, plis.slice(0, 25).map((li, k) => [li, k === 3 ? undefined : urlOf(k)]), '#28-8 split read')
+        if (!hasLine(lines, 'open link read failed: status -500', '1 unreadable alone')) throw new Error('#28-8 log ' + JSON.stringify(lines))
       })
       const r1 = reads()
       await slot.linksFor(plis.slice(0, 25))
       if (reads() !== r1) throw new Error('#28-8 known links are not read again')
-      // 많은 사람(12명 중 10명) → 확인 읽기 뒤 하나씩 읽어 두 사람만 옾링이 나온다
+      // 많은 사람(12명 중 10명) → 확인 읽기 뒤 하나씩 읽어 두 사람만 옾링이 나오고, 나머지는 모름('없음'이 아니다)
       const many = plis.slice(25)
       fs.infolinkBad = new Set(many.filter((_, k) => k !== 4 && k !== 9))
       const got = await slot.linksFor(many)
-      check(got, many.map((li, k) => [li, k === 4 || k === 9 ? urlOf(25 + k) : '']), '#28-8 many unreadable')
-      // 나갈 때처럼 한 사람만 읽는다: 읽지 못하면 확인 뒤 옾링 없음, INFOLINK 가 안 되면 모름
+      check(got, many.map((li, k) => [li, k === 4 || k === 9 ? urlOf(25 + k) : undefined]), '#28-8 many unreadable')
+      // 혼자서도 못 읽은 사람은 30분 동안 묶음 읽기에서 빠지지만, 안내 전 읽기(linkNow)는 다시 읽는다
       fs.setProfiles('7900', [{ li: '79001', name: '혼자', url: 'https://open.kakao.com/o/b7900' }])
       fs.setProfiles('7901', [{ li: '79011', name: '혼자2', url: 'https://open.kakao.com/o/b7901' }])
       fs.infolinkBad = new Set(['79001'])
       const one = await slot.linksFor(['79001'])
-      if (one.get('79001') !== '') throw new Error('#28-8 single unreadable ' + JSON.stringify([...one]))
+      if (one.size !== 0 || !slot.badLinks.has('79001')) throw new Error('#28-8 single unreadable stays unknown ' + JSON.stringify([...one]))
+      if (await slot.linkNow('79001') !== null) throw new Error('#28-8 linkNow of an unreadable link is unknown')
+      fs.infolinkBad = new Set()
+      const r2 = reads()
+      if ((await slot.linksFor(['79001'])).size !== 0 || reads() !== r2) throw new Error('#28-8 an unreadable link is skipped for a while')
+      if (await slot.linkNow('79001') !== 'https://open.kakao.com/o/b7900' || slot.badLinks.has('79001')) throw new Error('#28-8 linkNow reads it again before a notice')
       fs.infolinkFail = -500
       const none = await slot.linksFor(['79011'])
       if (none.size !== 0) throw new Error('#28-8 single while INFOLINK fails ' + JSON.stringify([...none]))
+      if (await slot.linkNow('79011') !== null) throw new Error('#28-8 linkNow while INFOLINK fails is unknown')
     } finally {
       fs.infolinkFail = 0
       fs.infolinkBad = new Set()
     }
   }
-  // #28-5 나간 사람의 카드를 읽지 못해도 안내는 나간다(옾링 없음). 읽기는 2초에서 끊고, 방마다 10초에 한 번만 한다.
+  // #28-9 프로필 변경 안내는 옾링을 모르면(묶음 읽기 실패로 명부에 null) 보내기 전에 혼자 한 번 더 읽는다 → 주소.
+  //   그래도 못 읽으면 '없음'이 아니라 '확인 못 함'. 카드 한 장(MEMBER)이 pli 를 빼고 줘도 아는 오픈프로필·옾링을 지우지 않는다.
+  {
+    const code = 'bookx36'
+    const room0 = fs.room(code)
+    fs.setProfiles('791', [{ li: '7911', name: '바꿀 프로필', url: 'https://open.kakao.com/o/a791' }])
+    fs.setProfiles('792', [{ li: '7921', name: '못읽을 프로필', url: 'https://open.kakao.com/o/a792' }])
+    fs.setProfiles('793', [{ li: '7931', name: '빠질 프로필', url: 'https://open.kakao.com/o/a793' }])
+    room0.members['791'] = { mt: 2, nick: '옾프사람', ptp: 16, pli: '7911', photo: 'https://k.kakaocdn.net/dn/p/791.jpg', status: null }
+    room0.members['792'] = { mt: 2, nick: '못읽음', ptp: 16, pli: '7921', photo: '', status: null }
+    room0.members['793'] = { mt: 2, nick: '빠질사람', ptp: 16, pli: '7931', photo: '', status: null }
+    botA.slot.joinH.list = []
+    const iP = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iP).state === 'waiting_host', 5000, '#28-9 join')
+    const chat = rowOf(iP).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iP).state === 'active', 3000, '#28-9 promotion')
+    const vp = botA.slot.byInstall.get(iP)
+    await waitFor(() => vp.memberOkAt > 0 && vp.members.get('791') && vp.members.get('791').link, 5000, '#28-9 first sync')
+    const notice = (nm) => sentIn(iP).find((t) => t.indexOf('🔔 프로필 변경 감지 · @' + nm) === 0)
+    try {
+      // 운영에서처럼 옾링을 모른 채(null) 남았고, 묶음 읽기는 그 사람을 30분 건너뛴다
+      vp.members.set('791', Object.assign({}, vp.members.get('791'), { link: null }))
+      botA.slot.linkCache.delete('7911')
+      botA.slot.badLinks.set('7911', Date.now())
+      fs.event(chat, botA.uid, { kind: 'message', user_id: '791', name: '옾프사람☯', text: '안녕' })
+      room0.members['791'].nick = '옾프사람☯'
+      await waitFor(() => notice('옾프사람☯'), 70000, '#28-9 rename notice')
+      const n1 = notice('옾프사람☯')
+      if (n1.indexOf('\n🔗 옾링 : https://open.kakao.com/o/a791\n') < 0 || n1.indexOf('🖼') >= 0) throw new Error('#28-9 the link is read before the notice ' + JSON.stringify(n1))
+      if (vp.members.get('791').link !== 'https://open.kakao.com/o/a791') throw new Error('#28-9 the read link is kept in the book')
+      // INFOLINK 가 안 된다 → 확인 못 함('없음' 아님)
+      vp.members.set('792', Object.assign({}, vp.members.get('792'), { link: null }))
+      botA.slot.linkCache.delete('7921')
+      fs.infolinkFail = -500
+      fs.event(chat, botA.uid, { kind: 'message', user_id: '792', name: '못읽음2', text: '안녕' })
+      room0.members['792'].nick = '못읽음2'
+      await waitFor(() => notice('못읽음2'), 70000, '#28-9 unread link notice')
+      const n2 = notice('못읽음2')
+      if (n2.indexOf('\n🔗 옾링 : 확인 못 함\n') < 0) throw new Error('#28-9 an unread link is not shown as none ' + JSON.stringify(n2))
+      fs.infolinkFail = 0
+      // MEMBER 가 pli 를 빼고 준다 → 명부의 pli·옾링은 그대로, 옾링 변경 안내 없음
+      room0.memberNoPli = true
+      fs.event(chat, botA.uid, { kind: 'message', user_id: '793', name: '빠질사람2', text: '안녕' })
+      room0.members['793'].nick = '빠질사람2'
+      await waitFor(() => notice('빠질사람2'), 70000, '#28-9 rename without pli')
+      const n3 = notice('빠질사람2')
+      const m793 = vp.members.get('793')
+      if (m793.pli !== '7931' || m793.link !== 'https://open.kakao.com/o/a793') throw new Error('#28-9 a card without pli keeps the book ' + JSON.stringify(m793))
+      if (n3.indexOf('▸ 옾링') >= 0 || n3.indexOf('\n🔗 옾링 : https://open.kakao.com/o/a793\n') < 0) throw new Error('#28-9 no false link change ' + JSON.stringify(n3))
+    } finally {
+      fs.infolinkFail = 0
+      room0.memberNoPli = false
+      botA.slot.badLinks.delete('7911')
+    }
+  }
+  // #28-5 나간 사람의 카드를 읽지 못해도 안내는 나간다(옾링 확인 못 함). 읽기는 2초에서 끊고, 방마다 10초에 한 번만 한다.
   {
     const code = 'bookx32'
     const room0 = fs.room(code)
@@ -1767,11 +1840,11 @@ async function withLog(fn) {
     const alive = setInterval(() => {}, 100)
     await withLog(async (lines) => {
       try {
-        // 751: 나간 뒤라 MEMBER 에 카드가 없다 → 옾링 없음, 사진 줄 없음
+        // 751: 나간 뒤라 MEMBER 에 카드가 없다 → 옾링은 확인 못 함('없음'이라고 하지 않는다), 사진 줄은 늘 없음
         fs.event(chat, botA.uid, { kind: 'leave', user_id: '751', name: '나갈사람751' })
-        await waitFor(() => sentIn(iLv).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-5 leave notice')
+        await waitFor(() => sentIn(iLv).some((t) => t.indexOf('📤 퇴장 안내') === 0), 70000, '#28-5 leave notice')
         const out = sentIn(iLv).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-        if (out.indexOf('\n👤 나갈사람751\n🆔 751\n🔗 옾링 : 없음\n') < 0 || out.indexOf('🖼 사진') >= 0) throw new Error('#28-5 leave notice without a card ' + JSON.stringify(out))
+        if (out.indexOf('\n👤 나갈사람751\n🆔 751\n🔗 옾링 : 확인 못 함\n') < 0 || out.indexOf('🖼 사진') >= 0) throw new Error('#28-5 leave notice without a card ' + JSON.stringify(out))
         if (!hasLine(lines, `leave ${iLv}: 751 not in the member book (book 0, last sync `, 'member read: no card')) throw new Error('#28-5 leave line ' + JSON.stringify(lines))
         // 752: MEMBER 가 답하지 않는다 → 2초에서 끊고 안내를 만든다
         room0.memberHang = true
@@ -1785,7 +1858,7 @@ async function withLog(fn) {
         await botA.slot.onVisit(vl, { kind: 'leave', userId: '753', name: '나갈사람753', logId: '7530001', at: Date.now() })
         if (Date.now() - t0 > 500) throw new Error('#28-5 one read per room per 10 s')
         if (!hasLine(lines, `leave ${iLv}: 752 not in`, 'member read: timed out') || !hasLine(lines, `leave ${iLv}: 753 not in`, 'member read: skipped')) throw new Error('#28-5 leave lines ' + JSON.stringify(lines))
-        await waitFor(() => sentIn(iLv).filter((t) => t.indexOf('📤 퇴장 안내') === 0).length === 3, 12000, '#28-5 all leave notices go out')
+        await waitFor(() => sentIn(iLv).filter((t) => t.indexOf('📤 퇴장 안내') === 0).length === 3, 70000, '#28-5 all leave notices go out')
       } finally {
         clearInterval(alive)
         room0.memberHang = false

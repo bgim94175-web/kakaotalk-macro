@@ -3084,7 +3084,7 @@
   var PRODUCT_LABEL = { roombot: '방 관리봇', minigame: '미니게임봇' };
   var LOG_KIND = { churn: '들낙 감지', kick: '내보내기', kick_fail: '내보내기 실패', unkick: '내보내기 해제', promo: '홍보 금지', hide: '글 가리기',
     cover: '글 가리기 (금지어)', perm: '권한 변경', wave: '올킥 감지', state: '방 상태 변경', skip: '처리 건너뜀' };
-  var PROFILE_KIND = { name: '닉네임', link: '옾링', photo: '프로필 사진', status: '상태 메시지' };
+  var PROFILE_KIND = { name: '닉네임', link: '옾링', status: '상태 메시지' };   // 이 밖의 항목(예전 기록)은 표에 싣지 않는다
   var NOT_ACTIVE = '부방장 지정을 기다리는 중입니다. 방장이 K bot을 부방장으로 지정하면 설정할 수 있습니다.';
   var roomsSt = { timer: null, busy: false, seq: 0, fails: 0, sig: '' };
   var roomSt = blankRoom(0);
@@ -3514,7 +3514,6 @@
     if (r === 'r-profile') {
       setSw('r-profile-on', c.profile.enabled);
       setSw('r-profile-name', c.profile.name);
-      setSw('r-profile-photo', c.profile.photo);
       setSw('r-profile-status', c.profile.status);
       segSet('r-profile-lookup', c.profile.lookup);
       var na = c.status_supported === false;
@@ -3574,7 +3573,7 @@
     };
     if (r === 'r-profile') return {
       profile: {
-        enabled: $('r-profile-on').checked, name: $('r-profile-name').checked, photo: $('r-profile-photo').checked,
+        enabled: $('r-profile-on').checked, name: $('r-profile-name').checked,
         status: c.status_supported === false ? !!(c.profile && c.profile.status) : $('r-profile-status').checked,
         lookup: segVal('r-profile-lookup'),
       },
@@ -3990,7 +3989,7 @@
     if (roomSt.prevLogs) roomSt.prevLogs.profile.forEach(function (r) { prev[profileKey(r)] = last(r.changes) ? last(r.changes).at : 0; });
     tb.innerHTML = rows.map(function (r, i) {
       var k = profileKey(r);
-      var changes = r.changes || [];
+      var changes = (r.changes || []).filter(function (c) { return PROFILE_KIND[changeKind(c)]; });
       var nameCh = changes.filter(function (c) { return changeKind(c) === 'name'; });
       var lastC = last(changes);
       var open = !!expandedR.profile[k];
@@ -4004,8 +4003,7 @@
       var tl = '<div class="tl"><ol aria-label="' + esc(r.name) + ' 프로필 변경 기록">' + changes.map(function (c, j) {
         var kind = changeKind(c);
         var what;
-        if (kind === 'photo') what = '변경됨';
-        else if (kind === 'status' || kind === 'link') what = '<span class="old">' + esc(c.from || '없음') + '</span><span class="arr">→</span>' + esc(c.to || '없음');
+        if (kind === 'status' || kind === 'link') what = '<span class="old">' + esc(c.from || '없음') + '</span><span class="arr">→</span>' + esc(c.to || '없음');
         else {
           var nx = nameCh[nameCh.indexOf(c) + 1];
           what = '<span class="old">' + esc(c.name) + '</span><span class="arr">→</span>' + esc(nx ? nx.name : r.name);
