@@ -1350,7 +1350,7 @@
         memo: str(memoIn.value)
       };
       api('/api/order', { method: 'POST', body: body }).then(function (res) {
-        showResult(res, sent);
+        goLive(res, sent);
       }, function (e) {
         lock(false);
         orderFail(e, sent);
@@ -1393,6 +1393,16 @@
     }
 
     /* ── 접수 결과 ─────────────────────────────────────── */
+    /* 주문이 접수되면 주문 화면(/order/:id)으로 바로 넘어간다 — 거기서 입금 확인·방 입장을 실시간으로 보여 준다.
+       new=1 이면 그 화면 제목이 '주문 완료'가 된다. 주문번호를 못 받았으면(예외) 이 자리에 결과를 그린다. */
+    function goLive(res, sent) {
+      var id = str(pick(res, ['id', 'order_id']));
+      var token = str(pick(res, ['token', 't']));
+      if (!id) { showResult(res, sent); return; }
+      if (token) saveToken(id, token);
+      location.replace(orderUrl(id, token) + (token ? '&' : '?') + 'new=1');
+    }
+
     function showResult(res) {
       applyAutoCopy(res && res.auto_approve);    // 접수 직후 안내 문구도 자동/수동을 맞춘다
       var id     = str(pick(res, ['id', 'order_id']));
@@ -1575,6 +1585,16 @@
     }
     idIn.value = id;
     $$('#orderNote [data-support]').forEach(function (b) { b.setAttribute('data-support-ctx', '주문 ' + id); });
+
+    /* 구매 화면에서 막 넘어왔다(new=1): 제목을 '주문 완료'로 하고, 새로고침해도 다시 안 뜨게 주소에서 뺀다 */
+    if (qs().get('new') === '1') {
+      var h1 = $('.pub-head h1'), lead = $('.pub-head .lead');
+      if (h1) h1.textContent = '주문 완료';
+      if (lead) lead.textContent = '아래 금액을 입금하면 이 화면에서 자동으로 확인됩니다. 화면을 닫아도 내 계정의 구매 내역에서 다시 볼 수 있습니다.';
+      document.title = '주문 완료 · K bot';
+      toast('주문이 완료되었습니다', 'ok');
+      try { history.replaceState(null, '', orderUrl(id, str(qs().get('t')))); } catch (e) { /* 주소만 못 바꾼다 */ }
+    }
 
     /* ── 폴링 (SPEC 12.4) ───────────────────────────────────────────────
          · 5초마다 GET /api/order/:id?t=...
@@ -1833,9 +1853,13 @@
         g.rooms.some(function (rm) { var v = views[rm.install_id]; return !v || v.display !== 'active'; });
       var live = !(done || canceled) || roomWatch;
       pollEvery = done ? ROOM_POLL_MS : POLL_MS;
-      var enter = !!shownStatus && shownStatus !== o.status && !reducedMotion();
+      var was = shownStatus;
+      var enter = !!was && was !== o.status && !reducedMotion();
       shownStatus = o.status;
       decidePolling(live);
+      /* 보고 있는 동안 상태가 바뀌면 알린다 */
+      if (was === 'pending' && (paid || done)) toast('입금이 확인되었습니다', 'ok');
+      else if (was === 'paid' && done) toast('처리가 끝났습니다', 'ok');
 
       /* 상품 줄 */
       var kv = [];
@@ -1892,8 +1916,12 @@
         ];
       }
 
+      /* 살아있는 표시는 카드 맨 위에 — 휴대폰에서도 들어오자마자 '지금 확인 중'이 보이게 */
+      var waitEl = (!done && live && polling && !timedOut)
+        ? makeWait(paid ? '처리 대기 중' : (o.needsReview ? '관리자 확인 대기 중' : '입금 확인 대기 중')) : null;
       out.appendChild(el('div', { cls: 'card stack' + (enter ? ' in' : '') }, [
         headChips(o, st, autoCanceled),
+        waitEl,
         pending ? amountBlock(o.amount, o.base, o.needsReview) : null,
         pending && o.canCancel ? cancelBox(o) : null,
         pending ? accountBig(acct) : null,
@@ -1901,10 +1929,6 @@
         el('dl', { cls: 'kv' }, kv),
         el('div', { cls: 'btn-row' }, acts)
       ]));
-
-      if (!done && live && polling && !timedOut) {
-        out.appendChild(makeWait(paid ? '처리 대기 중' : (o.needsReview ? '관리자 확인 대기 중' : '입금 확인 대기 중')));
-      }
       if (!done && live && timedOut) {
         out.appendChild(noteEl('warn', ['30분이 지나 자동 확인을 멈췄습니다. [상태 새로고침]을 누르면 다시 확인합니다. ' +
           '같은 상태가 이어지면 주문번호를 적어 문의해 주세요.', ' ', supportBtn('문의하기', '주문 ' + showId)]));
