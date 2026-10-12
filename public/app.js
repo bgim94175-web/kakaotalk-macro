@@ -602,8 +602,8 @@
     return pricePromise;
   }
 
-  /* ══════════════════ 4. 상품 줄 (홈 가격 · 구매 화면 로그아웃 상태) ══════════════════
-     카드 3개를 가로로 늘어놓지 않는다 — .prods 안의 행 3개(6.8). */
+  /* ══════════════════ 4. 상품 카드 (구매 화면 ① 상품 고르기 · 로그아웃 상태) ══════════════════
+     카드 3개를 가로로 늘어놓지 않는다 — .prods 안에 세로로 3개(6.8). */
 
   var PROD_BULLETS = {
     macro:    [['카카오 계정 최대 ', { limit: 'kakao_accounts', text: '3' }, '개'], '다시 구매하면 현재 만료일에 이어서 연장'],
@@ -621,12 +621,11 @@
     return li;
   }
 
-  /* 모노 칸 안의 한글은 산세리프 span 으로 */
-  function sans(t) { return el('span', { cls: 'sans', text: t }); }
+  /* 상품마다 아이콘 하나(카드 왼쪽 위 색 칸). 색은 style.css 의 .prod[data-prod] 가 정한다 */
+  var PROD_ICON = { macro: 'i-macro', roombot: 'i-shield', minigame: 'i-game' };
 
-  /* 매크로 `20,000원 / 1개월(30일)`, 방 상품 `15,000원 / 방 1개 · 기간 제한 없음` (부록 A.1) —
-     가격 칸 두 줄로 나눠 보인다 */
-  /* opt.pick: 누르면 고르는 행(체크 칸이 행 전체를 덮는다) · opt.buyHref: 로그아웃 화면의 [구매하기] */
+  /* 가격 줄: 큰 금액 `20,000원 / 1개월(30일)` + 오른쪽 작은 칸(한 번에 1~12개월 · 기간 제한 없음) (부록 A.1) */
+  /* opt.pick: 누르면 고르는 카드(체크 칸이 카드 전체를 덮는다) · opt.buyHref: 로그아웃 화면의 [구매하기] */
   function prodRow(p, gloss, opt) {
     var o = opt || {};
     var room = p.unit === 'room';
@@ -642,22 +641,19 @@
     return el('article', { cls: 'card prod' + (o.pick ? '' : ' one'), 'data-prod': p.id }, [
       pickLab,
       el('div', { cls: 'head' }, [
-        el('div', { cls: 't' }, [
-          el('h3', { text: p.label }),
-          p.desc ? el('p', { cls: 'desc', text: gloss ? glossDm(p.desc) : p.desc }) : null
-        ])
+        el('span', { cls: 'p-ic', 'aria-hidden': 'true' }, [icon(PROD_ICON[p.id] || 'i-check', 22)]),
+        el('h3', { text: p.label })
       ]),
+      p.desc ? el('p', { cls: 'desc', text: gloss ? glossDm(p.desc) : p.desc }) : null,
       el('ul', { cls: 'bul' }, (PROD_BULLETS[p.id] || []).map(bulletLi)),
-      el('div', { cls: 'prices' }, [
-        el('div', { cls: 'pr', 'data-on': '1' }, [
-          el('span', { cls: 'pl', text: room ? '방 1개' : '1개월(' + days + '일)' }),
-          el('span', { cls: 'pv' }, wonKids(p.price))
+      el('div', { cls: 'price' }, [
+        el('span', { cls: 'pv' }, [
+          el('span', { cls: 'amt mono' }, wonKids(p.price)),
+          el('span', { cls: 'per', text: '/ ' + (room ? '방 1개' : '1개월(' + days + '일)') })
         ]),
-        el('div', { cls: 'pr' }, room
-          ? [el('span', { cls: 'pl', text: '기간' }), el('span', { cls: 'pv' }, [sans('제한 없음')])]
-          : [el('span', { cls: 'pl', text: '한 번에' }), el('span', { cls: 'pv' }, [(p.min || 1) + '~' + (p.max || 12), sans('개월')])])
+        el('span', { cls: 'cap', text: room ? '기간 제한 없음' : '한 번에 ' + (p.min || 1) + '~' + (p.max || 12) + '개월' })
       ]),
-      o.buyHref ? el('div', { cls: 'prod-act' }, [el('a', { cls: 'btn primary', href: o.buyHref(p.id) }, p.label + ' 구매하기')]) : null
+      o.buyHref ? el('div', { cls: 'prod-act' }, [el('a', { cls: 'btn primary lg wide', href: o.buyHref(p.id) }, p.label + ' 구매하기')]) : null
     ]);
   }
 
@@ -728,7 +724,7 @@
     var depIn = $('#depositor'), conIn = $('#contact'), memoIn = $('#memo');
     var sumMount = $('#sum'), submitBtn = $('#submitBtn');
     var rows = [], seq = 0, sending = false, ME = null;
-    var sumLines = null, sumNudge = null;
+    var sumLines = null, sumNudge = null, lastTotal = null;
     var pk = {}, wanted = wantedFromUrl(), pendingAdd = 0;
 
     /* 주소로 미리 고를 상품 */
@@ -1209,7 +1205,8 @@
         sumLines.appendChild(el('div', { cls: 'ln' }, [el('span', { text: l.t }), el('span', { cls: 'v mono' }, wonKids(l.a))]));
       });
       if (!lines.length) sumLines.appendChild(el('div', { cls: 'ln off' }, [el('span', { text: roomPicks().length ? '방 링크를 넣으면 금액이 나옵니다' : '고른 상품이 없습니다' }), el('span', { cls: 'v', text: '-' })]));
-      sumLines.appendChild(el('div', { cls: 'ln total' }, [el('span', { text: '결제 금액' }), el('span', { cls: 'v mono' }, wonKids(total))]));
+      sumLines.appendChild(el('div', { cls: 'ln total' }, [el('span', { text: '결제 금액' }), el('span', { cls: 'v mono' + (lastTotal !== null && total !== lastTotal ? ' bump' : '') }, wonKids(total))]));
+      lastTotal = total;
       sumNudge.textContent = '주문을 구분하려고 금액에 1~99원이 더해집니다' + (total ? ' (예: ' + won(total + 47) + ').' : '.');
     }
 
