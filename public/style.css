@@ -10,6 +10,9 @@
   --warn-bg: rgba(214, 162, 74, 0.07); --warn-line: rgba(214, 162, 74, 0.34);
   --hl: rgba(244, 244, 245, 0.06); --hl-2: rgba(244, 244, 245, 0.11);
   --crit-pulse: rgba(239, 106, 96, 0.45); --live-pulse: rgba(95, 184, 120, 0.4);
+  --p-macro: #60a5fa; --p-macro-soft: rgba(96, 165, 250, 0.12); --p-macro-line: rgba(96, 165, 250, 0.4); --p-macro-glow: rgba(96, 165, 250, 0.6);
+  --p-room: #a78bfa; --p-room-soft: rgba(167, 139, 250, 0.12); --p-room-line: rgba(167, 139, 250, 0.4); --p-room-glow: rgba(167, 139, 250, 0.6);
+  --p-game: #f472b6; --p-game-soft: rgba(244, 114, 182, 0.12); --p-game-line: rgba(244, 114, 182, 0.4); --p-game-glow: rgba(244, 114, 182, 0.6);
   --scrim: rgba(5, 5, 7, 0.66); --glass: rgba(9, 9, 11, 0.82);
   --shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.72), 0 2px 6px rgba(0, 0, 0, 0.36);
   --ring: 0 0 0 3px rgba(244, 244, 245, 0.08);
@@ -477,30 +480,51 @@ legend.lb + * { clear: both; }
 .seg input:checked + span { background: var(--bg-4); color: var(--fg); }
 .seg input:checked + span em { color: var(--fg-2); }
 .seg input:focus-visible + span { outline: 2px solid var(--fg); outline-offset: 1px; }
-/* product rows (Picker cards variant) */
-.prods { border: 1px solid var(--line-2); border-radius: var(--r-4); overflow: hidden; background: var(--bg-1); }
-.prods .card.prod { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) 220px; grid-template-areas: "chk head prices" "chk bul prices"; gap: 4px 20px; border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; padding: 22px 22px; background: transparent; transition: background var(--d1); }
-.prods .card.prod:first-child { border-top: 0; }
-.prods .card.prod:hover { background: var(--bg-2); }
-.prods .card.prod.sel { background: var(--bg-2); }
-.prod .head { grid-area: head; display: flex; gap: 12px; align-items: flex-start; }
-.prod .head .t { min-width: 0; }
-.prod h3 { font-size: var(--t-16); font-weight: 500; letter-spacing: -0.02em; }
-.prod .desc { color: var(--fg-2); font-size: var(--t-13); margin-top: 2px; }
-.prod .bul { grid-area: bul; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; margin-top: 10px; }
-.prod .bul li { position: relative; padding-left: 14px; color: var(--fg-3); font-size: var(--t-12); line-height: 1.55; }
-.prod .bul li::before { content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 1px; background: var(--fg-4); }
-.prod .prices { grid-area: prices; display: grid; gap: 2px; align-self: center; }
-.prod .pr { display: flex; justify-content: space-between; gap: 12px; padding: 4px 10px; border-radius: var(--r-1); color: var(--fg-3); font-size: var(--t-12); transition: background var(--d2), color var(--d2); }
-.prod .pr .pv { font-family: var(--f-mono); font-size: var(--t-13); white-space: nowrap; }
-.prod .pr[data-on="1"] { background: var(--bg-3); color: var(--fg); }
-.prods .prod > .chk { grid-area: chk; position: absolute; inset: 0; border: 0; background: transparent; padding: 22px; min-height: 0; align-items: flex-start; border-radius: 0; }
-.prods .prod > .chk:hover { background: transparent; }
-.prods .prod > .chk .t, .prods .prod > .chk .amt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-/* 상품 소개 행(.prod.one, 홈 가격·구매 화면 상품 3종): 선택 칸 없이 이름·설명 + 가격 칸. .sel 로 강조 */
-.prods .card.prod.one, .pricing-body .prods .card.prod.one { grid-template-columns: minmax(0, 1fr) 196px; grid-template-areas: "head prices" "bul prices"; }
-.prods .card.prod.one:hover { background: transparent; }
-.prods .card.prod.one.sel, .prods .card.prod.one.sel:hover { background: var(--bg-2); }
+/* 상품 카드(구매 화면 ① 상품 고르기 · 로그아웃 상품 소개) — 카드 3개를 세로로 쌓는다(6.8).
+   상품마다 색 하나(:root 의 --p-*): 아이콘 칸 · 체크 표시 · 고른 카드 테두리 · 금액에만 쓴다 */
+.prod { --acc: var(--fg-2); --acc-soft: var(--hl); --acc-line: var(--line-3); --acc-glow: var(--hl-2); }
+.prod[data-prod="macro"] { --acc: var(--p-macro); --acc-soft: var(--p-macro-soft); --acc-line: var(--p-macro-line); --acc-glow: var(--p-macro-glow); }
+.prod[data-prod="roombot"] { --acc: var(--p-room); --acc-soft: var(--p-room-soft); --acc-line: var(--p-room-line); --acc-glow: var(--p-room-glow); }
+.prod[data-prod="minigame"] { --acc: var(--p-game); --acc-soft: var(--p-game-soft); --acc-line: var(--p-game-line); --acc-glow: var(--p-game-glow); }
+.prods { display: grid; gap: 12px; }
+.prods .card.prod { position: relative; margin: 0; padding: 20px 22px; border: 1px solid var(--line-2); border-radius: 14px; background: radial-gradient(90% 130% at 100% 0%, var(--acc-soft), transparent 60%), linear-gradient(180deg, var(--bg-2), var(--bg-1)); transition: border-color var(--d2) var(--ease), box-shadow var(--d2) var(--ease), transform var(--d2) var(--ease); }
+.prod .head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.prod .p-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--acc); background: linear-gradient(145deg, var(--acc-soft), transparent), var(--acc-soft); border: 1px solid var(--acc-line); transition: background var(--d2), color var(--d2), border-color var(--d2), box-shadow var(--d2), transform var(--d3) var(--ease); }
+.prod h3 { min-width: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.35; }
+.prod .desc { margin-top: 12px; color: var(--fg-2); font-size: var(--t-13); line-height: 1.65; }
+.prod .bul { display: grid; gap: 4px; margin-top: 10px; }
+.prod .bul li { position: relative; padding-left: 20px; color: var(--fg-2); font-size: var(--t-13); line-height: 1.55; }
+.prod .bul li::before { content: ""; position: absolute; left: 2px; top: .52em; width: 8px; height: 4px; border-left: 1.6px solid var(--acc); border-bottom: 1.6px solid var(--acc); transform: rotate(-45deg); }
+.prod .price { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.prod .price .pv { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
+.prod .price .amt { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: var(--fg); transition: color var(--d2); }
+.prod .price .amt .sans { margin-left: 1px; font-size: 15px; font-weight: 500; }
+.prod .price .per { color: var(--fg-3); font-size: var(--t-13); }
+.prod .price .cap { padding: 3px 10px; border-radius: 999px; background: var(--bg-3); color: var(--fg-2); font-size: var(--t-12); white-space: nowrap; transition: background var(--d2), color var(--d2); }
+.prod .prod-act { margin-top: 16px; }
+/* ① 상품 고르기: 카드 어디를 눌러도 고른다(체크 칸 label 이 카드 전체를 덮는다). 오른쪽 위 동그라미가 체크 표시 */
+.picks .card.prod { cursor: pointer; }
+.picks .prod .head { padding-right: 40px; }
+.picks .prod > .chk { position: absolute; inset: 0; z-index: 1; min-height: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; }
+.picks .prod > .chk .t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.picks .prod > .chk .box { position: absolute; top: 30px; right: 22px; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--line-3); background: var(--bg-1); }
+.picks .prod > .chk .box::after { width: 10px; height: 5px; border-width: 0 0 2px 2px; border-style: solid; border-color: var(--inv-fg); }
+.picks .prod > .chk input:checked + .box { background: var(--acc); border-color: var(--acc); animation: ckPop 380ms var(--ease); }
+.picks .card.prod.sel { border-color: var(--acc-glow); background: radial-gradient(120% 150% at 0% 0%, var(--acc-soft), transparent 60%), linear-gradient(180deg, var(--bg-2), var(--bg-1)); box-shadow: 0 0 0 1px var(--acc-line), 0 18px 44px -24px var(--acc-glow); }
+.picks .prod.sel .p-ic { color: var(--inv-fg); background: var(--acc); border-color: var(--acc); box-shadow: 0 8px 22px -8px var(--acc-glow); animation: icPop 460ms var(--ease); }
+.picks .prod.sel .price .amt { color: var(--acc); }
+.picks .prod.sel .price .cap { background: var(--acc-soft); color: var(--fg); }
+.picks .card.prod::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0; }
+.picks .card.prod.sel::after { animation: selRing 650ms var(--ease); }
+@media (hover: hover) {
+  .picks .card.prod:hover { transform: translateY(-2px); border-color: var(--acc-line); box-shadow: 0 16px 36px -22px var(--acc-glow); }
+  .picks .card.prod.sel:hover { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc-line), 0 22px 48px -24px var(--acc-glow); }
+  .picks .card.prod:hover .p-ic { transform: rotate(-6deg) scale(1.06); }
+}
+.picks .card.prod:active { transform: scale(.99); }
+@keyframes ckPop { 0% { transform: scale(.55); } 55% { transform: scale(1.18); } 100% { transform: none; } }
+@keyframes icPop { 0% { transform: scale(.8); } 55% { transform: scale(1.1); } 100% { transform: none; } }
+@keyframes selRing { 0% { opacity: 1; box-shadow: 0 0 0 0 var(--acc-glow); } 100% { opacity: 0; box-shadow: 0 0 0 12px transparent; } }
 .chip.tagx { height: 20px; font-size: var(--t-11); }
 .chip.tagx::before { display: none; }
 /* sum */
@@ -514,13 +538,6 @@ legend.lb + * { clear: both; }
 .sum .was { color: var(--fg-3); font-size: var(--t-13); margin-right: 8px; text-decoration-color: var(--fg-4); }
 .sum .nudge, .sum .saved { font-size: var(--t-12); color: var(--fg-2); padding: 8px 12px; border: 1px dashed var(--line-3); border-radius: var(--r-2); }
 .sum .saved { border-style: solid; color: var(--fg); }
-.pricing-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.pricing-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
-.pricing-side { position: sticky; top: 84px; display: grid; gap: 12px; }
-@media (min-width: 761px) {
-  .pricing-body .prods .card.prod { grid-template-columns: 32px minmax(0, 1fr) 196px; gap: 4px 16px; }
-  .pricing-body .prod .bul { grid-template-columns: minmax(0, 1fr); }
-}
 /* big boxes (amount, account, order id, key) */
 .big { padding: 16px 18px; border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--bg); }
 .big + .big { margin-top: 10px; }
@@ -589,11 +606,9 @@ legend.lb + * { clear: both; }
 #lookupForm + #result { margin-top: 12px; }
 .pub-grid:has(> .pub-main > #result[hidden]) { grid-template-columns: minmax(0, 520px); }
 /* price skeleton while /api/price loads */
-.prods .card.prod.skel > div:nth-child(2) { grid-area: bul; margin-top: 10px; }
 .sk-ln { height: 10px; }
 .sk-ln.w40 { width: 40%; } .sk-ln.w70 { width: 70%; } .sk-ln.w90 { width: 90%; }
 .sk-pl { width: 40px; height: 10px; } .sk-pv { width: 72px; height: 10px; }
-.prods > .card:not(.prod) { border: 0; border-radius: 0; }
 /* toast (3.0) */
 #toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 120; display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid var(--line-3); border-radius: var(--r-3); background: var(--bg-2); color: var(--fg); box-shadow: var(--shadow); font-size: var(--t-13); transform: translate(-50%, 12px); opacity: 0; pointer-events: none; transition: transform var(--d2) var(--ease), opacity var(--d2) var(--ease); }
 #toast[data-on="1"] { transform: translate(-50%, 0); opacity: 1; }
@@ -686,11 +701,7 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .step { display: flex; align-items: center; gap: 10px; color: var(--fg); font-size: var(--t-16); font-weight: 600; letter-spacing: -0.02em; }
 .step .sn { width: 22px; height: 22px; border-radius: 50%; background: var(--inv); color: var(--inv-fg); display: grid; place-items: center; font: 600 12px/1 var(--f-mono); flex: none; }
 .fsec-h .hint { margin-top: 6px; padding-left: 32px; }
-.picks .card.prod { cursor: pointer; }
-.picks .prod > .chk { grid-area: auto; z-index: 1; }      /* 카드 전체를 덮는다(격자 칸 chk 에 갇히지 않게) — 어디를 눌러도 고른다 */
-.picks .card.prod.sel { box-shadow: inset 3px 0 0 var(--fg); }
 .rprods.one { grid-template-columns: minmax(0, 1fr); }
-.prod .prod-act { grid-column: 1 / -1; margin-top: 12px; }
 .rooms-act .hint { margin: 0; }
 .xbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin-top: 6px; color: var(--fg-2); font-size: var(--t-13); transition: color var(--d1); }
 .xbtn:hover { color: var(--fg); }
@@ -735,13 +746,29 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .lrow-foot { padding-top: 12px; border-top: 1px solid var(--line); }
 .lrow-foot .btn-row { margin-top: 0; }
 .acc-list .feat-row .r1 h3 { flex: 1 0 auto; white-space: nowrap; }
-.pub-main .prods .prod .bul { grid-template-columns: minmax(0, 1fr); }
 
 /* 실시간 상담 (6.10) */
 .support-wrap { max-width: 640px; }
 .contact-t { color: var(--fg); white-space: pre-wrap; }
 .moved { padding-block: 56px; color: var(--fg-2); }
 .moved a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- 움직임 (공개 페이지) ----------
+   들어올 때 위에서부터 차례로 살짝 떠오른다. 숨겨 뒀다 보여 주는 칸(#macroSec · #rooms 등)도 보일 때 같은 움직임.
+   fill 은 backwards 만 — 끝난 뒤 :hover 의 transform 을 막지 않게. 움직임 줄이기 설정이면 맨 아래에서 끈다 */
+@keyframes riseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.pub-head > *, .pub-main > :not(.prods), .pub-grid > aside > *, .form > .fsec, .auth > :not(.pub-head), .support-wrap > *, .prods:not([aria-busy]) > .card { animation: riseIn 560ms var(--ease) backwards; }
+.pub-head > :nth-child(2), .pub-main > :nth-child(2), .prods > .card:nth-child(2), .pub-grid > aside > :nth-child(1) { animation-delay: 70ms; }
+.pub-head > :nth-child(n+3), .pub-main > :nth-child(n+3), .prods > .card:nth-child(3), .pub-grid > aside > :nth-child(2), .auth > :not(.pub-head), .support-wrap > *, #payerSec { animation-delay: 140ms; }
+.pub-grid > aside > :nth-child(n+3) { animation-delay: 210ms; }
+/* 결제 금액이 바뀌면 숫자가 아래에서 올라온다 */
+.sum .ln.total .v.bump { animation: numIn 420ms var(--ease); }
+@keyframes numIn { from { opacity: .2; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* 공개 페이지 맨 위 은은한 빛(상품 색 3개)이 천천히 흐른다. 빛은 상자 끝에서 0 이 되게(closest-side) — 잘린 모서리가 안 보인다.
+   가로로 넘치지 않게 .pub-page 안에서 자른다 */
+.pub-page { position: relative; isolation: isolate; overflow-x: clip; }
+.pub-page::before { content: ""; position: absolute; z-index: -1; left: 0; right: 0; top: 0; height: 440px; pointer-events: none; background: radial-gradient(closest-side at 22% 45%, var(--p-macro-soft), transparent), radial-gradient(closest-side at 52% 35%, var(--p-room-soft), transparent), radial-gradient(closest-side at 80% 50%, var(--p-game-soft), transparent); animation: glowDrift 16s ease-in-out infinite alternate; }
+@keyframes glowDrift { from { transform: translate3d(-2%, 0, 0); opacity: .7; } to { transform: translate3d(2%, 14px, 0); opacity: 1; } }
 
 /* ---------- responsive: shared primitives (style.css + panel.css) ---------- */
 @media (max-width: 760px) {
@@ -813,29 +840,17 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 @media (max-width: 960px) {
   .pub-grid { grid-template-columns: minmax(0, 1fr); }
   .pub-grid > aside { position: static; }
-  .pricing-body { grid-template-columns: minmax(0, 1fr); }
-  .pricing-side { position: static; }
 }
 @media (max-width: 760px) {
   .pub-head { padding-top: 36px; }
   .card { padding: 18px 16px; }
-  .prods .card.prod { grid-template-columns: 30px minmax(0, 1fr); grid-template-areas: "chk head" "chk bul" "chk prices"; padding: 18px 16px; gap: 6px 12px; }
-  .prods .prod > .chk { padding: 18px 16px; }
-  .prod .bul { grid-template-columns: minmax(0, 1fr); }
-  .prod .prices { margin-top: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-  .prod .pr { flex-direction: column; gap: 0; padding: 6px 8px; }
-  .prods .card.prod.one, .pricing-body .prods .card.prod.one { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "bul" "prices"; }
-  .prod.one .prices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prods .card.prod { padding: 18px 16px; }
+  .picks .prod > .chk .box { top: 28px; right: 16px; }
+  .prod .price { flex-direction: column; align-items: flex-start; }
   .seg label span { padding: 0 10px; }
   .kv .r { grid-template-columns: 96px minmax(0, 1fr); }
   .lookup { grid-template-columns: minmax(0, 1fr); }
   .fld input[type="text"], .fld input[type="password"], .fld input[type="url"], .fld input[type="tel"], .fld textarea { font-size: 16px; }
-}
-/* 360px 대: 금액이 한 줄에 들어가게 칸 여백과 글자를 줄인다 */
-@media (max-width: 380px) {
-  .prod .prices { gap: 2px; }
-  .prod .pr { padding: 6px 4px; }
-  .prod .pr .pv { font-size: var(--t-12); }
 }
 
 /* ---------- responsive: accounts v1 (style.css) ---------- */
@@ -856,7 +871,7 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; transition-delay: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   .rv.armed { transform: none; }
-  .caret, .dot.pulse { animation: none !important; }
+  .caret, .dot.pulse, .pub-page::before { animation: none !important; }
   .how-fig .pk { display: none; }
   .kkt-line.enter, .kkt-row.in, .tbl tr.in, .feed li.in, .alerts li.in, .rule.new, .room.pop, .wchip.new, .img-t, .spark rect, .kt-k, .mviz-strip i, .pass-code span { animation: none !important; }
 }

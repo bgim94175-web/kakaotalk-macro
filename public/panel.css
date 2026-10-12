@@ -10,6 +10,9 @@
   --warn-bg: rgba(214, 162, 74, 0.07); --warn-line: rgba(214, 162, 74, 0.34);
   --hl: rgba(244, 244, 245, 0.06); --hl-2: rgba(244, 244, 245, 0.11);
   --crit-pulse: rgba(239, 106, 96, 0.45); --live-pulse: rgba(95, 184, 120, 0.4);
+  --p-macro: #60a5fa; --p-macro-soft: rgba(96, 165, 250, 0.12); --p-macro-line: rgba(96, 165, 250, 0.4); --p-macro-glow: rgba(96, 165, 250, 0.6);
+  --p-room: #a78bfa; --p-room-soft: rgba(167, 139, 250, 0.12); --p-room-line: rgba(167, 139, 250, 0.4); --p-room-glow: rgba(167, 139, 250, 0.6);
+  --p-game: #f472b6; --p-game-soft: rgba(244, 114, 182, 0.12); --p-game-line: rgba(244, 114, 182, 0.4); --p-game-glow: rgba(244, 114, 182, 0.6);
   --scrim: rgba(5, 5, 7, 0.66); --glass: rgba(9, 9, 11, 0.82);
   --shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.72), 0 2px 6px rgba(0, 0, 0, 0.36);
   --ring: 0 0 0 3px rgba(244, 244, 245, 0.08);

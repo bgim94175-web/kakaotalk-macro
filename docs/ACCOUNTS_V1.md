@@ -980,7 +980,7 @@ if (!v || !v.licensed || v.state === 'error') return
 | `/panel` | panel.html | — | 5 |
 | `/manage` | manage.html | — | 6 |
 
-캐시 무효화: `style.css?v=8`, `app.js?v=9`, `support.js?v=1`, `panel.css?v=15`, `panel.js?v=18`, `manage.js?v=4`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
+캐시 무효화: `style.css?v=11`, `app.js?v=16`, `support.js?v=1`, `panel.css?v=15`, `panel.js?v=19`, `manage.js?v=4`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
 
 **보안 헤더**(작업 1, server.js 의 HTML 응답 전부 — `page(...)` 와 정적 `.html`): `X-Frame-Options: DENY` + `Content-Security-Policy: frame-ancestors 'none'`. `/panel`·`/manage` 에는 여기에 `script-src 'self'; object-src 'none'; base-uri 'self'` 를 더한다(두 화면은 제3자 스크립트를 싣지 않는다, D25). 사이트 화면은 채널톡 SDK 가 여러 호스트를 쓰므로 `script-src` 를 걸지 않는다.
 
@@ -1061,9 +1061,10 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 
 ### 6.6 구매 `/buy`
 
-- 로그아웃 상태: 상품 소개(`.prods` 행 목록 3개, 가격은 `/api/price`)와 `#loginGate` 카드(`로그인`·`회원가입`, 둘 다 `next=` 지금 주소). 상품 행마다 맨 아래 `{상품} 구매하기` 버튼 → `/login?next=/buy?p={상품}`(로그인하면 그 상품을 고른 채로 돌아온다). 폼은 숨김.
+- 상품 카드(`.prods` 안에 세로로 3개, 가격은 `/api/price`): 왼쪽 위 상품 아이콘 칸(`.p-ic` — 매크로 `i-macro`, 방 관리봇 `i-shield`, 미니게임봇 `i-game`) + 이름, 설명, 체크 글머리, 맨 아래 가격 줄(`20,000원 / 1개월(30일)` + 작은 칸 `한 번에 1~12개월`·`기간 제한 없음`). 상품마다 색 하나(공용 `:root` 토큰 `--p-macro` 파랑 · `--p-room` 보라 · `--p-game` 분홍과 그 `-soft`·`-line`·`-glow`, `.prod[data-prod]` 가 `--acc*` 로 받는다)를 아이콘 칸·체크·고른 카드 테두리·금액에만 쓴다.
+- 로그아웃 상태: 상품 카드와 `#loginGate` 카드(`로그인`·`회원가입`, 둘 다 `next=` 지금 주소). 상품 카드마다 맨 아래 `{상품} 구매하기` 버튼 → `/login?next=/buy?p={상품}`(로그인하면 그 상품을 고른 채로 돌아온다). 폼은 숨김.
 - 로그인 상태 `#buyForm.form` — **상품부터 고른다**(예전엔 방 관리봇을 사려면 `설치할 방` 의 `방 추가` 만 보여 손님이 어떻게 사는지 몰랐다). `.fsec` 마다 `.fsec-h` 단계 제목(`.step` + 번호 `.sn`, 번호는 보이는 칸 순서대로 다시 매긴다):
-  1. `#pickSec` `상품 고르기` — hint `구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.` `#picks.prods.picks` 안 상품 행 3개(가격·설명·글머리는 로그아웃 화면과 같음). 행 전체를 덮는 `.chk`(`#pick-{상품}`)라 행 어디를 눌러도 고르고, 고른 행은 `.sel`.
+  1. `#pickSec` `상품 고르기` — hint `구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.` `#picks.prods.picks` 안 상품 카드 3개(로그아웃 화면과 같은 카드). 카드 전체를 덮는 `.chk`(`#pick-{상품}`)라 카드 어디를 눌러도 고르고, 오른쪽 위 동그라미가 체크 표시다. 고른 카드는 `.sel` — 상품 색 테두리·빛, 아이콘 칸이 상품 색으로 차고, 체크가 톡 튀어나온다.
   2. `#macroSec` `매크로 기간`(매크로를 골랐을 때만): `.num #macroMonths`(1~12개월). hint `이미 쓰고 있으면 지금 만료일에 이어서 늘어납니다. 발송은 패널에 등록한 내 카카오 계정으로 합니다.` 이용 중이면 `#macroNow` `지금 만료일 YYYY.MM.DD · 여기에 이어서 늘어납니다`.
   3. `#rooms` `봇을 넣을 오픈채팅방`(방 관리봇·미니게임봇 중 하나라도 골랐을 때만, 고르면 방 행 1개가 바로 열린다): hint `방 링크를 붙여 넣으면 방 이름을 확인합니다. 방마다 한 번만 결제하면 기간 제한 없이 씁니다.` 방 행마다:
      - `#room{i}-link`(`type="url"`, placeholder `https://open.kakao.com/o/…`) + `확인` → `POST /api/room-preview`(붙여넣기·blur 때도). 미리 보기 줄·`verified:false` 확인란·참여코드 칸은 전과 같다.
@@ -1074,6 +1075,7 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 - 미리 고르기: `?p=macro,roombot,minigame` · `?macro=1`(매크로) · `#rooms`(방 관리봇) · `?add=<install_id>`(그 방을 행 1개로 미리 채우고 — 링크 읽기 전용 — 그 방에 아직 없는 봇을 위에서 고른다. 둘 다 있거나 입금 대기면 토스트). 패널·내 계정의 구매 버튼은 `?p=` 로 그 상품을 고른 채 연다(`봇 구매` → `?p=roombot`).
 - 아무것도 고르지 않고 주문하면 `#err-pick` `구매할 상품을 1개 이상 골라 주세요`.
 - aside `#sum`: 줄마다 `.ln`(`카카오톡 매크로 2개월` / `방 관리봇 · 동네모임`), `.ln.total` `결제 금액`, `.nudge` 지금 뒷자리 설명, `#submitBtn` `주문 접수`. 그 아래 `.note.dim` `구매 중 문제가 생기면 문의하십시오.` + `[data-support]` `문의하기`.
+- 움직임(공개 페이지 전체): 들어올 때 제목·카드·칸이 위에서부터 차례로 살짝 떠오르고(`riseIn`), 숨겨 뒀다 보여 주는 칸(`#macroSec`·`#rooms`)도 보일 때 같은 움직임. 상품 카드는 마우스를 올리면 살짝 뜨고, `결제 금액` 이 바뀌면 숫자가 아래에서 올라온다. 페이지 맨 위에 상품 색 3개의 은은한 빛이 천천히 흐른다. 움직임 줄이기 설정이면 전부 끈다.
 - 오류: 3.3 표의 `reason`·`room` 으로 칸에 붙이고, 첫 오류 칸으로 포커스+스크롤, 토스트 `입력 내용을 확인하십시오`. `room_taken`·`pending_exists`·`blocked_room`·`too_many_pending` 문구 옆에는 `[data-support]` 버튼을 붙인다.
 - 주문이 접수되면 **주문 화면 `/order/{id}?t={token}` 으로 바로 넘어간다**(`location.replace`, `new=1` → 제목 `주문 완료`·리드 `아래 금액을 입금하면 이 화면에서 자동으로 확인됩니다. …`·토스트 `주문이 완료되었습니다`, 그 뒤 주소에서 `new=1` 을 뺀다). 그 화면이 5초마다 상태를 다시 읽어 입금 확인·처리 완료·방 입장을 실시간으로 보여 준다(6.7). 살아있는 표시(`입금 확인 대기 중 ••• N초 경과`)는 카드 맨 위에 두고, 보고 있는 동안 상태가 바뀌면 토스트 `입금이 확인되었습니다`/`처리가 끝났습니다`. 주문번호를 못 받은 예외에서만 이 자리에 `showResult` 결과를 그린다.
 

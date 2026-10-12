@@ -25,9 +25,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=10">
+<link rel="stylesheet" href="/style.css?v=11">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=15" defer></script>
+<script src="/app.js?v=16" defer></script>
 </head>
 <body data-page="buy">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -39,6 +39,7 @@
     <symbol id="i-visit" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h3.5v11H9.5"/><path d="M2.5 8h7"/><path d="M7 5.5 9.5 8 7 10.5"/></g></symbol>
     <symbol id="i-profile" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.8" y="3" width="12.4" height="10" rx="1.6"/><circle cx="6" cy="7.2" r="1.5"/><path d="M3.9 11c.4-.9 1.1-1.4 2.1-1.4s1.7.5 2.1 1.4"/><path d="M10 6.5h2.4M10 9h2.4"/></g></symbol>
     <symbol id="i-guard" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5 2v4c0 3-2.2 5.1-5 6.4-2.8-1.3-5-3.4-5-6.4v-4z"/><path d="M8 5.4v3.2"/><path d="M8 10.9v.1"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5 2v4c0 3-2.2 5.1-5 6.4-2.8-1.3-5-3.4-5-6.4v-4z"/><path d="M5.7 8.2l1.6 1.6 3-3.1"/></g></symbol>
     <symbol id="i-cover" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 8s2.2-4.4 6-4.4S14 8 14 8s-2.2 4.4-6 4.4S2 8 2 8z"/><circle cx="8" cy="8" r="1.8"/><path d="M2.6 2.6l10.8 10.8"/></g></symbol>
     <symbol id="i-reply" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 3.2h11v7.6H7.6L4.6 13.3v-2.5H2.5z"/></symbol>
     <symbol id="i-snipe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></g></symbol>
@@ -105,9 +106,9 @@
     <div id="gateWrap" class="pub-grid" hidden>
       <div class="pub-main">
         <div id="prods" class="prods" aria-label="상품" aria-busy="true" data-gloss>
-          <article class="card prod one" data-prod="macro"><div class="head"><div class="t"><h3>카카오톡 매크로</h3><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></div></div></article>
-          <article class="card prod one" data-prod="roombot"><div class="head"><div class="t"><h3>방 관리봇</h3><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></div></div></article>
-          <article class="card prod one" data-prod="minigame"><div class="head"><div class="t"><h3>미니게임봇</h3><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+          <article class="card prod one" data-prod="macro"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-macro"></use></svg></span><h3>카카오톡 매크로</h3></div><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></article>
+          <article class="card prod one" data-prod="roombot"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-shield"></use></svg></span><h3>방 관리봇</h3></div><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></article>
+          <article class="card prod one" data-prod="minigame"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-game"></use></svg></span><h3>미니게임봇</h3></div><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></article>
         </div>
       </div>
       <aside>
@@ -130,9 +131,9 @@
             <div class="fsec-h"><p class="step" id="pickH"><span class="sn" aria-hidden="true">1</span>상품 고르기</p><p class="hint">구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.</p></div>
             <div class="fld" id="fld-pick" role="group" aria-labelledby="pickH">
               <div id="picks" class="prods picks" aria-busy="true">
-                <article class="card prod" data-prod="macro"><div class="head"><div class="t"><h3>카카오톡 매크로</h3><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></div></div></article>
-                <article class="card prod" data-prod="roombot"><div class="head"><div class="t"><h3>방 관리봇</h3><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></div></div></article>
-                <article class="card prod" data-prod="minigame"><div class="head"><div class="t"><h3>미니게임봇</h3><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+                <article class="card prod" data-prod="macro"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-macro"></use></svg></span><h3>카카오톡 매크로</h3></div><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></article>
+                <article class="card prod" data-prod="roombot"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-shield"></use></svg></span><h3>방 관리봇</h3></div><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></article>
+                <article class="card prod" data-prod="minigame"><div class="head"><span class="p-ic" aria-hidden="true"><svg class="ic" width="22" height="22"><use href="#i-game"></use></svg></span><h3>미니게임봇</h3></div><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></article>
               </div>
               <p class="err" id="err-pick" role="alert" hidden></p>
             </div>
