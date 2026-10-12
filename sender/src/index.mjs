@@ -422,15 +422,20 @@ app.post('/v1/bot/room-profile', botRoute(async (req, res) => {
 }))
 
 // ── 보이스룸 실험 전용(A층). SENDER_VOICE_EXPERIMENT=1 일 때만 등록한다 ──────────
-// POST /v1/bot/voice-experiment { install_id, on? }  — on 기본 true(켜기), false 면 끄기.
+// POST /v1/bot/voice-experiment { install_id | chat_id | li, on? }
+//   on 기본 true(켜기), false 면 끄기. 방은 세 값 중 아무 것으로나 고른다(캡처 로그 값 그대로 OK).
 // 봇이 그 방에 SETMETA(16) liveon 신호만 보낸다(서버 할당·음성세션 없음). 결과는 로그로 본다.
 if (process.env.SENDER_VOICE_EXPERIMENT === '1') {
   process.stderr.write('[sender] SENDER_VOICE_EXPERIMENT=1 — voice room signal experiment enabled\n')
   app.post('/v1/bot/voice-experiment', botRoute(async (req, res) => {
-    const id = needInstall(res, req.body && req.body.install_id)
-    if (!id) return null
-    const on = !(req.body && req.body.on === false)
-    return hub.pool.voiceExperiment(id, on)
+    const b = req.body || {}
+    const sel = { install_id: b.install_id, chat_id: b.chat_id, li: b.li }
+    if ((sel.install_id == null || sel.install_id === '') && !sel.chat_id && !sel.li) {
+      res.status(400).json({ ok: false, error: 'need_room' })
+      return null
+    }
+    const on = !(b.on === false)
+    return hub.pool.voiceExperiment(sel, on)
   }))
 }
 

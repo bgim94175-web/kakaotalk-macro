@@ -367,8 +367,24 @@ export class BotPool {
   }
 
   // 보이스룸 실험(A층): 한 방에 liveon 신호만 보내 본다. SENDER_VOICE_EXPERIMENT 전용.
-  async voiceExperiment(installId, on) {
-    const got = this.viewOf(installId)
+  // 방은 install_id · chat_id · li(오픈링크) 중 아무 것으로나 고른다(캡처 로그의 값 그대로 써도 됨).
+  voiceFind(sel) {
+    const s = sel || {}
+    if (s.install_id != null && s.install_id !== '') return this.viewOf(s.install_id)
+    const chat = s.chat_id != null ? String(s.chat_id) : ''
+    const li = s.li != null ? String(s.li) : ''
+    if (!chat && !li) return null
+    for (const slot of this.bots.values()) {
+      for (const v of slot.byInstall.values()) {
+        if (chat && String(v.chat_id) === chat) return { slot, view: v }
+        if (li && String(v.link_id) === li) return { slot, view: v }
+      }
+    }
+    return null
+  }
+
+  async voiceExperiment(sel, on) {
+    const got = this.voiceFind(sel)
     if (!got || !got.slot) return { ok: false, error: 'not_joined' }
     return got.slot.voiceSetMeta(got.view, on)
   }
