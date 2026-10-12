@@ -1231,31 +1231,42 @@ export class BotSlot {
   }
 
   // 보이스룸 생성 명령어 탐색: 후보 LOCO 명령어를 빈 바디로 던져 본다.
-  // -202(INVALID_METHOD)=없는 명령어, -1=세션없음/타임아웃. 그 외 상태면 "존재하는 명령어"다.
-  // 존재하는 명령어는 바디 부족이면 -203 등으로 답하므로 상태로 가린다. 과속 방지로 사이에 쉰다.
+  // 대조군을 함께 보낸다: REAL(진짜 명령어)·FAKE(완전 가짜 이름). "없는 명령어" 응답이
+  // 어떤 상태코드인지(FAKE 로)와 "있는 명령어가 바디부족일 때" 코드(REAL 로)를 못박아,
+  // 후보가 FAKE 와 다른 코드를 내면 그게 진짜 존재하는 명령어다. 과속 방지로 사이에 쉰다.
   async voiceProbe(view) {
     const chatId = view && view.chat_id ? String(view.chat_id) : ''
     if (!chatId) return { ok: false, error: 'no_chat' }
     const li = view && view.link_id ? String(view.link_id) : ''
-    const cands = [
-      'LIVETALK', 'GETLT', 'CREATELT', 'LTCREATE', 'GETLIVETALK', 'CREATELIVETALK',
-      'LIVEINFO', 'LTINFO', 'GETLTINFO', 'LIVEON', 'LTON', 'STARTLT', 'GETLIVE', 'CREATELIVE',
-      'VRCREATE', 'CREATEVR', 'GETVR', 'VRINFO', 'MAKEVR', 'VROOM', 'GETVROOM', 'STARTVR', 'OPENVR',
-      'VOX', 'GETVOX', 'CREATEVOX', 'VOXCREATE', 'OPENVOX',
-      'MVOIP', 'GETVOIP', 'MAKEVOIP', 'CREATEVOIP', 'GETMVOIP',
+    const groups = [
+      ['REAL', ['WRITE', 'GETMEM', 'CHATINFO']],
+      ['FAKE', ['ZZQXNON1', 'QWEORIZZ9']],
+      ['CAND', [
+        'LIVETALK', 'GETLT', 'CREATELT', 'LTCREATE', 'GETLIVETALK', 'CREATELIVETALK',
+        'LIVEINFO', 'LTINFO', 'GETLTINFO', 'LIVEON', 'LTON', 'STARTLT', 'GETLIVE', 'CREATELIVE',
+        'VRCREATE', 'CREATEVR', 'GETVR', 'VRINFO', 'MAKEVR', 'VROOM', 'GETVROOM', 'STARTVR', 'OPENVR',
+        'VOX', 'GETVOX', 'CREATEVOX', 'VOXCREATE', 'OPENVOX',
+        'MVOIP', 'GETVOIP', 'MAKEVOIP', 'CREATEVOIP', 'GETMVOIP',
+      ]],
     ]
-    const hits = []
-    for (const m of cands) {
-      const body = { chatId: L(chatId) }
-      if (li) body.li = L(li)
-      const r = await this.raw(m, body)
-      const st = R.locoStatus(r)
-      log(this.id, `voice probe ${m} → status ${st} body ${traceText((r && r.body) || {})}`)
-      if (st !== -202 && st !== -1) hits.push(`${m}:${st}`)
-      await new Promise((ok) => { const t = setTimeout(ok, 500); if (t.unref) t.unref() })
+    const results = []
+    for (const [tag, list] of groups) {
+      for (const m of list) {
+        const body = { chatId: L(chatId) }
+        if (li) body.li = L(li)
+        const r = await this.raw(m, body)
+        const st = R.locoStatus(r)
+        log(this.id, `voice probe ${tag} ${m} → status ${st} body ${traceText((r && r.body) || {})}`)
+        results.push({ tag, m, st })
+        await new Promise((ok) => { const t = setTimeout(ok, 500); if (t.unref) t.unref() })
+      }
     }
-    log(this.id, `voice probe done, non-(-202) hits: ${hits.join(', ') || 'none'}`)
-    return { ok: true, hits }
+    const codeOf = (tag) => results.filter((x) => x.tag === tag).map((x) => `${x.m}:${x.st}`).join(' ')
+    // FAKE 들이 낸 상태코드 = "없는 명령어" 코드. 후보가 그와 다르면 존재하는 명령어 후보.
+    const fakeCodes = new Set(results.filter((x) => x.tag === 'FAKE').map((x) => x.st))
+    const standout = results.filter((x) => x.tag === 'CAND' && x.st !== -1 && !fakeCodes.has(x.st)).map((x) => `${x.m}:${x.st}`)
+    log(this.id, `voice probe done. REAL[${codeOf('REAL')}] FAKE[${codeOf('FAKE')}] standout[${standout.join(' ') || 'none'}]`)
+    return { ok: true, real: codeOf('REAL'), fake: codeOf('FAKE'), standout }
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
@@ -2896,7 +2907,7 @@ export class BotSlot {
         }
         this.say(v, '보룸 명령어 후보를 찾는 중… 잠시만요(약 20초).', { what: 'reply' })
         const r = await this.voiceProbe(v)
-        this.say(v, `보룸 명령어 후보 응답: ${r.hits && r.hits.length ? r.hits.join(', ') : '전부 없음(-202)'}`, { what: 'reply' })
+        this.say(v, `REAL[${r.real}]\nFAKE[${r.fake}]\n튀는 후보: ${r.standout && r.standout.length ? r.standout.join(', ') : '없음'}`, { what: 'reply' })
         return
       }
     }
