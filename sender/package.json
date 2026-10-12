@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/boot.mjs",
     "postinstall": "node src/patch-kakao.mjs",
-    "check": "node src/patch-kakao.mjs && node --check src/boot.mjs && node --check src/patch-kakao.mjs && node --check src/register.mjs && node --check src/index.mjs && node --check src/store.mjs && node --check src/word.mjs && node --check src/quiz.mjs && node --check src/features.mjs && node --check src/runner.mjs && node --check src/room-kind.mjs && node --check src/secretbox.mjs && node --check src/roomfeat.mjs && node --check src/botpool.mjs && node --check src/fake.mjs && node src/register-check.mjs && node src/selfcheck.mjs"
+    "check": "node src/patch-kakao.mjs && node --check src/boot.mjs && node --check src/voice-probe.mjs && node --check src/patch-kakao.mjs && node --check src/register.mjs && node --check src/index.mjs && node --check src/store.mjs && node --check src/word.mjs && node --check src/quiz.mjs && node --check src/features.mjs && node --check src/runner.mjs && node --check src/room-kind.mjs && node --check src/secretbox.mjs && node --check src/roomfeat.mjs && node --check src/botpool.mjs && node --check src/fake.mjs && node src/register-check.mjs && node src/selfcheck.mjs"
   },
   "dependencies": {
     "agent-messenger": "2.38.0",

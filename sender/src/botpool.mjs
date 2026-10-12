@@ -192,6 +192,14 @@ function voiceTraceOk(packet) {
   return ++voiceN <= 20
 }
 
+// 보이스룸 신호는 자르지 않는다(meta.content 의 url 이 200자를 넘는다).
+function voiceText(b) {
+  const head = { chatId: R.idText(b.chatId), li: R.idText(b.li) }
+  if (b.meta) return JSON.stringify({ ...head, metaType: Number(b.meta.type), authorId: R.idText(b.meta.authorId) }) + ' content ' + String(b.meta.content || '')
+  const l = b.chatLog || {}
+  return JSON.stringify({ ...head, authorId: R.idText(l.authorId), author: b.authorNickname || '' }) + ' message ' + String(l.message || '')
+}
+
 export function traceText(v) {
   const s = JSON.stringify(traceValue(v, 0))
   return s && s.length > 4000 ? s.slice(0, 4000) + '…' : s
@@ -2201,7 +2209,7 @@ export class BotSlot {
       log(this.id, `push ${packet.method} keys ${Object.keys(packet.body || {}).join(',')}`)
     }
     // SENDER_TRACE_VOICE=1: 보이스룸 실험용. 보이스룸 신호만 본문 전체를 남긴다(분당 20줄).
-    if (process.env.SENDER_TRACE_VOICE === '1' && voiceTraceOk(packet)) log(this.id, `voice? ${packet.method} ${traceText(packet.body)}`)
+    if (process.env.SENDER_TRACE_VOICE === '1' && voiceTraceOk(packet)) log(this.id, `voice? ${packet.method} ${voiceText(packet.body)}`)
     this.enqueue(() => this.onPush(packet)).catch((e) => log(this.id, `push ${packet.method} failed: ${errText(e)}`))
   }
 

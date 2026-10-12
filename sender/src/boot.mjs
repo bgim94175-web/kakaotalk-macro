@@ -66,6 +66,10 @@ try {
   const { createApp } = await import('./index.mjs')
   app = await createApp()
   lineOut('SENDER_READY')
+  if (process.env.SENDER_VOICE_PROBE) {
+    const { voiceProbe } = await import('./voice-probe.mjs')
+    setTimeout(() => voiceProbe(process.env.SENDER_VOICE_PROBE).catch(() => {}), 10000).unref()
+  }
 } catch (e) {
   bootError = safeMessage(e)
   process.stderr.write(`[sender] boot failed: ${bootError}\n`)
