@@ -1314,7 +1314,7 @@
       ]),
       el('p', { cls: 'hint', text:
         (o.orderId ? '구매자는 주문 조회 화면(/order/' + o.orderId + ')에서도 같은 키를 확인할 수 있습니다. ' : '') +
-        '구매자가 회원가입 후 내 계정에서 이 키를 등록하면 남은 기간이 회원 계정으로 옮겨집니다.' })
+        '손님 화면의 키 등록은 없어졌습니다. 기간을 옮겨야 하면 회원 쪽에서 직접 연장해 주세요.' })
     ] });
     var acts = [btn('닫기', 'ghost', function () { m.close(); })];
     if (key) {
@@ -3266,7 +3266,7 @@
     if (str(lic.blocked_reason)) alerts.push(note('차단된 키입니다. 사유: ' + str(lic.blocked_reason), true));
     if (lic.revoked) alerts.push(note('회수된 키입니다. 회원 계정에 등록할 수 없고, 이 키에 묶인 카카오 계정의 발송이 멈춥니다. 남은 기간은 보존됩니다.', true));
     if (!claimed && !isStarted(lic) && (lic.features || []).length) {
-      alerts.push(note('아직 사용 전입니다. 회원이 내 계정에서 이 키를 등록하면 그때부터 기간이 계산되고, 매크로 기간은 회원의 매크로 기간에 더해집니다.'));
+      alerts.push(note('아직 사용 전입니다. 손님 화면의 키 등록은 없어졌습니다.'));
     }
 
     // 기능
@@ -3491,7 +3491,7 @@
       title: '새 키 발급',
       body: [
         note('기존 고객 지원용 라이선스 키를 발급합니다. 기능 ' + featIds().length + '종(' + featIds().map(featLabel).join(' · ') +
-             ')이 모두 포함됩니다. 받은 사람이 회원가입 후 내 계정에서 키를 등록하면 그때부터 기간이 계산되고, 매크로 기간은 회원의 매크로 기간에 더해집니다. 새 판매에는 회원 주문을 써 주세요.'),
+             ')이 모두 포함됩니다. 손님 화면의 키 등록은 없어졌으니 새 판매에는 회원 주문을 써 주세요.'),
         per.node,
         el('div', { cls: 'mg-sec' }, [el('span', { cls: 'lb', text: '수량' }),
           el('div', { cls: 'mg-numrow' }, [count, el('span', { cls: 'dim tiny', text: '개 (최대 20개)' })])]),

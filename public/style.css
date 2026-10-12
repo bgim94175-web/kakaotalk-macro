@@ -734,7 +734,6 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .o-amt { display: grid; justify-items: end; gap: 2px; font-size: var(--t-13); }
 .lrow-foot { padding-top: 12px; border-top: 1px solid var(--line); }
 .lrow-foot .btn-row { margin-top: 0; }
-#claimDone { margin-top: 12px; }
 .acc-list .feat-row .r1 h3 { flex: 1 0 auto; white-space: nowrap; }
 .pub-main .prods .prod .bul { grid-template-columns: minmax(0, 1fr); }
 

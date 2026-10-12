@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/style.css?v=10">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=13" defer></script>
+<script src="/app.js?v=14" defer></script>
 </head>
 <body data-page="account">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -152,18 +152,6 @@
             </form>
           </section>
 
-          <section class="card" id="claim" aria-labelledby="accClaimH">
-            <div class="card-h"><h2 id="accClaimH"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-key"></use></svg>기존 라이선스 키 등록</h2></div>
-            <form id="claimForm" novalidate>
-              <div class="fld" id="fld-claim">
-                <label for="claimKey">라이선스 키</label>
-                <div class="inrow"><input type="text" id="claimKey" name="key" class="keyin" placeholder="KAKA-XXXX-XXXX-XXXX" maxlength="19" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-describedby="claim-hint err-claim"><button type="submit" class="btn primary" id="claimBtn"><span class="spin" aria-hidden="true"></span><span class="lbl-idle">등록</span></button></div>
-                <p class="hint" id="claim-hint">예전에 받은 라이선스 키를 이 계정으로 옮깁니다. 남은 매크로 기간은 현재 기간에 더해지고, 키에 등록된 카카오 계정도 함께 옮겨집니다. 등록한 키는 다른 아이디에 다시 등록할 수 없습니다.</p>
-                <p class="err" id="err-claim" role="alert" hidden></p>
-              </div>
-            </form>
-            <div id="claimDone" hidden></div>
-          </section>
         </div>
         <aside>
           <div class="note dim"><span class="ic" aria-hidden="true">i</span><span>오류가 생기면 문의해 주세요. 주문번호를 함께 알려 주시면 더 빨리 확인할 수 있습니다. <button type="button" class="btn sm" data-support data-support-ctx="내 계정 문의"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button></span></div>

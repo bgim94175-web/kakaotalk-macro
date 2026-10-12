@@ -4409,7 +4409,7 @@
     var btn = $('loginBtn');
     var id = $('login-id').value.trim();
     var pw = $('login-pw').value;
-    if (/^KAKA-/i.test(id)) { loginErr('라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록해 주세요.', 'login-id'); return; }
+    if (/^KAKA-/i.test(id)) { loginErr('라이선스 키로는 로그인할 수 없습니다. 아이디로 로그인하거나 회원가입해 주세요.', 'login-id'); return; }
     if (!id) { loginErr('아이디를 입력해 주세요.', 'login-id'); return; }
     if (!pw) { loginErr('비밀번호를 입력해 주세요.', 'login-pw'); return; }
     addBusy(btn, true);

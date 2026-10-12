@@ -976,7 +976,7 @@ if (!v || !v.licensed || v.state === 'error') return
 | `/signup` | signup.html (새) | signup | 4 |
 | `/account` | account.html (새) | account | 4 |
 | `/support` | support.html (새) | support | 4 |
-| `/my` | — | — | 서버가 302 `/account#claim` (작업 1, server.js) |
+| `/my` | — | — | 서버가 302 `/account` (작업 1, server.js) |
 | `/panel` | panel.html | — | 5 |
 | `/manage` | manage.html | — | 6 |
 
@@ -1012,7 +1012,7 @@ if (!v || !v.licensed || v.state === 'error') return
 - `.hint` `Google 계정은 내 계정에서 연결한 경우에만 사용할 수 있습니다.`
 - `.auth-foot`: `회원가입`(→`/signup?next=`), `비밀번호를 잊은 경우`(Google 재설정 링크. Google 꺼져 있으면 링크 대신 `#forgotNote` 만).
 - `#forgotNote`(늘 보임, `.hint`): `Google 계정을 연결하지 않았다면 문의하기로 아이디를 전달하십시오. 확인 뒤 임시 비밀번호를 안내합니다.` + `[data-support]` `문의하기`. 관리자는 `member-pwreset` 으로 처리한다.
-- `#keyNote`(`.note.dim`, 늘 보임): `라이선스 키로 사용하던 경우 회원가입 후 내 계정에서 키를 등록하십시오.` + 링크 `회원가입` → `/signup?next=%2Faccount%23claim`. 아이디 칸 값이 `/^KAKA-/i` 이면 제출하지 않고 `#fld-login` 에 `라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록하십시오` 를 띄운다.
+- (없앰) 예전 라이선스 키 안내 `#keyNote` — 손님 화면의 키 등록을 없앴다. 아이디 칸에 `KAKA-` 를 넣으면 `라이선스 키로는 로그인할 수 없습니다. 아이디로 로그인하거나 회원가입해 주세요`.
 - `?g=` 는 3.2.2 문구를 `.note` 로. `?next=` 는 `^/(?!/)` 만 허용(`#` 포함 가능), 기본 `/account`.
 - 성공 → 토스트 없이 `next` 로 이동.
 
@@ -1055,7 +1055,7 @@ Google 이 켜져 있고 이 회원이 연결하지 않았으면 머리 아래 `
 | `#acc-sessions` | 로그인 기기 | 세션 목록(`device` · 마지막 사용 · `지금 이 기기` 표시), 행마다 `로그아웃`(인라인 확인), 아래 `다른 기기 모두 로그아웃`. hint `동시에 로그인할 수 있는 기기는 3대입니다. 4번째 기기에서 로그인하면 가장 오래 쓰지 않은 기기가 로그아웃됩니다.` |
 | `#acc-google` | Google 계정 | 미연결: `Google 계정을 연결하면 비밀번호를 잊은 경우 Google 계정으로 로그인하여 새 비밀번호를 정할 수 있습니다.` + `연결`(→`/auth/google/start?mode=link&next=/account`). 연결됨: mono 이메일(가림) + `연결 해제`(인라인으로 비밀번호 칸이 펼쳐짐 → `해제`). Google 꺼져 있으면 카드 숨김 |
 | `#password` | 비밀번호 변경 | 현재·새·확인. `/api/me.password_reset_open` 이 true 면 현재 칸을 숨기고 `.note` 3.2.2 `recover` 문구. 버튼 `변경`. 성공 토스트 `비밀번호를 변경했습니다. 다른 기기는 로그아웃되었습니다` |
-| `#claim` | 기존 라이선스 키 등록 | `.keyin` 입력(`KAKA-XXXX-XXXX-XXXX`) + `등록`. hint `이전에 발급받은 키를 이 계정으로 옮깁니다. 남은 매크로 기간은 지금 기간에 더해지고, 키에 등록된 카카오 계정도 함께 옮겨집니다. 등록한 키는 다른 계정에 다시 등록할 수 없습니다.` 성공 → `.note` `키를 등록했습니다. 매크로 만료 YYYY.MM.DD · 옮긴 카카오 계정 n개` |
+| ~~`#claim`~~ | (없앰) 기존 라이선스 키 등록 | 손님 화면에서 뺐다(운영자 지정). `POST /api/auth/claim` 은 남아 있지만 화면에서 부르지 않는다. 구매 화면·로그인 화면·패널 로그인의 키 등록 안내도 함께 뺐다. |
 
 aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 함께 전달하면 확인이 빠릅니다.` + `[data-support]` `문의하기`.
 
@@ -1115,7 +1115,7 @@ index.html·buy.html·order.html 의 키 시대 문구는 **부록 A 의 문자�
 
 - 구조 유지. 리드 2개: `회원 아이디로 로그인합니다. 콘솔 로그인은 기기에 묶지 않으며, 동시에 기기 3대까지 로그인할 수 있습니다.` / `결제가 확인되면 그때부터 카카오톡 매크로 사용 기간이 시작됩니다.` (panel-check 의 `기기에 묶지 않`·`사용 기간이 시작됩니다` 단언을 그대로 만족)
 - 칸: `#login-id`(아이디, `.inp`, `autocomplete="username"`), `#login-pw`(`type="password"`), `#login-error`, `#loginBtn` `로그인`. `/api/auth/login` 을 부른다. 아래 `#loginGoogle`(사이트와 같은 버튼, Google 꺼지면 숨김).
-- 북마크로 들어온 옛 키 사용자용 `#login-keynote`(`.note.dim`, 늘 보임): `라이선스 키로 사용하던 경우 회원가입 후 내 계정에서 키를 등록하십시오.` + 링크 `회원가입` → `/signup?next=%2Faccount%23claim`. `#login-id` 값이 `/^KAKA-/i` 면 요청하지 않고 `#login-error` 에 `라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록하십시오.`
+- (없앰) 옛 키 사용자용 `#login-keynote` — 키 등록을 없애면서 뺐다.
 - `.login-foot`: `회원가입`(`/signup?next=/panel`) · `내 계정`(`/account`) · `[data-support]` `문의하기`.
 
 #### 사이드바

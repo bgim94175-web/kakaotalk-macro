@@ -103,8 +103,8 @@ function htmlHeaders(res, fileName) {
   res.setHeader('Cache-Control', 'no-cache');
 }
 
-// /my(예전 키 조회 화면)는 내 계정의 키 등록 카드로 보낸다. 정적 파일(my.html)보다 먼저 둔다.
-app.get('/my', (q, r) => r.redirect(302, '/account#claim'));
+// /my(예전 키 조회 화면)는 내 계정으로 보낸다. 정적 파일(my.html)보다 먼저 둔다.
+app.get('/my', (q, r) => r.redirect(302, '/account'));
 
 // ── 정적 파일 (구매 웹사이트). index 는 아래에서 직접 다룬다.
 app.use(express.static(PUBLIC_DIR, {
