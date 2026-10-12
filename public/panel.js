@@ -3735,7 +3735,7 @@
       } else {
         t.classList.remove('dim');
         // sender/src/roomfeat.mjs promoNotice 와 같은 모양(첫 위반)
-        t.textContent = '[홍보 금지]\n이름 : @하늘\n경고 : ' + (kickAt > 1 ? '1회 (' + kickAt + '회가 되면 내보내요)' : '1회') + '\n조치 : ' + (kickAt === 1 ? '내보내기' : hide ? '글 가리기' : '경고');
+        t.textContent = '[홍보 금지]\n이름 : @하늘\n경고 : ' + (kickAt > 1 ? '1회 (' + kickAt + '회가 되면 내보내요)' : '1회') + '\n조치 : ' + (kickAt === 1 ? '내보내기' : hide ? '글 가리기' : '경고') + '\n오후 9:14';
       }
     }
     if (r === 'r-cover') {

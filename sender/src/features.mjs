@@ -1,6 +1,6 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
-import { branch, foldedNotice, josa, kstShort, personLines, profileObserve, RULE, stayText } from './roomfeat.mjs'
+import { josa, profileObserve, visitNoticeText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -1504,13 +1504,6 @@ const VISIT_GAP_MS = 4000
 const VISIT_KEEP_MS = 14 * 24 * 60 * 60 * 1000
 const VISIT_KEEP_N = 30
 
-function kstStamp(ms) {
-  const t = new Date(Number(ms) + 9 * 60 * 60 * 1000)
-  if (!Number.isFinite(t.getTime())) return ''
-  const p = (n) => String(n).padStart(2, '0')
-  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`
-}
-
 function openProfileLink(raw) {
   const s = String(raw || '').trim()
   if (!/^https:\/\/open\.kakao\.com\/\S+$/i.test(s)) return ''
@@ -1700,41 +1693,14 @@ function visitDelay(v, chatId, now) {
   return at - now
 }
 
-function timeLines(times) {
-  return times.map((t) => '- ' + kstStamp(t))
-}
-
-// 입장·퇴장 안내(7.2(a)): 사람 정보(👤 🆔 🔗 옾링) + 이번 종류의 기록(최근 5번) + 예전 프로필(닉네임·옾링이 바뀐 적).
-// 입장 안내에는 입장 시각만, 퇴장 안내에는 퇴장 시각과 머문 시간만 적는다.
+// 입장·퇴장 안내(7.2(a)): `[입장 안내]`/`[퇴장 안내]` · `이름 : @닉네임` · `옾링 : …` · 맨 아래 시각(관리자 지정, 최대한 간단하게).
+// 입장·퇴장 시각과 예전 프로필은 저장만 하고, 관리 화면 기록에서 본다.
 // linkUnknown: 오픈프로필인데 옾링을 읽지 못했다(아는 옾링도 없음) → '없음' 대신 '확인 못 함'.
-const VISIT_SHOW_N = 5
-
 function visitNotice(row, kind, linkUnknown) {
   const r = row || {}
-  const leave = kind === 'leave'
   const userId = /^[1-9][0-9]*$/.test(String(r.userId || '')) ? String(r.userId) : ''
-  const cur = { userId, name: r.name, link: r.link || (linkUnknown ? null : '') }
-  const lines = [RULE, ...personLines(cur)]
-  const times = (leave ? r.leaves : r.joins) || []
-  if (leave && times.length) {
-    const out = Number(times[times.length - 1])
-    const joinedAt = (Array.isArray(r.joins) ? r.joins : []).map(Number).filter((t) => t <= out).pop()
-    if (joinedAt) lines.push('⏳ 머문 시간 : ' + stayText(out - joinedAt) + ' (' + kstShort(joinedAt) + ' 입장)')
-  }
-  const shown = times.slice(-VISIT_SHOW_N)
-  lines.push('', (leave ? '🕒 퇴장 기록 · ' : '🕒 입장 기록 · ') + times.length + '회' + (times.length > shown.length ? ' · 최근 ' + shown.length + '번' : ''))
-  lines.push(...branch(shown.map((t) => kstStamp(t))))
-  const changes = Array.isArray(r.changes) ? r.changes : []
-  if (changes.length) {
-    lines.push('', '📝 예전 프로필 · ' + changes.length + '회')
-    lines.push(...branch(changes.slice(-VISIT_SHOW_N).map((c) => {
-      const past = String(c && c.name || '').replace(/[@\r\n]/g, '').trim() || '이름 없음'
-      const pastLink = openProfileLink(c && c.link)
-      return kstStamp(c && c.at) + ' · ' + past + (pastLink && pastLink !== r.link ? ' · ' + pastLink : '')
-    })))
-  }
-  lines.push(RULE)
-  return foldedNotice(leave ? '📤 퇴장 안내' : '📥 입장 안내', r.name, userId, lines)
+  const times = (kind === 'leave' ? r.leaves : r.joins) || []
+  return visitNoticeText(kind, { userId, name: r.name, link: r.link || (linkUnknown ? null : '') }, Number(times[times.length - 1]) || 0)
 }
 
 function mentionIdJson(id) {

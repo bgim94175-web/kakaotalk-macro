@@ -2626,7 +2626,7 @@ export class BotSlot {
         const r = await this.kick(v, ev.userId, name, 'leave')
         if (r.ok) {
           delete rt.bans[ev.userId]
-          if (cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(name), { what: 'notice' })
+          if (cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(name, this.now()), { what: 'notice' })
         }
         return
       }
@@ -2649,7 +2649,7 @@ export class BotSlot {
     if (plan.idUnknown) detail.note = 'id 확인 불가'
     await this.roomLog(v.install_id, 'churn', { user_id: plan.userId || null, name: plan.name, ok: result !== 'kick_failed', detail })
     if (plan.notice) {
-      const n = R.churnNotice(plan, result)
+      const n = R.churnNotice(plan, result, this.now())
       this.say(v, n.text, { mention: n.mention, what: 'notice' })
     }
   }
@@ -2661,7 +2661,7 @@ export class BotSlot {
     }
     const r = await this.kick(v, plan.userId, plan.name, 'leave')
     if (r.ok) {
-      if (v.cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(plan.name), { what: 'notice' })
+      if (v.cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(plan.name, this.now()), { what: 'notice' })
       return
     }
     if (!r.skipped) {
@@ -2826,7 +2826,7 @@ export class BotSlot {
     }
     await this.roomLog(v.install_id, 'promo', { user_id: plan.userId, name: plan.name, detail: { n: plan.n, why: plan.why, hidden, kicked } })
     if (plan.notice) {
-      const n = R.promoNotice(plan, { hidden, kicked })
+      const n = R.promoNotice(plan, { hidden, kicked }, this.now())
       this.say(v, n.text, { mention: n.mention, what: 'notice' })
     }
     v.dirty = true

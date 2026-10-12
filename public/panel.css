@@ -677,17 +677,6 @@ tr.detail:not(.open) td { border-bottom: 0; }
 .preview-chat { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .preview-chat .bub { max-width: 82%; font-size: var(--t-13); }
 .preview-chat .bub.notice { font-size: var(--t-12); line-height: 1.6; overflow-wrap: anywhere; }
-/* 접힌 방 안내 미리보기: 카카오톡처럼 첫 줄 아래 [전체보기], 누르면 펼친다 */
-.bub.notice.fold { display: grid; }
-.bub.notice details.more { margin-top: 8px; }
-.bub.notice details.more summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--fg-3); cursor: pointer; }
-.bub.notice details.more summary::-webkit-details-marker { display: none; }
-.bub.notice details.more summary::after { content: '›'; font-size: var(--t-14); line-height: 1; }
-.bub.notice details.more[open] summary::after { content: '‹'; }
-.bub.notice details.more summary .c, .bub.notice details.more[open] summary .o { display: none; }
-.bub.notice details.more[open] summary .c { display: inline; }
-.bub.notice details.more summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 4px; }
-.bub.notice .more-b { margin-top: 8px; }
 .preview-chat .who-l { color: var(--fg-3); font-size: var(--t-11); }
 .rule { border-top: 1px solid var(--line); }
 .rule:first-child { border-top: 0; }
