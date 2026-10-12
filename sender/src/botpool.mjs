@@ -1214,10 +1214,20 @@ export class BotSlot {
     } else {
       content = '{"liveon":false}'
     }
-    const r = await this.raw('SETMETA', { chatId: L(chatId), type: 16, content })
-    const st = R.locoStatus(r)
-    log(this.id, `voice experiment SETMETA(16) liveon=${on} chat ${chatId} content ${content} → status ${st} body ${traceText((r && r.body) || {})}`)
-    return { ok: R.locoOk(r), status: st, sent: content }
+    // 오픈채팅은 요청에 li(오픈링크 id)가 더 필요할 수 있다. li 포함본과 미포함본을 둘 다 시도해 로그로 가른다.
+    const li = view && view.link_id ? String(view.link_id) : ''
+    const attempts = []
+    if (li) attempts.push({ tag: 'with-li', body: { chatId: L(chatId), li: L(li), type: 16, content } })
+    attempts.push({ tag: 'no-li', body: { chatId: L(chatId), type: 16, content } })
+    let last = { ok: false, status: -1 }
+    for (const a of attempts) {
+      const r = await this.raw('SETMETA', a.body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice experiment SETMETA(16) ${a.tag} liveon=${on} chat ${chatId} li ${li || '-'} content ${content} → status ${st} body ${traceText((r && r.body) || {})}`)
+      last = { ok: R.locoOk(r), status: st }
+      if (last.ok) break
+    }
+    return { ok: last.ok, status: last.status, sent: content }
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
