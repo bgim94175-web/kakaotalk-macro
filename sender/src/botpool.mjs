@@ -20,6 +20,7 @@ import {
   visitMentionExtra,
 } from './features.mjs'
 import { Owner } from './owner.mjs'
+import { isVoiceSignal, recordVoiceSignal, voiceLabRun } from './voice-lab.mjs'
 import * as R from './roomfeat.mjs'
 import { open as openPasscode } from './secretbox.mjs'
 
@@ -277,6 +278,7 @@ export class BotPool {
     this.syncAgain = false
     this.timers = []
     this.traced = new Set()
+    this.voiceSeen = []   // 보이스룸 실험실(SENDER_VOICE_LAB=1)이 모은 신호
     // 배포 겹침 울타리(owner.mjs). 주지 않으면 늘 주인이다(시험).
     this.owner = d.owner || new Owner(null)
   }
@@ -648,6 +650,25 @@ export class BotPool {
     if (got.slot) got.view.dirty = true
     else await this.store.saveRoomState(got.view.install_id, rt)
     return { ok: true }
+  }
+
+  // ── 보이스룸 실험실(SENDER_VOICE_LAB=1) ─────────────────────────────────
+  // /v1/bot/voice-seen: 남이 연 보이스룸의 신호를 모은 그대로 보여 준다.
+  voiceSeenList(installId) {
+    const id = installId == null || installId === '' ? null : Number(installId)
+    const got = id ? this.viewOf(id) : null
+    const chatId = got ? got.view.chat_id : ''
+    const rows = chatId ? this.voiceSeen.filter((r) => r.chat_id === chatId) : this.voiceSeen
+    return { ok: true, chat_id: chatId, seen: rows }
+  }
+
+  // /v1/bot/voice-try: 후보 명령을 방에 두드려 본다. 기본은 대조군+읽기만, kinds 로 'open' 까지 넓힌다.
+  async voiceTry(installId, opts) {
+    const got = this.viewOf(installId)
+    if (!got || !got.slot || !got.view.chat_id) return { ok: false, error: 'not_joined' }
+    const out = await voiceLabRun(got.slot, got.view, opts, { long: L })
+    for (const t of out.tried || []) log(got.slot.id, `voice try ${t.method} → statusCode ${t.status} ${t.body}`)
+    return out
   }
 }
 
@@ -2210,6 +2231,8 @@ export class BotSlot {
     }
     // SENDER_TRACE_VOICE=1: 보이스룸 실험용. 보이스룸 신호만 본문 전체를 남긴다(분당 20줄).
     if (process.env.SENDER_TRACE_VOICE === '1' && voiceTraceOk(packet)) log(this.id, `voice? ${packet.method} ${voiceText(packet.body)}`)
+    // SENDER_VOICE_LAB=1: 보이스룸 신호를 모아 둔다(/v1/bot/voice-seen 이 그대로 보여 준다).
+    if (process.env.SENDER_VOICE_LAB === '1' && isVoiceSignal(packet)) recordVoiceSignal(this.pool.voiceSeen, this.id, packet, R.idText)
     this.enqueue(() => this.onPush(packet)).catch((e) => log(this.id, `push ${packet.method} failed: ${errText(e)}`))
   }
 

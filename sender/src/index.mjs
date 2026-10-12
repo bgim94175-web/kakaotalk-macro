@@ -421,6 +421,21 @@ app.post('/v1/bot/room-profile', botRoute(async (req, res) => {
   return hub.pool.roomProfileCmd(id, how)
 }))
 
+// ── 보이스룸 실험실(SENDER_VOICE_LAB=1) ────────────────────────────────────
+// 보이스룸을 여는 명령을 찾는 동안만 쓴다. 모은 신호 보기와 후보 명령 두드리기, 둘뿐이다.
+if (process.env.SENDER_VOICE_LAB === '1') {
+  process.stderr.write('[sender] SENDER_VOICE_LAB=1 — voice room experiment routes are on\n')
+
+  app.get('/v1/bot/voice-seen', botRoute(async (req) => hub.pool.voiceSeenList(req.query.install_id)))
+
+  app.post('/v1/bot/voice-try', botRoute(async (req, res) => {
+    const b = req.body || {}
+    const id = needInstall(res, b.install_id)
+    if (!id) return null
+    return hub.pool.voiceTry(id, { method: b.method, body: b.body, kinds: b.kinds })
+  }))
+}
+
 // ── 가짜 모드 전용(9.4). SENDER_FAKE=1 일 때만 등록한다(8.5) ───────────────────
 if (fakeOn()) {
   process.stderr.write('[sender] SENDER_FAKE=1 — fake Kakao connection, never use in production\n')
