@@ -350,6 +350,7 @@ ALTER TABLE bot_accounts
 | `oauth` | `RATE_OAUTH_PER_MIN` | 20 | GET `/auth/google/start` `/auth/google/callback` |
 | `preview` | `RATE_PREVIEW_PER_MIN` | 20 | POST `/api/room-preview` (+ 회원당 시간 60회. 전체 카카오 조회량은 sender 예산이 막는다, 5.3) |
 | `member` | `RATE_MEMBER_PER_MIN` | 180 | 나머지 `/api/auth/*`, GET `/api/site` `/api/me` `/api/my/*`, POST `/api/my/orders/cancel` |
+| `demo` | `RATE_DEMO_PER_MIN` | 180 | GET `/api/demo`, POST `/api/demo/start` `/api/demo/step` (사이트 체험 3.7, 로그인 없음 · 서버 안에서만 계산하고 카카오에는 보내지 않는다) |
 | 기존 | | | `order-read` `order-write` `deposit` `admin` `panel` 그대로. `panel-login` 은 키 로그인이 없어지므로 쓰지 않는다(정의는 남겨도 됨). `/v1/*` 는 더 이상 공개하지 않는다(8.5) |
 
 - 로그인 실패 제한(`ratelimit.js` 의 관리자 실패 패턴을 복사, `sweep()`·`resetAll()` 에 포함). 아이디는 존재 여부와 무관하게 센다.
@@ -694,6 +695,23 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 기존 `/v1/snapshot`·`/v1/logs`·`/v1/chats`·`/v1/recent`·`/v1/inbox`·`/v1/thread`·`/v1/send*`·`/v1/config`·`/v1/session` 은 `bot.` device 에 404 를 돌려준다(고객 방 노출 방지 이중 장치, 봇 기록의 `features` 를 덮지 않게). `/v1/status` 는 `bot.` 도 답한다(읽기 전용, 3.5 의 준비 판정이 쓴다).
 `/v1/config` 는 v2 기록에 `features` 가 오면 400 `features_not_allowed`(권리는 `/v1/grants` 만 바꾼다). `/v1/session`(`Hub.upsert`)의 기본 `features` 는 `{v:2, macro_until:0, legacy_room_until:0}` 이다.
 
+### 3.7 체험 API (`routes/demo.js` · 엔진 `lib/demo.js`, 로그인 없음)
+
+화면은 6.13. 서버는 DB·로그인 없이 `lib/demo.js` 만 부르고, 체험 상태 전체(JSON 하나, 48KB 미만)는 화면이 들고 다니며 단계마다 돌려보낸다(서버는 상태를 저장하지 않는다). 카카오톡에는 아무것도 보내지 않는다. 레이트리밋 `demo`(3.1).
+
+| 경로 | 요청 | 응답 |
+|---|---|---|
+| GET `/api/demo` | — | `{ok, first:'games', groups:[{id, title, desc, product, scenes:[{id, title}]}]}` |
+| POST `/api/demo/start` | `{scene, opts?}` | `{ok, scene, state, out, clock}`. 모르는 장면은 400 `bad_scene`. `opts` 는 장면의 고르기 칸 값(모르는 칸·값은 기본값) |
+| POST `/api/demo/step` | `{state, ev}` — `ev` = `{type:'say', text, cid}`(글은 앞뒤 공백을 지우고 1,000자까지, `cid` 는 화면의 글 번호 40자까지) 또는 `{type:'act', id}` | `{ok, state, out, clock}`. 상태가 틀리면(48KB 초과 · `v` 다름 · 모양 · 그 장면에 없는 버튼 · 엔진 처리 실패) 400 `bad_state` `체험을 처음부터 다시 시작합니다.` → 화면이 장면을 다시 시작한다. 손님이 일으킨 문제로 500 을 내지 않는다 |
+
+- 장면 12개(id 고정): 미니게임봇 `games` · 방 관리봇 `visit` `churn` `leavekick` `profile` `promo` `cover` `hide` `guard` · 카카오톡 매크로 `macro` `reply` `snipe`. `scene`(방 이름·인원·공지, 손님 `me`, 사람 목록, 버튼 `actions`, 바로 입력 `chips`, 고르기 칸 `controls`, 구매 링크)과 `out` 항목(`day` `feed` `msg` `hide` `member` `panel` `hint`, 앞 항목 뒤 `wait` ms)의 모양은 `lib/demo.js` 머리 주석. `msg.mention` 은 반각 `@` 부터 이름 끝까지의 `{start, len}` 이고 실제 발송에서 멘션이 붙는 글(`visitMentionExtra`)에만 있다. `clock` 은 체험 시계 — 손님 글을 미리 그릴 때 시각으로 쓴다(매크로 30분 진행 뒤에는 실제 시각보다 앞선다).
+- **문구:** K bot(과 고객 계정)이 방에 보내는 글은 전부 실제 봇 함수(`sender/src/roomfeat.mjs` · `features.mjs`)를 이 프로세스 안에서 불러 만든다(처음 쓸 때 `import()` 한 번). 엔진이 쓰는 글은 사람들의 대화, 카카오톡 시스템 줄(`…님이 들어왔습니다.` `…님이 나갔습니다.` `…님을 내보냈습니다.`), 고객이 써 둔 예시(매크로 글 · 자동 응답 · 저격 규칙), 화면 설명(`hint`, 합니다체)뿐이다. `botpool.mjs` 안에만 있는 가리기 답 4개는 그대로 옮기고 `lib/demo-check.js` 가 botpool.mjs 에 같은 글이 있는지 본다.
+- **botpool 순서를 다시 짠 것(5.7):** 메시지는 링 버퍼 → 닉네임 비교(프로필 변경) → `!도움` → `!가리기` → `!프로필` → 홍보 금지/금지어 검열 → 올킥 감지 → 미니게임. 입장·퇴장은 중복 판정 → 안내(`guardOnChat`) → 재입장 차단 → 들낙 감지. 내보내기는 연속 실패 멈춤(`actionFailed` — 내보내기·가리기가 3번 이어서 실패하면 10분 동안 둘 다 건너뛰고, 성공하면 0 으로)과 올킥 멈춤·방 한도(시간 10회)를 보고, 이미 나간 사람의 내보내기는 실패로 본다(7.2 (b) 의 실측 전 항목 — 그래서 목록에 바로 올리지 못한 경우의 `noteBan` 길을 보이고, 화면 설명도 「바로 올리지 못하면」으로 쓴다). `leavekick` 은 한 번에 한 사람만 나간다(나감 → 다시 들어옴) — 나간 사람의 실패가 이어져 연속 실패 멈춤에 닿지 않게. 가리기는 300ms 간격으로 하나씩, 그동안 다시 명령하면 `이미 글을 가리는 중이에요.` 링 버퍼는 80개(봇은 300). 매크로는 runner 의 20초 점검(`macroRoomsDue` → 다른 사람 글 수 → `noteMacroWait`/`noteMacroSent`), 갠톡 자동 응답·저격 규칙은 고객 계정 기록(v2 매크로 기간 안)의 `onInbound`.
+- **시계:** 장면을 열 때 서버 시각에서 시작해 단계마다 실제로 흐른 시간(6시간까지)만큼 가고, 시간이 드는 버튼(들낙 1분 머묾 · 홍보 20초 · 매크로 30분)은 그만큼 더 간다. 입장·퇴장 · 재입장 차단 · 프로필 장면의 버튼은 1분씩 간다(안내 맨 아래 기록 시각이 한 분에 몰리지 않게). 방 관리봇 함수는 이 시계를 `now` 로 받는다. 미니게임·갠톡·저격 규칙의 `onInbound` 은 실제 `Date.now()` 를 쓰므로 쿨타임(자동 응답 6시간·저격 60초)도 실제 시간이다. 미니게임 쿨타임만 0 으로 둔다(selfcheck 7.7 #13 과 같은 방법). 같은 방 안내 4초 간격·답 1초는 화면 간격 750~900ms 로 줄이고, 방당 분당 6회 송신 한도(Pacer)는 흉내 내지 않는다.
+- **체험 설정:** 장면마다 그 기능만 켜고 나머지는 7.1 기본값(`!가리기` 명령도 기본값대로 켜져 있어 어느 방 관리봇 장면에서나 `!도움` 에 답한다). 예외: `leavekick` 은 다시 들어온 사람의 `[입장 안내]` 를 보이려고 입장·퇴장 기록과 재입장 차단 안내(기본은 꺼짐 — 장면 설명에 `설정에서 켠 경우에만` 이라고 적는다)도 켠다. 미니게임만 있는 `games` 방의 K bot 은 일반 참여자(권한 2, 부방장 표시 없음 — botpool 이 미니게임만 있는 방은 권한을 보지 않는다). 손님 이름은 `체험자`(봇 문구가 `{이름}님` 을 붙인다). `profile` 은 처음부터 `!프로필 하늘` 에 기록이 나오게 이틀 전 닉네임 변경(`하늘이` → `하늘`) 하나를 실제 `profileChange` 로 남겨 둔다(그때 안내는 그리지 않는다). 상태의 사람 목록·장면 설정은 서버가 장면 정의로 다시 맞추고, `__proto__` 같은 열쇠가 섞인 상태는 받지 않는다. 장면 카운터(`x`)의 글은 그 장면 사람의 아이디만 받고, 명부는 제 칸(`hasOwnProperty`)으로만 찾는다. 고르기 칸 값은 글자·수만 읽는다. 매크로 점검 시각(`x.t`)은 체험 시계에서 1시간 안이어야 하고, 한 단계의 화면 항목은 300개까지(넘으면 `bad_state`).
+- 검사: `lib/demo-check.js`(`npm run check:w4`) — 목록 모양, 장면마다 모든 버튼·명령어, K bot 글 = 같은 입력으로 부른 실제 함수 결과, 멘션 위치, 가리기 대상, 틀린 상태 거절(던지지 않음), 무작위 200단계 뒤 상태 48KB 미만, 화면 문구에 이모지·영문 없음, 레이트리밋 `demo` 버킷.
+
 ---
 
 ## 4. 가격 · 견적 · 발급
@@ -976,11 +994,12 @@ if (!v || !v.licensed || v.state === 'error') return
 | `/signup` | signup.html (새) | signup | 4 |
 | `/account` | account.html (새) | account | 4 |
 | `/support` | support.html (새) | support | 4 |
+| `/demo` | demo.html (새) | demo | 체험 (6.13) |
 | `/my` | — | — | 서버가 302 `/account` (작업 1, server.js) |
 | `/panel` | panel.html | — | 5 |
 | `/manage` | manage.html | — | 6 |
 
-캐시 무효화: `style.css?v=11`, `app.js?v=16`, `support.js?v=1`, `panel.css?v=15`, `panel.js?v=19`, `manage.js?v=4`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
+캐시 무효화: `style.css?v=12`, `app.js?v=17`, `support.js?v=1`, `demo.css?v=1`, `demo.js?v=1`, `panel.css?v=15`, `panel.js?v=19`, `manage.js?v=5`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
 
 **보안 헤더**(작업 1, server.js 의 HTML 응답 전부 — `page(...)` 와 정적 `.html`): `X-Frame-Options: DENY` + `Content-Security-Policy: frame-ancestors 'none'`. `/panel`·`/manage` 에는 여기에 `script-src 'self'; object-src 'none'; base-uri 'self'` 를 더한다(두 화면은 제3자 스크립트를 싣지 않는다, D25). 사이트 화면은 채널톡 SDK 가 여러 호스트를 쓰므로 `script-src` 를 걸지 않는다.
 
@@ -994,14 +1013,16 @@ if (!v || !v.licensed || v.state === 'error') return
   <a class="btn ghost icon-s" href="/login" data-auth="out" aria-label="로그인"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
   <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
   <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
+  <a class="btn ghost hide-s" href="/demo" data-nav="demo">체험</a>
   <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
-  <a class="btn primary" href="/panel" data-nav="panel">콘솔 열기</a>
+  <a class="btn primary" href="/panel" data-nav="panel">패널 열기</a>
 </nav>
 ```
 
 - 지금의 `내 키`(`/my`) 버튼은 없앤다.
 - HTML 기본은 로그아웃 상태. `window.kbSite`(support.js 가 만든 `/api/site` 프라미스)가 `member` 를 주면 `[data-auth="in"]` 를 보이고 `[data-auth="out"]` 를 숨긴다. `.icon-s` 는 760px 이하에서만 보인다(style.css 에 규칙 추가). 로그아웃 상태의 휴대폰 상단에도 로그인 진입점(아이콘)이 있다.
-- 바닥글 링크: `구매 신청`, `내 계정`, `주문 조회`, `콘솔`, `<button type="button" data-support>실시간 상담</button>`. `.foot .links button` 에 `a` 와 같은 규칙을 준다. `[data-support]` 를 보일지는 `hidden` 이 아니라 `<html data-support>` 값으로 CSS 가 정한다(6.10).
+- `체험`(`/demo`)은 `hide-s` 라 760px 이하 상단 바에서는 숨는다. 휴대폰에서는 바닥글과 구매 화면 카드의 `[체험하기]` 로 들어간다.
+- 바닥글 링크: `체험`, `구매`, `내 계정`, `주문 조회`, `패널`, `<button type="button" data-support>문의하기</button>`. `.foot .links button` 에 `a` 와 같은 규칙을 준다. `[data-support]` 를 보일지는 `hidden` 이 아니라 `<html data-support>` 값으로 CSS 가 정한다(6.10).
 - 모든 사이트 페이지 `<head>` 에 `<script src="/support.js?v=1" defer></script>` 를 `app.js` 보다 먼저.
 
 ### 6.3 로그인 `/login`
@@ -1062,7 +1083,7 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 ### 6.6 구매 `/buy`
 
 - 상품 카드(`.prods` 안에 세로로 3개, 가격은 `/api/price`): 왼쪽 위 상품 아이콘 칸(`.p-ic` — 매크로 `i-macro`, 방 관리봇 `i-shield`, 미니게임봇 `i-game`) + 이름, 설명, 체크 글머리, 맨 아래 가격 줄(`20,000원 / 1개월(30일)` + 작은 칸 `한 번에 1~12개월`·`기간 제한 없음`). 상품마다 색 하나(공용 `:root` 토큰 `--p-macro` 파랑 · `--p-room` 보라 · `--p-game` 분홍과 그 `-soft`·`-line`·`-glow`, `.prod[data-prod]` 가 `--acc*` 로 받는다)를 아이콘 칸·체크·고른 카드 테두리·금액에만 쓴다.
-- 로그아웃 상태: 상품 카드와 `#loginGate` 카드(`로그인`·`회원가입`, 둘 다 `next=` 지금 주소). 상품 카드마다 맨 아래 `{상품} 구매하기` 버튼 → `/login?next=/buy?p={상품}`(로그인하면 그 상품을 고른 채로 돌아온다). 폼은 숨김.
+- 로그아웃 상태: 상품 카드와 `#loginGate` 카드(`로그인`·`회원가입`, 둘 다 `next=` 지금 주소). 상품 카드마다 맨 아래 `{상품} 구매하기` 버튼 → `/login?next=/buy?p={상품}`(로그인하면 그 상품을 고른 채로 돌아온다). 옆에 `[체험하기]` → `/demo#macro`·`#visit`·`#games`(6.13, app.js `PROD_DEMO`). 폼은 숨김.
 - 로그인 상태 `#buyForm.form` — **상품부터 고른다**(예전엔 방 관리봇을 사려면 `설치할 방` 의 `방 추가` 만 보여 손님이 어떻게 사는지 몰랐다). `.fsec` 마다 `.fsec-h` 단계 제목(`.step` + 번호 `.sn`, 번호는 보이는 칸 순서대로 다시 매긴다):
   1. `#pickSec` `상품 고르기` — hint `구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.` `#picks.prods.picks` 안 상품 카드 3개(로그아웃 화면과 같은 카드). 카드 전체를 덮는 `.chk`(`#pick-{상품}`)라 카드 어디를 눌러도 고르고, 오른쪽 위 동그라미가 체크 표시다. 고른 카드는 `.sel` — 상품 색 테두리·빛, 아이콘 칸이 상품 색으로 차고, 체크가 톡 튀어나온다.
   2. `#macroSec` `매크로 기간`(매크로를 골랐을 때만): `.num #macroMonths`(1~12개월). hint `이미 쓰고 있으면 지금 만료일에 이어서 늘어납니다. 발송은 패널에 등록한 내 카카오 계정으로 합니다.` 이용 중이면 `#macroNow` `지금 만료일 YYYY.MM.DD · 여기에 이어서 늘어납니다`.
@@ -1273,6 +1294,21 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - 봇 항목: 닉네임 · mono 이메일 · chip(`접속 중` ok / `연결 대기` warn / `등록 필요` bad) · `nickname_dup` 이면 `.tag.warn` `이름 중복`(hint `방장이 구분할 수 있게 봇마다 다른 오픈프로필 이름을 쓰십시오`). 오픈프로필(D12, 5.8) 줄 `오픈프로필 「{이름}」 · open.kakao.com/me/…`, 없으면 `.tag.crit` `오픈프로필 없음` + crit 줄 `이 봇 계정에 오픈프로필이 없습니다. 카카오톡에서 이 계정으로 오픈프로필을 만든 뒤 [오픈프로필 다시 읽기]를 누르십시오. 기본 프로필로는 입장하지 않습니다.`, `gone` 이면 `.tag.warn` `오픈프로필 선택 필요`, 모르면 `.tag.line` `오픈프로필 확인 전`. 오픈프로필이 여럿이고 고르지 않았으면 hint `오픈프로필이 n개입니다. 지금은 「…」로 입장합니다.`, 오픈프로필이 아닌 프로필로 들어가 있는 방이 있으면 hint 로 그 수. 부하 막대 `.bar > i`(80% 이상 `.warn`) + `방 n / 상한`. 동작: `오픈프로필 선택`(라디오: 자동 + 목록, `다시 읽기`, 링크로 확인)·`오픈프로필 다시 읽기`·`재등록`·`새 방 받기 중지`/`새 방 받기 재개`·`최대 방 수 변경`·`삭제`. 등록은 콘솔 계정 등록 마법사와 같은 단계(휴대폰 확인 코드 표시, `.big` + `.v.key` 숫자 + `.wait` 점).
 - 방 항목: 방 이름 · 상품 tag · (봇이 그 방에 오픈프로필이 아닌 프로필로 들어가 있으면 tag `기본 프로필`·`다른 오픈프로필`·`프로필 바꾸기 거절`) · 상태 chip(0.1 의 5단계, 사이트 chip 색) · `.mg-line` mono 링크 · 회원 아이디 · `.mg-meta` 봇 · 사유 · 시도 횟수 · 고객 다시 시도 횟수. 동작: `다시 시도`·`다른 봇으로 이동`·`링크 바꾸기`·`상품 변경`·`다른 회원에게 넘기기`(`room-transfer`)·`확인 후 입장`(`hold_reason` 있을 때, `room-release`)·`설치 해제`·`방 금지`(`room-block`, 사유 입력) — 해제·금지는 `confirmAct` danger. 필터: 전체 · 확인 필요 · 확인 대기(hold) · 부방장 대기 · 사용 중 · 입금 대기. 방 탭 아래 `금지한 방` 목록(`room-blocks`, 행마다 `금지 해제`). 방 상세의 정보에 `봇 프로필`(`live.profile`), 오픈프로필이 아니면 `봇 프로필` 칸에 `오픈프로필로 바꾸기`(primary)·`다시 입장(오픈프로필)`(danger, 부방장 다시 지정 경고) — 5.8.
 - `manage.js` 의 `FEATS`·`FEAT_LABEL`·`PRODUCT` 상수는 `/api/price` 로 대체.
+
+### 6.13 체험 `/demo` (화면)
+
+공개 화면(로그인 없음). `demo.html` + `demo.css?v=1` + `demo.js?v=1`(자체 IIFE — app.js 는 헤더만 맡는다). 방에 나오는 K bot 글은 서버(`lib/demo.js` · `routes/demo.js`, `/api/demo*` — 3.7)가 실제 봇 함수로 만들고, 화면은 받은 글을 textContent 로만 그린다. 실제 카카오톡에는 아무것도 보내지 않는다.
+
+- 문구: 제목 `K bot 체험`, 리드 `카카오톡 방과 같은 화면에서 미니게임봇, 방 관리봇, 매크로가 하는 일을 확인합니다. 체험 중에는 실제 카카오톡에 아무것도 보내지 않습니다.` 화면에서는 `데모` 대신 `체험`(TONE.md). 버튼 묶음 이름 `상황 만들기`(장면의 actions) · `바로 입력`(chips).
+- 배치: 1100px 이상 `장면 목록(상품 묶음 → 장면) | 휴대폰(400px) | 설명 · 고르기 칸 · 버튼 · 패널 기록 · [구매] · [다시 시작]`. 760~1100 장면 탭(가로 스크롤)이 위, 휴대폰과 설명이 나란히. 760 미만 탭 → 설명(고르기 칸) → 버튼(`바로 입력` 은 한 줄 가로 스크롤) → 휴대폰(높이 `min(60svh, 560px)`, 최소 400px, 테두리 없음) → 안내 한 줄 → `[구매]` · `[다시 시작]` — 첫 화면에 누를 버튼이 보이고, 안내가 나타나도 버튼이 밀리지 않는다. 1099px 이하·터치 화면에서 누르는 곳 44px. 360·390px 에서 가로 스크롤 없음. 체험 화면은 머리말 여백을 줄이고(`.pub-head` 위 32px · 아래 24px) 휴대폰 높이를 `clamp(460px, 100vh - 290px, 760px)`(760~1100 은 `clamp(420px, 100vh - 370px, 760px)`)로 둬 1366×768 · 1440×900 에서 처음부터 입력 칸까지 보인다. 대화는 아래(입력 칸 쪽)에 붙여 쌓는다(글이 적어도 새 글은 입력 칸 바로 위). `상황 만들기` · `바로 입력` 을 눌렀을 때 휴대폰 아래쪽(새 글 · 입력 칸 · 안내)이 화면 밖이면 그만큼만 페이지를 내린다(모든 너비, 휴대폰 위가 머리 막대 밑으로 들어가지 않는 데까지).
+- 휴대폰 = 카카오톡 오픈채팅방(밝은 기본 테마 `color-scheme: light`, 색은 `:root` 의 `--kk-*` 만): 위 막대(뒤로 · 방 이름 + 인원 · 검색 · 메뉴 — 모양만), 공지 띠(`i-notice`, 한 줄 말줄임, 누르면 펼침), 날짜 알약 `2026년 10월 12일 월요일`, 방 알림 알약(`…님이 들어왔습니다.`), 남의 말풍선(흰색, 둥근 네모 프로필 — K bot 은 `.brand-mark`, 그 밖은 이름 첫 글자 + `--kk-av-0..5`, 첫 줄에 이름과 `방장`/`부방장` 표시), 내 말풍선(노랑, 오른쪽). 같은 사람 · 같은 분이면 묶는다: 프로필 · 이름 · 꼬리는 첫 줄, 시각(`오후 7:31`, roomfeat `kstClock` 과 같은 모양)은 마지막 줄. 말풍선 옆 노란 숫자(안 읽은 사람 수)는 방 인원에서 시작해 3초쯤에 걸쳐 줄어 사라진다(장식, 화면 읽기 프로그램에는 숨김. 갠톡은 내가 보낸 글에만 1). 멘션은 `{start, len}` 칸(반각 `@` 부터)만 굵게, 링크는 글자 그대로, 가려진 글은 `가려진 메시지입니다.`(회색 기울임), 500자 넘는 글은 잘라 두고 `[전체보기]`. 입력 칸: `+` · `메시지 입력` · 보내기(글이 있을 때만 노랑). Enter 보내기(한글 조합 중 `isComposing`/229 제외), Shift+Enter 줄바꿈. 위로 올려 보는 중 새 글이 오면 아래 띠(이름 + 첫 줄)를 띄운다. 대화 칸은 `role="log" aria-live="polite"`.
+- 재생: 응답 `out` 을 `wait`(ms) 간격으로 하나씩 그린다(재생 줄 하나). 요청은 누른 순서대로 하나씩, 앞 응답의 `state` 로 보낸다(버튼은 늘 누를 수 있다). 손님 글은 응답을 기다리지 않고 그리고 `cid` 로 보낸다(시각은 마지막으로 그린 글 기준, 재생이 끝났으면 응답 `clock` 도 본다). 장면을 열 때 `wait` 0 으로 온 앞부분은 원래 방에 있던 글로 보고 움직임 · 안 읽은 수 없이 그린다. `panel` 항목은 방 밖 `K bot 패널 기록` 칸(새 것이 위), `hint` 는 휴대폰 아래 안내 한 줄(마지막 것만 — 단계마다 그 단계 항목을 그리기 시작할 때 앞 단계의 안내를 지운다). `member` 는 이름 바꾸기 · 나감 표시. 위 막대 인원은 `feed.count` 가 있으면 그 값, 없으면 `member` 로 ±1.
+- 오류: 429 → 서버 문구를 안내 줄(경고 모양 — 표시가 `i` 대신 `!`, app.js 의 경고 안내와 같다)에. `bad_state` → 처음부터 다시 연다(처음 한 번은 조용히, 다시 연 뒤 곧바로 또 나면 서버 문구도 안내 줄에). 경고 모양 안내는 다음 단계가 성공하면 지운다. 연결 실패 → `연결이 끊겼습니다. 잠시 뒤 다시 시도해 주세요.` 장면 목록 · 시작을 못 받으면 휴대폰 안에 문구 + `[다시 시도]`.
+- 주소 `/demo#장면`(없거나 모르는 장면이면 목록의 `first`). 장면을 바꾸면 상태를 버리고 새로 시작한다. 고르기 칸을 바꾸거나 `[다시 시작]` 을 눌러도 처음부터.
+- 움직임: 새 말풍선 · 알약은 300ms 살짝 떠오른다. 움직임 줄이기 설정이면 움직임만 없애고 간격(`wait`)은 그대로.
+- 들어오는 길: 상단 바 `체험`(760px 초과), 바닥글 `체험`, 구매 화면 로그아웃 카드의 `[체험하기]`(매크로 `#macro` · 방 관리봇 `#visit` · 미니게임봇 `#games`, app.js `PROD_DEMO`). 로그인 상태의 고르기 카드에는 넣지 않는다(카드 전체가 고르기 칸).
+- 스프라이트: buy.html 과 같은 심볼 + 이 화면에만 `i-notice`(공지 띠).
+- 검사: `lib/panel-check.js` 가 demo.css 의 색(토큰만) · demo.css 에 `:root` 없음 · demo.html/demo.js 의 이모지 · `데모` · `해 보세요` 를 본다.
 
 ---
 
@@ -1725,6 +1761,7 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `ROOM_RETRY_BASE_MS` | 120000 | 고객 다시 시도 첫 간격(3.4.3) |
 | `ROOM_HOLD_WORDS` | — | 쉼표 목록. 방 이름이 걸리면 확인 대기(D28) |
 | `RATE_AUTH_PER_MIN` `RATE_SIGNUP_PER_MIN` `RATE_OAUTH_PER_MIN` `RATE_PREVIEW_PER_MIN` `RATE_MEMBER_PER_MIN` | 10/5/20/20/180 | |
+| `RATE_DEMO_PER_MIN` | 180 | 사이트 체험 `/api/demo*` (3.7) |
 | `BOT_ROOM_CAP` | 20 | 새 봇 기본 상한의 처음 값. 운영 값은 `app_settings.bot_room_cap`(저장할 때 등록한 봇 모두에 적용할 수 있음) |
 | `BOT_JOIN_GAP_MS` `BOT_PERM_POLL_MS` `BOT_ACTIVE_CHECK_MS` | 45000 / 60000 / 600000 | sender |
 | `BOT_JOIN_PER_HOUR` `BOT_JOIN_PER_DAY` `BOT_RESOLVE_PER_MIN` `BOT_RESOLVE_PER_DAY` | 20 / 80 / 10 / 300 | sender, 봇마다(5.3) |

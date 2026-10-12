@@ -85,6 +85,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 | `RATE_PREVIEW_PER_MIN` | `20` | `POST /api/room-preview` — 실제 K bot 계정이 카카오에 방을 조회합니다(+ 회원당 1시간 60회) |
 | `RATE_MEMBER_PER_MIN` | `180` | 나머지 회원 경로(`/api/auth/*`, `/api/site`, `/api/me`, `/api/my/*`) |
 | `RATE_PANEL_PER_MIN` | `180` | `/panel` 패널 API (채팅·방 상태 폴링) |
+| `RATE_DEMO_PER_MIN` | `180` | `GET /api/demo`, `POST /api/demo/start` · `/api/demo/step` — 사이트 체험(`/demo`). 로그인 없이 버튼·명령어마다 1회 부르며, 서버 안에서만 계산하고 카카오에는 보내지 않습니다 |
 | `ADMIN_RATE_LIMIT_PER_MIN` | `120` | `/admin/*` 전체 (`/manage` 가 목록·상세를 연속 호출합니다) |
 | `RATE_PANEL_LOGIN_PER_MIN` | — | **쓰지 않음.** 예전 패널 키 로그인용 값입니다. 패널은 회원 로그인(`RATE_AUTH_PER_MIN`)을 씁니다 |
 
@@ -173,6 +174,7 @@ Google 은 **로그인한 회원이 `/account` 에서 연결**한 경우에만 �
 https://<배포주소>/          → 구매 페이지(로그인했으면 패널)로 넘어가면 정상
 https://<배포주소>/signup    → 회원가입
 https://<배포주소>/buy       → 구매 (로그인 필요)
+https://<배포주소>/demo      → 체험 (카카오톡 방 화면에서 봇 체험, 로그인 없음 · 실제 카카오톡에 보내지 않음)
 https://<배포주소>/account   → 내 계정 (구매 내역·로그인 기기·Google·기존 키 등록)
 https://<배포주소>/panel     → K bot 패널 (회원 아이디로 로그인)
 https://<배포주소>/manage    → 판매 관리 (ADMIN_PASSWORD 로 로그인)

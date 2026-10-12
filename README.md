@@ -73,6 +73,7 @@ npm start
 https://<배포주소>/          → 구매 랜딩 페이지
 https://<배포주소>/signup    → 회원가입
 https://<배포주소>/buy       → 구매 (로그인 필요)
+https://<배포주소>/demo      → 체험 (카카오톡 방 화면에서 봇 체험, 로그인 없음)
 https://<배포주소>/order     → 주문 조회
 https://<배포주소>/account   → 내 계정 (구매 내역 · 기존 키 등록)
 https://<배포주소>/panel     → K bot 패널 (회원 아이디로 로그인)

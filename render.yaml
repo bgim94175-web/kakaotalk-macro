@@ -64,6 +64,7 @@ services:
       #     RATE_OAUTH_PER_MIN        20    GET /auth/google/start·callback
       #     RATE_PREVIEW_PER_MIN      20    POST /api/room-preview (+ 회원당 시간 60회)
       #     RATE_MEMBER_PER_MIN       180   나머지 /api/auth/*, /api/site, /api/me, /api/my/*
+      #     RATE_DEMO_PER_MIN         180   GET /api/demo, POST /api/demo/start·step (사이트 체험, 로그인 없음)
       #     RATE_PANEL_LOGIN_PER_MIN  —     쓰지 않음 (예전 키 로그인. 회원 로그인으로 바뀌었다)
       #   회원 로그인 실패 제한
       #     LOGIN_FAIL_MAX / LOGIN_BLOCK_MS   10 / 900000   (아이디, IP) 쌍이 15분에 10회 틀리면 15분 잠금

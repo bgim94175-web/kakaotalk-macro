@@ -1,6 +1,7 @@
 /* ───────────────────────────────────────────────────────────────
    K bot — 구매 웹 공통 스크립트 (docs/ACCOUNTS_V1.md 6장 · 부록 A, docs/UI_V5.md 3장)
-   페이지 구분: <body data-page="home|buy|order|login|signup|account|support">
+   페이지 구분: <body data-page="home|buy|order|login|signup|account|support|demo">
+   체험(/demo, data-page="demo")은 demo.js 가 그린다. 여기서는 헤더(로그인 상태 · 현재 위치)만 맡는다.
    support.js(?v=1) 가 먼저 실려 window.kbSite(/api/site 프라미스)와 window.kbSupport 를 만든다. 여기서 재사용한다.
 
    쓰는 서버 API (docs/ACCOUNTS_V1.md 3장):
@@ -623,9 +624,11 @@
 
   /* 상품마다 아이콘 하나(카드 왼쪽 위 색 칸). 색은 style.css 의 .prod[data-prod] 가 정한다 */
   var PROD_ICON = { macro: 'i-macro', roombot: 'i-shield', minigame: 'i-game' };
+  /* 상품마다 [체험하기] 가 여는 체험 장면(/demo#장면) */
+  var PROD_DEMO = { macro: 'macro', roombot: 'visit', minigame: 'games' };
 
   /* 가격 줄: 큰 금액 `20,000원 / 1개월(30일)` + 오른쪽 작은 칸(한 번에 1~12개월 · 기간 제한 없음) (부록 A.1) */
-  /* opt.pick: 누르면 고르는 카드(체크 칸이 카드 전체를 덮는다) · opt.buyHref: 로그아웃 화면의 [구매하기] */
+  /* opt.pick: 누르면 고르는 카드(체크 칸이 카드 전체를 덮는다) · opt.buyHref: 로그아웃 화면의 [구매하기] + 옆에 [체험하기] */
   function prodRow(p, gloss, opt) {
     var o = opt || {};
     var room = p.unit === 'room';
@@ -653,7 +656,10 @@
         ]),
         el('span', { cls: 'cap', text: room ? '기간 제한 없음' : '한 번에 ' + (p.min || 1) + '~' + (p.max || 12) + '개월' })
       ]),
-      o.buyHref ? el('div', { cls: 'prod-act' }, [el('a', { cls: 'btn primary lg wide', href: o.buyHref(p.id) }, p.label + ' 구매하기')]) : null
+      o.buyHref ? el('div', { cls: 'prod-act' }, [
+        el('a', { cls: 'btn primary lg wide', href: o.buyHref(p.id) }, p.label + ' 구매하기'),
+        PROD_DEMO[p.id] ? el('a', { cls: 'btn lg', href: '/demo#' + PROD_DEMO[p.id] }, [icon('i-play', 13), '체험하기']) : null
+      ]) : null
     ]);
   }
 

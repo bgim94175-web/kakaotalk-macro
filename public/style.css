@@ -25,6 +25,15 @@
   --ease: cubic-bezier(.2, .8, .2, 1);
   --d1: 150ms; --d2: 240ms; --d3: 380ms;
   --side-w: 248px; --top-h: 52px; --col-w: 1040px; --tap: 44px;
+  /* 체험(/demo) 카카오톡 방 화면 — 밝은 기본 테마 그대로. demo.css 만 쓴다 */
+  --kk-bg: #b2c7d9; --kk-them: #ffffff; --kk-me: #fee500; --kk-ink: #191919;
+  --kk-name: #3d4852; --kk-time: #47525e; --kk-unread: #f2c200; --kk-hidden: #6b7682;
+  --kk-pill: rgba(0, 0, 0, 0.2); --kk-pill-fg: #ffffff; --kk-sep: rgba(0, 0, 0, 0.08); --kk-scroll: rgba(0, 0, 0, 0.2);
+  --kk-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); --kk-focus: #191919;
+  --kk-input: #ffffff; --kk-input-fg: #8f8f8f; --kk-send-off: #ececec;
+  --kk-host: #f5c400; --kk-sub: #e1e7ec;
+  --kk-av-0: #e8916f; --kk-av-1: #9fc196; --kk-av-2: #d5ae86; --kk-av-3: #b3a1d6; --kk-av-4: #dc9ea3; --kk-av-5: #8cbfc2; --kk-av-fg: #ffffff;
+  --kk-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "IBM Plex Sans KR", sans-serif;
 }
 @media (prefers-reduced-motion: reduce) { :root { --d1: 0ms; --d2: 0ms; --d3: 0ms; } }
 
@@ -501,7 +510,11 @@ legend.lb + * { clear: both; }
 .prod .price .amt .sans { margin-left: 1px; font-size: 15px; font-weight: 500; }
 .prod .price .per { color: var(--fg-3); font-size: var(--t-13); }
 .prod .price .cap { padding: 3px 10px; border-radius: 999px; background: var(--bg-3); color: var(--fg-2); font-size: var(--t-12); white-space: nowrap; transition: background var(--d2), color var(--d2); }
-.prod .prod-act { margin-top: 16px; }
+/* 로그아웃 화면 카드 아래: [구매하기](넓게) + [체험하기]. 좁으면 두 줄 */
+.prod .prod-act { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+.prod .prod-act .btn { flex: 1 0 auto; }
+.prod .prod-act .btn.wide { flex: 3 1 220px; width: auto; }
+.prod .prod-act .btn .ic { color: var(--acc); }
 /* ① 상품 고르기: 카드 어디를 눌러도 고른다(체크 칸 label 이 카드 전체를 덮는다). 오른쪽 위 동그라미가 체크 표시 */
 .picks .card.prod { cursor: pointer; }
 .picks .prod .head { padding-right: 40px; }
