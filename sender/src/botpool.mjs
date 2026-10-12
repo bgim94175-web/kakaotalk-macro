@@ -180,6 +180,17 @@ function traceValue(v, depth) {
   return o
 }
 
+const VOICE_SKIP = new Set(['PING', 'DECUNREAD', 'NOTIREAD'])
+let voiceWin = 0, voiceN = 0
+function voiceTraceOk(packet) {
+  if (VOICE_SKIP.has(packet.method)) return false
+  const t = packet.body && packet.body.chatLog ? Number(packet.body.chatLog.type) : NaN
+  if (packet.method === 'MSG' && (t === 1 || t === 2)) return false
+  const now = Date.now()
+  if (now - voiceWin > 60000) { voiceWin = now; voiceN = 0 }
+  return ++voiceN <= 20
+}
+
 export function traceText(v) {
   const s = JSON.stringify(traceValue(v, 0))
   return s && s.length > 4000 ? s.slice(0, 4000) + '…' : s
@@ -2188,6 +2199,8 @@ export class BotSlot {
       this.pool.traced.add(packet.method)
       log(this.id, `push ${packet.method} keys ${Object.keys(packet.body || {}).join(',')}`)
     }
+    // SENDER_TRACE_VOICE=1: 보이스룸 실험용. 글·사진이 아닌 푸시는 본문 전체를 남긴다(분당 20줄).
+    if (process.env.SENDER_TRACE_VOICE === '1' && voiceTraceOk(packet)) log(this.id, `voice? ${packet.method} ${traceText(packet.body)}`)
     this.enqueue(() => this.onPush(packet)).catch((e) => log(this.id, `push ${packet.method} failed: ${errText(e)}`))
   }
 
