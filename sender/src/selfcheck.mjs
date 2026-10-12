@@ -4,10 +4,12 @@ import { roomListKind, roomTitle, stampOpenLinkTitles, withoutMemberCount } from
 import { Hub, Slot } from './runner.mjs'
 import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
-import { FOLD, groupLinkType, personLines, withProfileLink } from './roomfeat.mjs'
+import { groupLinkType, kstClock, linkText, withProfileLink } from './roomfeat.mjs'
 
-// 접힌 사람 안내: 첫 줄(제목 · @닉네임) + 보이지 않는 글자 + 줄바꿈 + 자세한 내용([전체보기])
-const folded = (head, lines) => head + FOLD + '\n' + lines.join('\n')
+// 방 안내 맨 아래 시각 줄(`오후 7:31`). 실제 봇 시각이 들어가는 안내는 이 줄을 떼고 비교한다
+const CLOCK_RE = /\n오[전후] (?:[1-9]|1[0-2]):[0-5][0-9]$/
+const hasClock = (t) => CLOCK_RE.test(t)
+const noClock = (t) => t.replace(CLOCK_RE, '')
 import * as passbox from './secretbox.mjs'
 import { linkable, has } from './word.mjs'
 import { correct } from './quiz.mjs'
@@ -300,41 +302,19 @@ const firstVisit = visitRecord()
 const firstLeft = guardOnChat(firstVisit, { kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 })
 if (firstLeft.sends.length !== 1) throw new Error('a leave posts one notice')
 const leftNote = firstLeft.sends[0].text
-// 새 모양: 제목 · 줄 · 👤 🆔 🔗 · 기록(가지 줄) · 줄. 사진은 넘겨받아도 적지 않는다.
-const expectedLeave = folded('📤 퇴장 안내 · @홍길동', [
-  '━━━━━━━━━━━━━━',
-  '👤 홍길동',
-  '🆔 7',
-  '🔗 옾링 : 없음',
-  '',
-  '🕒 퇴장 기록 · 1회',
-  ' └ 2023-11-15 07:13',
-  '━━━━━━━━━━━━━━',
-])
+// 관리자 지정 모양(최대한 간단하게): [제목] · 이름(@멘션) · 옾링 · 맨 아래 시각. 사진은 넘겨받아도 적지 않는다.
+const expectedLeave = '[퇴장 안내]\n이름 : @홍길동\n옾링 : 없음\n오전 7:13'
 if (leftNote !== expectedLeave) throw new Error('leave notice layout ' + JSON.stringify(leftNote))
-if (leftNote.indexOf('입장 기록') >= 0 || leftNote.indexOf('입장 안내') >= 0) throw new Error('a leave notice has no enter log')
 const joined = guardOnChat(firstVisit, {
   kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
   profileLink: 'https://open.kakao.com/o/abc', photo: 'https://k.kakaocdn.net/dn/a/b/img_s.jpg', now: t0 + 60000,
 })
 if (joined.sends.length !== 1) throw new Error('one join notice')
 const note = joined.sends[0].text
-const expected = folded('📥 입장 안내 · @홍길동', [
-  '━━━━━━━━━━━━━━',
-  '👤 홍길동',
-  '🆔 7',
-  '🔗 옾링 : https://open.kakao.com/o/abc',
-  '',
-  '🕒 입장 기록 · 1회',
-  ' └ 2023-11-15 07:14',
-  '━━━━━━━━━━━━━━',
-])
-// [전체보기]: 첫 줄만 보이고 500자가 넘게 채워져 카카오톡이 접는다. 멘션(@)은 첫 줄 하나뿐이다
-if (note.split('\n')[0] !== '📥 입장 안내 · @홍길동' + FOLD || note.length < 500 || note.split('@').length !== 2) throw new Error('the enter notice folds behind 전체보기')
+const expected = '[입장 안내]\n이름 : @홍길동\n옾링 : https://open.kakao.com/o/abc\n오전 7:14'
+// 접지 않는다([전체보기]용 보이지 않는 글자 없음). 멘션(@)은 이름 줄 하나뿐이다
+if (note.indexOf('\u200b') >= 0 || note.split('@').length !== 2) throw new Error('the enter notice is short with one mention')
 if (note !== expected) throw new Error('enter notice layout ' + JSON.stringify(note))
-if (note.indexOf('퇴장 기록') >= 0 || note.indexOf('퇴장 안내') >= 0 || note.indexOf('07:13') >= 0) {
-  throw new Error('an enter notice has no leave log')
-}
 if (note.indexOf('강퇴') >= 0 || note.indexOf('들낙방지') >= 0) throw new Error('notice must not kick')
 const mention = joined.sends[0].mention
 if (!mention || mention.userId !== '7' || mention.len !== 3 || mention.at !== note.indexOf('홍길동')) {
@@ -349,45 +329,51 @@ const laterJoin = guardOnChat(firstVisit, {
 })
 if (laterJoin.sends.length !== 1) throw new Error('a later join posts again')
 const laterText = laterJoin.sends[0].text
-if (laterText.indexOf('📥 입장 안내') !== 0 || laterText.indexOf('퇴장') >= 0) throw new Error('a later join is only an enter notice')
-if (laterText.indexOf('🕒 입장 기록 · 2회\n ├ 2023-11-15 07:14\n └ 2023-11-15 07:15') < 0) throw new Error('every join time is listed')
+// 몇 번째 입장이든 같은 짧은 모양이고, 시각은 이번 것 하나뿐이다
+if (laterText !== '[입장 안내]\n이름 : @홍길동\n옾링 : https://open.kakao.com/o/abc\n오전 7:15') throw new Error('a later join is the same short notice ' + JSON.stringify(laterText))
 if (laterText.indexOf('🖼') >= 0 || laterText.indexOf('img_s.jpg') >= 0) throw new Error('visit notices never show a photo')
 // 옾링: 주소 → 주소, '' → 없음, null(오픈프로필인데 읽지 못함) → 확인 못 함
-if (personLines({ userId: '1', name: 'a', link: null })[2] !== '🔗 옾링 : 확인 못 함') throw new Error('unknown link is not shown as none')
-if (personLines({ userId: '1', name: 'a', link: '' })[2] !== '🔗 옾링 : 없음' || personLines({ userId: '1', name: 'a' })[2] !== '🔗 옾링 : 없음') throw new Error('no link is 없음')
-if (personLines({ userId: '1', name: 'a', link: '', photo: 'https://k.kakaocdn.net/x.jpg' }).length !== 3) throw new Error('person lines have no photo')
+if (linkText(null) !== '확인 못 함') throw new Error('unknown link is not shown as none')
+if (linkText('') !== '없음' || linkText(undefined) !== '없음' || linkText('not-a-url') !== '없음') throw new Error('no link is 없음')
+if (linkText('https://open.kakao.com/o/abc') !== 'https://open.kakao.com/o/abc') throw new Error('a link is written as is')
+// 시각 줄: 카카오톡 시각 표시처럼 오전/오후 h:mm(한국 시간), 모르면 줄이 없다
+if (kstClock(Date.UTC(2026, 9, 12, 10, 31)) !== '오후 7:31' || kstClock(Date.UTC(2026, 9, 12, 15, 5)) !== '오전 12:05' ||
+  kstClock(Date.UTC(2026, 9, 12, 3, 0)) !== '오후 12:00' || kstClock(Date.UTC(2026, 9, 11, 23, 9)) !== '오전 8:09' || kstClock(0) !== '' || kstClock(undefined) !== '') {
+  throw new Error('notice clock line')
+}
 {
   const unk = guardOnChat(firstVisit, { kind: 'join', chatId: '555', authorId: '9', authorName: '모름', profileLink: null, now: t0 + 130000 })
-  if (unk.sends.length !== 1 || unk.sends[0].text.indexOf('\n🔗 옾링 : 확인 못 함\n') < 0) throw new Error('visit notice with an unread link ' + JSON.stringify(unk.sends[0] && unk.sends[0].text))
+  if (unk.sends.length !== 1 || unk.sends[0].text.indexOf('\n옾링 : 확인 못 함\n') < 0) throw new Error('visit notice with an unread link ' + JSON.stringify(unk.sends[0] && unk.sends[0].text))
 }
 if (!laterJoin.sends[0].mention || laterJoin.sends[0].mention.userId !== '7') throw new Error('still one mention')
 const laterLeft = guardOnChat(firstVisit, {
   kind: 'leave', chatId: '555', authorId: '7', authorName: '홍길동', now: t0 + 3 * 3600000 + 120000,
 })
 const leftText = laterLeft.sends.length === 1 ? laterLeft.sends[0].text : ''
-if (leftText.indexOf('📤 퇴장 안내') !== 0) throw new Error('a later leave posts')
-if (leftText.indexOf('입장 기록') >= 0) throw new Error('a leave notice has no enter log')
-if (leftText.indexOf('🕒 퇴장 기록 · 2회\n ├ 2023-11-15 07:13\n └ 2023-11-15 10:15') < 0) throw new Error('every leave time is listed ' + JSON.stringify(leftText))
-if (leftText.indexOf('🔗 옾링 : https://open.kakao.com/o/abc') < 0) throw new Error('the leave keeps the open profile')
-if (leftText.indexOf('⏳ 머문 시간 : 3시간 (11-15 07:15 입장)') < 0) throw new Error('the leave states how long the person stayed ' + JSON.stringify(leftText))
-// 프로필 변경: 같은 사람(userId 7)이 이름/링크를 바꿔 다시 들어오면 그 이력을 남긴다.
+if (leftText !== '[퇴장 안내]\n이름 : @홍길동\n옾링 : https://open.kakao.com/o/abc\n오전 10:15') throw new Error('a later leave keeps the open profile and its own time ' + JSON.stringify(leftText))
+// 입장·퇴장 시각은 안내에 적지 않아도 기록(관리 화면)에 모두 남는다
+{
+  const row = firstVisit.runtime.visit.people['555\u00017']
+  if (!row || row.joins.length !== 2 || row.leaves.length !== 2) throw new Error('every join and leave time is kept ' + JSON.stringify(row))
+}
+// 프로필 변경: 같은 사람(userId 7)이 이름/링크를 바꿔 다시 들어오면 안내는 지금 이름·옾링, 예전 것은 기록에 남는다.
 const swapRec = visitRecord()
 guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '홍길동',
   profileLink: 'https://open.kakao.com/o/old', now: t0 })
 const renamed = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
   profileLink: 'https://open.kakao.com/o/new', now: t0 + 60000 })
 const swapText = renamed.sends[0].text
-if (swapText.indexOf('📝 예전 프로필 · 1회\n └ 2023-11-15 07:14 · 홍길동 · https://open.kakao.com/o/old') < 0) throw new Error('the old name and link are kept ' + JSON.stringify(swapText))
-if (swapText.indexOf('📥 입장 안내 · @김철수' + FOLD) !== 0 || swapText.indexOf('\n👤 김철수\n') < 0) throw new Error('the current name is the mention')
+const swapRow = () => swapRec.runtime.visit.people['555\u00017']
+if (swapText !== '[입장 안내]\n이름 : @김철수\n옾링 : https://open.kakao.com/o/new\n오전 7:14') throw new Error('the current name and link are on the notice ' + JSON.stringify(swapText))
+if (JSON.stringify(swapRow().changes.map((c) => [c.name, c.link])) !== '[["홍길동","https://open.kakao.com/o/old"]]') throw new Error('the old name and link are kept ' + JSON.stringify(swapRow().changes))
 if (renamed.sends[0].mention.userId !== '7') throw new Error('still one mention after a rename')
 if (visitMentionExtra(swapText, renamed.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
 // 같은 사람이 그대로 다시 들어오면 변경 이력이 늘지 않는다
-const swapAgain = guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
+guardOnChat(swapRec, { kind: 'join', chatId: '555', authorId: '7', authorName: '김철수',
   profileLink: 'https://open.kakao.com/o/new', now: t0 + 120000 })
-if (swapAgain.sends[0].text.indexOf('📝 예전 프로필 · 1회') < 0) throw new Error('no new change when nothing changed')
-if (swapAgain.sends[0].text.indexOf('· 김철수') >= 0) throw new Error('the current identity is not logged as a change')
+if (swapRow().changes.length !== 1) throw new Error('no new change when nothing changed')
 // 처음 보는 사람은 변경 이력이 없다
-if (note.indexOf('예전 프로필') >= 0) throw new Error('a first sighting has no change log')
+if (firstVisit.runtime.visit.people['555\u00017'].changes.length !== 0) throw new Error('a first sighting has no change log')
 
 // 즉시 감지 (들낙방지와 별개 기능, config.profile): 이미 본 사람(userId 7)이
 // 메시지에서 다른 닉으로 나오면 그 즉시 [프로필 변경 감지]를 쏜다.
@@ -402,9 +388,8 @@ const renameMsg = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '
   text: '싸게 팝니다', now: t0 + 2000 })
 if (renameMsg.sends.length !== 1) throw new Error('a rename posts one notice at once')
 const rtext = renameMsg.sends[0].text
-// 새 모양: 사람 정보(👤 🆔 🔗) + 바뀐 내용(전·후). 메시지에서는 옾링을 모르니 '없음'으로 두고 linkFor 로 봇에게 맡긴다.
-const RENAME = folded('🔔 프로필 변경 감지 · @사기꾼_새닉', ['━━━━━━━━━━━━━━', '👤 사기꾼_새닉', '🆔 7', '🔗 옾링 : 없음', '', '✏️ 바뀐 내용', '▸ 닉네임',
-  ' ├ 전 : 홍길동', ' └ 후 : 사기꾼_새닉', '━━━━━━━━━━━━━━'])
+// 관리자 지정 모양(사진): 변경전(＠ — 멘션 아님) · 변경후(@멘션) · 옾링 · 시각. 메시지에서는 옾링을 모르니 '없음'으로 두고 linkFor 로 봇에게 맡긴다.
+const RENAME = '[프로필 변경 감지]\n변경전 : ＠홍길동\n변경후 : @사기꾼_새닉\n옾링 : 없음\n오전 7:13'
 if (rtext !== RENAME) throw new Error('rename notice layout: ' + JSON.stringify(rtext))
 if (renameMsg.sends[0].linkFor !== '7') throw new Error('rename notice asks the sender to fill the open profile link')
 if (renameMsg.sends[0].mention.userId !== '7') throw new Error('rename notice mentions the person')
@@ -412,25 +397,26 @@ if (renameMsg.sends[0].mention.userId !== '7') throw new Error('rename notice me
   const m0 = renameMsg.sends[0].mention
   if (rtext.slice(m0.at, m0.at + m0.len) !== '사기꾼_새닉') throw new Error('rename mention points at the new name')
   const filled = withProfileLink(renameMsg.sends[0], 'https://open.kakao.com/me/abc')
-  if (filled.text !== RENAME.replace('🔗 옾링 : 없음', '🔗 옾링 : https://open.kakao.com/me/abc')) throw new Error('filled rename notice layout')
+  if (filled.text !== RENAME.replace('옾링 : 없음', '옾링 : https://open.kakao.com/me/abc')) throw new Error('filled rename notice layout')
   if (filled.text.slice(filled.mention.at, filled.mention.at + filled.mention.len) !== '사기꾼_새닉') throw new Error('the mention moves with the filled link')
   if (filled.linkFor || !renameMsg.sends[0].linkFor) throw new Error('filling drops linkFor on the copy only')
   if (withProfileLink(renameMsg.sends[0], 'javascript:alert(1)') !== renameMsg.sends[0]) throw new Error('a bad link is not filled')
 }
-if (visitMentionExtra(rtext, renameMsg.sends[0].mention).split('user_id').length !== 2) throw new Error('rename keeps one mention')
+// 옛 이름의 ＠ 는 멘션 @ 가 아니다 — 멘션은 새 이름 하나
+if (visitMentionExtra(rtext, renameMsg.sends[0].mention) !== '{"mentions":[{"user_id":7,"at":[1],"len":6}]}') throw new Error('rename keeps one mention on the new name')
 if (renameMsg.sends[0].delayMs !== 0) throw new Error('first profile notice has no wait')
 // 한 번 알린 뒤에는 같은 닉으로 또 쏘지 않는다
 const after = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '사기꾼_새닉',
   text: '또 메시지', now: t0 + 3000 })
 if (after.sends.length !== 0) throw new Error('no repeat notice for the same new name')
-// 연달아 바꿔도 바뀔 때마다 알리고, 누적 횟수가 올라간다
+// 연달아 바꿔도 바뀔 때마다 알린다(누적 횟수는 안내에 적지 않는다)
 const twice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '또다른닉',
   text: '세번째', now: t0 + 4000 })
-if (twice.sends.length !== 1 || twice.sends[0].text.indexOf(' ├ 전 : 사기꾼_새닉\n └ 후 : 또다른닉') < 0) throw new Error('a quick second rename is announced too')
-if (twice.sends[0].text.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('repeated renames count up')
+if (twice.sends.length !== 1 || twice.sends[0].text.indexOf('\n변경전 : ＠사기꾼_새닉\n변경후 : @또다른닉\n') < 0) throw new Error('a quick second rename is announced too')
+if (twice.sends[0].text.indexOf('누적') >= 0) throw new Error('the rename notice stays short')
 const thrice = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '7', authorName: '세번째닉',
   text: '네번째', now: t0 + 5000 })
-if (thrice.sends.length !== 1 || thrice.sends[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('a third rename posts again')
+if (thrice.sends.length !== 1 || thrice.sends[0].text.indexOf('\n변경전 : ＠또다른닉\n변경후 : @세번째닉\n') < 0) throw new Error('a third rename posts again')
 // 처음 보는 사람의 메시지는 기준이 없어 아무것도 안 한다
 const stranger = guardOnChat(liveRec, { kind: 'msg', chatId: '555', authorId: '88', authorName: '처음본사람',
   text: '하이', now: t0 + 5000 })
@@ -451,7 +437,7 @@ const onlyJoin = guardOnChat(noLeave, {
   kind: 'join', chatId: '555', authorId: '9', authorName: '김', profileLink: 'not-a-url', now: t0,
 })
 if (onlyJoin.sends[0].text.indexOf('퇴장') >= 0) throw new Error('an enter notice has no leave log')
-if (onlyJoin.sends[0].text.indexOf('🔗 옾링 : 없음') < 0) throw new Error('missing link is stated')
+if (onlyJoin.sends[0].text.indexOf('\n옾링 : 없음\n') < 0) throw new Error('missing link is stated')
 if (!onlyJoin.sends[0].mention || onlyJoin.sends[0].mention.userId !== '9') throw new Error('the named person is the mention')
 if (onlyJoin.sends[0].delayMs !== 0) throw new Error('first notice has no wait')
 const burst = guardOnChat(noLeave, {
@@ -463,7 +449,7 @@ const otherRoom = guardOnChat(noLeave, {
 })
 if (otherRoom.sends.length !== 0) throw new Error('unwatched room stays quiet')
 const left = guardOnChat(noLeave, { kind: 'leave', chatId: '555', authorId: '9', authorName: '김', now: t0 + 200 })
-if (left.sends.length !== 1 || left.sends[0].text.indexOf('📤 퇴장 안내') !== 0) throw new Error('a leave is announced')
+if (left.sends.length !== 1 || left.sends[0].text.indexOf('[퇴장 안내]') !== 0) throw new Error('a leave is announced')
 if (left.sends[0].text.indexOf('입장 기록') >= 0) throw new Error('a leave notice has no enter log')
 if (left.sends[0].delayMs < 3000) throw new Error('a leave waits behind the previous notice')
 const repeatJoin = guardOnChat(noLeave, {
@@ -528,7 +514,7 @@ const plainPosted = guardOnChat(visitRecord(), {
 if (plainPosted.sends.length !== 1 || plainPosted.sends[0].text.indexOf('홍보ㄱㄱ') < 0) {
   throw new Error('plain sentence posts one notice')
 }
-if (plainPosted.sends[0].text.indexOf('📥 입장 안내') !== 0) throw new Error('plain sentence uses the enter notice')
+if (plainPosted.sends[0].text.indexOf('[입장 안내]') !== 0) throw new Error('plain sentence uses the enter notice')
 if (plainPosted.sends[0].text.indexOf('@') >= 0 || plainPosted.sends[0].mention) {
   throw new Error('a sentence without a user id is not a fake mention')
 }
@@ -586,17 +572,17 @@ const feedLeft = guardOnChat(feedRoom, {
   kind: openLeave[0].kind, chatId: '555', authorId: openLeave[0].authorId,
   authorName: openLeave[0].authorName, now: t0,
 })
-if (feedLeft.sends.length !== 1 || feedLeft.sends[0].text.indexOf('📤 퇴장 안내') !== 0) {
+if (feedLeft.sends.length !== 1 || feedLeft.sends[0].text.indexOf('[퇴장 안내]') !== 0) {
   throw new Error('a feed leave posts one notice')
 }
-if (feedLeft.sends[0].text.indexOf('2023-11-15 07:13') < 0 || feedLeft.sends[0].text.indexOf('입장 기록') >= 0) {
+if (!feedLeft.sends[0].text.endsWith('\n오전 7:13') || feedLeft.sends[0].text.indexOf('입장') >= 0) {
   throw new Error('the leave time is on the leave notice')
 }
 const feedJoin = guardOnChat(feedRoom, {
   kind: openJoin[0].kind, chatId: '555', authorId: '7',
   authorName: '홍길동', profileLink: 'https://open.kakao.com/o/abc', now: t0 + 60000,
 })
-if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('📥 입장 안내') !== 0) {
+if (feedJoin.sends.length !== 1 || feedJoin.sends[0].text.indexOf('[입장 안내]') !== 0) {
   throw new Error('a feed join posts one notice')
 }
 if (!feedJoin.sends[0].mention || feedJoin.sends[0].mention.userId !== '7') throw new Error('the feed mention is the joiner')
@@ -608,7 +594,7 @@ const bigExtra = visitMentionExtra(feedJoin.sends[0].text, {
 if (bigExtra !== `{"mentions":[{"user_id":"${bigId}","at":[1],"len":3}]}`) {
   throw new Error('a large open-chat id is an int64 string')
 }
-const ascii = folded('📥 입장 안내 · @GOLD_AEC1908', ['━━━━━━━━━━━━━━', '👤 GOLD_AEC1908', '🆔 42', '🔗 옾링 : https://open.kakao.com/o/abc', '', '🕒 입장 기록 · 1회', ' └ 2026-10-05 21:04', '━━━━━━━━━━━━━━'])
+const ascii = '[입장 안내]\n이름 : @GOLD_AEC1908\n옾링 : https://open.kakao.com/o/abc\n오후 9:04'
 const asciiAt = ascii.indexOf('GOLD_AEC1908')
 const asciiExtra = visitMentionExtra(ascii, { userId: '42', at: asciiAt, len: 'GOLD_AEC1908'.length })
 const asciiByte = Buffer.byteLength(ascii.slice(0, asciiAt), 'utf8')
@@ -622,7 +608,7 @@ const wrongCard = visitMemberId('99', 'GOLD_AEC1908', '', { userId: '99', name: 
 if (wrongCard.userId || wrongCard.name !== 'GOLD_AEC1908') throw new Error('a different member is not mentioned')
 const fresh = visitMemberId('42', 'GOLD_AEC1908', '', { userId: '', name: '' })
 if (fresh.userId !== '42') throw new Error('a new member keeps the feed id')
-if (feedJoin.sends[0].text.indexOf('2023-11-15 07:13') >= 0 || feedJoin.sends[0].text.indexOf('퇴장') >= 0) {
+if (feedJoin.sends[0].text.indexOf('7:13') >= 0 || feedJoin.sends[0].text.indexOf('퇴장') >= 0) {
   throw new Error('the leave time stays off the enter notice')
 }
 
@@ -1084,9 +1070,9 @@ async function withLog(fn) {
     if (RF.churnCheck(st, cfg, ev(0), host, T) || RF.churnCheck(st, cfg, ev(1), host, T)) throw new Error('7.7#3 early')
     const plan = RF.churnCheck(st, cfg, ev(2), host, T)
     if (!plan || plan.count !== 3 || plan.action !== 'warn') throw new Error('7.7#3 third join')
-    const n = RF.churnNotice(plan, 'warn')
+    const n = RF.churnNotice(plan, 'warn', T)
     if (n.text.split('@').length !== 2 || !n.mention || n.mention.userId !== '7') throw new Error('7.7#3 one mention')
-    if (n.text !== '[들낙 감지]\n이름 : @홍길동\n입장 : 10분 동안 3회\n조치 : 경고') throw new Error('7.7#3 notice layout ' + n.text)
+    if (n.text !== '[들낙 감지]\n이름 : @홍길동\n입장 : 10분 동안 3회\n조치 : 경고\n' + RF.kstClock(T) || !hasClock(n.text)) throw new Error('7.7#3 notice layout ' + n.text)
     if (F.visitMentionExtra(n.text, n.mention).split('user_id').length !== 2) throw new Error('7.7#3 mention extra')
     if (RF.churnCheck(st, cfg, ev(3), host, T)) throw new Error('7.7#3 fourth in same window')
     const kcfg = RF.normRoomConfig({ churn: { enabled: true, joins: 3, windowMin: 10, action: 'kick' } })
@@ -1148,22 +1134,22 @@ async function withLog(fn) {
     if (JSON.stringify(rt).indexOf('kakaocdn') >= 0) throw new Error('7.7#6 photos are not stored')
     RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '안녕' }, T)
     const stc = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '바이' }, T + 1)
-    if (stc.length !== 1 || stc[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 안녕\n └ 후 : 바이') < 0) throw new Error('7.7#6 status')
+    if (stc.length !== 1 || stc[0].text.indexOf('\n이름 : @김\n상태 메시지 변경전 : 안녕\n상태 메시지 변경후 : 바이\n') < 0) throw new Error('7.7#6 status ' + JSON.stringify(stc[0] && stc[0].text))
     // 바로 또 바뀌어도 알린다
     const st2 = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김', status: '다시' }, T + 2)
-    if (st2.length !== 1 || st2[0].text.indexOf('▸ 상태 메시지\n ├ 전 : 바이\n └ 후 : 다시') < 0) throw new Error('7.7#6 every change is announced')
+    if (st2.length !== 1 || st2[0].text.indexOf('\n상태 메시지 변경전 : 바이\n상태 메시지 변경후 : 다시\n') < 0) throw new Error('7.7#6 every change is announced')
     // 관찰한 곳에서 옾링을 알면 바로 적고 linkFor 는 없다
     const wl = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김새닉', status: '다시', link: 'https://open.kakao.com/me/kim' }, T + 6 * 60000)
-    if (wl.length !== 1 || wl[0].text.indexOf('\n👤 김새닉\n🆔 8\n🔗 옾링 : https://open.kakao.com/me/kim\n') < 0 || wl[0].text.indexOf('▸ 닉네임\n ├ 전 : 김\n └ 후 : 김새닉') < 0 || wl[0].linkFor) throw new Error('7.7#6 known link is written at once ' + JSON.stringify(wl[0] && wl[0].text))
+    if (wl.length !== 1 || wl[0].text !== '[프로필 변경 감지]\n변경전 : ＠김\n변경후 : @김새닉\n옾링 : https://open.kakao.com/me/kim\n' + RF.kstClock(T + 6 * 60000) || wl[0].linkFor) throw new Error('7.7#6 known link is written at once ' + JSON.stringify(wl[0] && wl[0].text))
     if (wl[0].text.slice(wl[0].mention.at, wl[0].mention.at + wl[0].mention.len) !== '김새닉') throw new Error('7.7#6 mention points at the current name')
-    if (wl[0].text.indexOf('🔁 누적 변경 : 3회') < 0) throw new Error('7.7#6 cumulative changes ' + JSON.stringify(wl[0].text))
-    // 예전에 저장된 사진 변경 기록은 기록 화면에도, 누적 변경 수에도 나오지 않는다
+    // 예전에 저장된 사진 변경 기록은 기록 화면에 나오지 않고, 다음 변경 때 기록에서도 빠진다
     const k8 = Object.keys(rt.profile.people).find((k) => rt.profile.people[k].userId === '8')
     rt.profile.people[k8].changes.unshift({ at: T - 5, kind: 'photo' })
     const rows = F.logsView({ rooms: [{ key: 'r', chat_id: '555', name: '방' }], runtime: rt }).profile
     if (!rows.some((r) => r.changes.some((c) => c.kind === 'status')) || rows.some((r) => r.changes.some((c) => c.kind === 'photo'))) throw new Error('7.7#5 profile log has kind, no photo')
     const wl2 = RF.profileObserve(rt, '555', pcfg, { userId: '8', name: '김새닉', status: '또' }, T + 7 * 60000)
-    if (wl2.length !== 1 || wl2[0].text.indexOf('🔁 누적 변경 : 4회') < 0) throw new Error('7.7#6 old photo changes are not counted ' + JSON.stringify(wl2[0] && wl2[0].text))
+    if (wl2.length !== 1 || wl2[0].text.indexOf('\n상태 메시지 변경전 : 다시\n상태 메시지 변경후 : 또\n') < 0) throw new Error('7.7#6 status change ' + JSON.stringify(wl2[0] && wl2[0].text))
+    if (rt.profile.people[k8].changes.some((c) => c.kind === 'photo') || rt.profile.people[k8].changes.length !== 4) throw new Error('7.7#6 old photo changes are dropped ' + JSON.stringify(rt.profile.people[k8].changes))
     if (RF.normRoomConfig({ profile: { enabled: true, photo: true } }).profile.photo !== undefined) throw new Error('7.7#6 a saved photo option is dropped')
   }
   // #7 조회: 방장 → 기록 문구, staff 에서 일반 → 없음, 멘션 id 우선, 동명이인 → 같은 이름 문구
@@ -1209,6 +1195,8 @@ async function withLog(fn) {
     if (p1.n !== 1 || p1.kick || !p1.hide || p2.n !== 2 || p2.kick || p3.n !== 3 || !p3.kick) throw new Error('7.7#8 1/3 2/3 3/3')
     if (RF.promoNotice(p1, { hidden: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 1회 (3회가 되면 내보내요)\n조치 : 글 가리기') throw new Error('7.7#8 notice')
     if (RF.promoNotice(p3, { hidden: true, kicked: true }).text !== '[홍보 금지]\n이름 : @홍\n경고 : 3회\n조치 : 내보내기') throw new Error('7.7#8 kicked notice')
+    if (RF.promoNotice(p1, { hidden: true }, T).text !== '[홍보 금지]\n이름 : @홍\n경고 : 1회 (3회가 되면 내보내요)\n조치 : 글 가리기\n' + RF.kstClock(T)) throw new Error('7.7#8 notice ends with the time')
+    if (RF.leaveKickNotice('홍', T) !== '[재입장 차단]\n이름 : 홍\n' + RF.kstClock(T)) throw new Error('7.7#8 leave kick notice ends with the time')
     RF.promoCheck(st, cfg, e, host, T + 50000)
     const later = RF.promoCheck(st, cfg, e, host, T + 50000 + 25 * 3600000)
     if (later.n !== 1) throw new Error('7.7#8 reset after resetHours')
@@ -1476,34 +1464,33 @@ async function withLog(fn) {
     if (sentIn(iBook).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28 the first read only sets a baseline')
     // 먼저 있던 사람이 나간다 → 퇴장 안내에 옾링(예전에는 '없음'이었다)
     fs.event(chat, botA.uid, { kind: 'leave', user_id: '701', name: '먼저온사람' })
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28 leave notice')
-    const out = sentIn(iBook).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-    if (out.indexOf('\n👤 먼저온사람\n🆔 701\n🔗 옾링 : https://open.kakao.com/o/first701\n\n') < 0 || out.indexOf('🖼') >= 0) throw new Error('#28 leave notice has the link of someone who was there before the bot ' + JSON.stringify(out))
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('[퇴장 안내]') === 0), 8000, '#28 leave notice')
+    const out = sentIn(iBook).find((t) => t.indexOf('[퇴장 안내]') === 0)
+    if (noClock(out) !== '[퇴장 안내]\n이름 : @먼저온사람\n옾링 : https://open.kakao.com/o/first701' || !hasClock(out) || out.indexOf('🖼') >= 0) throw new Error('#28 leave notice has the link of someone who was there before the bot ' + JSON.stringify(out))
     await pool.flush()
     const saved = await store.loadMembers(iBook, chat, 0)
     if (!saved.some((r) => r.user_id === '701' && r.link === 'https://open.kakao.com/o/first701')) throw new Error('#28 the book is saved ' + JSON.stringify(saved))
     // 메시지 닉네임이 바뀌었다 → 카드를 읽어 프로필 변경 안내
     fs.event(chat, botA.uid, { kind: 'profile', user_id: '702', name: '둘째새닉' })
     fs.event(chat, botA.uid, { kind: 'message', user_id: '702', name: '둘째새닉', text: '닉 바꿨어요' })
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('🔔 프로필 변경 감지') === 0), 8000, '#28 rename notice')
-    const rn = sentIn(iBook).find((t) => t.indexOf('🔔 프로필 변경 감지') === 0)
-    const RN = folded('🔔 프로필 변경 감지 · @둘째새닉', [RF.RULE, '👤 둘째새닉', '🆔 702', '🔗 옾링 : https://open.kakao.com/o/second702',
-      '', '✏️ 바뀐 내용', '▸ 닉네임', ' ├ 전 : 둘째', ' └ 후 : 둘째새닉', RF.RULE])
-    if (rn !== RN) throw new Error('#28 rename notice ' + JSON.stringify(rn))
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('[프로필 변경 감지]') === 0), 8000, '#28 rename notice')
+    const rn = sentIn(iBook).find((t) => t.indexOf('[프로필 변경 감지]') === 0)
+    const RN = '[프로필 변경 감지]\n변경전 : ＠둘째\n변경후 : @둘째새닉\n옾링 : https://open.kakao.com/o/second702'
+    if (noClock(rn) !== RN || !hasClock(rn)) throw new Error('#28 rename notice ' + JSON.stringify(rn))
     // 주기 동기화: 703 은 사진만 바꾸고(안내 없음), 702 는 닉네임을 또 바꿨다(바뀔 때마다 알린다)
     room0.members['703'].photo = 'https://k.kakaocdn.net/dn/p/703b.jpg'
     room0.members['702'].nick = '둘째또닉'
     vb.memberSyncAt = 0
     // 봇 전체 발송 한도(분당 30)에 걸리면 다음 1분 창까지 기다린다
-    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n👤 둘째또닉\n') >= 0), 70000, '#28 second rename notice').catch((e) => {
+    await waitFor(() => sentIn(iBook).some((t) => t.indexOf('\n변경후 : @둘째또닉\n') >= 0), 70000, '#28 second rename notice').catch((e) => {
       const sl = botA.slot
       throw new Error(e.message + ' DIAG ' + JSON.stringify({ live: sl.live(), syncing: vb.memberSyncing, syncAt: vb.memberSyncAt, now: Date.now(), checking: vb.checking,
         sent: sentIn(iBook).map((t) => t.split('\n')[0].slice(0, 30)), pend: sl.pacer ? sl.pacer.pending() : null, m702: vb.members.get('702') && vb.members.get('702').name }))
     })
     await sleep(300)
-    if (sentIn(iBook).some((t) => t.indexOf('\n👤 기본프로필\n') >= 0 || t.indexOf('🖼') >= 0 || t.indexOf('▸ 사진') >= 0)) throw new Error('#28 a photo-only change is not announced')
-    const rn2 = sentIn(iBook).find((t) => t.indexOf('\n👤 둘째또닉\n') >= 0)
-    if (rn2.indexOf('▸ 닉네임\n ├ 전 : 둘째새닉\n └ 후 : 둘째또닉') < 0 || rn2.indexOf('🔁 누적 변경 : 2회') < 0) throw new Error('#28 a quick second rename is announced ' + JSON.stringify(rn2))
+    if (sentIn(iBook).some((t) => t.indexOf('기본프로필') >= 0 || t.indexOf('🖼') >= 0)) throw new Error('#28 a photo-only change is not announced')
+    const rn2 = sentIn(iBook).find((t) => t.indexOf('\n변경후 : @둘째또닉\n') >= 0)
+    if (rn2.indexOf('\n변경전 : ＠둘째새닉\n변경후 : @둘째또닉\n') < 0 || !hasClock(rn2)) throw new Error('#28 a quick second rename is announced ' + JSON.stringify(rn2))
     const hist = vb.runtime.profile.people[chat + '\u0001702']
     if (!hist || hist.changes.filter((c) => c.kind === 'name').length !== 2) throw new Error('#28 both renames are recorded ' + JSON.stringify(hist))
   }
@@ -1523,9 +1510,9 @@ async function withLog(fn) {
     await waitFor(() => vl.members.get('711') && vl.members.get('711').link === 'https://open.kakao.com/o/a711', 5000, '#28-2 member book')
     room0.members['711'].pli = '7112'
     vl.memberSyncAt = 0
-    await waitFor(() => sentIn(iLink).some((t) => t.indexOf('▸ 옾링') >= 0), 8000, '#28-2 link change notice')
-    const lc = sentIn(iLink).find((t) => t.indexOf('▸ 옾링') >= 0)
-    if (lc.indexOf('▸ 옾링\n ├ 전 : https://open.kakao.com/o/a711\n └ 후 : https://open.kakao.com/o/b711') < 0 || lc.indexOf('🔗 옾링 : https://open.kakao.com/o/b711') < 0) throw new Error('#28-2 link change ' + JSON.stringify(lc))
+    await waitFor(() => sentIn(iLink).some((t) => t.indexOf('\n옾링 변경전 : ') >= 0), 8000, '#28-2 link change notice')
+    const lc = sentIn(iLink).find((t) => t.indexOf('\n옾링 변경전 : ') >= 0)
+    if (lc.indexOf('\n옾링 변경전 : https://open.kakao.com/o/a711\n옾링 변경후 : https://open.kakao.com/o/b711\n') < 0 || lc.indexOf('\n옾링 : ') >= 0 || !hasClock(lc)) throw new Error('#28-2 link change ' + JSON.stringify(lc))
     const rows = F.logsView(RF.adapterRecord(vl, botA.id)).profile
     if (!rows.some((r) => r.changes.some((c) => c.kind === 'link' && c.to === 'https://open.kakao.com/o/b711'))) throw new Error('#28-2 the panel log has the link change ' + JSON.stringify(rows))
   }
@@ -1645,9 +1632,9 @@ async function withLog(fn) {
     // 명부에 없는 742 가 나간다 → 로그 한 줄 + MEMBER 로 읽어 퇴장 안내에 옾링
     await withLog(async (lines) => {
       fs.event(chat, botA.uid, { kind: 'leave', user_id: '742', name: '조용한사람' })
-      await waitFor(() => sentIn(iFill).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-4 leave notice')
-      const out = sentIn(iFill).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-      if (out.indexOf('\n👤 조용한사람\n🆔 742\n🔗 옾링 : https://open.kakao.com/o/a742\n\n') < 0 || out.indexOf('🖼') >= 0) throw new Error('#28-4 leave notice of someone not in the book ' + JSON.stringify(out))
+      await waitFor(() => sentIn(iFill).some((t) => t.indexOf('[퇴장 안내]') === 0), 8000, '#28-4 leave notice')
+      const out = sentIn(iFill).find((t) => t.indexOf('[퇴장 안내]') === 0)
+      if (out.indexOf('\n이름 : @조용한사람\n옾링 : https://open.kakao.com/o/a742\n') < 0 || out.indexOf('🖼') >= 0) throw new Error('#28-4 leave notice of someone not in the book ' + JSON.stringify(out))
       if (!hasLine(lines, `leave ${iFill}: 742 not in the member book`, 'member read: card')) throw new Error('#28-4 leave line ' + JSON.stringify(lines))
     })
   }
@@ -1688,9 +1675,9 @@ async function withLog(fn) {
       vt.leaveReadAt = 0
       await withLog(async (lines) => {
         fs.event(chat, botA.uid, { kind: 'leave', user_id: '772', name: '나갈사람' })
-        await waitFor(() => sentIn(iLate).some((t) => t.indexOf('📤 퇴장 안내') === 0), 8000, '#28-7 leave notice')
-        const out = sentIn(iLate).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-        if (out.indexOf('🔗 옾링 : https://open.kakao.com/o/a772\n') < 0) throw new Error('#28-7 leave reads the unknown link ' + JSON.stringify(out))
+        await waitFor(() => sentIn(iLate).some((t) => t.indexOf('[퇴장 안내]') === 0), 8000, '#28-7 leave notice')
+        const out = sentIn(iLate).find((t) => t.indexOf('[퇴장 안내]') === 0)
+        if (out.indexOf('\n옾링 : https://open.kakao.com/o/a772\n') < 0) throw new Error('#28-7 leave reads the unknown link ' + JSON.stringify(out))
         if (!hasLine(lines, `leave ${iLate}: 772 has no link in the member book`, 'link read: link')) throw new Error('#28-7 leave line ' + JSON.stringify(lines))
       })
       // 다음 채우기는 771 의 옾링만 다시 읽는다(MEMBER 없이)
@@ -1785,7 +1772,7 @@ async function withLog(fn) {
     await waitFor(() => rowOf(iP).state === 'active', 3000, '#28-9 promotion')
     const vp = botA.slot.byInstall.get(iP)
     await waitFor(() => vp.memberOkAt > 0 && vp.members.get('791') && vp.members.get('791').link, 5000, '#28-9 first sync')
-    const notice = (nm) => sentIn(iP).find((t) => t.indexOf('🔔 프로필 변경 감지 · @' + nm) === 0)
+    const notice = (nm) => sentIn(iP).find((t) => t.indexOf('[프로필 변경 감지]') === 0 && t.indexOf('\n변경후 : @' + nm + '\n') >= 0)
     try {
       // 운영에서처럼 옾링을 모른 채(null) 남았고, 묶음 읽기는 그 사람을 30분 건너뛴다
       vp.members.set('791', Object.assign({}, vp.members.get('791'), { link: null }))
@@ -1795,7 +1782,7 @@ async function withLog(fn) {
       room0.members['791'].nick = '옾프사람☯'
       await waitFor(() => notice('옾프사람☯'), 70000, '#28-9 rename notice')
       const n1 = notice('옾프사람☯')
-      if (n1.indexOf('\n🔗 옾링 : https://open.kakao.com/o/a791\n') < 0 || n1.indexOf('🖼') >= 0) throw new Error('#28-9 the link is read before the notice ' + JSON.stringify(n1))
+      if (n1.indexOf('\n옾링 : https://open.kakao.com/o/a791\n') < 0 || n1.indexOf('🖼') >= 0) throw new Error('#28-9 the link is read before the notice ' + JSON.stringify(n1))
       if (vp.members.get('791').link !== 'https://open.kakao.com/o/a791') throw new Error('#28-9 the read link is kept in the book')
       // INFOLINK 가 안 된다 → 확인 못 함('없음' 아님)
       vp.members.set('792', Object.assign({}, vp.members.get('792'), { link: null }))
@@ -1805,7 +1792,7 @@ async function withLog(fn) {
       room0.members['792'].nick = '못읽음2'
       await waitFor(() => notice('못읽음2'), 70000, '#28-9 unread link notice')
       const n2 = notice('못읽음2')
-      if (n2.indexOf('\n🔗 옾링 : 확인 못 함\n') < 0) throw new Error('#28-9 an unread link is not shown as none ' + JSON.stringify(n2))
+      if (n2.indexOf('\n옾링 : 확인 못 함\n') < 0) throw new Error('#28-9 an unread link is not shown as none ' + JSON.stringify(n2))
       fs.infolinkFail = 0
       // MEMBER 가 pli 를 빼고 준다 → 명부의 pli·옾링은 그대로, 옾링 변경 안내 없음
       room0.memberNoPli = true
@@ -1815,7 +1802,7 @@ async function withLog(fn) {
       const n3 = notice('빠질사람2')
       const m793 = vp.members.get('793')
       if (m793.pli !== '7931' || m793.link !== 'https://open.kakao.com/o/a793') throw new Error('#28-9 a card without pli keeps the book ' + JSON.stringify(m793))
-      if (n3.indexOf('▸ 옾링') >= 0 || n3.indexOf('\n🔗 옾링 : https://open.kakao.com/o/a793\n') < 0) throw new Error('#28-9 no false link change ' + JSON.stringify(n3))
+      if (n3.indexOf('옾링 변경전') >= 0 || n3.indexOf('\n옾링 : https://open.kakao.com/o/a793\n') < 0) throw new Error('#28-9 no false link change ' + JSON.stringify(n3))
     } finally {
       fs.infolinkFail = 0
       room0.memberNoPli = false
@@ -1842,9 +1829,9 @@ async function withLog(fn) {
       try {
         // 751: 나간 뒤라 MEMBER 에 카드가 없다 → 옾링은 확인 못 함('없음'이라고 하지 않는다), 사진 줄은 늘 없음
         fs.event(chat, botA.uid, { kind: 'leave', user_id: '751', name: '나갈사람751' })
-        await waitFor(() => sentIn(iLv).some((t) => t.indexOf('📤 퇴장 안내') === 0), 70000, '#28-5 leave notice')
-        const out = sentIn(iLv).find((t) => t.indexOf('📤 퇴장 안내') === 0)
-        if (out.indexOf('\n👤 나갈사람751\n🆔 751\n🔗 옾링 : 확인 못 함\n') < 0 || out.indexOf('🖼 사진') >= 0) throw new Error('#28-5 leave notice without a card ' + JSON.stringify(out))
+        await waitFor(() => sentIn(iLv).some((t) => t.indexOf('[퇴장 안내]') === 0), 70000, '#28-5 leave notice')
+        const out = sentIn(iLv).find((t) => t.indexOf('[퇴장 안내]') === 0)
+        if (out.indexOf('\n이름 : @나갈사람751\n옾링 : 확인 못 함\n') < 0 || out.indexOf('🖼 사진') >= 0) throw new Error('#28-5 leave notice without a card ' + JSON.stringify(out))
         if (!hasLine(lines, `leave ${iLv}: 751 not in the member book (book 0, last sync `, 'member read: no card')) throw new Error('#28-5 leave line ' + JSON.stringify(lines))
         // 752: MEMBER 가 답하지 않는다 → 2초에서 끊고 안내를 만든다
         room0.memberHang = true
@@ -1858,7 +1845,7 @@ async function withLog(fn) {
         await botA.slot.onVisit(vl, { kind: 'leave', userId: '753', name: '나갈사람753', logId: '7530001', at: Date.now() })
         if (Date.now() - t0 > 500) throw new Error('#28-5 one read per room per 10 s')
         if (!hasLine(lines, `leave ${iLv}: 752 not in`, 'member read: timed out') || !hasLine(lines, `leave ${iLv}: 753 not in`, 'member read: skipped')) throw new Error('#28-5 leave lines ' + JSON.stringify(lines))
-        await waitFor(() => sentIn(iLv).filter((t) => t.indexOf('📤 퇴장 안내') === 0).length === 3, 70000, '#28-5 all leave notices go out')
+        await waitFor(() => sentIn(iLv).filter((t) => t.indexOf('[퇴장 안내]') === 0).length === 3, 70000, '#28-5 all leave notices go out')
       } finally {
         clearInterval(alive)
         room0.memberHang = false
