@@ -633,10 +633,21 @@
 
   /* 매크로 `20,000원 / 1개월(30일)`, 방 상품 `15,000원 / 방 1개 · 기간 제한 없음` (부록 A.1) —
      가격 칸 두 줄로 나눠 보인다 */
-  function prodRow(p, gloss) {
+  /* opt.pick: 누르면 고르는 행(체크 칸이 행 전체를 덮는다) · opt.buyHref: 로그아웃 화면의 [구매하기] */
+  function prodRow(p, gloss, opt) {
+    var o = opt || {};
     var room = p.unit === 'room';
     var days = p.days || DAYS_FALLBACK;
-    return el('article', { cls: 'card prod one', 'data-prod': p.id }, [
+    var pickLab = null;
+    if (o.pick) {
+      pickLab = el('label', { cls: 'chk', for: 'pick-' + p.id }, [
+        el('input', { type: 'checkbox', id: 'pick-' + p.id, 'data-p': p.id }),
+        el('span', { cls: 'box', 'aria-hidden': 'true' }),
+        el('span', { cls: 't', text: p.label + ' 고르기' })
+      ]);
+    }
+    return el('article', { cls: 'card prod' + (o.pick ? '' : ' one'), 'data-prod': p.id }, [
+      pickLab,
       el('div', { cls: 'head' }, [
         el('div', { cls: 't' }, [
           el('h3', { text: p.label }),
@@ -652,16 +663,17 @@
         el('div', { cls: 'pr' }, room
           ? [el('span', { cls: 'pl', text: '기간' }), el('span', { cls: 'pv' }, [sans('제한 없음')])]
           : [el('span', { cls: 'pl', text: '한 번에' }), el('span', { cls: 'pv' }, [(p.min || 1) + '~' + (p.max || 12), sans('개월')])])
-      ])
+      ]),
+      o.buyHref ? el('div', { cls: 'prod-act' }, [el('a', { cls: 'btn primary', href: o.buyHref(p.id) }, p.label + ' 구매하기')]) : null
     ]);
   }
 
-  function renderProdRows(mount) {
+  function renderProdRows(mount, opt) {
     if (!mount || !PRICE) return;
     mount.removeAttribute('aria-busy');
     clear(mount);
     var gloss = mount.hasAttribute('data-gloss');
-    PRICE.order.forEach(function (id) { mount.appendChild(prodRow(PRICE.products[id], gloss)); });
+    PRICE.order.forEach(function (id) { mount.appendChild(prodRow(PRICE.products[id], gloss, opt)); });
   }
 
   function prodRowsError(mount, msg) {
@@ -699,8 +711,10 @@
 
 
   /* ══════════════════ 6. 구매 신청 (/buy) — 6.6 ══════════════════
-     로그아웃: 상품 소개 + #loginGate. 로그인: #buyForm (매크로 · 설치할 방 · 입금 정보).
-     방 행은 처음 0개다(매크로만 사는 사람이 빈 행 오류를 만나지 않게). /buy#rooms 면 1개를 미리 연다.
+     로그아웃: 상품 소개(상품마다 [구매하기] → 로그인 뒤 그 상품을 고른 채로 돌아온다) + #loginGate.
+     로그인: #buyForm — ① 상품 고르기 → 고른 상품에 필요한 칸만(매크로 기간 · 봇을 넣을 방) → 입금자 정보.
+     방 관리봇·미니게임봇을 고르면 방 링크 칸이 바로 하나 열린다. 단계 번호는 보이는 칸 순서대로 다시 매긴다.
+     미리 고르기: ?p=macro,roombot,minigame · ?macro=1 · #rooms(방 관리봇) · ?add=<install_id>(그 방에 없는 봇).
      금액은 서버가 정한다 (상품 금액 + 뒷자리 1~99원). 화면 합계는 /api/price 로 계산한 안내값이다. */
 
   var ROOM_HINT = {
@@ -715,12 +729,25 @@
   function pageBuy() {
     var q = qs();
     var bootBox = $('#buyBoot'), gate = $('#gateWrap'), form = $('#buyForm'), out = $('#result');
-    var macroOn = $('#macroOn'), monthsRow = $('#macroMonthsRow'), monthsIn = $('#macroMonths'), macroNow = $('#macroNow');
-    var roomsBox = $('#roomRows'), addBtn = $('#roomAdd'), termsFld = $('#fld-terms'), termsIn = $('#terms');
+    var picksBox = $('#picks'), macroSec = $('#macroSec'), roomsSec = $('#rooms');
+    var monthsRow = $('#macroMonthsRow'), monthsIn = $('#macroMonths'), macroNow = $('#macroNow');
+    var roomsBox = $('#roomRows'), addBtn = $('#roomAdd'), termsIn = $('#terms');
     var depIn = $('#depositor'), conIn = $('#contact'), memoIn = $('#memo');
     var sumMount = $('#sum'), submitBtn = $('#submitBtn');
     var rows = [], seq = 0, sending = false, ME = null;
     var sumLines = null, sumNudge = null;
+    var pk = {}, wanted = wantedFromUrl(), pendingAdd = 0;
+
+    /* 주소로 미리 고를 상품 */
+    function wantedFromUrl() {
+      var w = {};
+      str(q.get('p')).split(',').forEach(function (x) { x = str(x); if (x === 'macro' || ROOM_PRODUCTS.indexOf(x) >= 0) w[x] = 1; });
+      if (q.get('macro') === '1') w.macro = 1;
+      if (location.hash === '#rooms' && !w.roombot && !w.minigame) w.roombot = 1;
+      return w;
+    }
+    function isPicked(k) { return !!(pk[k] && pk[k].inp.checked); }
+    function roomPicks() { return ROOM_PRODUCTS.filter(isPicked); }
 
     /* 로그인·가입 링크는 지금 주소로 돌아오게 */
     $$('[data-next-base]').forEach(function (a) {
@@ -739,7 +766,7 @@
       gate.hidden = false;
       form.hidden = true;
       if (perr) prodRowsError($('#prods'), perr.message);
-      else renderProdRows($('#prods'));
+      else renderProdRows($('#prods'), { buyHref: function (id) { return loginUrl('/buy?p=' + id); } });
     }
 
     /* ── 폼 ─────────────────────────────────────────────── */
@@ -747,30 +774,86 @@
       gate.hidden = true;
       form.hidden = false;
       initSum();
-      if (perr) priceFail(perr);
-      if (q.get('macro') === '1') { macroOn.checked = true; syncMacro(); }
+      if (perr) { priceFail(perr); prodRowsError(picksBox, perr.message); }
+      else renderPicks();
       api('/api/me').then(function (me) {
         ME = me;
         var m = me.macro || {};
         if (macroNow && m.active && ts(m.until)) {
-          macroNow.textContent = '현재 만료일 ' + dateKr(m.until);
+          macroNow.textContent = '지금 만료일 ' + dateKr(m.until) + ' · 여기에 이어서 늘어납니다';
           macroNow.hidden = false;
         }
         var add = num(q.get('add'));
-        if (add) prefillInstall(add);
-        else if (location.hash === '#rooms' && !rows.length) openRoomsAnchor();
+        if (add) { if (pk.roombot) prefillInstall(add); else pendingAdd = add; }
       }, function (e) {
         if (e.status === 401) { showGate(perr); return; }
-        if (location.hash === '#rooms' && !rows.length) openRoomsAnchor();
       });
+      syncSteps();
       updateSum();
     }
 
-    function openRoomsAnchor() {
-      var r = addRow();
-      var anchor = $('#rooms');
-      if (anchor) { try { anchor.scrollIntoView({ block: 'start' }); } catch (e) { /* 무시 */ } }
-      if (r) { try { r.linkIn.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } }
+    /* ① 상품 고르기: 가격표로 행 3개를 그리고, 누르면 고른다 */
+    function renderPicks() {
+      if (!PRICE || pk.roombot || pk.macro) return;
+      renderProdRows(picksBox, { pick: true });
+      $$('input[data-p]', picksBox).forEach(function (inp) {
+        var k = inp.getAttribute('data-p');
+        pk[k] = { inp: inp, card: inp.closest('.prod') };
+        inp.addEventListener('change', function () { onPick(k); });
+      });
+      Object.keys(wanted).forEach(function (k) { if (pk[k]) setPick(k, true); });
+      wanted = {};
+      if (location.hash === '#rooms' && roomsSec && !roomsSec.hidden) {
+        try { roomsSec.scrollIntoView({ block: 'start' }); } catch (e) { /* 무시 */ }
+      }
+      if (pendingAdd) { var a = pendingAdd; pendingAdd = 0; prefillInstall(a); }
+    }
+
+    function setPick(k, on) {
+      if (!pk[k] || pk[k].inp.checked === on) return;
+      pk[k].inp.checked = on;
+      onPick(k);
+    }
+
+    function onPick(k) {
+      var on = isPicked(k);
+      if (pk[k] && pk[k].card) pk[k].card.classList.toggle('sel', on);
+      fieldErr('pick', '');
+      if (k === 'macro') syncMacro();
+      else {
+        rows.forEach(function (r) {
+          var x = r.prod[k];
+          if (on) { if (!x.inp.disabled) x.inp.checked = true; } else x.inp.checked = false;
+          setRowErr(r, 'prod', '');
+        });
+        syncRooms();
+      }
+      syncSteps();
+      updateSum();
+    }
+
+    /* 고른 방 상품이 있으면 방 칸을 열고(행이 없으면 하나), 행마다 고른 봇만 보인다 */
+    function syncRooms() {
+      var any = roomPicks().length > 0;
+      roomsSec.hidden = !any;
+      if (any && !rows.length) addRow();
+      rows.forEach(syncRowProds);
+      if (!any) { fieldErr('rooms', ''); fieldErr('terms', ''); }
+    }
+    function syncRowProds(r) {
+      var n = 0;
+      ROOM_PRODUCTS.forEach(function (k) { var on = isPicked(k); r.prod[k].lab.hidden = !on; if (on) n++; });
+      r.prodBox.classList.toggle('one', n < 2);
+    }
+
+    /* 단계 번호: 보이는 칸 순서대로 1, 2, 3… */
+    function syncSteps() {
+      var n = 0;
+      $$('.fsec', form).forEach(function (sec) {
+        if (sec.hidden) return;
+        var sn = $('.sn', sec);
+        if (sn) sn.textContent = String(++n);
+      });
     }
 
     /* 가격표를 못 받으면 금액을 보여줄 수 없다 → 폼을 그대로 두고 [다시 시도] 만 내준다.
@@ -780,7 +863,7 @@
       sumLines.appendChild(el('p', { cls: 'err', text: (e && e.message) || MSG_PRICE_FAIL }));
       sumLines.appendChild(el('p', { cls: 'hint', text: '입력한 내용은 그대로 남아 있습니다. [다시 시도]를 눌러 주세요.' }));
       sumLines.appendChild(el('div', null, [el('button', { type: 'button', cls: 'btn sm', onclick: function () {
-        loadPrice().then(function () { bindPrice(); refreshRowPrices(); updateSum(); }, priceFail);
+        loadPrice().then(function () { bindPrice(); renderPicks(); refreshRowPrices(); syncSteps(); updateSum(); }, priceFail);
       } }, [icon('i-refresh', 14), '다시 시도'])]));
     }
 
@@ -809,12 +892,10 @@
     }
     function macroMax() { return (PRICE && PRICE.products.macro && PRICE.products.macro.max) || 12; }
     function syncMacro() {
-      monthsRow.hidden = !macroOn.checked;
-      if (macroOn.checked && !months()) monthsIn.value = '1';
+      macroSec.hidden = !isPicked('macro');
+      if (isPicked('macro') && !months()) monthsIn.value = '1';
       fieldErr('macro', '');
-      updateSum();
     }
-    macroOn.addEventListener('change', syncMacro);
     monthsIn.addEventListener('input', function () {
       var v = digits(monthsIn.value).slice(0, 2);
       if (v !== monthsIn.value) monthsIn.value = v;
@@ -822,7 +903,7 @@
       updateSum();
     });
     monthsIn.addEventListener('blur', function () {
-      if (!macroOn.checked) return;
+      if (!isPicked('macro')) return;
       monthsIn.value = String(clamp(months() || 1, 1, macroMax()));
       updateSum();
     });
@@ -863,7 +944,8 @@
 
       ROOM_PRODUCTS.forEach(function (k) {
         var id = 'room' + i + '-' + k;
-        var inp = el('input', { type: 'checkbox', id: id, 'data-p': k });
+        var inp = el('input', { type: 'checkbox', id: id, 'data-k': k });
+        inp.checked = isPicked(k);
         var tag = el('span', { cls: 'tag', hidden: true });
         var amt = el('span', { cls: 'amt' }, price(k) !== null ? wonKids(price(k)) : null);
         var nmT = el('span', { text: featName(k) });
@@ -876,6 +958,7 @@
         r.prod[k] = { inp: inp, tag: tag, lab: lab, amt: amt, nmT: nmT };
       });
       r.prodErr = el('p', { cls: 'err', id: 'err-room' + i + '-prod', role: 'alert', hidden: true });
+      r.prodBox = el('div', { cls: 'rprods' }, [r.prod.roombot.lab, r.prod.minigame.lab]);
 
       r.title = el('span', { text: '방' });
       r.delBtn = el('button', { type: 'button', cls: 'btn sm ghost' }, [icon('i-trash', 14), '빼기']);
@@ -887,8 +970,8 @@
           r.pv, r.linkErr
         ]),
         r.codeFld,
-        el('div', { cls: 'fld', id: 'fld-room' + i + '-prod', role: 'group', 'aria-label': '설치할 봇' }, [
-          el('div', { cls: 'rprods' }, [r.prod.roombot.lab, r.prod.minigame.lab]),
+        el('div', { cls: 'fld', id: 'fld-room' + i + '-prod', role: 'group', 'aria-label': '이 방에 넣을 봇' }, [
+          r.prodBox,
           r.prodErr
         ])
       ]);
@@ -909,6 +992,7 @@
 
       rows.push(r);
       roomsBox.appendChild(r.el);
+      syncRowProds(r);
       syncRows();
       return r;
     }
@@ -925,13 +1009,14 @@
     }
 
     function syncRows() {
-      rows.forEach(function (r, k) { r.title.textContent = '방 ' + (k + 1); });
+      rows.forEach(function (r, k) {
+        r.title.textContent = '방 ' + (k + 1);
+        r.delBtn.hidden = rows.length < 2;          // 마지막 한 줄은 빼지 않는다(그만 사려면 위에서 상품을 끈다)
+      });
       addBtn.disabled = rows.length >= maxRooms();
       var cap = $('#roomCap');
       if (cap) cap.textContent = rows.length >= maxRooms() ? '방은 한 번에 ' + maxRooms() + '개까지 주문할 수 있습니다' : '';
-      termsFld.hidden = rows.length === 0;
       fieldErr('rooms', '');
-      if (!rows.length) fieldErr('terms', '');
     }
 
     function refreshRowPrices() {
@@ -1044,8 +1129,10 @@
         var x = r.prod[k];
         var ok = av[k] !== false;
         var installed = !!(mine && mine.products && mine.products[k]);
+        var was = x.inp.disabled;
         x.inp.disabled = !ok;
         if (!ok) x.inp.checked = false;
+        else if (was && isPicked(k)) x.inp.checked = true;
         x.tag.hidden = ok;
         x.tag.textContent = ok ? '' : (installed ? '설치됨' : '입금 대기');
         x.tag.className = 'tag ' + (installed ? 'line' : 'warn');
@@ -1064,6 +1151,10 @@
       var v = null;
       list.forEach(function (x) { if (x && Number(x.id) === id) v = x; });
       if (!v) { toast('방을 찾을 수 없습니다. 내 방 목록에서 다시 골라 주세요', 'bad'); return; }
+      var missing = ROOM_PRODUCTS.filter(function (k) {
+        return !(v.products && v.products[k]) && !(v.pending_products && v.pending_products[k]);
+      });
+      if (!missing.length) { toast('이 방에는 두 봇이 모두 있거나 입금 확인을 기다리고 있습니다', 'bad'); return; }
       var r = addRow();
       if (!r) return;
       r.installId = id;
@@ -1083,24 +1174,26 @@
         x.tag.hidden = !(have || pend);
         x.tag.textContent = have ? '설치됨' : (pend ? '입금 대기' : '');
         x.tag.className = 'tag ' + (have ? 'line' : 'warn');
-        if (!have && !pend) x.inp.checked = true;
+        if (!have && !pend) setPick(k, true);       // 이 방에 없는 봇을 위에서 고른다
       });
+      syncRooms();
+      syncSteps();
       updateSum();
-      var anchor = $('#rooms');
-      if (anchor) { try { anchor.scrollIntoView({ block: 'start' }); } catch (e) { /* 무시 */ } }
+      if (roomsSec) { try { roomsSec.scrollIntoView({ block: 'start' }); } catch (e) { /* 무시 */ } }
     }
 
     function rowProducts(r) {
-      return ROOM_PRODUCTS.filter(function (k) { return r.prod[k].inp.checked && !r.prod[k].inp.disabled; });
+      return ROOM_PRODUCTS.filter(function (k) { return isPicked(k) && r.prod[k].inp.checked && !r.prod[k].inp.disabled; });
     }
     function rowName(r, k) {
       if (r.view && r.view.link_name) return r.view.link_name;
       if (r.preview && r.preview.room && r.preview.room.name) return r.preview.room.name;
       return '방 ' + (k + 1);
     }
-    /* 보낼 행: 링크가 비어 있고 상품도 고르지 않은 행은 버린다(오류 아님) */
+    /* 보낼 행: 방 상품을 고르지 않았으면 없음. 링크가 빈 행은 버린다(오류 아님 — 한 줄도 없으면 validate 가 알린다) */
     function sentRows() {
-      return rows.filter(function (r) { return r.installId || str(r.linkIn.value) || rowProducts(r).length; });
+      if (!roomPicks().length) return [];
+      return rows.filter(function (r) { return r.installId || str(r.linkIn.value); });
     }
 
     /* ── 합계 ───────────────────────────────────────────── */
@@ -1108,7 +1201,7 @@
       if (!sumLines || !PRICE) return;
       clear(sumLines);
       var lines = [], total = 0;
-      if (macroOn.checked && PRICE.products.macro) {
+      if (isPicked('macro') && PRICE.products.macro) {
         var m = clamp(months() || 1, 1, macroMax());
         lines.push({ t: PRICE.products.macro.label + ' ' + m + '개월', a: PRICE.products.macro.price * m });
       }
@@ -1122,14 +1215,14 @@
         total += l.a;
         sumLines.appendChild(el('div', { cls: 'ln' }, [el('span', { text: l.t }), el('span', { cls: 'v mono' }, wonKids(l.a))]));
       });
-      if (!lines.length) sumLines.appendChild(el('div', { cls: 'ln off' }, [el('span', { text: '선택한 상품이 없습니다' }), el('span', { cls: 'v', text: '-' })]));
+      if (!lines.length) sumLines.appendChild(el('div', { cls: 'ln off' }, [el('span', { text: roomPicks().length ? '방 링크를 넣으면 금액이 나옵니다' : '고른 상품이 없습니다' }), el('span', { cls: 'v', text: '-' })]));
       sumLines.appendChild(el('div', { cls: 'ln total' }, [el('span', { text: '결제 금액' }), el('span', { cls: 'v mono' }, wonKids(total))]));
       sumNudge.textContent = '주문을 구분하려고 금액에 1~99원이 더해집니다' + (total ? ' (예: ' + won(total + 47) + ').' : '.');
     }
 
     /* ── 제출 ───────────────────────────────────────────── */
     function clearErrs() {
-      ['macro', 'rooms', 'terms', 'depositor', 'contact'].forEach(function (k) { fieldErr(k, ''); });
+      ['pick', 'macro', 'rooms', 'terms', 'depositor', 'contact'].forEach(function (k) { fieldErr(k, ''); });
       rows.forEach(function (r) { setRowErr(r, 'link', ''); setRowErr(r, 'code', ''); setRowErr(r, 'prod', ''); });
       fieldErr('submit', '');
       var sb = $('#submitErr');
@@ -1144,8 +1237,17 @@
       sb.hidden = false;
     }
     function firstEnabledProd(r) {
-      var x = ROOM_PRODUCTS.map(function (k) { return r.prod[k].inp; }).filter(function (i) { return !i.disabled; });
+      var x = roomPicks().map(function (k) { return r.prod[k].inp; }).filter(function (i) { return !i.disabled; });
       return x[0] || r.linkIn;
+    }
+    function firstPick() { var k = PRICE ? PRICE.order[0] : 'macro'; return pk[k] ? pk[k].inp : picksBox; }
+    /* 이 방에 넣을 봇이 없을 때: 고른 봇이 전부 이미 있거나 입금 대기면 그렇게 알린다 */
+    function noProdMsg(r) {
+      var ks = roomPicks();
+      var blocked = ks.filter(function (k) { return r.prod[k].inp.disabled; }).length;
+      return ks.length && blocked === ks.length
+        ? '고른 봇이 이 방에 이미 있거나 입금 확인을 기다리고 있습니다. 다른 방 링크를 넣어 주세요'
+        : '이 방에 넣을 봇을 1개 이상 골라 주세요';
     }
 
     /* 화면 위에서 아래 순서로 검사하고 첫 오류 칸을 돌려준다 */
@@ -1153,11 +1255,15 @@
       var first = null;
       function mark(n) { if (!first) first = n; }
       var sent = sentRows();
-      if (macroOn.checked) {
+      if (!isPicked('macro') && !roomPicks().length) { fieldErr('pick', '구매할 상품을 1개 이상 골라 주세요'); mark(firstPick()); }
+      if (isPicked('macro')) {
         var m = months();
         if (!(m >= 1 && m <= macroMax())) { fieldErr('macro', '기간은 1~' + macroMax() + '개월로 입력해 주세요'); mark(monthsIn); }
       }
-      if (!macroOn.checked && !sent.length) { fieldErr('macro', '상품을 1개 이상 선택해 주세요'); mark(macroOn); }
+      if (roomPicks().length && !sent.length) {
+        if (rows.length) { setRowErr(rows[0], 'link', '봇을 넣을 오픈채팅방 링크를 붙여 넣어 주세요'); mark(rows[0].linkIn); }
+        else { fieldErr('rooms', '봇을 넣을 방을 추가해 주세요'); mark(addBtn); }
+      }
       if (sent.length > maxRooms()) { fieldErr('rooms', '방은 한 번에 ' + maxRooms() + '개까지 주문할 수 있습니다'); mark(addBtn); }
       var seen = {};
       sent.forEach(function (r) {
@@ -1166,7 +1272,7 @@
           if (seen['i' + r.installId]) { setRowErr(r, 'link', '이미 추가한 방입니다'); mark(r.delBtn); return; }
           seen['i' + r.installId] = 1;
           if (r.view && r.view.link_url) seen['u' + normLink(r.view.link_url)] = 1;
-          if (!prods.length) { setRowErr(r, 'prod', '이 방에 설치할 봇을 1개 이상 골라 주세요'); mark(firstEnabledProd(r)); }
+          if (!prods.length) { setRowErr(r, 'prod', noProdMsg(r)); mark(firstEnabledProd(r)); }
           return;
         }
         var v = normLink(r.linkIn.value);
@@ -1186,7 +1292,7 @@
           mark(r.unvIn || r.linkIn);
         }
         if (r.needsCode && !str(r.codeIn.value)) { setRowErr(r, 'code', '참여코드를 입력해 주세요'); mark(r.codeIn); }
-        if (!prods.length) { setRowErr(r, 'prod', '이 방에 설치할 봇을 1개 이상 골라 주세요'); mark(firstEnabledProd(r)); }
+        if (!prods.length) { setRowErr(r, 'prod', noProdMsg(r)); mark(firstEnabledProd(r)); }
       });
       if (sent.length && !termsIn.checked) { fieldErr('terms', '이용 조건에 동의해 주세요'); mark(termsIn); }
       if (!str(depIn.value)) { fieldErr('depositor', '입금자명을 입력해 주세요'); mark(depIn); }
@@ -1232,7 +1338,7 @@
     function send() {
       var sent = sentRows();
       var body = {
-        macro_months: macroOn.checked ? clamp(months(), 1, macroMax()) : 0,
+        macro_months: isPicked('macro') ? clamp(months(), 1, macroMax()) : 0,
         rooms: sent.map(function (r) {
           if (r.installId) return { install_id: r.installId, products: rowProducts(r) };
           return { link: str(r.linkIn.value), passcode: str(r.codeIn.value), products: rowProducts(r),
@@ -1270,7 +1376,8 @@
         focusEl = slot === 'code' ? r.codeIn : (slot === 'prod' ? firstEnabledProd(r) : r.linkIn);
         if (reason === 'unverified') check(r, true);
       } else if (reason === 'no_depositor') { fieldErr('depositor', msg); focusEl = depIn; }
-      else if (reason === 'empty' || reason === 'bad_months') { fieldErr('macro', msg); focusEl = macroOn; }
+      else if (reason === 'empty') { fieldErr('pick', msg); focusEl = firstPick(); }
+      else if (reason === 'bad_months') { fieldErr('macro', msg); focusEl = monthsIn; }
       else if (reason === 'too_many_rooms') { fieldErr('rooms', msg); focusEl = addBtn; }
       else if (reason === 'no_terms') { fieldErr('terms', msg); focusEl = termsIn; }
       else {
@@ -2214,7 +2321,7 @@
           ]),
           el('div', { cls: 'btn-row' }, [
             n || pend ? el('a', { cls: 'btn sm', href: '/panel#rooms' }, [icon('i-link', 14), '내 방 보기']) : null,
-            el('a', { cls: 'btn sm' + (n ? '' : ' primary'), href: '/buy#rooms' }, [icon('i-plus', 14), '방 추가 구매'])
+            el('a', { cls: 'btn sm' + (n ? '' : ' primary'), href: '/buy?p=' + k }, [icon('i-plus', 14), n ? '다른 방에도 구매' : '구매'])
           ])
         ]));
       });

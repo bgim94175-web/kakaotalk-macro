@@ -681,6 +681,16 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .chk:has(input:disabled):hover { border-color: var(--line-2); }
 .chk:has(input:disabled) .t, .chk:has(input:disabled) .amt, .chk:has(input:disabled) .box { opacity: .5; }
 .rooms-act { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+/* 구매 단계(① 상품 고르기 → 필요한 칸 → 입금자 정보) */
+.fsec > .fsec-h { padding-bottom: 14px; }
+.step { display: flex; align-items: center; gap: 10px; color: var(--fg); font-size: var(--t-16); font-weight: 600; letter-spacing: -0.02em; }
+.step .sn { width: 22px; height: 22px; border-radius: 50%; background: var(--inv); color: var(--inv-fg); display: grid; place-items: center; font: 600 12px/1 var(--f-mono); flex: none; }
+.fsec-h .hint { margin-top: 6px; padding-left: 32px; }
+.picks .card.prod { cursor: pointer; }
+.picks .prod > .chk { grid-area: auto; z-index: 1; }      /* 카드 전체를 덮는다(격자 칸 chk 에 갇히지 않게) — 어디를 눌러도 고른다 */
+.picks .card.prod.sel { box-shadow: inset 3px 0 0 var(--fg); }
+.rprods.one { grid-template-columns: minmax(0, 1fr); }
+.prod .prod-act { grid-column: 1 / -1; margin-top: 12px; }
 .rooms-act .hint { margin: 0; }
 .xbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin-top: 6px; color: var(--fg-2); font-size: var(--t-13); transition: color var(--d1); }
 .xbtn:hover { color: var(--fg); }

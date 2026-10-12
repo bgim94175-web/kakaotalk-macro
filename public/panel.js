@@ -3011,7 +3011,7 @@
       $('ov-empty-acts').innerHTML = (buy
         ? '<a class="btn primary" href="#account-add">' + ic('plus', 14) + '카카오 계정 등록</a>'
         : '<a class="btn primary" href="/buy?macro=1">카카오톡 매크로 구매</a>') +
-        '<a class="btn" href="/buy#rooms">' + ic('plus', 14) + '방 추가</a>';
+        '<a class="btn" href="/buy?p=roombot">' + ic('plus', 14) + '방 관리봇 구매</a>';
     }
     $('ov-feat-grp').hidden = !hasAcc;
     renderUnreadMetric();
@@ -4237,9 +4237,9 @@
     { g: '설정', t: '응답 메시지', sub: '갠톡 응답', icon: 'reply', go: 'reply', focus: 'reply-message' },
     { g: '설정', t: '쿨타임', sub: '갠톡 응답', icon: 'reply', go: 'reply', focus: 'reply-hours' },
     { g: '작업', t: '카카오 계정 추가', icon: 'plus', go: 'account-add' },
-    { g: '작업', t: '방 추가', icon: 'plus', href: '/buy#rooms' },
+    { g: '작업', t: '봇 구매', sub: '방 관리봇 · 미니게임봇', icon: 'plus', href: '/buy?p=roombot' },
     { g: '작업', t: '저격 규칙 추가', icon: 'plus', go: 'snipe', then: 'add-trigger' },
-    { g: '작업', t: '사이트로 이동', icon: 'home', href: '/' },
+    { g: '작업', t: '구매 페이지', icon: 'receipt', href: '/buy' },
   ];
   // 고른 방의 설정 화면(방 설정 묶음) — 방을 고른 뒤에만
   var ROOM_PAL = [
