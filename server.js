@@ -144,16 +144,19 @@ app.use(authRoutes);
 app.use(purchaseRoutes);
 app.use(panelRoutes);
 
-// 링크 미리보기 봇(카카오톡·디스코드 등). Accept 에 text/html 이 없어도 랜딩 페이지를 받아야 og 태그를 읽는다.
+// 링크 미리보기 봇(카카오톡·디스코드 등). Accept 에 text/html 이 없어도 og 태그가 있는 페이지를 받아야 한다.
 const PREVIEW_BOT = /kakaotalk-scrap|facebookexternalhit|Discordbot|Twitterbot|Slackbot|TelegramBot|WhatsApp|LinkedInBot|Applebot|Googlebot|bingbot|Yeti|Daum/i;
 
-// 루트: 브라우저·미리보기 봇이면 랜딩 페이지, 그 외(curl 연결확인)는 기존 JSON 그대로
+// 루트: 소개 페이지는 없앴다. 브라우저는 로그인했으면 패널, 아니면 구매로 바로 보낸다.
+// 미리보기 봇은 구매 페이지(og 태그)를 그대로 받고, 그 외(curl 연결확인)는 기존 JSON 그대로.
 app.get('/', (req, res) => {
-  const wantsHtml = String(req.headers.accept || '').indexOf('text/html') >= 0 || PREVIEW_BOT.test(String(req.headers['user-agent'] || ''));
-  const idx = path.join(PUBLIC_DIR, 'index.html');
-  if (wantsHtml && fs.existsSync(idx)) {
-    htmlHeaders(res, 'index.html');
-    return res.sendFile(idx);
+  if (PREVIEW_BOT.test(String(req.headers['user-agent'] || ''))) {
+    htmlHeaders(res, 'buy.html');
+    return res.sendFile(path.join(PUBLIC_DIR, 'buy.html'));
+  }
+  if (String(req.headers.accept || '').indexOf('text/html') >= 0) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.redirect(302, memberAuth.cookieValue(req, memberAuth.COOKIE) ? '/panel' : '/buy');
   }
   res.json({ ok: true, service: 'kakao-license', time: Date.now() });
 });
