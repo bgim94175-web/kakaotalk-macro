@@ -246,13 +246,6 @@
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-  /* 키 입력 정리: 영숫자만 남기고 4글자마다 하이픈 (KAKA-XXXX-XXXX-XXXX) */
-  function normKey(s) {
-    var v = String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
-    if (!v) return '';
-    return v.match(/.{1,4}/g).join('-');
-  }
-  var KEY_RE = /^KAKA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 
   /* 붙여넣은 글에서 오픈채팅 링크를 뽑아 https://open.kakao.com/o/<code> 로 맞춘다. 없으면 ''.
      lib/openchat.js 와 같은 식이다(lib/purchase-check.js 가 두 쪽 결과를 맞춰 본다).
@@ -2006,10 +1999,9 @@
           el('div', { cls: 'k', text: extend ? '연장된 라이선스 키' : '발급된 라이선스 키' }),
           el('div', { cls: 'v key', text: o.issued }),
           el('div', { cls: 'btn-row' }, [
-            copyBtn(function () { return o.issued; }, '키'),
-            el('a', { cls: 'btn sm primary', href: '/account#claim' }, '내 계정에 등록')
+            copyBtn(function () { return o.issued; }, '키')
           ]),
-          el('div', { cls: 'tiny warnline', text: '예전 라이선스 키입니다. 이제 패널은 아이디로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록하면 남은 기간이 그대로 옮겨집니다.' })
+          el('div', { cls: 'tiny warnline', text: '예전 라이선스 키 주문입니다. 이제 패널은 아이디로 로그인합니다.' })
         ]) : null,
         pending ? amountBlock(o.amount, o.base, o.needsReview) : null,
         pending ? accountBig(acct) : null,
@@ -2045,7 +2037,7 @@
       } else if (paid) {
         tip = '입금이 확인되었습니다. 키가 발급되면 이 화면에 바로 표시됩니다.';
       } else if (done) {
-        tip = '이제 패널은 아이디로 로그인합니다. 회원가입 후 내 계정에서 이 키를 등록해 주세요.';
+        tip = '예전 라이선스 키 주문입니다. 이제 패널은 아이디로 로그인합니다. 궁금한 점이 있으면 주문번호를 적어 문의해 주세요.';
       } else if (autoCanceled) {
         tip = TTL_CANCELED_MSG;
       } else if (canceled) {
@@ -2133,7 +2125,7 @@
       fieldErr('login', ''); fieldErr('pw', ''); fieldErr('submit', '');
       var id = str(idIn.value), pw = pwIn.value || '';
       if (/^KAKA-/i.test(id)) {
-        fieldErr('login', '라이선스 키는 로그인에 쓰지 않습니다. 회원가입 후 내 계정에서 키를 등록해 주세요');
+        fieldErr('login', '라이선스 키로는 로그인할 수 없습니다. 아이디로 로그인하거나 회원가입해 주세요');
         idIn.focus();
         return;
       }
@@ -2574,53 +2566,6 @@
             curIn.focus();
           } else if (e.status === 401) { toLogin(); }
           else fieldErr('pw', e.message);
-        });
-      });
-    }
-
-    /* ── 기존 라이선스 키 등록 ─────────────────────── */
-    var claimForm = $('#claimForm');
-    if (claimForm) {
-      var keyIn = $('#claimKey'), claimBtn = $('#claimBtn'), claimDone = $('#claimDone');
-      var claimBusy = false;
-      keyIn.addEventListener('input', function () {
-        var atEnd = keyIn.selectionStart === keyIn.value.length;
-        var v = normKey(keyIn.value);
-        if (v !== keyIn.value && atEnd) keyIn.value = v;
-        fieldErr('claim', '');
-      });
-      keyIn.addEventListener('blur', function () { keyIn.value = normKey(keyIn.value); });
-      claimForm.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        if (claimBusy) return;
-        fieldErr('claim', '');
-        var key = normKey(keyIn.value);
-        keyIn.value = key;
-        if (!key) { fieldErr('claim', '키를 입력해 주세요'); keyIn.focus(); return; }
-        if (!KEY_RE.test(key)) { fieldErr('claim', '키 형식이 올바르지 않습니다. KAKA-XXXX-XXXX-XXXX 형식으로 입력해 주세요'); keyIn.focus(); return; }
-        claimBusy = true;
-        setBusy(claimBtn, true);
-        api('/api/auth/claim', { method: 'POST', body: { key: key } }).then(function (res) {
-          claimBusy = false;
-          setBusy(claimBtn, false);
-          keyIn.value = '';
-          var mv = (res && res.moved) || {};
-          var parts = ['키를 등록했습니다.'];
-          var tail = [];
-          if (ts(mv.macro_until)) tail.push('매크로 만료 ' + dateKr(mv.macro_until));
-          tail.push('옮긴 카카오 계정 ' + (num(mv.accounts) || 0) + '개');
-          clear(claimDone);
-          claimDone.appendChild(noteEl('', [parts[0] + ' ' + tail.join(' · ')]));
-          claimDone.hidden = false;
-          toast('키를 등록했습니다', 'ok');
-          loadMe(false);
-        }, function (e) {
-          claimBusy = false;
-          setBusy(claimBtn, false);
-          if (e.status === 401) { toLogin(); return; }
-          var sup = (e.code === 'claimed' || e.code === 'key_blocked') ? supportBtn('문의하기', '키 등록 · ' + key + ' · ' + e.message) : null;
-          fieldErr('claim', e.message, sup);
-          keyIn.focus();
         });
       });
     }
