@@ -1230,6 +1230,34 @@ export class BotSlot {
     return { ok: last.ok, status: last.status, sent: content }
   }
 
+  // 보이스룸 생성 명령어 탐색: 후보 LOCO 명령어를 빈 바디로 던져 본다.
+  // -202(INVALID_METHOD)=없는 명령어, -1=세션없음/타임아웃. 그 외 상태면 "존재하는 명령어"다.
+  // 존재하는 명령어는 바디 부족이면 -203 등으로 답하므로 상태로 가린다. 과속 방지로 사이에 쉰다.
+  async voiceProbe(view) {
+    const chatId = view && view.chat_id ? String(view.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = view && view.link_id ? String(view.link_id) : ''
+    const cands = [
+      'LIVETALK', 'GETLT', 'CREATELT', 'LTCREATE', 'GETLIVETALK', 'CREATELIVETALK',
+      'LIVEINFO', 'LTINFO', 'GETLTINFO', 'LIVEON', 'LTON', 'STARTLT', 'GETLIVE', 'CREATELIVE',
+      'VRCREATE', 'CREATEVR', 'GETVR', 'VRINFO', 'MAKEVR', 'VROOM', 'GETVROOM', 'STARTVR', 'OPENVR',
+      'VOX', 'GETVOX', 'CREATEVOX', 'VOXCREATE', 'OPENVOX',
+      'MVOIP', 'GETVOIP', 'MAKEVOIP', 'CREATEVOIP', 'GETMVOIP',
+    ]
+    const hits = []
+    for (const m of cands) {
+      const body = { chatId: L(chatId) }
+      if (li) body.li = L(li)
+      const r = await this.raw(m, body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice probe ${m} → status ${st} body ${traceText((r && r.body) || {})}`)
+      if (st !== -202 && st !== -1) hits.push(`${m}:${st}`)
+      await new Promise((ok) => { const t = setTimeout(ok, 500); if (t.unref) t.unref() })
+    }
+    log(this.id, `voice probe done, non-(-202) hits: ${hits.join(', ') || 'none'}`)
+    return { ok: true, hits }
+  }
+
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
   async write(installId, fields) {
     return this.store.updateInstall(Number(installId), this.id, fields)
@@ -2858,6 +2886,17 @@ export class BotSlot {
         }
         const r = await this.voiceSetMeta(v, on)
         this.say(v, r.ok ? `보룸 신호 ${on ? '켜기' : '끄기'} 보냈어요 (status ${r.status})` : `보룸 신호 실패 (status ${r.status})`, { what: 'reply' })
+        return
+      }
+      if (t === '보룸찾기') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 찾기는 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, '보룸 명령어 후보를 찾는 중… 잠시만요(약 20초).', { what: 'reply' })
+        const r = await this.voiceProbe(v)
+        this.say(v, `보룸 명령어 후보 응답: ${r.hits && r.hits.length ? r.hits.join(', ') : '전부 없음(-202)'}`, { what: 'reply' })
         return
       }
     }
