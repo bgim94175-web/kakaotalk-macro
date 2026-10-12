@@ -285,7 +285,7 @@ router.get('/api/auth/sessions', wrap(async (req, res) => {
       created_at: Number(x.created_at),
       last_seen_at: Number(x.last_seen_at),
       device: uaSummary(x.ua),
-      ip: maskIp(x.ip),
+      // IP 는 손님 화면에 보이지 않는다(손님이 불안해한다 — 운영자 지정). 관리자 화면에서만 가려서 본다.
     })),
   });
 }));

@@ -2424,8 +2424,7 @@
               s.current ? el('span', { cls: 'tag line', text: '지금 이 기기' }) : null,
               s.method === 'google' ? el('span', { cls: 'tag', text: 'Google 로그인' }) : null
             ]),
-            el('span', { cls: 't2' }, ['마지막 사용 ', el('span', { cls: 'mono', text: dateKr(s.last_seen_at, true) }),
-              s.ip ? ' · ' : null, s.ip ? el('span', { cls: 'mono', text: str(s.ip) }) : null])
+            el('span', { cls: 't2' }, ['마지막 사용 ', el('span', { cls: 'mono', text: dateKr(s.last_seen_at, true) })])
           ]),
           el('div', { cls: 'lrow-r' }, [
             s.current ? null : el('button', { type: 'button', cls: 'btn sm', 'data-revoke': str(s.sid) }, [icon('i-logout', 14), '로그아웃'])
