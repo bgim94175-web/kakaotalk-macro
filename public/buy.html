@@ -25,9 +25,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=9">
+<link rel="stylesheet" href="/style.css?v=10">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=11" defer></script>
+<script src="/app.js?v=12" defer></script>
 </head>
 <body data-page="buy">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -123,33 +123,43 @@
       </aside>
     </div>
 
-    <!-- 로그인 상태: 구매 폼 -->
+    <!-- 로그인 상태: 구매 폼 — ① 상품 고르기 → 고른 상품에 필요한 칸만 → 입금자 정보 -->
     <form id="buyForm" class="form" novalidate autocomplete="on" hidden>
       <div id="formWrap" class="pub-grid">
         <div class="form">
-          <div class="fsec">
+          <div class="fsec" id="pickSec">
+            <div class="fsec-h"><p class="step" id="pickH"><span class="sn" aria-hidden="true">1</span>상품 고르기</p><p class="hint">구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.</p></div>
+            <div class="fld" id="fld-pick" role="group" aria-labelledby="pickH">
+              <div id="picks" class="prods picks" aria-busy="true">
+                <article class="card prod" data-prod="macro"><div class="head"><div class="t"><h3>카카오톡 매크로</h3><p class="desc">1개월(30일) <span data-bind="price-macro">20,000</span>원</p></div></div></article>
+                <article class="card prod" data-prod="roombot"><div class="head"><div class="t"><h3>방 관리봇</h3><p class="desc">방 1개 <span data-bind="price-roombot">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+                <article class="card prod" data-prod="minigame"><div class="head"><div class="t"><h3>미니게임봇</h3><p class="desc">방 1개 <span data-bind="price-minigame">15,000</span>원 · 기간 제한 없음</p></div></div></article>
+              </div>
+              <p class="err" id="err-pick" role="alert" hidden></p>
+            </div>
+          </div>
+
+          <div class="fsec" id="macroSec" hidden>
+            <div class="fsec-h"><p class="step" id="macroH"><span class="sn" aria-hidden="true">2</span>매크로 기간</p></div>
             <div class="fld" id="fld-macro" role="group" aria-labelledby="macroH">
-              <p class="lb" id="macroH">카카오톡 매크로</p>
-              <label class="chk" for="macroOn"><input type="checkbox" id="macroOn" name="macro"><span class="box" aria-hidden="true"></span><span class="t"><span class="nm">카카오톡 매크로 · <span data-bind="price-macro">20,000</span>원/1개월</span><span class="ds" data-bind="desc-macro" data-gloss>내 카카오 계정으로 정해진 간격마다 자동 발송 · 이미지 첨부 · 갠톡(1:1 대화) 자동 응답 · 저격 규칙</span></span></label>
-              <div class="months" id="macroMonthsRow" hidden>
+              <div class="months" id="macroMonthsRow">
                 <span class="months-l">기간</span>
                 <div class="num"><button type="button" data-step="-1" aria-label="기간 줄이기">−</button><input type="text" id="macroMonths" name="macro_months" inputmode="numeric" autocomplete="off" value="1" maxlength="2" aria-label="카카오톡 매크로 기간(개월)"><button type="button" data-step="1" aria-label="기간 늘리기">+</button><span class="unit">개월</span></div>
               </div>
-              <p class="hint">구매하면 현재 만료일에 이어서 기간이 늘어납니다. 패널에 등록한 내 카카오 계정으로 발송합니다.</p>
+              <p class="hint">이미 쓰고 있으면 지금 만료일에 이어서 늘어납니다. 발송은 패널에 등록한 내 카카오 계정으로 합니다.</p>
               <p class="meta-l" id="macroNow" hidden></p>
               <p class="err" id="err-macro" role="alert" hidden></p>
             </div>
           </div>
 
-          <div class="fsec" id="rooms">
+          <div class="fsec" id="rooms" hidden>
+            <div class="fsec-h"><p class="step" id="roomsH"><span class="sn" aria-hidden="true">2</span>봇을 넣을 오픈채팅방</p><p class="hint">방 링크를 붙여 넣으면 방 이름을 확인합니다. 방마다 한 번만 결제하면 기간 제한 없이 씁니다.</p></div>
             <div class="fld" id="fld-rooms" role="group" aria-labelledby="roomsH">
-              <p class="lb" id="roomsH">설치할 방</p>
-              <p class="hint rooms-d">방 관리봇·미니게임봇은 K bot이 오픈채팅방에 들어가 동작합니다. 방마다 한 번만 결제하면 기간 제한 없이 쓸 수 있습니다.</p>
               <div class="rrows" id="roomRows"></div>
-              <div class="rooms-act"><button type="button" class="btn" id="roomAdd"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>방 추가</button><span class="hint" id="roomCap" aria-live="polite"></span></div>
+              <div class="rooms-act"><button type="button" class="btn" id="roomAdd"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>다른 방도 추가</button><span class="hint" id="roomCap" aria-live="polite"></span></div>
               <p class="err" id="err-rooms" role="alert" hidden></p>
             </div>
-            <div class="fld" id="fld-terms" hidden>
+            <div class="fld" id="fld-terms">
               <label class="chk" for="terms"><input type="checkbox" id="terms" name="terms"><span class="box" aria-hidden="true"></span><span class="t"><span class="nm">이용 조건에 동의합니다</span></span></label>
               <button type="button" class="xbtn" id="termsToggle" aria-expanded="false" aria-controls="termsBody">이용 조건 보기<svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></button>
               <div class="xpand" id="termsBody"><div><p>K bot은 방장이 허락한 방에만 설치해 주세요. 불법·도박·음란·스팸 목적의 방에는 설치할 수 없으며, 확인되면 예고 없이 K bot이 방에서 나가고 환불하지 않습니다. 방이 삭제되거나 방장이 K bot을 내보내면 기능을 쓸 수 없습니다.</p></div></div>
@@ -157,7 +167,8 @@
             </div>
           </div>
 
-          <div class="fsec">
+          <div class="fsec" id="payerSec">
+            <div class="fsec-h"><p class="step"><span class="sn" aria-hidden="true">2</span>입금자 정보</p></div>
             <div class="fld" id="fld-depositor">
               <label for="depositor">입금자명 <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="depositor" name="depositor" placeholder="홍길동" autocomplete="name" maxlength="40" aria-describedby="dep-hint">
