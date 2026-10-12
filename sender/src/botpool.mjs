@@ -180,12 +180,19 @@ function traceValue(v, depth) {
   return o
 }
 
-// 보이스룸 신호만: MSG type 52(vr_invite·vr_bye), CHGMETA type 16(liveon)·17(인원). 다른 글은 남기지 않는다.
+// 보이스룸 신호만: MSG type 52(vr_invite·vr_bye), 그리고 보이스룸 방 메타(CHGMETA).
+// 메타 type 번호는 카카오가 11/12(node-kakao) 또는 다른 값으로 줄 수 있어 번호로 거르지 않는다.
+// content 안에 liveon·csIP·callId·count 가 들어 있으면 보이스룸 메타다. 다른 글은 남기지 않는다.
 let voiceWin = 0, voiceN = 0
+function isVoiceMeta(meta) {
+  if (!meta) return false
+  const c = String(meta.content || '')
+  return /"liveon"|"csIP"|"callId"|"startTime"|"count"/.test(c)
+}
 function voiceTraceOk(packet) {
   const b = packet.body || {}
   const voice = (packet.method === 'MSG' && b.chatLog && Number(b.chatLog.type) === 52) ||
-    (packet.method === 'CHGMETA' && b.meta && (Number(b.meta.type) === 16 || Number(b.meta.type) === 17))
+    (packet.method === 'CHGMETA' && isVoiceMeta(b.meta))
   if (!voice) return false
   const now = Date.now()
   if (now - voiceWin > 60000) { voiceWin = now; voiceN = 0 }
