@@ -260,6 +260,14 @@ export function kstClock(ms) {
   return (h < 12 ? '오전 ' : '오후 ') + (h % 12 || 12) + ':' + k.mi
 }
 
+/** 기록 줄 시각: `10.12 오후 7:31`. 기준(가장 최근 기록)과 해가 다르면 `2025.10.12 오후 7:31`. 모르면 '' */
+export function kstWhen(ms, refMs) {
+  const k = Number(ms) > 0 ? kst(ms) : null
+  if (!k) return ''
+  const r = Number(refMs) > 0 ? kst(refMs) : null
+  return (r && r.y !== k.y ? k.y + '.' : '') + k.mo + '.' + k.d + ' ' + kstClock(ms)
+}
+
 function oneLine(s, max) {
   return String(s == null ? '' : s).replace(/[\r\n]+/g, ' ').trim().slice(0, max || 40)
 }
@@ -529,7 +537,8 @@ function nameChanges(changes) {
 
 // ── 방 안내 공통 모양(입장·퇴장·프로필 변경 · 들낙 · 재입장 차단 · 홍보 금지) ─────
 // 관리자 지정: 최대한 간단하게. `[제목]` · `이름 : @닉네임`(멘션 @ 는 글에 하나) · 내용 · 맨 아래 시각 한 줄(`오후 7:31`).
-// 기호·접기([전체보기])·기록 목록은 쓰지 않는다. 카카오톡은 글자 크기를 못 바꾸니 시각은 마지막 줄에 짧게 둔다.
+// 입장·퇴장·프로필 변경은 맨 아래가 시각만 적은 기록(`입장 기록 : N회` + 최근 시각, 마지막 줄이 이번 시각).
+// 기호·접기([전체보기])는 쓰지 않는다. 카카오톡은 글자 크기를 못 바꾸니 시각은 마지막 줄에 짧게 둔다.
 export const NO_LINK = '없음'
 export const UNKNOWN_LINK = '확인 못 함'
 const LINK_LINE = '옾링 : '
@@ -544,19 +553,31 @@ export function linkText(link) {
   return profileUrl(link) || (link === null ? UNKNOWN_LINK : NO_LINK)
 }
 
-/** 줄들 + 맨 아래 시각(모르면 없음) → {text, mention}. 멘션은 글의 첫 @ 다 */
-function noticeOf(lines, mention, at) {
-  const text = lines.concat(kstClock(at)).filter(Boolean).join('\n')
+const RECORD_N = 5
+
+/** 기록(관리자 지정, 시각만): `입장 기록 : N회` + 최근 시각 5개(옛 → 새, 마지막 줄이 이번). 시각이 없으면 [] */
+export function recordLines(label, times) {
+  const ts = (Array.isArray(times) ? times : []).map(Number).filter((t) => t > 0).sort((a, b) => a - b)
+  if (!ts.length) return []
+  const last = ts[ts.length - 1]
+  return [`${label} : ${ts.length}회`, ...ts.slice(-RECORD_N).map((t) => kstWhen(t, last))]
+}
+
+/** 줄들 + 맨 아래(기록 줄들, 기록이 없으면 시각 한 줄 — 모르면 없음) → {text, mention}. 멘션은 글의 첫 @ 다 */
+function noticeOf(lines, mention, at, record) {
+  const tail = record && record.length ? record : [kstClock(at)]
+  const text = lines.concat(tail).filter(Boolean).join('\n')
   return { text, mention: withAt(text, mention) }
 }
 
 /**
- * 입장·퇴장 안내 1개. cur = {userId, name, link}(link null = 읽지 못함), at = 들어오거나 나간 시각.
- * `[입장 안내]` · `이름 : @닉네임` · `옾링 : …` · `오후 7:31` → {text, mention}
+ * 입장·퇴장 안내 1개. cur = {userId, name, link}(link null = 읽지 못함), times = 이 사람의 입장(퇴장이면 퇴장) 시각들(마지막이 이번).
+ * `[입장 안내]` · `이름 : @닉네임` · `옾링 : …` · `입장 기록 : N회` · 최근 시각들(`10.12 오후 7:31`) → {text, mention}
  */
-export function visitNoticeText(kind, cur, at) {
+export function visitNoticeText(kind, cur, times) {
+  const leave = kind === 'leave'
   const nm = mentionLine('이름', cur.name, idText(cur.userId))
-  return noticeOf([kind === 'leave' ? '[퇴장 안내]' : '[입장 안내]', nm.line, LINK_LINE + linkText(cur.link)], nm.mention, at)
+  return noticeOf([leave ? '[퇴장 안내]' : '[입장 안내]', nm.line, LINK_LINE + linkText(cur.link)], nm.mention, 0, recordLines(leave ? '퇴장 기록' : '입장 기록', times))
 }
 
 const FIELD_LABEL = { link: '옾링', status: '상태 메시지' }
@@ -574,11 +595,11 @@ function plainName(name) {
 
 /**
  * 프로필 변경 안내 1개. cur = 지금 프로필 {userId, name, link}(link null = 읽지 못함),
- * changes = 안내할 변경 [{kind:'name'|'link'|'status', from, to}], at = 바뀐 시각.
- * `[프로필 변경 감지]` · `변경전 : ＠옛닉` · `변경후 : @새닉`(멘션) · `옾링 : …` · `오후 7:31`.
+ * changes = 안내할 변경 [{kind:'name'|'link'|'status', from, to}], times = 이 사람의 프로필이 바뀐 시각들(마지막이 이번).
+ * `[프로필 변경 감지]` · `변경전 : ＠옛닉` · `변경후 : @새닉`(멘션) · `옾링 : …` · `변경 기록 : N회` · 최근 시각들.
  * 닉네임이 그대로면 `이름 : @닉`. 옾링·상태 메시지가 바뀌었으면 `옾링 변경전 : …` · `옾링 변경후 : …`.
  */
-export function profileChangeNotice(cur, changes, at) {
+export function profileChangeNotice(cur, changes, times) {
   const name = changes.find((c) => c.kind === 'name')
   const lines = ['[프로필 변경 감지]']
   if (name) lines.push('변경전 : ' + plainName(name.from))
@@ -591,7 +612,12 @@ export function profileChangeNotice(cur, changes, at) {
     lines.push(`${FIELD_LABEL[c.kind]} 변경전 : ${fieldText(c.kind, c.from)}`, `${FIELD_LABEL[c.kind]} 변경후 : ${fieldText(c.kind, c.to)}`)
   }
   if (!linkShown) lines.push(LINK_LINE + linkText(cur.link))
-  return noticeOf(lines, nm.mention, at)
+  return noticeOf(lines, nm.mention, 0, recordLines('변경 기록', times))
+}
+
+/** 프로필이 바뀐 시각들(한 번에 여러 칸이 바뀌면 한 번) */
+function changeTimes(changes) {
+  return [...new Set(keptChanges(changes).map((c) => Number(c.at) || 0))]
 }
 
 /** 보내기 전 옾링 채우기: '옾링 : 없음' 줄을 링크로 바꾸고, 그 뒤에 있는 멘션 위치를 그만큼 민다. */
@@ -651,7 +677,7 @@ export function profileChange(runtime, chatId, pcfg, ev, now) {
   if (!shown.length) return []
   // 옾링은 지금 것(after)만 쓴다. 모르면(null) '확인 못 함' — 예전 옾링을 지금 것처럼 적지 않는다
   const cur = { userId, name: an || bn, link: a.link === undefined ? b.link : a.link }
-  const note = profileChangeNotice(cur, shown, now)
+  const note = profileChangeNotice(cur, shown, changeTimes(p.people[key].changes))
   return [{ text: note.text, mention: note.mention, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
 }
 
@@ -705,7 +731,7 @@ export function profileObserve(runtime, chatId, pcfg, ob, now) {
   const on = (k) => !pcfg || pcfg[k] !== false
   const shown = changed.filter((c) => on(c.kind))
   if (!shown.length) return []
-  const note = profileChangeNotice({ userId, name: nowName, link: keepLink }, shown, now)
+  const note = profileChangeNotice({ userId, name: nowName, link: keepLink }, shown, changeTimes(p.people[key].changes))
   const out = { text: note.text, mention: note.mention, kind: shown[0].kind }
   if (!keepLink) out.linkFor = userId
   return [out]

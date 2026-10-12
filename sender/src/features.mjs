@@ -1693,14 +1693,13 @@ function visitDelay(v, chatId, now) {
   return at - now
 }
 
-// 입장·퇴장 안내(7.2(a)): `[입장 안내]`/`[퇴장 안내]` · `이름 : @닉네임` · `옾링 : …` · 맨 아래 시각(관리자 지정, 최대한 간단하게).
-// 입장·퇴장 시각과 예전 프로필은 저장만 하고, 관리 화면 기록에서 본다.
+// 입장·퇴장 안내(7.2(a)): `[입장 안내]`/`[퇴장 안내]` · `이름 : @닉네임` · `옾링 : …` · 맨 아래 시각만 적은 기록(관리자 지정, 간단하게).
+// 예전 프로필은 저장만 하고, 관리 화면 기록에서 본다.
 // linkUnknown: 오픈프로필인데 옾링을 읽지 못했다(아는 옾링도 없음) → '없음' 대신 '확인 못 함'.
 function visitNotice(row, kind, linkUnknown) {
   const r = row || {}
   const userId = /^[1-9][0-9]*$/.test(String(r.userId || '')) ? String(r.userId) : ''
-  const times = (kind === 'leave' ? r.leaves : r.joins) || []
-  return visitNoticeText(kind, { userId, name: r.name, link: r.link || (linkUnknown ? null : '') }, Number(times[times.length - 1]) || 0)
+  return visitNoticeText(kind, { userId, name: r.name, link: r.link || (linkUnknown ? null : '') }, (kind === 'leave' ? r.leaves : r.joins) || [])
 }
 
 function mentionIdJson(id) {
