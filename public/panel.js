@@ -366,6 +366,9 @@
       if (!b) return;
       if (full) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
     });
+    // 매크로를 사기 전에는 '계정 추가'를 눈에 띄게 두지 않는다(구매 안내 카드가 먼저 보이게)
+    var ovAdd = $('ov-add');
+    if (ovAdd) ovAdd.classList.toggle('primary', macroOk());
     $('acc-cap').style.transform = 'scaleX(' + Math.min(1, n / max) + ')';
     $('acc-cap-n').textContent = n + ' / ' + max;
     $('add-cap').textContent = n + ' / ' + max;
@@ -402,7 +405,7 @@
     qsa('[data-macro-off]').forEach(function (b) {
       if (!off) { b.hidden = true; b.textContent = ''; return; }
       b.innerHTML = ic('alert') + '<span class="grow">카카오톡 매크로 이용 기간이 아닙니다(구매 전 또는 기간 만료). 발송과 갠톡 받기가 멈춰 있습니다.</span>' +
-        '<a class="btn sm" href="/buy?macro=1">구매</a>';
+        '<a class="btn sm primary" href="/buy?p=macro">매크로 구매하기</a>';
       b.hidden = false;
     });
   }
@@ -1983,7 +1986,9 @@
     var top = chatRooms.scrollTop;
     chatRooms.textContent = '';
     if (!inboxSt.accounts.length) {
-      chatRooms.appendChild(emptyBox('등록된 카카오 계정 없음', '카카오 계정을 등록하면 갠톡이 여기에 모입니다.', { label: '계정 등록', fn: goRegister }));
+      chatRooms.appendChild(macroOk()
+        ? emptyBox('등록된 카카오 계정 없음', '카카오 계정을 등록하면 갠톡이 여기에 모입니다.', { label: '계정 등록', fn: goRegister })
+        : emptyBox('카카오톡 매크로 구매 필요', '매크로를 구매하고 카카오 계정을 등록하면 갠톡이 여기에 모입니다.', { label: '카카오톡 매크로 구매하기', fn: function () { location.href = '/buy?p=macro'; } }));
       return;
     }
     if (!inboxSt.loaded && !inboxSt.chats.length) {
@@ -2926,7 +2931,7 @@
         '<span class="sq">' + ic('link', 13) + '</span>' +
         '<span class="meta"><b>' + esc(roomName(v)) + '</b><small>' + esc(productsText(v)) + '</small></span>' +
         stateHtmlRoom(v) + '</button>';
-    }).join('') : '<p class="empty">봇을 설치한 방이 없습니다. [방 추가]에서 오픈채팅방 링크를 입력하고 구매할 수 있습니다.</p>';
+    }).join('') : '<div class="empty">봇을 설치한 방이 없습니다. 방 관리봇·미니게임봇은 구매한 방에만 들어갑니다.<div class="acts-c"><a class="btn primary" href="/buy?p=roombot">방 관리봇 구매하기</a></div></div>';
   }
   // 개요 지표 4칸(6.9): 안 읽은 갠톡 · 매크로 · 사용 중인 방 · 확인 필요
   function renderMacroMetric() {
@@ -3004,14 +3009,18 @@
     $('ov-metrics').hidden = empty;
     $('ov-grid').hidden = empty;
     if (empty) {
+      // 아무것도 사지 않았으면 '구매 필요'를 크게 — 사야 설정할 수 있다는 걸 먼저 보인다
       var buy = macroOk();
+      $('ov-empty-tag').textContent = buy ? '다음 단계' : '구매 필요';
+      $('ov-empty-h').textContent = buy ? '카카오 계정을 등록해 주세요' : '아직 구매한 상품이 없습니다';
       $('ov-empty-t').textContent = buy
-        ? '등록한 카카오 계정도, 봇을 설치한 방도 없습니다. 매크로를 쓰려면 먼저 카카오 계정을 등록해 주세요.'
-        : '이용 중인 서비스가 없습니다.';
+        ? '매크로를 쓰려면 먼저 카카오 계정을 등록해야 합니다. 방 관리봇·미니게임봇은 따로 구매합니다.'
+        : '카카오톡 매크로와 방 관리봇은 구매해야 설정할 수 있습니다. 필요한 상품을 골라 구매해 주세요.';
       $('ov-empty-acts').innerHTML = (buy
-        ? '<a class="btn primary" href="#account-add">' + ic('plus', 14) + '카카오 계정 등록</a>'
-        : '<a class="btn primary" href="/buy?macro=1">카카오톡 매크로 구매</a>') +
-        '<a class="btn" href="/buy?p=roombot">' + ic('plus', 14) + '방 관리봇 구매</a>';
+        ? '<a class="btn primary" href="#account-add">' + ic('plus', 16) + '카카오 계정 등록</a>'
+        : '<a class="btn primary" href="/buy?p=macro">카카오톡 매크로 구매하기</a>') +
+        '<a class="btn" href="/buy?p=roombot">방 관리봇 구매하기</a>' +
+        (buy ? '' : '<a class="btn" href="/buy?p=minigame">미니게임봇 구매하기</a>');
     }
     $('ov-feat-grp').hidden = !hasAcc;
     renderUnreadMetric();
@@ -3253,6 +3262,7 @@
     roomsPageSig = sig;
     var tb = $('rooms-list');
     $('rooms-empty').hidden = !!rooms.length;
+    $('rooms-sec').hidden = !rooms.length;
     $('rooms-tbl').hidden = !rooms.length;
     var focusId = '';
     var ae = document.activeElement;

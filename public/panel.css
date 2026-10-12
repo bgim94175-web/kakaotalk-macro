@@ -241,11 +241,11 @@ input:checked + .sw::after, [data-on="true"] > .sw::after { transform: translate
 .sec > .srow:first-child, .sec > .dep:first-child .srow:first-child, .dep-in > .srow:first-child { border-top: 0; }
 .dep .dep-in > .srow:first-child, .sec > .dep .dep-in > .srow:first-child { border-top: 1px solid var(--line); }
 .sec > .dep:first-child .dep-in > .srow:first-child { border-top: 0; }
-.srow.main .srow-l .lb, .srow.main .srow-l label { font-size: var(--t-14); font-weight: 600; }
+.srow.main .srow-l .lb, .srow.main .srow-l label { font-size: 16px; font-weight: 600; }
 .srow.top { align-items: start; }
 .srow.stack { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .srow.stack .srow-r { justify-content: flex-start; }
-.srow-l label, .srow-l .lb { display: block; font-size: var(--t-14); font-weight: 500; color: var(--fg); }
+.srow-l label, .srow-l .lb { display: block; font-size: 15px; font-weight: 600; color: var(--fg); }
 .srow-l p { color: var(--fg-3); font-size: var(--t-13); margin-top: 2px; line-height: 1.55; max-width: 600px; }
 .srow-l p b { color: var(--fg-2); font-weight: 500; }
 .srow-r { display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; min-width: 0; }
@@ -877,9 +877,15 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .metric .v b .sans { font-family: var(--f-sans); letter-spacing: -0.02em; font-size: var(--t-24); }
 .metric .v b .of { color: var(--fg-3); font-size: var(--t-16); margin-left: 4px; }
 #visit-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ov-empty { display: grid; justify-items: center; padding-bottom: 32px; }
-.ov-empty .empty { padding-bottom: 16px; }
+/* 구매가 필요할 때: 큰 제목·큰 버튼으로 '사야 쓸 수 있다'를 먼저 보인다 */
+.buy-card { display: grid; gap: 12px; padding: 24px 22px; border: 1px solid var(--line-3); border-radius: var(--r-4); background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+.buy-card .bc-tag { justify-self: start; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn); font-size: var(--t-12); font-weight: 600; }
+.buy-card h2 { font-size: 20px; font-weight: 700; line-height: 1.35; letter-spacing: -0.02em; color: var(--fg); }
+.buy-card p { color: var(--fg-2); font-size: var(--t-14); line-height: 1.6; }
+.buy-card .bc-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.buy-card .bc-acts .btn { height: 48px; padding: 0 20px; font-size: 16px; font-weight: 600; border-radius: var(--r-3); }
 .acts-c { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.empty .acts-c { margin-top: 14px; }
 .acc-li .sq .ic { color: var(--fg-2); }
 .acc-li .state { justify-self: end; }
 /* 내 방 */
@@ -956,6 +962,13 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   #app.nav-open .scrim { opacity: 1; pointer-events: auto; }
   :root { --top-h: 56px; }
   .menu-btn { display: inline-flex; }
+  /* 휴대폰: 글자를 한 단계씩 키운다 — 설정 이름처럼 중요한 글자가 작아 보이지 않게 */
+  :root { --t-11: 12px; --t-12: 13px; --t-13: 14px; --t-14: 15px; --t-16: 17px; --t-18: 19px; }
+  .srow-l label, .srow-l .lb { font-size: 16px; font-weight: 600; }
+  .srow.main .srow-l .lb, .srow.main .srow-l label { font-size: 17px; font-weight: 700; }
+  .srow-l p, .off-note { color: var(--fg-2); }
+  .buy-card .bc-acts { display: grid; }
+  .buy-card .bc-acts .btn { width: 100%; justify-content: center; }
   .top-search { display: grid; }
   .topbar { padding: 0 16px; padding-top: env(safe-area-inset-top, 0px); height: calc(var(--top-h) + env(safe-area-inset-top, 0px)); }
   .view > .page { padding: 28px 16px 200px; }
