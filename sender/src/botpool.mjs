@@ -1190,21 +1190,33 @@ export class BotSlot {
   }
 
   // ── 보이스룸 실험(A층) ───────────────────────────────────────────────────
-  // SETMETA(type 16) 로 liveon 신호만 보낸다. 서버 할당(csIP/csPort/callId)과
-  // 음성 미디어 세션은 아직 없다 — 카카오가 이 신호를 받아 배너를 띄우고 얼마나
-  // 유지하는지(또는 바로 liveon:false 로 되돌리는지)를 로그로 측정하기 위한 것.
-  // 응답 status 와, 되돌아오는 CHGMETA 는 SENDER_TRACE_VOICE 로그로 함께 본다.
+  // SETMETA(type 16) 로 LIVE_TALK_INFO 를 보낸다. 서버 할당(csIP/csPort/callId)과
+  // 음성 미디어 세션은 아직 없다 — csIP/callId 를 임의값으로 채워, 카카오가
+  //   (a) 필드 존재만 확인하는지(→ status 0, 가짜 값으로도 배너 가능) 아니면
+  //   (b) callId 를 실제 할당과 대조하는지(→ 거부)
+  // 를 응답 status 로 가린다. callId 는 2^53 을 넘으므로 숫자 정밀도를 잃지 않게
+  // content 문자열을 직접 조립한다(JSON.stringify 금지). off 는 liveon:false 만 보낸다.
   async voiceSetMeta(view, on) {
     const chatId = view && view.chat_id ? String(view.chat_id) : ''
     if (!chatId) return { ok: false, error: 'no_chat' }
     const nowSec = Math.floor(Date.now() / 1000)
     const title = cleanName(view.link_name) || '보이스룸'
-    const content = on
-      ? { liveon: true, title, updateTime: nowSec, startTime: nowSec }
-      : { liveon: false }
-    const r = await this.raw('SETMETA', { chatId: L(chatId), type: 16, content: JSON.stringify(content) })
+    let content
+    if (on) {
+      // 17자리 callId 를 문자열로 만든다(정밀도 유지). csIP 는 과거 캡처에서 본 음성서버.
+      const callId = '1' + String(nowSec) + String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
+      const csIP = '211.242.15.98'
+      const csIP6 = '2404:4600:2:d5:211:242:15:98'
+      content = '{"liveon":true,"title":' + JSON.stringify(title) +
+        ',"updateTime":' + nowSec + ',"startTime":' + nowSec +
+        ',"csIP":"' + csIP + '","csIP6":"' + csIP6 + '","csPort":9000' +
+        ',"callId":' + callId + ',"url":"","blind":false}'
+    } else {
+      content = '{"liveon":false}'
+    }
+    const r = await this.raw('SETMETA', { chatId: L(chatId), type: 16, content })
     const st = R.locoStatus(r)
-    log(this.id, `voice experiment SETMETA(16) liveon=${on} chat ${chatId} → status ${st} body ${traceText((r && r.body) || {})}`)
+    log(this.id, `voice experiment SETMETA(16) liveon=${on} chat ${chatId} content ${content} → status ${st} body ${traceText((r && r.body) || {})}`)
     return { ok: R.locoOk(r), status: st, sent: content }
   }
 
