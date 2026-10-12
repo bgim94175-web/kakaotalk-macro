@@ -4,6 +4,7 @@
 //   routes/purchase.js : 구매 웹 API (/api/*) — 주문 · 키 조회 · 자동 입금확인 웹훅
 //   routes/auth.js     : 회원·인증 API (/api/site /api/me /api/auth/* /auth/google/*) — 아이디·비밀번호 + Google
 //   routes/panel.js    : 웹 콘솔 API (/panel/api/*) — 회원 세션으로 로그인
+//   routes/demo.js     : 사이트 체험 API (/api/demo*) — 로그인 없이 lib/demo.js 엔진만 부른다(카카오톡에는 보내지 않는다)
 //   lib/sender-child.js: 서버 쪽 카카오 발송 자식 프로세스 (127.0.0.1 에서만 듣고, 공개 /v1 프록시는 없다)
 // 안드로이드 앱(사용자앱·관리자앱)은 단종됐다. 앱 전용 API(/verify /heartbeat ...)도 같이 뺐다.
 'use strict';
@@ -22,6 +23,7 @@ const adminRoutes = require('./routes/admin');
 const authRoutes = require('./routes/auth');
 const purchaseRoutes = require('./routes/purchase');
 const panelRoutes = require('./routes/panel');
+const demoRoutes = require('./routes/demo');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -50,7 +52,7 @@ app.use((req, res, next) => {
 
 // ── IP 기반 레이트리밋 (실제 구현은 lib/ratelimit.js — 메모리 기반).
 // 버킷은 종류별로 나뉘어 있다(order-read 180 / order-write 20 / deposit 60 / admin 120 /
-// panel-login 8 / panel 180, 전부 분당·환경변수로 덮어쓰기 가능 — lib/ratelimit.js 의 KIND_LIMITS 참고).
+// panel-login 8 / panel 180 / demo 180(사이트 체험), 전부 분당·환경변수로 덮어쓰기 가능 — lib/ratelimit.js 의 KIND_LIMITS 참고).
 // NAT(사무실) 뒤에서 여러 명이 같이 써도 폴링이 결제 대기자끼리 서로를 막지 않게 하려는 분리다.
 // IP 는 rl.ipOf() 로만 뽑는다 — req.ip 는 Express 의 해석이라 우리 의도(XFF 맨 뒤)와 달라질 수 있다.
 // 관리자 비밀번호 연속 실패 차단은 routes/admin.js 의 guard 가 기록하고, 여기서 막는다(기본 15분).
@@ -134,6 +136,7 @@ app.get('/login', page('login.html'));
 app.get('/signup', page('signup.html'));
 app.get('/account', page('account.html'));
 app.get('/support', page('support.html'));
+app.get('/demo', page('demo.html'));
 app.get('/panel', page('panel.html'));
 // 관리자 화면. /admin 은 비밀번호로 막힌 API 접두사라 페이지는 /manage 에 둔다.
 app.get('/manage', page('manage.html'));
@@ -143,6 +146,7 @@ app.use(adminRoutes);
 app.use(authRoutes);
 app.use(purchaseRoutes);
 app.use(panelRoutes);
+app.use(demoRoutes);
 
 // 링크 미리보기 봇(카카오톡·디스코드 등). Accept 에 text/html 이 없어도 og 태그가 있는 페이지를 받아야 한다.
 const PREVIEW_BOT = /kakaotalk-scrap|facebookexternalhit|Discordbot|Twitterbot|Slackbot|TelegramBot|WhatsApp|LinkedInBot|Applebot|Googlebot|bingbot|Yeti|Daum/i;
@@ -175,6 +179,11 @@ app.use((err, req, res, next) => {
   }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ ok: false, reason: 'bad_request', error: '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' });
+  }
+  // 그 밖의 손님 쪽 요청 오류(본문 압축 방식이 틀림 등, body-parser 의 4xx)는 그 상태 그대로
+  const st = err && Number(err.status || err.statusCode);
+  if (st >= 400 && st < 500) {
+    return res.status(st).json({ ok: false, reason: 'bad_request', error: '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' });
   }
   res.status(500).json({ ok: false, reason: 'server_error', error: '요청을 처리하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' });
 });

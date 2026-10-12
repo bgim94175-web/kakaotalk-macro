@@ -25,6 +25,15 @@
   --ease: cubic-bezier(.2, .8, .2, 1);
   --d1: 150ms; --d2: 240ms; --d3: 380ms;
   --side-w: 248px; --top-h: 52px; --col-w: 1040px; --tap: 44px;
+  /* 체험(/demo) 카카오톡 방 화면 — 밝은 기본 테마 그대로. demo.css 만 쓴다 */
+  --kk-bg: #b2c7d9; --kk-them: #ffffff; --kk-me: #fee500; --kk-ink: #191919;
+  --kk-name: #3d4852; --kk-time: #47525e; --kk-unread: #f2c200; --kk-hidden: #6b7682;
+  --kk-pill: rgba(0, 0, 0, 0.2); --kk-pill-fg: #ffffff; --kk-sep: rgba(0, 0, 0, 0.08); --kk-scroll: rgba(0, 0, 0, 0.2);
+  --kk-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); --kk-focus: #191919;
+  --kk-input: #ffffff; --kk-input-fg: #8f8f8f; --kk-send-off: #ececec;
+  --kk-host: #f5c400; --kk-sub: #e1e7ec;
+  --kk-av-0: #e8916f; --kk-av-1: #9fc196; --kk-av-2: #d5ae86; --kk-av-3: #b3a1d6; --kk-av-4: #dc9ea3; --kk-av-5: #8cbfc2; --kk-av-fg: #ffffff;
+  --kk-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "IBM Plex Sans KR", sans-serif;
 }
 @media (prefers-reduced-motion: reduce) { :root { --d1: 0ms; --d2: 0ms; --d3: 0ms; } }
 
