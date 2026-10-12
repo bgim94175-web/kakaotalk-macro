@@ -1,0 +1,838 @@
+package com.buseong.kakaoauto;
+
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.Random;
+
+/**
+ * 주기 자동발송 스케줄러.
+ *
+ * 핵심 동작(v1.8 에서 그대로 가져온 것 — 절대 바꾸지 마라)
+ *   "내가 마지막으로 보낸 뒤 그 방에 남의 새 메시지가 minMessages 개 이상 쌓였을 때만 보낸다."
+ *   아무도 말 안 하는 방에 혼자 도배하지 않게 하는 장치다.
+ *
+ * 흐름
+ *   ensureScheduled → 알람 예약 → AlarmReceiver → runDue(조건 판정 + 발송) → scheduleNext → 반복
+ *
+ * 서버와는 아무 통신도 하지 않는다. 켜고 끄는 건 매크로 설정(enabled)과 전체 정지(SendGuard)뿐이다.
+ */
+public final class Scheduler {
+    private Scheduler() {}
+
+    /** 알람 브로드캐스트 액션. AlarmReceiver 가 이걸 보고 runDue 로 보낸다. */
+    public static final String ACTION_FIRE = "com.buseong.kakaoauto.ALARM_FIRE";
+
+    /**
+     * v2.0 까지 쓰던 주기 확인 알람의 액션. 지금은 쓰지 않는다.
+     * 업데이트 전 기기에 남아 있는 알람을 지우는 데({@link #dropOldAlarm})만 쓴다 —
+     * PendingIntent 를 찾으려면 action 문자열이 예전과 똑같아야 한다.
+     */
+    public static final String ACTION_OLD = "com.buseong.kakaoauto.ALARM_HEARTBEAT";
+
+    /** PendingIntent requestCode (다른 PendingIntent 와 겹치지 않게 고정) */
+    public static final int REQ_ALARM = 7311;
+
+    /** 예전 주기 확인 알람의 requestCode ({@link #ACTION_OLD} 와 같이 쓴다) */
+    private static final int REQ_OLD = 7312;
+
+    /** 예전 주기 확인 알람의 예정 시각 키. 지우기만 한다. */
+    private static final String K_OLD_NEXT = "sched_hb_next";
+
+    /** 다음 발송 예정 시각 (평문 Prefs — 시각 자체는 민감정보가 아니고, 설정키가 없어도 읽혀야 한다) */
+    private static final String K_NEXT = "sched_next";
+
+    /** 누적 발송 카운터. EVERY_N("N번째 발송마다") 이미지 첨부 판정에 쓴다. */
+    private static final String K_SEQ = "sched_seq";
+
+    // ── 마지막 사진 전송 실패 기록 ────────────────────────────────────────────
+    //  예약 발송의 사진 전송은 아무도 화면을 안 보고 있을 때 돌아간다. 그래서 실패를
+    //  여기 안 남기면 사용자는 영원히 모른다 — 활동 로그는 200줄 링버퍼라 금방 밀려난다.
+    //  평문 Prefs 에 둔다: 설정을 못 읽는 상황에서도 경고는 떠야 하니까.
+    private static final String K_IMG_FAIL_AT = "img_fail_at";
+    private static final String K_IMG_FAIL_ROOM = "img_fail_room";
+    private static final String K_IMG_FAIL_WHY = "img_fail_why";
+    /** "이미지 생략" 을 마지막으로 알린 날 ({@link #dayOf}). 하루 1회만 남기기 위한 값이다. */
+    private static final String K_IMG_SKIP_NOTED = "img_skip_noted_day";
+
+    /** 사유 문구가 아무리 길어도 이만큼만 보관한다 (경고 줄 한 줄에 들어갈 만큼) */
+    private static final int IMG_FAIL_WHY_MAX = 300;
+
+    /** WakeLock 은 runDue 도는 동안만, 최대 60초. */
+    private static final long WAKE_TIMEOUT_MS = 60000L;
+
+    /**
+     * 한 번의 runDue 가 쓸 수 있는 시간. WakeLock 타임아웃(60초)보다 넉넉히 짧게 잡는다.
+     * 브로드캐스트를 너무 오래 붙잡으면 시스템이 프로세스를 잡아간다.
+     */
+    private static final long RUN_BUDGET_MS = 35000L;
+
+    /** 방 사이 간격 (봇처럼 안 보이게 1~3초 랜덤) */
+    private static final int GAP_MIN_MS = 1000;
+    private static final int GAP_MAX_MS = 3000;
+
+    private static final Random RND = new Random();
+
+    /** runDue 중복 실행 방지 */
+    private static final Object LOCK = new Object();
+    private static boolean running = false;
+
+    /** "정확한 알람 권한 없음" 안내를 로그에 한 번만 남기려고 */
+    private static boolean warnedInexact = false;
+
+    /** WakeLock 실패(권한 없음 등) 안내도 로그에 한 번만 남긴다 — 매 주기마다 쌓으면 링버퍼가 오염된다 */
+    private static boolean warnedWake = false;
+
+    // ── 예약 ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 발송 알람이 걸려 있게 보장한다. 여러 번 불러도 안전하다(같은 PendingIntent 를 덮어쓴다).
+     * 매크로가 꺼져 있으면 알람을 끈다.
+     *
+     * v4: 전역 nextAt 하나가 아니라 <b>방별 nextAt</b> 중 가장 이른 시각에 알람을 건다.
+     *     nextAt 이 0 인(아직 안 잡힌) 대상 방은 지금부터 그 방의 유효 쿨타임(effCd) 범위 랜덤으로 초기화한다.
+     */
+    /**
+     * 전체 정지 중이면 예약을 걸지 않는다. 차단은 발송 직전에도 한 번 더 걸리지만
+     * (SendGuard), 알람을 계속 깨우면 배터리만 쓰고 활동 로그에 보류 기록이 쌓인다.
+     */
+    public static void ensureScheduled(Context ctx) {
+        if (SendGuard.stopped(ctx)) { cancel(ctx); return; }
+        Context c = app(ctx);
+        if (c == null) return;
+
+        rearm(c);
+    }
+
+    /**
+     * 대상 방들의 방별 nextAt 을 살펴 가장 이른 시각에 발송 알람을 다시 건다.
+     * 매크로가 꺼져 있거나 대상 방이 하나도 없으면 알람을 끈다.
+     * {@link #ensureScheduled} 와 {@link #scheduleNext} 가 공유한다.
+     */
+    private static void rearm(Context c) {
+        Settings s = settings(c);
+        if (s == null) return;
+        // 설정 키를 잠깐 못 열어 기본값이다 → 진짜 예약을 끄지 않고 5분 뒤 다시 본다
+        if (s.keyless) { arm(c, System.currentTimeMillis() + 5 * 60 * 1000L); return; }
+        Settings.Macro m = s.macro;
+
+        if (!m.enabled) {
+            cancel(c);
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        boolean[] inited = { false };
+        long earliest = planActive(s, now, inited);
+
+        // 대상 방이 없거나 전부 비활성(미사용 계정·방 꺼짐)이면 예약을 거는 의미가 없다.
+        if (earliest <= 0L) {
+            cancel(c);
+            return;
+        }
+
+        setNext(c, s, earliest, inited[0]);
+        arm(c, earliest);
+    }
+
+    /**
+     * 대상 방(roomActive)을 돌며 가장 이른 방별 nextAt 을 찾는다.
+     * nextAt 이 0 인 방은 지금부터 그 방 유효 쿨타임 범위 랜덤으로 초기화한다(메모리만 — 저장은 호출측).
+     *
+     * @param inited 새로 초기화한 방이 하나라도 있으면 inited[0]=true 로 알려준다(호출측이 save 판단).
+     * @return 대상 방들의 가장 이른 nextAt. 대상 방이 하나도 없으면 0.
+     */
+    private static long planActive(Settings s, long now, boolean[] inited) {
+        Settings.Macro m = s.macro;
+        long earliest = 0L;
+        List<RoomRef> all = m.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid() || !s.roomActive(r)) continue;
+            long at = s.roomNextAt(r);
+            if (at <= 0L) {
+                at = m.pickNextAt(now, s.effCdMinMin(r), s.effCdMaxMin(r));
+                s.setRoomNextAt(r, at);
+                if (inited != null) inited[0] = true;
+            }
+            if (earliest == 0L || at < earliest) earliest = at;
+        }
+        return earliest;
+    }
+
+    /** 발송 알람을 끈다. 예정 시각도 지운다. */
+    public static void cancel(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return;
+
+        try {
+            AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+            PendingIntent pi = pending(c);
+            if (am != null && pi != null) am.cancel(pi);
+            if (pi != null) pi.cancel();
+        } catch (Throwable t) {
+            Log.add(c, "발송 알람 해제에 실패했습니다. (" + t + ")");
+        }
+
+        Prefs.putLong(c, K_NEXT, 0L);
+        try {
+            Settings cur = Settings.load(c);
+            Settings.Macro m = (cur == null || cur.keyless) ? null : cur.macro;
+            if (m != null && m.nextAt != 0L) {
+                m.nextAt = 0L;
+                if (Settings.canSave(c)) Settings.flush(c);
+            }
+        } catch (Throwable t) {
+            // 설정을 못 읽는 상황이면 그냥 넘어간다 — 평문 예정 시각은 이미 지웠다
+            android.util.Log.w("KakaoAuto", "예정 시각 초기화 실패", t);
+        }
+    }
+
+    /** 다음 발송 예정 시각 (epoch ms). 예정이 없으면 0. */
+    public static long nextAt(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return 0L;
+        long at = storedNext(c);
+        if (at > 0) return at;
+        try {
+            Settings.Macro m = Settings.macro(c);
+            return (m == null) ? 0L : m.nextAt;
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
+    /**
+     * 다음 발송 알람을 다시 잡는다. v4 에서는 방별 nextAt 중 가장 이른 시각에 건다.
+     * (runDue 가 보낸 방은 이미 자기 nextAt 을 미래로 갱신해 뒀고, 아직 안 보낸 방은 그대로다.)
+     * 방해금지 시간대 처리는 각 방의 nextAt 을 잡을 때 pickNextAt 안에서 이미 끝난다.
+     */
+    public static void scheduleNext(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return;
+        rearm(c);
+    }
+
+    // ── 예전 버전 정리 ──────────────────────────────────────────────────────────
+
+    /**
+     * v2.0 이 걸어둔 주기 확인 알람이 남아 있으면 지운다. 앱 시작·부팅 때 한 번씩 부른다.
+     * 그 알람이 울려도 {@link AlarmReceiver} 는 무시하지만, 기기를 괜히 깨우지 않게 아예 없앤다.
+     */
+    public static void dropOldAlarm(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return;
+        try {
+            Intent i = new Intent(c, AlarmReceiver.class);
+            i.setAction(ACTION_OLD);
+            int flags = PendingIntent.FLAG_NO_CREATE;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent pi = PendingIntent.getBroadcast(c, REQ_OLD, i, flags);
+            if (pi != null) {
+                AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                if (am != null) am.cancel(pi);
+                pi.cancel();
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "예전 알람 정리 실패", t);
+        }
+        if (Prefs.has(c, K_OLD_NEXT)) Prefs.remove(c, K_OLD_NEXT);
+    }
+
+    // ── 발송 ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 알람이 울렸을 때 호출된다. 조건을 다 따져보고 실제로 보낸다.
+     * <b>백그라운드 스레드에서 불러라</b> — 방 사이에 1~3초 쉬면서 최대 {@link #RUN_BUDGET_MS} 까지 돈다.
+     * 끝나면 무조건 다음 알람을 다시 잡는다.
+     */
+    public static void runDue(Context ctx) {
+        final Context c = app(ctx);
+        if (c == null) return;
+
+        // 전체 정지 — 조건 판정도 하지 않고 알람까지 끊는다. 발송 직전에도 한 번 더 막히지만
+        // 여기서 끊어야 보류 기록이 방마다 쌓이지 않는다.
+        if (SendGuard.stopped(c)) {
+            Log.add(c, "전체 정지 중이므로 자동발송을 실행하지 않았습니다.");
+            cancel(c);
+            return;
+        }
+
+        synchronized (LOCK) {
+            if (running) {
+                Log.add(c, "이전 자동발송이 진행 중입니다. 이번 주기는 건너뜁니다.");
+                return;
+            }
+            running = true;
+        }
+
+        PowerManager.WakeLock wl = null;
+        try {
+            wl = acquire(c, "kakaoauto:send", WAKE_TIMEOUT_MS);
+            work(c);
+        } catch (Throwable t) {
+            Log.add(c, "자동발송 중 오류가 발생했습니다. (" + t + ")");
+        } finally {
+            release(wl);
+            synchronized (LOCK) { running = false; }
+
+            try {
+                scheduleNext(c);
+                long at = nextAt(c);
+                if (at > 0) Log.add(c, "다음 발송 예정 " + when(at));
+            } catch (Throwable t) {
+                Log.add(c, "다음 발송 예약에 실패했습니다. (" + t + ")");
+            }
+
+            refreshUi();
+        }
+    }
+
+    /** 실제 판정 + 발송. runDue 안에서만 부른다. */
+    private static void work(Context c) {
+        final long now = System.currentTimeMillis();
+
+        Settings s;
+        try {
+            s = Settings.load(c);
+        } catch (Throwable t) {
+            Log.add(c, "설정을 읽지 못해 발송을 건너뛰었습니다. (" + t + ")");
+            return;
+        }
+        if (s.keyless) {
+            // 설정 키를 잠깐 못 열었다 → 이번 차례는 건너뛰고 5분 뒤 다시 본다(예약은 끄지 않는다)
+            arm(c, now + 5 * 60 * 1000L);
+            return;
+        }
+        final Settings.Macro m = s.macro;
+
+        // 1) 활성 여부
+        if (!m.enabled) {
+            Log.add(c, "자동발송이 비활성 상태이므로 발송하지 않았습니다.");
+            return;
+        }
+
+        // 2) 방해금지 시간 (전역 유지)
+        if (m.inQuiet(now)) {
+            Log.add(c, "방해금지 시간대(" + m.quietFrom + "~" + m.quietTo + ")이므로 발송하지 않았습니다.");
+            return;
+        }
+
+        // 3) 대상 방 — roomActive(전역 on && 계정 on && 방 on && 발송 대상 계정) 인 방만 돈다.
+        //    (일일 한도 체크는 v4 에서 제거됨.)
+        List<RoomRef> rooms = new ArrayList<RoomRef>();
+        int inactive = 0;
+        List<RoomRef> all = m.roomRefs();
+        for (int i = 0; i < all.size(); i++) {
+            RoomRef r = all.get(i);
+            if (r == null || !r.valid()) continue;
+            if (!s.roomActive(r)) { inactive++; continue; }
+            rooms.add(r);
+        }
+        if (rooms.isEmpty()) {
+            if (inactive > 0) {
+                Log.add(c, "대상 대화방 " + inactive + "개가 모두 비활성 상태(미사용 계정 또는 방 매크로 꺼짐)이므로 발송하지 않았습니다."
+                        + " 계정·대화방별 설정을 확인하십시오.");
+            } else {
+                Log.add(c, "대상 대화방이 지정되지 않아 발송하지 않았습니다. 매크로 탭에서 대화방을 추가하십시오.");
+            }
+            return;
+        }
+
+        // 4) 알림 읽기 권한 — 없으면 어떤 방도 못 보낸다(방마다 실패 로그 쌓지 말고 여기서 끝낸다)
+        if (!KakaoListener.listenerBound()) {
+            if (KakaoListener.connected(c)) {
+                Log.add(c, "알림 읽기 권한가 아직 연결되지 않았습니다. 카카오톡 알림이 1회 수신되면 발송이 재개됩니다.");
+            } else {
+                Log.add(c, "알림 읽기 권한이 비활성 상태이므로 발송이 불가합니다. 내정보 탭에서 권한을 허용하십시오.");
+            }
+            return;
+        }
+
+        // 5) 방별 발송 — 방마다 자기 nextAt(쿨타임)·유효 메시지·최소 신규 메시지 수를 쓴다.
+        final long deadline = now + RUN_BUDGET_MS;
+        int ok = 0;
+        int waiting = 0;    // 신규 메시지 미달로 대기
+        int notDue = 0;     // 아직 쿨타임이 안 됨
+        int held = 0;       // 계정 간 간격으로 보류 (다음 알람에서 다시 보낸다)
+        int emptyMsg = 0;   // 유효 메시지가 비어 건너뜀
+        int left = 0;
+        boolean dirty = false;   // 방별 nextAt 을 갱신했으면 끝에 한 번 save
+        StringBuilder failed = new StringBuilder();
+
+        for (int i = 0; i < rooms.size(); i++) {
+            if (System.currentTimeMillis() > deadline) {
+                left = rooms.size() - i;
+                break;
+            }
+
+            RoomRef room = rooms.get(i);
+            // 계정이 2개 이상이면 label(c) 가 계정 이름까지 붙여준다 (하나면 방 이름만)
+            String label = room.label(c);
+
+            // 방별 쿨타임: 아직 때가 안 됐으면 건너뛴다 (0 이면 이번에 바로 발송 대상)
+            long roomAt = s.roomNextAt(room);
+            if (roomAt > 0L && now < roomAt) {
+                notDue++;
+                continue;
+            }
+
+            // ★ 쿨타임이 도래한 방은 '발송하든 못 하든' 다음 쿨타임으로 즉시 밀어둔다.
+            //   그러지 않으면 발송 조건 미충족(새 메시지 부족·메시지 공백·발송 실패) 방의 nextAt 이
+            //   과거에 고정돼, ensureScheduled 가 그 과거 시각으로 알람을 다시 걸어 즉시 재발화한다
+            //   (무한 반복·배터리 고갈). 발송 성공 여부와 무관하게 여기서 한 번만 전진시킨다.
+            s.setRoomNextAt(room, m.pickNextAt(now, s.effCdMinMin(room), s.effCdMaxMin(room)));
+            dirty = true;
+
+            // 유효 메시지(방 > 계정 > 전역)가 비면 그 방은 건너뛰고 로그로 알린다.
+            String msg = s.effMessage(room);
+            if (msg == null || msg.trim().length() == 0) {
+                emptyMsg++;
+                Log.add(c, "「" + label + "」 발송 메시지가 비어 있어 건너뛰었습니다. 매크로/계정/대화방 설정에서 메시지를 입력하십시오.");
+                continue;
+            }
+
+            // ★ v1.8 핵심: 내 마지막 발송 뒤 남의 새 메시지가 (방별 유효) minMessages 개 이상 쌓인 방에만 보낸다
+            final int minNeed = Math.max(0, s.effMinMessages(room));
+            int others = 0;
+            try {
+                others = KakaoListener.othersSinceMine(room);
+            } catch (Throwable t) {
+                Log.add(c, "「" + label + "」 신규 메시지 수를 읽지 못했습니다. (" + t + ")");
+            }
+            if (others < minNeed) {
+                waiting++;
+                continue;
+            }
+
+            int res = KakaoListener.SEND_FAIL;
+            try {
+                res = KakaoListener.send(c, room, msg, SendGuard.MACRO);
+            } catch (Throwable t) {
+                Log.add(c, "「" + label + "」 발송 중 오류가 발생했습니다. (" + t + ")");
+            }
+
+            // ★ 계정 간 간격에 걸렸다 — 아직 아무것도 보내지 않았다.
+            //   메모리 타이머로 미루면 기기가 잠들 때 사라지므로(홍보 누락), 이 방의 다음
+            //   발송 시각을 간격이 끝나는 시점으로 **당겨** 알람에 맡긴다. 알람은 기기를
+            //   깨우고 프로세스가 죽어도 살아나므로 둘 다 보내는 것이 보장된다.
+            //   성공으로 집계하지 않고 사진도 보내지 않는다 — 글보다 사진이 먼저 나가면 안 된다.
+            if (res == KakaoListener.SEND_HELD) {
+                long wait = 0L;
+                try { wait = KakaoListener.heldMs(c, room); } catch (Throwable t) { wait = 0L; }
+                if (wait <= 0L) wait = 5000L;                  // 그 사이 간격이 끝났으면 곧 다시
+                long retryAt = now + wait + 1500L;             // 간격 경계를 확실히 넘긴 뒤
+                long planned = s.roomNextAt(room);
+                // 이미 더 이른 시각이 잡혀 있으면 그대로 둔다 (쿨타임을 앞당기지는 않는다)
+                if (planned <= 0L || retryAt < planned) s.setRoomNextAt(room, retryAt);
+                KakaoListener.noteHeld(c, room, SendGuard.MACRO, wait, false);
+                held++;
+                continue;
+            }
+
+            if (res == KakaoListener.SEND_OK) {
+                ok++;
+                MainActivity.countSent(c, 1);
+
+                // 이미지 첨부 (EVERY / EVERY_N). NEVER·MANUAL 은 imagesThisTime 이 false 를 준다.
+                int seq = bumpSeq(c);
+                // ★ ImageSender 에는 RoomRef 를 그대로 넘긴다. 저장 키(RoomRef.key())를 넘기면
+                //   계정 구분자가 붙은 문자열이 화면 매칭에 쓰여 카톡 화면의 어떤 텍스트와도 안 맞는다.
+                final RoomRef imgRoom = room;
+                final String imgLabel = label;
+                final boolean wantImages = m.imagesThisTime(seq);
+                try {
+                    if (wantImages && ImageSender.blockedInBackground(c, imgRoom, m.images)) {
+                        // 공유창도 안 뜨고 채팅방 첨부 경로의 재료도 없는 백그라운드 상태다.
+                        // 매 주기 같은 실패를 되풀이하는 대신 텍스트만 보내고 이 사실을 하루 1회만 알린다.
+                        // (images 를 같이 넘기는 이유: 채팅방 첨부 경로는 공유창과 무관하게 동작하므로
+                        //  "공유창 불가 확정" 만으로 이미지를 포기하면 실제로 되는 경로를 스스로 닫는다.)
+                        noteImageSkipped(c, imgLabel);
+                    } else if (wantImages) {
+                        // ★ 콜백을 버리면 안 된다. 예약 발송은 아무도 안 보고 있어서,
+                        //   여기서 결과를 기록하지 않으면 사진이 안 갔다는 걸 사용자가 영원히 모른다.
+                        ImageSender.sendWithResult(c, imgRoom, m.images, new ImageSender.Done() {
+                            @Override public void done(boolean ok, String detail) {
+                                if (ok) {
+                                    clearImageFail(c, imgLabel);
+                                    Log.add(c, "「" + imgLabel + "」 이미지 전송을 완료했습니다.");
+                                } else {
+                                    noteImageFail(c, imgLabel, detail);
+                                    Log.add(c, "「" + imgLabel + "」 이미지 전송에 실패했습니다. "
+                                            + ((detail == null || detail.length() == 0)
+                                               ? "원인 확인 불가" : detail));
+                                }
+                                refreshUi();
+                            }
+                        });
+                    }
+                } catch (Throwable t) {
+                    noteImageFail(c, imgLabel, "전송을 시작하지 못했습니다. (" + t + ")");
+                    Log.add(c, "「" + imgLabel + "」 이미지 전송을 시작하지 못했습니다. (" + t + ")");
+                }
+
+                if (i < rooms.size() - 1) gap();
+            } else {
+                if (failed.length() > 0) failed.append(", ");
+                failed.append(label);
+            }
+        }
+
+        // 방별 nextAt 갱신분을 한 번에 저장 (방마다 디스크 쓰지 않게 배치로)
+        if (dirty && Settings.canSave(c)) s.save(c);
+
+        StringBuilder sb = new StringBuilder(96);
+        sb.append("자동발송 · 성공 ").append(ok).append("건");
+        if (held > 0) {
+            sb.append(" / 계정 간 간격으로 ").append(held).append("개 대화방은 잠시 뒤 발송");
+        }
+        if (notDue > 0) sb.append(" / 쿨타임 대기 ").append(notDue).append("개 대화방");
+        if (waiting > 0) {
+            sb.append(" / 신규 메시지 대기 ").append(waiting).append("개 대화방");
+        }
+        if (emptyMsg > 0) sb.append(" / 메시지 없음 ").append(emptyMsg).append("개");
+        if (failed.length() > 0) sb.append(" / 실패: ").append(failed);
+        if (inactive > 0) sb.append(" / 비활성 제외 ").append(inactive).append("개");
+        if (left > 0) sb.append(" / 시간 부족으로 ").append(left).append("개 대화방은 다음 주기로 이월");
+        Log.add(c, sb.toString());
+    }
+
+    // ── 마지막 사진 전송 실패 기록 (공개 API) ─────────────────────────────────
+
+    /**
+     * 마지막으로 실패한 사진 전송 한 건. {@link #lastImageFail} 이 돌려준다.
+     * 성공하면 {@link #clearImageFail} 로 지워진다 — 그래서 이게 null 이 아니면
+     * "지금도 안 고쳐진 실패" 라고 봐도 된다.
+     */
+    public static final class ImageFail {
+        /** 실패한 시각 (0 이 아니다) */
+        public final long at;
+        /** 어느 방에 보내려던 거였나 ("" 면 모름) */
+        public final String room;
+        /** 왜 실패했나 (사람이 읽는 한 줄) */
+        public final String why;
+
+        ImageFail(long at, String room, String why) {
+            this.at = at;
+            this.room = (room == null) ? "" : room;
+            this.why = (why == null || why.length() == 0) ? "원인 확인 불가" : why;
+        }
+    }
+
+    /** 마지막 사진 전송 실패 기록. 없으면 null. */
+    public static ImageFail lastImageFail(Context ctx) {
+        Context c = app(ctx);
+        if (c == null) return null;
+        long at = Prefs.getLong(c, K_IMG_FAIL_AT, 0L);
+        if (at <= 0) return null;
+        return new ImageFail(at, Prefs.getStr(c, K_IMG_FAIL_ROOM, ""),
+                Prefs.getStr(c, K_IMG_FAIL_WHY, ""));
+    }
+
+    /**
+     * "백그라운드에서는 이미지를 보낼 수 없어서 텍스트만 보냈다" 를 <b>하루 1회만</b> 알린다.
+     *
+     * 왜 하루 1회인가 — 예약 발송은 20~40분마다 돌고, 같은 원인의 같은 줄이 매 주기 쌓이면
+     * 활동 로그(200줄 링버퍼)가 이 줄로만 가득 차서 정작 읽어야 하는 실패가 밀려난다.
+     * 그래서 마지막으로 알린 <b>날짜</b>를 기록하고 날이 바뀌기 전에는 다시 적지 않는다.
+     * (예전에는 {@link ImageSender#backgroundBlockedAt} 값으로만 판단했는데, 전송이 한 번 성공해
+     *  그 값이 지워졌다가 다시 확정될 때마다 새 회차로 취급되어 같은 날에도 여러 번 쌓였다.)
+     *
+     * 실패 기록({@link #noteImageFail})은 항상 갱신한다 — 그건 누적되지 않고 마지막 한 건만 남는
+     * 상태 표시라서, 하루 1회로 묶으면 화면이 오래된 내용을 보여준다.
+     */
+    private static void noteImageSkipped(Context c, String label) {
+        if (ImageSender.backgroundBlockedAt(c) <= 0L) return;
+
+        String why = "이미지를 생략하고 텍스트만 발송했습니다. "
+                + "이 기기의 예약 발송에서는 카카오톡 화면이 표시되지 않아 이미지를 첨부할 수 없습니다(원인 미확정). "
+                + "매크로 › 이미지 첨부 › 즉시 발송 으로 1회 전송하면 다시 시도합니다.";
+        noteImageFail(c, label, why);
+
+        boolean first;
+        long today = dayOf(System.currentTimeMillis());
+        try {
+            first = Prefs.getLong(c, K_IMG_SKIP_NOTED, 0L) != today;
+            if (first) Prefs.putLong(c, K_IMG_SKIP_NOTED, today);
+        } catch (Throwable t) {
+            first = true;   // 못 읽었으면 한 번은 알리는 쪽이 낫다
+        }
+        if (!first) return;
+
+        Log.add(c, "이미지 전송을 생략하고 텍스트만 발송합니다. 백그라운드 상태에서 카카오톡 화면이 "
+                + ImageSender.BG_FAIL_LIMIT + "회 연속 표시되지 않았습니다. "
+                + "채팅방 첨부 경로도 사용할 수 없는 상태입니다(대상 대화방 알림 미수신 또는 이미지 시각 확인 불가). "
+                + "이미지는 매크로 › 이미지 첨부 › 즉시 발송 으로 전송하십시오. "
+                + "1회 성공하면 예약 발송이 이미지 첨부를 다시 시도합니다. "
+                + "이 안내는 하루 1회만 기록됩니다.");
+    }
+
+    /** 그 시각이 며칠째인가 (기기 시간대 기준 일 번호). 하루 1회 안내 판정에 쓴다. */
+    private static long dayOf(long ms) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.setTimeInMillis(ms);
+        return cal.get(java.util.Calendar.YEAR) * 1000L + cal.get(java.util.Calendar.DAY_OF_YEAR);
+    }
+
+    /**
+     * 사진 전송 실패를 기록한다. 예약 발송·수동 전송·진단이 전부 이걸 부른다.
+     * 마지막 한 건만 보관한다 (사용자가 알아야 하는 건 "지금 안 되고 있다" 는 사실이다).
+     */
+    public static void noteImageFail(Context ctx, String room, String why) {
+        Context c = app(ctx);
+        if (c == null) return;
+        String w = (why == null) ? "" : why.trim();
+        if (w.length() == 0) w = "원인 확인 불가";
+        if (w.length() > IMG_FAIL_WHY_MAX) w = w.substring(0, IMG_FAIL_WHY_MAX) + "…";
+        try {
+            Prefs.putLong(c, K_IMG_FAIL_AT, System.currentTimeMillis());
+            Prefs.putStr(c, K_IMG_FAIL_ROOM, (room == null) ? "" : room);
+            Prefs.putStr(c, K_IMG_FAIL_WHY, w);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 남겼다", t);
+        }
+    }
+
+    /** 실패 기록을 무조건 지운다 (사용자가 "지우기" 를 누른 경우). */
+    public static void clearImageFail(Context ctx) {
+        clearImageFail(ctx, null);
+    }
+
+    /**
+     * 실패 기록을 지운다.
+     *
+     * @param room null 이면 무조건 지운다. 방 이름을 주면 <b>그 방 실패였을 때만</b> 지운다.
+     *        방을 따지는 이유: 한 주기에 여러 방으로 보내는데, 뒷방이 성공했다고
+     *        앞방의 실패 기록을 덮어버리면 사용자는 앞방이 안 간 걸 영원히 모른다.
+     */
+    public static void clearImageFail(Context ctx, String room) {
+        Context c = app(ctx);
+        if (c == null) return;
+        if (room != null) {
+            ImageFail cur = lastImageFail(c);
+            if (cur == null) return;
+            if (!cur.room.trim().equals(room.trim())) return;
+        }
+        try {
+            Prefs.remove(c, K_IMG_FAIL_AT);
+            Prefs.remove(c, K_IMG_FAIL_ROOM);
+            Prefs.remove(c, K_IMG_FAIL_WHY);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "사진 전송 실패 기록을 못 지웠다", t);
+        }
+    }
+
+    // ── 알람 배선 ─────────────────────────────────────────────────────────────
+
+    private static PendingIntent pending(Context c) {
+        try {
+            Intent i = new Intent(c, AlarmReceiver.class);
+            i.setAction(ACTION_FIRE);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            return PendingIntent.getBroadcast(c, REQ_ALARM, i, flags);
+        } catch (Throwable t) {
+            Log.add(c, "발송 알람을 등록하지 못했습니다. (" + t + ")");
+            return null;
+        }
+    }
+
+    /**
+     * at 시각에 알람을 건다. 도즈 모드에서도 깨어나게 ...AndAllowWhileIdle 를 쓴다.
+     * API 31+ 에서 「알람 및 리마인더」 권한이 없으면 정확한 알람을 못 걸기 때문에
+     * setAndAllowWhileIdle 로 폴백하고 그 사실을 로그로 알린다(조용히 넘기면 사용자가 왜 늦는지 모른다).
+     */
+    private static boolean arm(Context c, long at) {
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) {
+            Log.add(c, "알람 서비스를 사용할 수 없어 발송 예약에 실패했습니다.");
+            return false;
+        }
+        PendingIntent pi = pending(c);
+        if (pi == null) return false;
+
+        // 과거 시각이면 지금 직후로 올린다(방어). 도래한 방은 한 번 발화 후 runDue 가 nextAt 을 전진시킨다.
+        long nowMs = System.currentTimeMillis();
+        if (at < nowMs) at = nowMs + 500L;
+
+        boolean exact = true;
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                exact = am.canScheduleExactAlarms();
+            } catch (Throwable t) {
+                exact = false;
+            }
+        }
+
+        if (exact) {
+            try {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+                return true;
+            } catch (SecurityException se) {
+                Log.add(c, "정확한 알람 권한이 없어 대략적인 시각으로 예약했습니다. 최대 수 분 지연될 수 있습니다.");
+            } catch (Throwable t) {
+                Log.add(c, "정확한 알람 예약에 실패하여 대략적인 시각으로 예약합니다. (" + t + ")");
+            }
+        } else if (!warnedInexact) {
+            warnedInexact = true;
+            Log.add(c, "「알람 및 리마인더」 권한이 비활성 상태입니다. 대략적인 시각으로 예약되며 최대 수 분 지연될 수 있습니다. "
+                    + "시스템 설정에서 허용하면 정확한 시각에 발송됩니다.");
+        }
+
+        try {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+            return true;
+        } catch (Throwable t) {
+            Log.add(c, "발송 알람 예약에 실패했습니다. (" + t + ")");
+            return false;
+        }
+    }
+
+    // ── WakeLock ──────────────────────────────────────────────────────────────
+
+    /**
+     * PARTIAL_WAKE_LOCK 을 잡는다. 매니페스트에 WAKE_LOCK 권한이 있어야 한다.
+     * 권한이 없거나(구버전 설치본) 제조사가 막으면 acquire 에서 터지는데,
+     * 그때도 발송·하트비트 자체는 계속 진행한다 — 안내는 로그에 한 번만 남긴다.
+     */
+    private static PowerManager.WakeLock acquire(Context c, String tag, long timeoutMs) {
+        PowerManager.WakeLock wl = null;
+        try {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) {
+                warnWake(c, "전원 관리자를 사용할 수 없음");
+                return null;
+            }
+            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag);
+            wl.setReferenceCounted(false);
+            wl.acquire(timeoutMs);
+            return wl;
+        } catch (Throwable t) {
+            // WAKE_LOCK 권한이 없으면 여기서 터진다. 일 자체는 계속한다.
+            warnWake(c, String.valueOf(t));
+            // 절반만 잡힌 상태로 새는 걸 막는다
+            release(wl);
+            return null;
+        }
+    }
+
+    private static void warnWake(Context c, String why) {
+        if (warnedWake) return;
+        warnedWake = true;
+        Log.add(c, "WakeLock 획득에 실패했습니다(" + why + "). 화면이 꺼진 동안 작업이 중단될 수 있습니다.");
+    }
+
+    private static void release(PowerManager.WakeLock wl) {
+        if (wl == null) return;
+        try {
+            if (wl.isHeld()) wl.release();
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "WakeLock 해제 실패", t);
+        }
+    }
+
+    // ── 잡동사니 ──────────────────────────────────────────────────────────────
+
+    /** 누적 발송 카운터 +1. EVERY_N 판정용이라 자정에 리셋하지 않는다(계속 누적). */
+    private static synchronized int bumpSeq(Context c) {
+        int n = Prefs.getInt(c, K_SEQ, 0);
+        if (n < 0 || n >= 1000000000) n = 0;
+        n = n + 1;
+        Prefs.putInt(c, K_SEQ, n);
+        return n;
+    }
+
+    /** 지금까지 보낸 누적 건수 (EVERY_N 안내 문구에 써도 된다) */
+    public static int sendSeq(Context ctx) {
+        Context c = app(ctx);
+        return (c == null) ? 0 : Prefs.getInt(c, K_SEQ, 0);
+    }
+
+    private static void gap() {
+        int ms = GAP_MIN_MS + RND.nextInt(GAP_MAX_MS - GAP_MIN_MS + 1);
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static long storedNext(Context c) {
+        long at = Prefs.getLong(c, K_NEXT, 0L);
+        return (at < 0) ? 0L : at;
+    }
+
+    /**
+     * 다음 알람 예정 시각(= 가장 이른 방별 nextAt)을 평문 Prefs 에 쓰고, 전역 nextAt 거울도 맞춘다.
+     * planActive 가 방별 nextAt 을 새로 초기화했거나(inited) 전역 거울이 바뀌었으면 한 번 저장한다
+     * (방별 타이머와 전역 거울이 같은 Settings 인스턴스라 한 번의 save 로 함께 영속된다).
+     */
+    private static void setNext(Context c, Settings s, long earliest, boolean inited) {
+        Prefs.putLong(c, K_NEXT, earliest);
+        try {
+            Settings.Macro m = s.macro;
+            boolean mirrorChanged = (m.nextAt != earliest);
+            if (mirrorChanged) m.nextAt = earliest;
+            if ((inited || mirrorChanged) && Settings.canSave(c)) s.save(c);
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "예정 시각 저장 실패", t);
+        }
+    }
+
+    /** 설정을 읽는다. 못 읽으면 로그를 남기고 null. */
+    private static Settings settings(Context c) {
+        try {
+            return Settings.load(c);
+        } catch (Throwable t) {
+            Log.add(c, "설정을 읽지 못해 발송 예약에 실패했습니다. (" + t + ")");
+            return null;
+        }
+    }
+
+    /**
+     * 앱이 떠 있으면 <b>보고 있는 탭</b>을 갱신해준다 (UI 건드리는 거라 메인 스레드로 넘긴다).
+     *
+     * 홈만 갱신하면 안 된다 — 사진 전송 실패 경고는 매크로 탭 사진 카드에도 뜨는데,
+     * 사용자가 그 탭을 보고 있는 동안 실패하면 다시 들어올 때까지 아무 변화가 없다.
+     */
+    private static void refreshUi() {
+        try {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Nav.reload();
+                    } catch (Throwable t) {
+                        android.util.Log.w("KakaoAuto", "화면 갱신 실패", t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            android.util.Log.w("KakaoAuto", "홈 갱신 예약 실패", t);
+        }
+    }
+
+    private static String when(long at) {
+        try {
+            return new SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(new Date(at));
+        } catch (Throwable t) {
+            return "-";
+        }
+    }
+
+    private static Context app(Context c) {
+        if (c == null) return App.app();
+        Context a = c.getApplicationContext();
+        return (a == null) ? c : a;
+    }
+}
