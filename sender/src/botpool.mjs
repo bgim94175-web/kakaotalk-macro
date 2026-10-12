@@ -2823,6 +2823,22 @@ export class BotSlot {
     const text = m.text || ''
     const mentions = R.mentionIds(m.attachment)
     const isCmd = text.trim().startsWith(prefix)
+    // 보이스룸 실험(A층): SENDER_VOICE_EXPERIMENT=1 이고 방장·부방장이 「접두사+보룸실험/보룸중지」를
+    // 쳤을 때만. 봇이 이 방에 SETMETA(16) liveon 신호만 보낸다(서버 할당·음성세션 없음). 결과를 답으로 알린다.
+    if (process.env.SENDER_VOICE_EXPERIMENT === '1' && isCmd) {
+      const t = text.trim().slice(prefix.length).trim()
+      if (t === '보룸실험' || t === '보룸켜' || t === '보룸중지' || t === '보룸꺼') {
+        const on = t === '보룸실험' || t === '보룸켜'
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 실험은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        const r = await this.voiceSetMeta(v, on)
+        this.say(v, r.ok ? `보룸 신호 ${on ? '켜기' : '끄기'} 보냈어요 (status ${r.status})` : `보룸 신호 실패 (status ${r.status})`, { what: 'reply' })
+        return
+      }
+    }
     if (v.products.roombot && m.logId) {
       // 가리기 링 버퍼·작성자 목록은 방 관리봇이 있는 방에서만(8.11)
       R.ringPush(v.ring, { logId: m.logId, type: m.type, authorId: m.authorId, name, at: m.at, cmd: isCmd && /가리기/.test(text) })
