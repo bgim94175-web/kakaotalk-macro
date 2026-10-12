@@ -421,6 +421,19 @@ app.post('/v1/bot/room-profile', botRoute(async (req, res) => {
   return hub.pool.roomProfileCmd(id, how)
 }))
 
+// ── 보이스룸 실험 전용(A층). SENDER_VOICE_EXPERIMENT=1 일 때만 등록한다 ──────────
+// POST /v1/bot/voice-experiment { install_id, on? }  — on 기본 true(켜기), false 면 끄기.
+// 봇이 그 방에 SETMETA(16) liveon 신호만 보낸다(서버 할당·음성세션 없음). 결과는 로그로 본다.
+if (process.env.SENDER_VOICE_EXPERIMENT === '1') {
+  process.stderr.write('[sender] SENDER_VOICE_EXPERIMENT=1 — voice room signal experiment enabled\n')
+  app.post('/v1/bot/voice-experiment', botRoute(async (req, res) => {
+    const id = needInstall(res, req.body && req.body.install_id)
+    if (!id) return null
+    const on = !(req.body && req.body.on === false)
+    return hub.pool.voiceExperiment(id, on)
+  }))
+}
+
 // ── 가짜 모드 전용(9.4). SENDER_FAKE=1 일 때만 등록한다(8.5) ───────────────────
 if (fakeOn()) {
   process.stderr.write('[sender] SENDER_FAKE=1 — fake Kakao connection, never use in production\n')
