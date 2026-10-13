@@ -6,6 +6,7 @@
 //   · 방별 처리: 방 어댑터 기록(roomfeat.adapterRecord)으로 features.mjs 를 부르고, 새 기능은 roomfeat.mjs.
 //   · DB 쓰기는 2.2 의 sender 칸만, 늘 WHERE id AND phase='installed' AND bot_device_id=봇(store.updateInstall).
 // 네트워크·DB 는 주입받는다(store, newClient) — selfcheck 가 가짜 연결·메모리 저장소로 같은 코드를 돈다.
+import { createHash } from 'node:crypto'
 import { Long } from 'bson'
 
 import {
@@ -3710,17 +3711,49 @@ export class BotSlot {
     if (wake) this.scheduleSend(Math.max(wake, this.now() + 50))
   }
 
+  // 사진 1장. 라이브러리 sendPhoto(SHIP → 업로드 → COMPLETE). SHIP 이 업로드 주소(k·vh·p) 없이 답하면
+  // 확장자를 jpg 로 바꿔 한 번 더 보내 보고, 처음 한 번은 SHIP 답을 그대로 로그에 남긴다(원인 확인용, 토큰 값은 가린다).
+  async sendPhoto(v, png) {
+    for (const name of ['kbot.png', 'kbot.jpg']) {
+      try {
+        const res = await this.client.sendPhoto(v.chat_id, png, name)
+        if (res && res.success === true) {
+          if (name !== 'kbot.png' && !this.photoExtNoted) {
+            this.photoExtNoted = true
+            log(this.id, 'image send ok with jpg extension')
+          }
+          return true
+        }
+        log(this.id, `image send failed install ${v.install_id} (${name}) status ${res ? res.status_code : '?'}`)
+        return false
+      } catch (e) {
+        const msg = errText(e)
+        log(this.id, `image send failed install ${v.install_id} (${name}): ${msg}`)
+        if (!/SHIP response missing/.test(msg)) return false
+        if (!this.shipProbed) {
+          this.shipProbed = true
+          await this.shipProbe(v.chat_id, png).catch((err) => log(this.id, `ship probe failed: ${errText(err)}`))
+        }
+      }
+    }
+    return false
+  }
+
+  async shipProbe(chatId, png) {
+    const cs = createHash('sha1').update(png).digest('hex')
+    for (const e of ['png', 'jpg']) {
+      const r = await this.raw('SHIP', { c: L(chatId), t: 2, s: Long.fromNumber(png.length), cs, e })
+      const b = Object.assign({}, (r && r.body) || {})
+      if (typeof b.k === 'string') b.k = '(' + b.k.length + ' chars)'
+      log(this.id, `ship probe e=${e} → status ${r ? r.statusCode : '?'} keys ${Object.keys(b).join(',') || '-'} body ${traceText(b)}`)
+    }
+  }
+
   async deliver(v, item) {
     if (item.image) {
-      try {
-        const res = await this.client.sendPhoto(v.chat_id, item.image, 'kbot.png')
-        if (res && res.success === true) {
-          if (item.after) await this.deliver(v, { text: item.after.text, mention: item.after.mention })
-          return
-        }
-        log(this.id, `image send failed install ${v.install_id}`)
-      } catch (e) {
-        log(this.id, `image send failed install ${v.install_id}: ${errText(e)}`)
+      if (await this.sendPhoto(v, item.image)) {
+        if (item.after) await this.deliver(v, { text: item.after.text, mention: item.after.mention })
+        return
       }
       if (!item.text) return
       item = Object.assign({}, item, { image: null, after: null })
