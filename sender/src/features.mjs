@@ -513,6 +513,17 @@ export function legacyRoomOff(record) {
   return !!(f && f.v === 2 && !(Date.now() < Number(f.legacy_room_until || 0)))
 }
 
+// 갠톡 응답을 보낼 1:1 방인가. 대화방 목록의 종류(list_kind, room-kind.mjs)를 먼저 본다.
+// 오픈프로필 1:1(open_dm)은 라이브러리 분류(kind)로는 'open' 이지만 1:1 이다. 오픈 단체방(open_room)에는 답하지 않는다.
+// 목록 종류가 없거나 일반 채팅(normal)이면 예전처럼 kind 로 본다.
+// 2026-10-11 전에 불러온 목록은 3명 이상인 type 14·16 단체방도 open_dm 으로 적었다. 1:1 은 2명보다 많을 수 없으므로
+// 적어 둔 인원(members)이 3명 이상이면 답하지 않는다.
+function directRoom(room) {
+  if (room.list_kind === 'open_dm') return !(Number(room.members) > 2)
+  if (room.list_kind === 'open_room') return false
+  return !(room.kind === 'group' || room.kind === 'open')
+}
+
 export function onInbound(record, msg) {
   const out = []
   const config = record.config || {}
@@ -523,6 +534,7 @@ export function onInbound(record, msg) {
   const parsed = parseRoomKey(room.key)
   if (!accountOn(config, parsed.acc)) return out
   const group = room.kind === 'group' || room.kind === 'open'
+  const direct = directRoom(room)
   const who = msg.authorName || ''
   const mine = !!msg.mine
   const now = Date.now()
@@ -531,7 +543,7 @@ export function onInbound(record, msg) {
 
   if (featureOn(record, 'macro')) {
     triggers(record, out, room, parsed, who, text, mine, now)
-    if (!group && !mine) autoReply(record, out, room, parsed, who, text, now, state, unknown)
+    if (direct && !mine) autoReply(record, out, room, parsed, who, text, now, state, unknown)
   }
   state.knownRooms[room.key] = true
   if (!mine) {

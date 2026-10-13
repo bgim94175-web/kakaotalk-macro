@@ -26,7 +26,10 @@ import {
   coverNeedsAuthor,
   coverPlan,
   coverSkipsLink,
+  featureOn,
+  parseRoomKey,
   realId,
+  roomByChat,
   visitEventsFromMessage,
   visitMentionExtra,
   visitMemberId,
@@ -35,7 +38,7 @@ import {
 import { BotPool } from './botpool.mjs'
 import { BEAT_MS, Owner } from './owner.mjs'
 import { FakeKakaoClient, fakeOn } from './fake.mjs'
-import { openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
+import { directType, openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
 import { isBotId, locoOk, withProfileLink } from './roomfeat.mjs'
 import { dbStore, listFeatureRows, listIds, loadRecord, saveRecord, updateFeatures } from './store.mjs'
 
@@ -907,6 +910,8 @@ class Slot {
     this.linkNames = { at: 0, map: new Map() }
     // 지금 카카오가 가진 방 목록(LCHATLIST). 채팅 화면이 몇 초마다 보므로 잠깐 들고 있는다.
     this.liveChats = { at: 0, list: [] }
+    // 갠톡 응답 목록에 더하지 않은 처음 보는 방(chat_id → 다시 물어도 되는 시각). 같은 방을 자꾸 묻지 않게.
+    this.notDirect = new Map()
   }
 
   // 방 목록. maxAge 안에 읽은 목록이 있으면 그대로 쓴다(0 이면 늘 새로 읽는다).
@@ -1328,11 +1333,18 @@ class Slot {
     const cover = coverPlan(this.record, coverEv)
     if (cover) await this.coverMessage(cover)
     if (taken) return
+    const mine = author.length > 0 && author === creds.user_id
+    let authorName = ev.author_name || ''
+    // 대화방 불러오기 전에 처음 온 갠톡이면 목록에 더한다. 방금 읽은 방 정보로 보낸 사람 이름도 찾는다
+    // (이름이 비면 쿨타임을 방 단위로 세다가 다음 글부터 사람 단위로 세어 두 번 답하게 된다)
+    if (!mine && (await this.addDirectRoom(chatId)) && !authorName && this.client && typeof this.client.lookupAuthorName === 'function') {
+      authorName = this.client.lookupAuthorName(chatId, ev.author_id) || ''
+    }
     const sends = onInbound(this.record, {
       chatId,
       text: ev.message || '',
-      authorName: ev.author_name || '',
-      mine: author.length > 0 && author === creds.user_id,
+      authorName,
+      mine,
     })
     const guard = guardOnChat(this.record, {
       kind: 'msg',
@@ -1471,6 +1483,59 @@ class Slot {
     }
     guardFinishHalt(this.record, ask.chatId, allowed, Date.now(), ask.roomName, ask.count)
     log(this.id, allowed ? 'kick wave halted' : 'kick wave noticed')
+  }
+
+  // 대화방 불러오기 전에 처음 온 갠톡(오픈프로필 1:1)을 방 목록에 더한다. 더했으면 true.
+  // 갠톡 응답을 쓸 때만 카카오에 그 방 하나를 묻는다(CHATINFO). 오픈 단체방·일반 채팅은 더하지 않는다.
+  // 갠톡이 아닌 방은 하루 동안, 읽지 못한 방은 10분 동안 다시 묻지 않는다(방 종류는 잘 바뀌지 않는다).
+  async addDirectRoom(chatId) {
+    const id = String(chatId || '')
+    if (!realId(id) || !this.client || this.stopped) return false
+    if (roomByChat(this.record.rooms, id)) return false
+    if (!featureOn(this.record, 'macro')) return false
+    const cfg = this.record.config && this.record.config.autoreply
+    if (!cfg || !cfg.enabled || !String(cfg.message || '').trim()) return false
+    const until = this.notDirect.get(id)
+    if (until && Date.now() < until) return false
+    const known = this.kindOf(id)
+    let ch = null
+    if (!known || known === 'open_dm') {
+      try {
+        ch = await this.client.getChat(id)
+      } catch (e) {
+        // 읽기 실패는 로그만 남긴다(로그인을 지우거나 토큰을 새로 받지 않는다)
+        log(this.id, `new chat lookup failed: ${e && e.code ? e.code : 'error'}`)
+      }
+    }
+    // '' = 읽지 못함
+    let kind = ch ? roomListKind(ch) : (known === 'open_dm' ? '' : known)
+    // 확실한 1:1 type(OD·14·16, 2명 이하)만 더한다. type 2·모르는 type 은 링크와 인원만으로 1:1 로 보는데,
+    // 아직 2명인 단체방일 수 있어 더하지 않고 대화방 불러오기에 맡긴다(하루 동안 다시 묻지 않는다).
+    if (kind === 'open_dm' && !(directType(String(ch.type)) && !(Number(ch.active_members) > 2))) kind = 'unsure'
+    // 상대 이름(displayMembers)을 못 읽은 1:1 은 읽지 못한 방처럼 10분 뒤 다시 묻는다({이름} 자리에 '대화방 1234' 가 들어가지 않게)
+    const name = ch ? String(ch.display_name || '').trim() : ''
+    if (kind === 'open_dm' && !name) kind = ''
+    if (kind !== 'open_dm') {
+      if (this.notDirect.size >= 500 && !this.notDirect.has(id)) this.notDirect.delete(this.notDirect.keys().next().value)
+      this.notDirect.set(id, Date.now() + (kind ? 86400000 : 600000))
+      return false
+    }
+    if (this.stopped) return false
+    if (!Array.isArray(this.record.rooms)) this.record.rooms = []
+    const rooms = this.record.rooms
+    if (roomByChat(rooms, id)) return false
+    // 대화방 불러오기(lib/panel-config.js mergeCatalog)와 같은 이름·키. 다음 불러오기도 chat_id 로 이 키를 그대로 쓴다
+    const used = new Set(rooms.map((r) => r && r.key))
+    // 매크로 대상에 남은 키(그 방이 목록에서 빠진 뒤 설정을 다시 저장하지 않음)는 쓰지 않는다. 받으면 매크로 글이 이 1:1 로 간다
+    const macro = this.record.config && this.record.config.macro
+    for (const k of (macro && Array.isArray(macro.rooms) ? macro.rooms : [])) used.add(parseRoomKey(k).key)
+    let key = '0\u0001' + name
+    for (let n = 2; used.has(key); n++) key = '0\u0001' + name + ' ' + n
+    const row = { key, chat_id: id, name, kind: chatKind(ch), list_kind: 'open_dm' }
+    if (ch.active_members) row.members = ch.active_members
+    rooms.push(row)
+    log(this.id, 'new 1:1 chat added for auto reply')
+    return true
   }
 
   noteLink(ev) {

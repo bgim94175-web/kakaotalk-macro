@@ -2752,7 +2752,8 @@ export class BotSlot {
     this.sendAll(v, g.sends)
     const ctx = this.ctxFor(v)
     if (ev.kind === 'join') {
-      if (ev.userId && R.bannedNow(rt, ev.userId, now)) {
+      // 재입장 차단을 끈 방이나, 적어 둔 뒤 제외 대상·방장·부방장이 된 사람은 내보내지 않는다(적어 둔 것은 그대로 둔다)
+      if (ev.userId && cfg.leaveKick.enabled && !R.protectedPerson(cfg, ctx, ev.userId) && R.bannedNow(rt, ev.userId, now)) {
         // 나간 뒤 내보내지 못한 사람이 다시 들어왔다: 지금은 방 안이라 내보낼 수 있다(7.2(b))
         const name = ev.name || (rt.bans[ev.userId] && rt.bans[ev.userId].name) || ''
         const r = await this.kick(v, ev.userId, name, 'leave')
@@ -2791,15 +2792,18 @@ export class BotSlot {
       await this.roomLog(v.install_id, 'kick_fail', { name: plan.name, ok: false, detail: { why: 'leave', note: plan.note } })
       return
     }
-    const r = await this.kick(v, plan.userId, plan.name, 'leave')
+    const r = await this.kick(v, plan.userId, plan.name, 'leave', true)
     if (r.ok) {
       if (v.cfg.leaveKick.notice) this.say(v, R.leaveKickNotice(plan.name, this.now()), { what: 'notice' })
       return
     }
-    if (!r.skipped) {
-      // 나간 사람의 내보내기가 실패하면 30일 안에 다시 들어오는 즉시 내보낸다
+    // 내보내지 못하면(카카오가 받지 않음, 또는 연속 실패 멈춤·올킥 감지·한도로 건너뜀) 30일 안에 다시 들어오는 즉시 내보낸다.
+    // 방 관리봇이 꺼져 있어 건너뛴 것만 적지 않는다.
+    if (!r.skipped || r.held) {
       R.noteBan(v.runtime, plan.userId, plan.name, this.now())
       v.dirty = true
+      // 건너뛴 사람도 패널의 「K bot이 내보낸 사람」 표(kick·kick_fail 기록)에 올라 해제할 수 있게
+      if (r.skipped) await this.roomLog(v.install_id, 'kick_fail', { user_id: plan.userId, name: plan.name, ok: false, detail: { why: 'leave' } })
     }
   }
 
@@ -2811,23 +2815,25 @@ export class BotSlot {
   }
 
   // 강퇴는 재시도하지 않는다. 한도를 넘으면 건너뛰고 skip 기록.
-  async kick(v, userId, name, why) {
+  // 연속 실패 멈춤·올킥 감지·한도로 건너뛰면 held(부르는 쪽이 나중에 내보내려고 적어 둘 수 있다).
+  // left: 이미 나간 사람(7.2 (b)). 카카오가 받지 않아도(실측 전, 10.1 #5) 권한만 다시 읽고 연속 실패로 세지 않는다(레이트리밋 답은 센다).
+  async kick(v, userId, name, why, left = false) {
     const now = this.now()
     const uid = String(userId || '')
     if (!uid) return { ok: false, skipped: true }
     if (!R.roombotLive(v)) return { ok: false, skipped: true }
     if (v.actPausedUntil > now) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'paused' } })
-      return { ok: false, skipped: true }
+      return { ok: false, skipped: true, held: true }
     }
     const g = v.runtime.guard
     if (g && g.halt && Number(g.halt[v.chat_id] || 0) > now) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'wave' } })
-      return { ok: false, skipped: true }
+      return { ok: false, skipped: true, held: true }
     }
     if (!v.limits.kick.ok(now) || !this.limits.kickH.ok(now) || !this.limits.kickD.ok(now)) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick' } })
-      return { ok: false, skipped: true }
+      return { ok: false, skipped: true, held: true }
     }
     v.limits.kick.add(now)
     this.limits.kickH.add(now)
@@ -2840,7 +2846,8 @@ export class BotSlot {
       return { ok: true }
     }
     await this.roomLog(v.install_id, 'kick_fail', { user_id: uid, name, ok: false, detail: { why, status: r.status } })
-    await this.actionFailed(v)
+    // 레이트리밋 답은 나간 사람이어도 센다(사람이 방에 있는지와 상관없이 카카오가 막는 것)
+    await this.actionFailed(v, left && !RATE_STATUS.has(r.status))
     return { ok: false, status: r.status }
   }
 
@@ -2862,12 +2869,14 @@ export class BotSlot {
   }
 
   // 강퇴·가리기가 실패하면 권한을 바로 다시 읽는다. 잃었으면 waiting_host, 아니면 연속 3회에 10분 멈춤.
-  async actionFailed(v) {
+  // noCount: 이미 나간 사람의 내보내기 실패 — 권한만 읽고 세지 않는다(나가는 사람이 많은 방이 멈추지 않게).
+  async actionFailed(v, noCount = false) {
     const perm = await this.readPerm(v.chat_id, null)
     if (perm != null && !(perm & 5) && v.products.roombot) {
       await this.applyPerm(v, perm)
       return
     }
+    if (noCount) return
     v.failStreak += 1
     if (v.failStreak >= 3) {
       v.failStreak = 0
