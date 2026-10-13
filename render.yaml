@@ -79,6 +79,8 @@ services:
       #     MEMBER_MAX_PENDING_ORDERS / MEMBER_MAX_PENDING_ROOMS / IP_MAX_PENDING_ORDERS   3 / 10 / 10
       #   방 설치형 봇
       #     ROOM_RETRY_BASE_MS        120000      고객 다시 시도 첫 간격(두 배씩, 최대 6시간, 연속 10번 뒤 관리자만)
+      #     ROOM_SELF_MOVE_GAP_MS     86400000    고객 봇 옮기기(다른 방, 무료) 방마다 간격 24시간
+      #     ROOM_SELF_REINSTALL_GAP_MS 1800000    고객 같은 방에 다시 설치(무료) 방마다 간격 30분
       #     ROOM_HOLD_WORDS           (없음)      쉼표 목록. 방 이름이 걸리면 결제 뒤 운영자 확인을 기다린다
       #     ROOM_LOG_KEEP_DAYS        30          방 조치 기록 보존 일수
       #     BOT_ROOM_CAP              20          새 K bot 계정의 기본 방 상한의 처음 값([설정] 탭)

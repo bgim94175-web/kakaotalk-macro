@@ -3253,6 +3253,7 @@
       return '<button type="button" class="btn sm" data-retry="' + id + '"' + (later ? ' disabled' : '') + '><span class="spin"></span><span class="lbl-idle">' +
         (later ? esc(fmtHM(v.retry_after)) + ' 이후' : '다시 시도') + '</span></button>';
     }
+    if (needLink(v) && v.can_move) return '<a class="btn sm" href="#room/' + id + '" data-focus="r-move-link">새 링크 입력</a>';
     return '<button type="button" class="btn sm" data-support data-support-ctx="' + esc('방 #' + id + ' · ' + v.label) + '">문의하기</button>';
   }
   var roomsPageSig = '';
@@ -3865,6 +3866,7 @@
     $('room-off').hidden = !off;
     $('room-off-go').setAttribute('href', '#r-visit/' + v.id);
     renderRoomErr(v);
+    renderMove(v);
     ['roombot', 'minigame'].forEach(function (p) {
       var box = qs('[data-prod-r="' + p + '"]');
       var html;
@@ -3892,6 +3894,7 @@
     hint.hidden = !later;
     hint.textContent = later ? fmtHM(v.retry_after) + ' 이후에 다시 시도할 수 있습니다.' : '';
     $('room-support').setAttribute('data-support-ctx', '방 #' + v.id + ' · ' + v.label);
+    $('room-move-go').hidden = !(needLink(v) && v.can_move);
     if (later) {
       var wait = Math.min(Number(v.retry_after) - Date.now() + 200, 6 * 3600000);
       roomErrTimer = setTimeout(function () { if (route === 'room') renderRoomPage(); if (route === 'rooms') renderRoomsPage(true); }, wait);
@@ -4218,6 +4221,175 @@
       if (authFail(e)) { showLogin(e); return; }
       notify('랭킹을 초기화하지 못했습니다.', e.message, { kind: 'crit' });
       rankReset(true);
+    }
+  }
+
+  // ── 봇 옮기기·다시 설치 (무료, ACCOUNTS_V1 3.4.3) ─────────
+  // 가능 여부·간격·까닭 문구는 서버 RoomView(can_move·move_after·move_note·can_reinstall·reinstall_after·reinstall_note·self_rule)를 그대로 쓴다.
+  var NEED_LINK = { link_gone: 1, room_deleted: 1, not_group: 1, link_changed: 1 };
+  var moveSt = { id: 0, link: '', same: false };
+  var REINSTALL_BTN = '<button type="button" class="btn sm" id="r-reinstall-btn">' + ic('refresh', 12) + '다시 설치</button>';
+  function needLink(v) { return !!(v && v.display === 'error' && NEED_LINK[v.error_code]); }
+  function renderMove(v) {
+    var grp = $('room-move-grp');
+    grp.hidden = v.display === 'pending';
+    if (moveSt.id !== v.id) {
+      moveSt.id = v.id;
+      $('r-move-link').value = '';
+      moveReset(false);
+      $('r-reinstall-act').innerHTML = REINSTALL_BTN;
+    }
+    if (grp.hidden) return;
+    $('r-move-rule').textContent = v.self_rule || '';
+    var now = Date.now();
+    var rWait = Number(v.reinstall_after) > now;
+    var rText = !v.can_reinstall || rWait ? (v.reinstall_note || '') : '';
+    $('r-reinstall-note').textContent = rText;
+    $('r-reinstall-note').hidden = !rText;
+    var rb = $('r-reinstall-btn');
+    if (rb && !rb.classList.contains('busy')) rb.disabled = !v.can_reinstall || rWait;
+    if (!rb && (!v.can_reinstall || rWait) && !qs('[data-reinstall-yes].busy')) $('r-reinstall-act').innerHTML = REINSTALL_BTN;
+    // 옮기기 간격 안이어도 같은 방의 새 링크는 받는다(서버가 링크를 확인한 뒤 가른다). 그래서 입력은 막지 않고 까닭만 보인다.
+    var mText = !v.can_move || Number(v.move_after) > now ? (v.move_note || '') : '';
+    $('r-move-note').textContent = mText;
+    $('r-move-note').hidden = !mText;
+    var lock = !v.can_move;
+    $('r-move-link').disabled = lock;
+    var mc = $('r-move-check');
+    if (!mc.classList.contains('busy')) mc.disabled = lock || !$('r-move-pv').hidden;
+    if (lock && !$('r-move-pv').hidden) moveReset(false);
+  }
+  function moveReset(focus) {
+    moveSt.link = '';
+    moveSt.same = false;
+    $('r-move-pv').hidden = true;
+    $('r-move-link').readOnly = false;
+    $('r-move-passcode').value = '';
+    var v = curRoom();
+    var mc = $('r-move-check');
+    mc.classList.remove('busy');
+    mc.disabled = !(v && v.can_move);
+    say('r-move-err', '');
+    if (focus) $('r-move-link').focus();
+  }
+  async function moveCheck() {
+    var v = curRoom();
+    if (!v || !v.can_move) return;
+    var inp = $('r-move-link');
+    var text = inp.value.trim();
+    say('r-move-err', '');
+    if (!text) { say('r-move-err', '옮길 오픈채팅방 링크를 입력해 주세요.'); inp.focus(); return; }
+    var btn = $('r-move-check');
+    addBusy(btn, true);
+    var ok = false;
+    try {
+      var pv = await api('/api/room-preview', { link: text });
+      if (!curRoom() || curRoom().id !== v.id) return;
+      ok = showMovePv(curRoom(), text, pv);
+    } catch (e) {
+      if (authFail(e)) { showLogin(e); return; }
+      say('r-move-err', e.message);
+    } finally {
+      btn.classList.remove('busy');
+      btn.disabled = ok || !(curRoom() && curRoom().can_move);
+    }
+  }
+  // 미리 보기 결과 → 확인 칸. 옮길 수 없는 방이면 까닭을 보이고 false.
+  function showMovePv(v, text, pv) {
+    if (!pv.verified) { say('r-move-err', '지금은 링크를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.'); return false; }
+    var mine = pv.mine;
+    var same = !!(mine && Number(mine.install_id) === v.id);
+    if (mine && !same) {
+      say('r-move-err', mine.display === 'pending' ? '이미 입금 대기 중인 주문에 들어 있는 방입니다. 내 계정의 구매 내역에서 확인해 주세요.'
+        : '이 방에는 이미 내 K bot이 있습니다. 두 방을 합치려면 문의해 주세요.');
+      return false;
+    }
+    if (!same && Number(v.move_after) > Date.now()) { say('r-move-err', v.move_note); return false; }
+    var name = (pv.room && pv.room.name) || '';
+    moveSt.link = text;
+    moveSt.same = same;
+    $('r-move-q').textContent = same
+      ? '지금 방과 같은 방입니다. 이 링크로 바꾸고 K bot이 같은 방에 다시 들어갑니다.'
+      : (name ? '「' + name + '」 방으로' : '이 방으로') + ' 옮깁니다. K bot은 지금 방에서 나갑니다.' +
+        (v.products && v.products.roombot ? ' 새 방에서 K bot을 부방장으로 다시 지정해야 방 관리 기능이 동작합니다.' : '');
+    $('r-move-yes-t').textContent = same ? '다시 설치' : '옮기기';
+    var needPc = !!(pv.room && pv.room.needs_passcode);
+    $('r-move-pc-wrap').hidden = !needPc;
+    $('r-move-passcode').value = '';
+    $('r-move-link').readOnly = true;
+    $('r-move-pv').hidden = false;
+    (needPc ? $('r-move-passcode') : $('r-move-no')).focus();
+    return true;
+  }
+  async function moveRun(btn) {
+    var v = curRoom();
+    if (!v || !moveSt.link) return;
+    var body = { id: v.id, link: moveSt.link };
+    if (!$('r-move-pc-wrap').hidden) {
+      var pc = $('r-move-passcode').value.trim();
+      if (!pc) { say('r-move-err', '참여코드를 입력해 주세요.'); $('r-move-passcode').focus(); return; }
+      if (pc.length > 20) { say('r-move-err', '참여코드는 20자 이하로 입력해 주세요.'); $('r-move-passcode').focus(); return; }
+      body.passcode = pc;
+    }
+    say('r-move-err', '');
+    addBusy(btn, true);
+    try {
+      var res = await api('/panel/api/bot-room/move', body);
+      $('r-move-link').value = '';
+      moveReset(false);
+      if (res.room) mergeRoom(res.room);
+      var nm = roomName(res.room || v);
+      if (res.same_room) notify('같은 방에 다시 설치합니다.', nm + ' · K bot이 새 링크로 방에 들어가 상태를 다시 확인합니다.');
+      else if (res.held) notify('K bot을 옮깁니다.', nm + ' · 관리자가 확인한 뒤 K bot이 들어갑니다.');
+      else notify('K bot을 옮깁니다.', nm + ' · K bot이 지금 방에서 나가고 새 방에 들어갑니다.');
+      if (route === 'room') { renderRoomPage(); $('room-title').focus({ preventScroll: true }); }
+    } catch (e) {
+      if (authFail(e)) { showLogin(e); return; }
+      say('r-move-err', e.message);
+      if (e.body && e.body.retry_after) loadRooms();
+    } finally {
+      btn.classList.remove('busy');
+      btn.disabled = false;
+    }
+  }
+  function reinstallAsk() {
+    var v = curRoom();
+    if (!v || !v.can_reinstall || Number(v.reinstall_after) > Date.now()) return;
+    var pc = v.needs_passcode
+      ? '<span class="pc"><label class="sr" for="r-reinstall-pc">참여코드</label><input class="inp" id="r-reinstall-pc" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="참여코드"></span>' : '';
+    $('r-reinstall-act').innerHTML = '<span class="q">K bot이 같은 방에 다시 들어갑니다.</span>' + pc +
+      '<button type="button" class="btn sm" data-reinstall-no>취소</button>' +
+      '<button type="button" class="btn sm primary" data-reinstall-yes><span class="spin"></span><span class="lbl-idle">다시 설치</span></button>';
+    (v.needs_passcode ? $('r-reinstall-pc') : qs('[data-reinstall-no]')).focus();
+  }
+  function reinstallReset(focus) {
+    $('r-reinstall-act').innerHTML = REINSTALL_BTN;
+    var v = curRoom();
+    if (v && route === 'room') renderMove(v);
+    if (focus && !$('r-reinstall-btn').disabled) $('r-reinstall-btn').focus();
+  }
+  async function reinstallRun(btn) {
+    var v = curRoom();
+    if (!v) return;
+    var body = { id: v.id };
+    var pcIn = $('r-reinstall-pc');
+    if (pcIn) {
+      var pc = pcIn.value.trim();
+      if (!pc) { notify('참여코드를 입력해 주세요.', '참여코드가 필요한 방입니다.', { kind: 'warn' }); pcIn.focus(); return; }
+      if (pc.length > 20) { notify('참여코드는 20자 이하로 입력해 주세요.', '', { kind: 'warn' }); pcIn.focus(); return; }
+      body.passcode = pc;
+    }
+    addBusy(btn, true);
+    try {
+      var res = await api('/panel/api/bot-room/reinstall', body);
+      if (res.room) mergeRoom(res.room);
+      reinstallReset(false);
+      notify('같은 방에 다시 설치합니다.', roomName(res.room || v) + ' · K bot이 방에 들어가 상태를 다시 확인합니다.');
+    } catch (e) {
+      if (authFail(e)) { showLogin(e); return; }
+      notify('다시 설치하지 못했습니다.', e.message, { kind: 'crit' });
+      reinstallReset(true);
+      if (e.body && e.body.retry_after) loadRooms();
     }
   }
 
@@ -4707,6 +4879,14 @@
     var hy = t.closest('[data-hide-yes]');
     if (hy) { hideRun(hy.dataset.hideYes, hy); return; }
     if (t.closest('#r-rank-reset')) { rankAsk(); return; }
+    if (t.closest('#r-reinstall-btn')) { reinstallAsk(); return; }
+    if (t.closest('[data-reinstall-no]')) { reinstallReset(true); return; }
+    var riy = t.closest('[data-reinstall-yes]');
+    if (riy) { reinstallRun(riy); return; }
+    if (t.closest('#r-move-no')) { moveReset(true); return; }
+    var mvy = t.closest('#r-move-yes');
+    if (mvy) { moveRun(mvy); return; }
+    if (t.closest('#room-move-go')) { focusSetting('r-move-link'); return; }
     if (t.closest('[data-rank-no]')) { rankReset(true); return; }
     var ry = t.closest('[data-rank-yes]');
     if (ry) { rankRun(ry); return; }
@@ -4833,6 +5013,16 @@
       }
       if (e.key === 'Backspace' && !t.value && rcWords.length) { rcWords.pop(); renderRcWords(); markDirty(); return; }
     }
+    if (e.key === 'Enter' && t.matches && t.matches('#r-move-passcode, #r-reinstall-pc') && !e.isComposing) {
+      e.preventDefault();
+      var yes = t.id === 'r-move-passcode' ? $('r-move-yes') : qs('[data-reinstall-yes]');
+      if (yes && !yes.disabled) yes.click();
+      return;
+    }
+    if (e.key === 'Escape' && t.closest && t.closest('#r-move-pv, #r-reinstall-act')) {
+      if (t.closest('#r-move-pv')) moveReset(true); else reinstallReset(true);
+      return;
+    }
     if (e.key === 'Enter' && t.matches && t.matches('#r-hide-last, #r-passcode')) {
       e.preventDefault();
       if (t.id === 'r-hide-last') fixNum(t);
@@ -4885,6 +5075,7 @@
     }
     if (t.id === 'guard-secs' || t.id === 'guard-count') renderGuardPreview(false);
     if (t.id === 'r-visit-q') return;
+    if (t.id === 'r-move-link' || t.id === 'r-move-passcode' || t.id === 'r-reinstall-pc') { say('r-move-err', ''); return; }
     if (t.id === 'r-profile-q') return;
     if (isRoomRoute(route)) roomPreviews(route);
     markDirty();
@@ -4970,6 +5161,11 @@
     var v = this.value;
     clearTimeout(rpqTimer);
     rpqTimer = setTimeout(function () { rUi.pq = v; renderRProfileTable(false); }, 150);
+  });
+  $('r-move-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (!$('r-move-pv').hidden || $('r-move-check').disabled) return;
+    moveCheck();
   });
   ROOM_ROUTES.forEach(function (r) {
     var f = $(formOf(r));

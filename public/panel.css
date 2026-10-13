@@ -934,6 +934,23 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .srow.rowlink:hover { background: var(--bg-2); }
 .srow-r .del-wrap { flex-wrap: wrap; }
 .bub.notice.dim { color: var(--fg-3); }
+/* 봇 옮기기·다시 설치 (ACCOUNTS_V1 6.9 · 3.4.3) */
+.move-f { display: flex; gap: 8px; align-items: center; }
+.move-f .inp { flex: 1; min-width: 0; height: 32px; }
+.move-pv { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--bg-1); }
+.move-q { flex-basis: 100%; margin: 0; color: var(--fg-2); font-size: var(--t-13); line-height: 1.55; }
+.move-pv .pc, #r-reinstall-act .pc { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-3); }
+.move-pv .pc .inp, #r-reinstall-act .pc .inp { width: 128px; height: 30px; }
+#r-move-err { margin-top: 6px; }
+#r-move-err:empty { display: none; }
+.srow-l p.hint { color: var(--fg-2); font-size: var(--t-12); }
+@media (max-width: 760px) {
+  .move-f { flex-wrap: wrap; }
+  .move-f .inp { flex-basis: 100%; height: 42px; }
+  .move-pv .pc { flex: 1; min-width: 0; }
+  .move-pv .pc .inp { width: 100%; height: 40px; }
+}
 
 
 /* ---------- responsive: shared primitives (style.css + panel.css) ---------- */

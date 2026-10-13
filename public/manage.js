@@ -102,7 +102,7 @@
   // 예전 키의 기능 목록 = 상품 id 전부(lib/features.js ALL 과 같은 이름)
   function featIds() { return PRICE.ids.slice(); }
 
-  // "상품: 카카오톡 매크로 1개월 20,000원 · 방 관리봇 방마다 15,000원 · …" (6.12)
+  // "상품: 카카오톡 매크로 1개월 20,000원 · 방 관리봇 방마다 10,000원 · …" (6.12)
   function renderProdSub() {
     var n = document.getElementById('prodSub');
     if (!n || !PRICE.ids.length) return;
