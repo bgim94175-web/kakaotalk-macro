@@ -594,6 +594,7 @@
     <div class="room-act" id="room-act">
       <span class="pc" id="r-passcode-wrap" hidden><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-lock"></use></svg><label class="sr" for="r-passcode">참여코드</label><input class="inp" id="r-passcode" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="참여코드"></span>
       <button type="button" class="btn sm" id="room-retry"><span class="spin"></span><span class="lbl-idle">다시 시도</span></button>
+      <button type="button" class="btn sm" id="room-move-go" hidden>새 링크 입력</button>
       <button type="button" class="btn sm" id="room-support" data-support data-support-ctx=""><svg class="ic" width="13" height="13" aria-hidden="true"><use href="#i-help"></use></svg>문의하기</button>
     </div>
     <p class="hint" id="room-retry-hint" hidden></p>
@@ -618,6 +619,21 @@
    <section class="sec" id="room-products">
     <div class="srow inline" data-prod="roombot"><div class="srow-l"><span class="lb">방 관리봇</span><p>입장·퇴장 기록 · 들낙 감지 · 나간 사람 재입장 차단 · 프로필 기록 · 홍보 금지 · 글 가리기 · 금지어 검열 · 올킥 감지</p></div><div class="srow-r" data-prod-r="roombot"></div></div>
     <div class="srow inline" data-prod="minigame"><div class="srow-l"><span class="lb">미니게임봇</span><p>끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹</p></div><div class="srow-r" data-prod-r="minigame"></div></div>
+   </section></div>
+  <div class="grp" id="room-move-grp"><h2 class="grp-t">봇 옮기기·다시 설치<span>무료</span></h2>
+   <section class="sec" id="room-move">
+    <div class="srow" id="row-r-reinstall"><div class="srow-l"><span class="lb">같은 방에 다시 설치</span><p>K bot이 방에서 내보내졌거나 방에서 답하지 않을 때 같은 방에 다시 들어갑니다. K bot이 방에 있으면 나가지 않고 상태만 다시 확인합니다. 내보내졌다면 먼저 오픈채팅방의 내보내기 목록에서 K bot을 해제해 주세요.</p><p class="hint" id="r-reinstall-note" hidden></p></div>
+      <div class="srow-r"><span class="del-wrap" id="r-reinstall-act"><button type="button" class="btn sm" id="r-reinstall-btn"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-refresh"></use></svg>다시 설치</button></span></div></div>
+    <div class="srow stack" id="row-r-move"><div class="srow-l"><label class="lb" for="r-move-link">다른 방으로 옮기기</label><p>옮길 오픈채팅방 링크를 입력합니다. K bot이 지금 방에서 나가고 새 방에 들어가며, 설정은 그대로 옮겨집니다. 방 링크만 바뀌었다면 바뀐 링크를 입력해 주세요. 같은 방이면 나가지 않고 다시 설치합니다.</p><p class="hint" id="r-move-note" hidden></p></div>
+      <div class="srow-r"><div class="w100">
+        <form class="move-f" id="r-move-form" novalidate><input class="inp mono" id="r-move-link" type="text" inputmode="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="https://open.kakao.com/o/…" aria-describedby="r-move-err"><button type="submit" class="btn sm" id="r-move-check"><span class="spin"></span><span class="lbl-idle">링크 확인</span></button></form>
+        <div class="move-pv" id="r-move-pv" hidden>
+          <p class="move-q" id="r-move-q"></p>
+          <span class="pc" id="r-move-pc-wrap" hidden><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-lock"></use></svg><label class="sr" for="r-move-passcode">참여코드</label><input class="inp" id="r-move-passcode" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="참여코드"></span>
+          <span class="del-wrap"><button type="button" class="btn sm" id="r-move-no">취소</button><button type="button" class="btn sm primary" id="r-move-yes"><span class="spin"></span><span class="lbl-idle" id="r-move-yes-t">옮기기</span></button></span>
+        </div>
+        <p class="errt" id="r-move-err" role="alert"></p></div></div></div>
+    <div class="sec-f"><span id="r-move-rule"></span></div>
    </section></div>
   <form id="room-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
