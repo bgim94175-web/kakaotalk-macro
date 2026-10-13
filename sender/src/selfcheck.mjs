@@ -1150,6 +1150,21 @@ async function withLog(fn) {
   custSlot.client.close()
 }
 
+// 보이스룸 역분석 캡처(관찰 전용): CHGMETA 메타에서 callId 정밀도를 지키며 값을 뽑는지.
+{
+  const { parseVoiceMeta, isVoiceMeta, voiceMetaLine } = await import('./roomfeat.mjs')
+  const callId = '117602880001234567'   // 17자리↑: JSON.parse 로는 정밀도를 잃는 값
+  const meta = { type: 11, authorId: '9001', content: '{"liveon":true,"title":"노래방","updateTime":1760000000,"startTime":1760000000,"csIP":"211.242.15.98","csIP6":"2404:4600:2:d5:211:242:15:98","csPort":9000,"callId":' + callId + ',"count":3,"url":"","blind":false}' }
+  if (!isVoiceMeta(meta)) throw new Error('voice: isVoiceMeta missed a liveon meta')
+  const info = parseVoiceMeta(meta)
+  if (info.callId !== callId) throw new Error('voice: callId precision lost (' + info.callId + ')')
+  if (info.csIP !== '211.242.15.98' || Number(info.csPort) !== 9000 || Number(info.count) !== 3) throw new Error('voice: csIP/csPort/count not captured')
+  if (info.liveon !== 'true' || info.title !== '노래방' || info.authorId !== '9001') throw new Error('voice: liveon/title/authorId not captured')
+  if (!/csIP 211\.242\.15\.98/.test(voiceMetaLine(info)) || !new RegExp('callId ' + callId).test(voiceMetaLine(info))) throw new Error('voice: line missing fields')
+  if (parseVoiceMeta({ type: 11, content: '{"text":"hi"}' }) !== null) throw new Error('voice: non-voice meta should be null')
+  if (voiceMetaLine(parseVoiceMeta({ type: 11, content: '{"liveon":false}' })) !== '보이스룸 꺼짐(liveon:false)') throw new Error('voice: off line wrong')
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 방 설치형 봇(K bot 계정) — docs/ACCOUNTS_V1.md 7.7 의 사례. DB·HTTP 없이 돈다.
 // 1~15 는 순수 함수, 16~24 는 9.4 의 가짜 연결(FakeKakaoClient)과 메모리 저장소로 실제 botpool 경로를 탄다.

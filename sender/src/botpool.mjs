@@ -1269,6 +1269,22 @@ export class BotSlot {
     return { ok: true, real: codeOf('REAL'), fake: codeOf('FAKE'), standout }
   }
 
+  // 보이스룸 메타 캡처(관찰 전용): 방에서 진짜 보룸이 켜지면 서버가 미는 CHGMETA 를 여기서 받는다.
+  // 값(liveon·callId·csIP)이 바뀔 때만 room_log('voice')에 남기고(콘솔에서 확인), SENDER_VOICE_EXPERIMENT
+  // 면 방장·부방장이 읽도록 채팅으로도 한 번 알린다. 관찰만 가능한 역분석의 1차 자료다.
+  async onVoiceMeta(v, info) {
+    if (!v || !info) return
+    const sig = String(info.liveon) + '|' + (info.callId == null ? '' : info.callId) + '|' + (info.csIP == null ? '' : info.csIP)
+    if (v.lastVoiceSig === sig) return
+    v.lastVoiceSig = sig
+    v.lastVoice = info
+    if (v.install_id) await this.roomLog(v.install_id, 'voice', { user_id: info.authorId || null, detail: info })
+    if (process.env.SENDER_VOICE_EXPERIMENT === '1' && R.roombotLive(v)) {
+      const line = R.voiceMetaLine(info)
+      if (line) this.say(v, '[보룸 캡처] ' + line, { what: 'reply' })
+    }
+  }
+
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
   async write(installId, fields) {
     return this.store.updateInstall(Number(installId), this.id, fields)
@@ -2339,6 +2355,12 @@ export class BotSlot {
       if (chatId) await this.onChatLog(chatId, log0, typeof b.authorNickname === 'string' ? b.authorNickname : '', m)
       return
     }
+    if (m === 'CHGMETA' && R.isVoiceMeta(b.meta)) {
+      // 보이스룸 역분석 캡처: 누군가 보룸을 켜면 서버가 진짜 메타(csIP·csPort·callId·count)를 밀어 준다.
+      const v = this.views.get(R.idText(b.chatId)) || this.viewByLink(b.li)
+      if (v) await this.onVoiceMeta(v, R.parseVoiceMeta(b.meta))
+      return
+    }
     if (m === 'SYNCMEMT') {
       const chatId = R.idText(b.c) || R.idText(b.chatId)
       const v = this.views.get(chatId)
@@ -2906,6 +2928,15 @@ export class BotSlot {
         }
         const r = await this.voiceSetMeta(v, on)
         this.say(v, r.ok ? `보룸 신호 ${on ? '켜기' : '끄기'} 보냈어요 (status ${r.status})` : `보룸 신호 실패 (status ${r.status})`, { what: 'reply' })
+        return
+      }
+      if (t === '보룸정보') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 정보는 방장·부방장만 볼 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, v.lastVoice ? ('마지막 캡처 — ' + R.voiceMetaLine(v.lastVoice)) : '아직 이 방에서 보이스룸 메타를 캡처한 적이 없어요. 누군가 보룸을 켜면 자동으로 잡힙니다.', { what: 'reply' })
         return
       }
       if (t === '보룸찾기') {

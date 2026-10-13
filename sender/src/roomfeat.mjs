@@ -191,6 +191,54 @@ export function idText(v) {
   return ''
 }
 
+// ── 보이스룸 역분석 캡처(관찰 전용) ────────────────────────────────────────
+// 봇은 방의 정식 멤버라, 누군가 보이스룸을 켜면 카카오가 CHGMETA 로 진짜 메타를
+// 밀어 준다. 그 content(JSON 문자열)에서 역분석에 필요한 값만 뽑는다. 네트워크·DB 안 쓴다.
+// callId 는 2^53 을 넘어 JSON.parse 로 읽으면 정밀도를 잃으므로, 문자열 그대로 둔다.
+const VOICE_KEYS = ['liveon', 'title', 'csIP', 'csIP6', 'csPort', 'callId', 'count', 'startTime', 'updateTime', 'url', 'blind', 'type', 'hostId']
+
+function metaField(raw, key) {
+  // "key":"문자열"  또는  "key":숫자/불린 을 찾는다. 숫자·불린은 문자열로 돌려줘 원값을 보존한다.
+  const m = raw.match(new RegExp('"' + key + '"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|-?\\d+(?:\\.\\d+)?|true|false)'))
+  if (!m) return undefined
+  const t = m[1]
+  if (t[0] === '"') { try { return JSON.parse(t) } catch { return t.slice(1, -1) } }
+  return t
+}
+
+export function isVoiceMeta(meta) {
+  if (!meta) return false
+  return /"liveon"|"csIP"|"callId"|"startTime"|"count"/.test(String(meta.content || ''))
+}
+
+export function parseVoiceMeta(meta) {
+  if (!isVoiceMeta(meta)) return null
+  const raw = String(meta.content || '')
+  const out = { metaType: Number(meta.type), authorId: idText(meta.authorId) }
+  for (const k of VOICE_KEYS) {
+    const val = metaField(raw, k)
+    if (val !== undefined) out[k] = val
+  }
+  out.raw = raw.length > 1200 ? raw.slice(0, 1200) + '…' : raw
+  return out
+}
+
+// 캡처한 보이스룸 메타를 사람이 읽을 한 줄로. 역분석에 쓰는 값(csIP·csPort·callId·count)을 앞세운다.
+export function voiceMetaLine(info) {
+  if (!info) return ''
+  const on = String(info.liveon) === 'true'
+  if (!on && info.liveon !== undefined) return '보이스룸 꺼짐(liveon:false)'
+  const bits = []
+  if (info.csIP !== undefined) bits.push('csIP ' + info.csIP)
+  if (info.csIP6 !== undefined) bits.push('csIP6 ' + info.csIP6)
+  if (info.csPort !== undefined) bits.push('csPort ' + info.csPort)
+  if (info.callId !== undefined) bits.push('callId ' + info.callId)
+  if (info.count !== undefined) bits.push('count ' + info.count)
+  if (info.startTime !== undefined) bits.push('startTime ' + info.startTime)
+  if (info.title !== undefined) bits.push('title ' + JSON.stringify(info.title))
+  return '보이스룸 메타(켜짐) ' + (bits.join(' · ') || '필드 없음')
+}
+
 // ── 7.6 방 어댑터 기록 ─────────────────────────────────────────────────────
 // 기존 features.mjs 함수(guardOnChat·applyVisit·coverPlan·onInbound·logsView)를 방 하나짜리 기록으로 부른다.
 // 방 관리 절은 roombotLive 가 아니면 enabled:false(게이트는 여기 한 곳). runtime 은 이 방 전용 객체를 그대로 쓴다.
