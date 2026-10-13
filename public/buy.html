@@ -25,9 +25,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/style.css?v=12">
+<link rel="stylesheet" href="/style.css?v=13">
+<link rel="stylesheet" href="/kk.css?v=1">
 <script src="/support.js?v=1" defer></script>
-<script src="/app.js?v=17" defer></script>
+<script src="/app.js?v=18" defer></script>
 </head>
 <body data-page="buy">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -83,7 +84,7 @@
       <a class="btn ghost icon-s" href="/login" data-auth="out" aria-label="로그인"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
       <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
       <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
-      <a class="btn ghost hide-s" href="/demo" data-nav="demo">체험</a>
+      <a class="btn ghost" href="/demo" data-nav="demo">체험</a>
       <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
       <a class="btn primary" href="/panel" data-nav="panel">패널 열기</a>
     </nav>
@@ -97,6 +98,40 @@
       <h1>필요한 것만 골라 구매</h1>
       <p class="lead">주문하면 입금 계좌와 금액이 바로 나옵니다. <span data-manual="안내된 &lt;b&gt;정확한 금액&lt;/b&gt;을 입금하면 관리자가 확인한 뒤 처리합니다.">안내된 <b>정확한 금액</b>을 입금하면 보통 1~2분 안에 자동으로 확인됩니다.</span></p>
     </div>
+
+    <!-- 체험 소개(로그아웃 상태 · 6.6): 작은 카카오톡 방 미리보기 + [체험하기]. 방 글은 실제 봇 문구 그대로(lib/demo-check.js 가 비교한다).
+         처음엔 숨겨 두고 로그아웃으로 확인되면 보인다(app.js applyAuth) — 로그인한 회원에게 잠깐 보였다 사라지지 않게 -->
+    <section class="intro" aria-labelledby="introH" data-auth="out" hidden>
+      <div class="intro-txt">
+        <p class="eyebrow">체험</p>
+        <h2 id="introH">미니게임봇 · 방 관리봇 · 매크로가 하는 일을 구매 전에 볼 수 있습니다</h2>
+        <p class="lead">카카오톡 방과 같은 화면에서 직접 입력하거나 버튼을 누르면 실제 방에서와 같은 문구가 올라옵니다. 체험 중에는 실제 카카오톡에 아무것도 보내지 않습니다.</p>
+        <div class="intro-act">
+          <a class="btn lg" href="/demo"><svg class="ic" width="13" height="13" aria-hidden="true"><use href="#i-play"></use></svg>체험하기</a>
+          <ul class="intro-sc" role="list" aria-label="장면 바로 열기">
+            <li><a href="/demo#games" data-prod="minigame">미니게임</a></li>
+            <li><a href="/demo#visit" data-prod="roombot">입장·퇴장 기록</a></li>
+            <li><a href="/demo#promo" data-prod="roombot">홍보 금지</a></li>
+            <li><a href="/demo#macro" data-prod="macro">자동 발송</a></li>
+          </ul>
+        </div>
+      </div>
+      <a class="intro-ph" href="/demo" tabindex="-1" aria-hidden="true">
+        <div class="kk">
+          <div class="kk-top">
+            <span class="kk-ib"><svg class="ic" width="20" height="20"><use href="#i-back"></use></svg></span>
+            <p class="kk-title"><b>K bot 체험방</b><span class="kk-count">19</span></p>
+            <span class="kk-ib"><svg class="ic" width="19" height="19"><use href="#i-search"></use></svg></span>
+            <span class="kk-ib"><svg class="ic" width="20" height="20"><use href="#i-menu"></use></svg></span>
+          </div>
+          <div class="kk-body"><div class="kk-log">
+            <div class="kk-msg me first" style="--i:0"><div class="kk-col"><div class="kk-line"><div class="kk-bub">!도움</div><span class="kk-meta"><span class="kk-time" data-clock>오후 9:14</span></span></div></div></div>
+            <div class="kk-msg them first" style="--i:1"><span class="kk-av brand-mark"></span><div class="kk-col"><div class="kk-name"><span class="kk-name-t">K bot</span><span class="kk-role">부방장</span></div><div class="kk-line"><div class="kk-bub" data-real="help">[명령어]&#10;미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹&#10;방 관리 : !가리기 !프로필</div><span class="kk-meta"><span class="kk-time" data-clock>오후 9:14</span></span></div></div></div>
+          </div></div>
+          <div class="kk-in"><span class="kk-plus"><svg class="ic" width="20" height="20"><use href="#i-plus"></use></svg></span><span class="kk-fake">메시지 입력</span><span class="kk-send"><span><svg class="ic" width="17" height="17"><use href="#i-send"></use></svg></span></span></div>
+        </div>
+      </a>
+    </section>
 
     <div id="buyBoot" class="card"><div class="state"><span class="spin" aria-hidden="true"></span>회원 정보 확인 중…</div></div>
 

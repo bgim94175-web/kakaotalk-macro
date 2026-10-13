@@ -766,6 +766,49 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .moved { padding-block: 56px; color: var(--fg-2); }
 .moved a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
 
+/* 체험 소개(구매 화면 맨 위 · 로그아웃 상태 · 6.6): 왼쪽 글 + [체험하기], 오른쪽 작은 카카오톡 방(방 화면 자체는 kk.css).
+   상품 카드가 첫 화면에 남도록 낮게 둔다 — 방에는 나의 「!도움」과 K bot 의 [명령어] 답 한 쌍만(맨 위 끝은 살짝 흐리게).
+   방 글은 들어올 때 차례로 하나씩 나타난다(--i 번째). 미리보기는 누르면 체험 화면으로 간다 */
+.intro { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: center; gap: 36px; margin-bottom: 32px; padding: 22px 22px 22px 30px; border: 1px solid var(--line-2); border-radius: 16px; background: radial-gradient(70% 120% at 100% 100%, var(--p-room-soft), transparent 60%), linear-gradient(180deg, var(--bg-2), var(--bg-1)); overflow: hidden; animation: riseIn 560ms var(--ease) backwards; animation-delay: 140ms; }
+.intro h2 { margin-top: 8px; font-size: var(--t-18); font-weight: 600; letter-spacing: -0.02em; line-height: 1.45; }
+.intro .lead { margin-top: 8px; max-width: 540px; color: var(--fg-2); font-size: var(--t-13); line-height: 1.7; }
+.intro-act { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 16px; }
+.intro-sc { display: contents; }
+.intro-sc li { display: contents; }
+.intro-sc a { --acc: var(--fg-3); display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--fg-2); font-size: var(--t-13); transition: color var(--d1) var(--ease), border-color var(--d1) var(--ease), background var(--d1) var(--ease); }
+.intro-sc a::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.intro-sc a[data-prod="minigame"] { --acc: var(--p-game); }
+.intro-sc a[data-prod="roombot"] { --acc: var(--p-room); }
+.intro-sc a[data-prod="macro"] { --acc: var(--p-macro); }
+.intro-sc a:hover { color: var(--fg); border-color: var(--line-3); background: var(--bg-3); }
+.intro-act > .btn { margin-right: 6px; }
+.intro-ph { display: block; padding: 6px; border: 1px solid var(--line-2); border-radius: 30px; background: var(--bg-2); box-shadow: var(--shadow); transition: transform var(--d2) var(--ease); }
+.intro-ph:hover { transform: translateY(-2px); }
+.intro .kk { height: 320px; border-radius: 24px; pointer-events: none; }
+.intro .kk-top { height: 46px; }
+.intro .kk-title { font-size: 15px; }
+.intro .kk-log { overflow: hidden; justify-content: flex-end; padding-bottom: 10px; -webkit-mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); }
+.intro .kk-log > :first-child { margin-top: 0; }
+.intro .kk-log > * { animation: kkIn 420ms var(--ease) backwards; animation-delay: calc(450ms + var(--i, 0) * 700ms); }
+.intro .kk-bub { font-size: 13.5px; }
+.intro .kk-in { padding-block: 2px; }
+.intro .kk-fake { flex: 1; align-self: center; padding: 0 4px; color: var(--kk-input-fg); font-size: 14px; }
+/* 입력 칸이 비어 있으니 보내기는 회색(실제 방과 같다) */
+.intro .kk .kk-send > span { background: var(--kk-send-off); color: var(--kk-input-fg); }
+@media (max-width: 960px) {
+  .intro { grid-template-columns: minmax(0, 1fr) 270px; gap: 24px; padding: 20px 18px 20px 24px; }
+}
+@media (max-width: 760px) {
+  .intro { grid-template-columns: minmax(0, 1fr); gap: 18px; margin-bottom: 24px; padding: 20px 16px 16px; }
+  .intro .lead { font-size: var(--t-13); }
+  .intro-act { flex-wrap: nowrap; overflow-x: auto; margin: 16px -16px 0; padding: 0 16px 2px; scrollbar-width: none; }
+  .intro-act::-webkit-scrollbar { display: none; }
+  .intro-act > *, .intro-sc a { flex: none; }
+  .intro-sc a { min-height: 40px; }
+  .intro-ph { padding: 0; border: 0; border-radius: 18px; background: none; box-shadow: none; }
+  .intro .kk { height: 320px; border-radius: 18px; }
+}
+
 /* ---------- 움직임 (공개 페이지) ----------
    들어올 때 위에서부터 차례로 살짝 떠오른다. 숨겨 뒀다 보여 주는 칸(#macroSec · #rooms 등)도 보일 때 같은 움직임.
    fill 은 backwards 만 — 끝난 뒤 :hover 의 transform 을 막지 않게. 움직임 줄이기 설정이면 맨 아래에서 끈다 */
@@ -880,11 +923,17 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   .acc-boot { padding-top: 36px; }
   .xbtn { min-height: 40px; }
 }
+@media (max-width: 359px) {
+  /* 아주 좁은 휴대폰(320~359px): 상단 바 버튼 사이·안쪽 여백을 줄여 체험까지 한 줄에 든다 */
+  .lnav-in { gap: 8px; }
+  .top-nav { gap: 2px; }
+  .top-nav .btn:not(.icon-s) { padding-inline: 9px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; transition-delay: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   .rv.armed { transform: none; }
-  .caret, .dot.pulse, .pub-page::before { animation: none !important; }
+  .caret, .dot.pulse, .pub-page::before, .intro .kk-log > * { animation: none !important; }
   .how-fig .pk { display: none; }
   .kkt-line.enter, .kkt-row.in, .tbl tr.in, .feed li.in, .alerts li.in, .rule.new, .room.pop, .wchip.new, .img-t, .spark rect, .kt-k, .mviz-strip i, .pass-code span { animation: none !important; }
 }
