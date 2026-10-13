@@ -3462,8 +3462,28 @@ export class BotSlot {
     this.scheduleSend(item.notBefore)
   }
 
+  // 이미지 1장(PNG Buffer, card.mjs). 보내지 못하면 text 를 글로 대신 보낸다(text 가 없으면 조용히 넘어간다).
+  sayImage(v, png, opt) {
+    const o = opt || {}
+    if (!v.chat_id || !v.licensed) return
+    if (!png || !png.length) {
+      if (o.text) this.say(v, o.text, o)
+      return
+    }
+    const now = this.now()
+    const item = { image: png, text: o.text ? String(o.text) : '', mention: o.mention || null, notBefore: now + Math.max(0, Number(o.delayMs) || 0), what: o.what || 'send', chat_id: v.chat_id }
+    if (!this.pacer.push(String(v.install_id), item, now)) {
+      this.bg(this.roomLog(v.install_id, 'skip', { detail: { what: item.what === 'reply' ? 'reply' : 'send' } }), 'skip log')
+      return
+    }
+    this.scheduleSend(item.notBefore)
+  }
+
   sendAll(v, sends, what) {
-    for (const s of sends || []) this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+    for (const s of sends || []) {
+      if (s.image) this.sayImage(v, s.image, { text: s.text, mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+      else this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+    }
   }
 
   scheduleSend(at) {
@@ -3508,6 +3528,17 @@ export class BotSlot {
   }
 
   async deliver(v, item) {
+    if (item.image) {
+      try {
+        const res = await this.client.sendPhoto(v.chat_id, item.image, 'kbot.png')
+        if (res && res.success === true) return
+        log(this.id, `image send failed install ${v.install_id}`)
+      } catch (e) {
+        log(this.id, `image send failed install ${v.install_id}: ${errText(e)}`)
+      }
+      if (!item.text) return
+      item = Object.assign({}, item, { image: null })
+    }
     try {
       const extra = item.mention ? visitMentionExtra(item.text, item.mention) : ''
       if (extra) {
