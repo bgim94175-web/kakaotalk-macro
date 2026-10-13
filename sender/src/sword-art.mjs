@@ -1,6 +1,9 @@
-// 「추억의 검 강화」 카드 그림(SVG → PNG). 검 그림은 모두 이 파일에서 직접 그린다(외부 그림 없음).
-// 단계 묶음(tier)마다 날 모양·색·코등이·보석이 바뀌고, 단계가 오를수록 빛(오라)과 반짝임이 늘어난다.
+// 「추억의 검 강화」 카드 그림(SVG → PNG). 검은 단계 묶음(tier)마다 그려 둔 그림(assets/swords/tier0~7.png)을 붙이고,
+// 그림 파일이 없으면 이 파일에서 직접 그린 벡터 검으로 대신한다. 단계가 오를수록 빛(오라)과 반짝임이 늘어난다.
 // 순수 모듈: 같은 카드 값이면 같은 SVG. PNG 는 card.mjs(resvg)가 만든다 — 못 만들면 null(부르는 쪽이 글로 보낸다).
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { svgToPng, esc, ellipsis, textWidth } from './card.mjs'
 import { MAX_LV, tierOf, swordName, won, cost, chance } from './sword.mjs'
 
@@ -32,6 +35,51 @@ function lcg(seed) {
 }
 
 const r1 = (n) => Math.round(n * 10) / 10
+
+// 묶음별 검 그림(세로, 끝이 위, 둘레는 투명). → { uri, w, h } 또는 null(파일이 없으면 벡터 검)
+const ART_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'swords')
+const ART = Array.from({ length: 8 }, (_, i) => {
+  try {
+    const b = readFileSync(join(ART_DIR, `tier${i}.png`))
+    if (b.length < 24 || b.toString('latin1', 12, 16) !== 'IHDR') return null
+    return { uri: 'data:image/png;base64,' + b.toString('base64'), w: b.readUInt32BE(16), h: b.readUInt32BE(20) }
+  } catch {
+    return null
+  }
+})
+const ART_MAX_H = Math.max(1, ...ART.map((a) => (a ? a.h : 0)))
+
+/** 이 단계의 검 그림(없으면 null) */
+export function artOf(lv) {
+  return ART[tierOf(lv)] || null
+}
+
+/**
+ * 그림 검을 (cx, cy) 가운데에 세운다. 높이는 묶음끼리 원래 비율대로(높은 단계가 더 크다), 가장 큰 검이 maxH.
+ * opt.broken: 날 가운데가 갈라져 두 동강(빛을 뺀 잿빛)
+ */
+function artSword(A, cx, cy, maxH, id, opt) {
+  const o = opt || {}
+  const k = maxH / ART_MAX_H
+  const w = r1(A.w * k)
+  const h = r1(A.h * k)
+  const x = r1(cx - w / 2)
+  const y = r1(cy - h / 2)
+  const img = `<image x="${x}" y="${y}" width="${w}" height="${h}" href="${A.uri}"/>`
+  if (!o.broken) return { defs: '', body: img }
+  // 날의 40% 높이에서 지그재그로 끊는다
+  const cut = y + h * 0.4
+  const zig = []
+  for (let i = 0; i <= 8; i++) zig.push(`${r1(x - 4 + ((w + 8) * i) / 8)},${r1(cut + (i % 2 ? 7 : -7))}`)
+  const top = `M${x - 4},${y - 4} L${r1(x + w + 4)},${y - 4} L${zig.slice().reverse().join(' L')} Z`
+  const bot = `M${zig.join(' L')} L${r1(x + w + 4)},${r1(y + h + 4)} L${x - 4},${r1(y + h + 4)} Z`
+  const defs = `<filter id="${id}g" x="-10%" y="-10%" width="120%" height="120%"><feColorMatrix type="saturate" values="0.1"/><feComponentTransfer><feFuncR type="linear" slope=".72"/><feFuncG type="linear" slope=".72"/><feFuncB type="linear" slope=".76"/></feComponentTransfer></filter>` +
+    `<clipPath id="${id}t"><path d="${top}"/></clipPath><clipPath id="${id}b"><path d="${bot}"/></clipPath>`
+  const body = `<g filter="url(#${id}g)">` +
+    `<g transform="translate(-16,-6) rotate(-14 ${r1(cx)} ${r1(cut)})"><g clip-path="url(#${id}t)">${img}</g></g>` +
+    `<g transform="translate(8,10) rotate(6 ${r1(cx)} ${r1(cut)})"><g clip-path="url(#${id}b)">${img}</g></g></g>`
+  return { defs, body }
+}
 const pt = (p) => `${r1(p[0])},${r1(p[1])}`
 
 // 매끈한 모서리(차이킨 2번). 처음·끝 점은 그대로
@@ -375,12 +423,19 @@ function showcase(lv, x, y, w, h, opt) {
   // 바닥 격자(옛 게임 느낌)
   for (let i = 1; i < 6; i++) s += `<path d="M${x},${r1(y + h - i * 16)} L${x + w},${r1(y + h - i * 16)}" stroke="${aura}" stroke-opacity="${r1(0.12 - i * 0.015) > 0 ? r1((0.12 - i * 0.018) * 100) / 100 : 0.02}" stroke-width="1"/>`
   s += `<ellipse cx="${cx}" cy="${y + h - 34}" rx="${w * 0.32}" ry="10" fill="#000" opacity=".35"/>`
-  const sw = swordSvg(lv, 'sw', { broken: o.broken })
-  defs += sw.defs
-  const scale = Math.min(1, (h - 40) / (sw.len * 0.74)) * (o.broken ? 0.9 : 1)
-  const ox = o.broken ? cx - 22 : cx
-  const oy = o.broken ? cy + 26 : cy
-  s += `<g transform="translate(${ox},${oy}) rotate(45) scale(${r1(scale * 100) / 100})">${sw.body}</g>`
+  const A = artOf(lv)
+  if (A) {
+    const sw = artSword(A, cx, cy - 22, h - 92, 'sw', { broken: o.broken })
+    defs += sw.defs
+    s += sw.body
+  } else {
+    const sw = swordSvg(lv, 'sw', { broken: o.broken })
+    defs += sw.defs
+    const scale = Math.min(1, (h - 40) / (sw.len * 0.74)) * (o.broken ? 0.9 : 1)
+    const ox = o.broken ? cx - 22 : cx
+    const oy = o.broken ? cy + 26 : cy
+    s += `<g transform="translate(${ox},${oy}) rotate(45) scale(${r1(scale * 100) / 100})">${sw.body}</g>`
+  }
   if (!o.broken) s += sparkles(lv * 7919 + 17, lv, cx, cy, Math.min(w, h) * 0.46, L.aura || '#ffffff')
   s += '</g>'
   s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="1.5"/>`
@@ -576,10 +631,15 @@ export function rankSvg(c) {
     s += `<rect x="34" y="${y}" width="${W - 68}" height="${RH - 8}" rx="12" fill="#ffffff" fill-opacity="${i < 3 ? 0.08 : 0.04}" stroke="#ffffff" stroke-opacity="${i < 3 ? 0.16 : 0.08}"/>`
     if (medal) s += `<circle cx="66" cy="${y + 25}" r="16" fill="${medal}"/>` + text(66, y + 32, String(i + 1), 18, '#1a1a2e', { bold: true, anchor: 'middle' })
     else s += text(66, y + 32, String(i + 1), 20, '#aab3d6', { bold: true, anchor: 'middle' })
-    const sw = swordSvg(r.lv, 'r' + i)
-    defs += sw.defs
-    const sc = 40 / (sw.len * 0.72)
-    s += `<g transform="translate(116,${y + 25}) rotate(45) scale(${r1(sc * 1000) / 1000})">${sw.body}</g>`
+    const A = artOf(r.lv)
+    if (A) {
+      s += `<g transform="translate(116,${y + 25}) rotate(45)">${artSword(A, 0, 0, 60, 'r' + i).body}</g>`
+    } else {
+      const sw = swordSvg(r.lv, 'r' + i)
+      defs += sw.defs
+      const sc = 40 / (sw.len * 0.72)
+      s += `<g transform="translate(116,${y + 25}) rotate(45) scale(${r1(sc * 1000) / 1000})">${sw.body}</g>`
+    }
     s += text(150, y + 33, ellipsis(r.name, 22, 250, true), 22, '#ffffff', { bold: true })
     const L = lookOf(r.lv)
     s += text(W - 160, y + 33, `+${r.lv} ${swordName(r.lv)}`, 20, L.aura || '#d9cdb9', { bold: true, anchor: 'end' })
