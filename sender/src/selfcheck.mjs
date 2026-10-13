@@ -1749,7 +1749,7 @@ async function withLog(fn) {
     const sent = sentIn(iMini)
     if (sent[0] !== '[K bot]\n미니게임봇이 입장했어요.\n「!도움」을 입력하면 명령어를 볼 수 있어요.') throw new Error('7.7#18 join notice first ' + JSON.stringify(sent))
     if (sent.filter((t) => t.startsWith('[명령어]')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
-    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
+    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
     // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
     const before = packets('REWRITE').length
     fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })

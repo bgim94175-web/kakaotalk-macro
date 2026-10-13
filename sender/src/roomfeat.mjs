@@ -29,7 +29,7 @@ export const DEFAULTS = Object.freeze({
   hide: { command: true },
   guard: { enabled: false, secs: 30, count: 5 },
   cmd: { link: 'staff' },
-  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, cooldownSec: 3, dailyLimit: 0 },
+  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, sword: true, cooldownSec: 3, dailyLimit: 0 },
 })
 
 const B = { t: 'bool' }
@@ -45,7 +45,7 @@ const SPEC = {
   hide: { command: B },
   guard: { enabled: B, secs: I(5, 300), count: I(3, 30) },
   cmd: { link: E(['staff', 'all', 'off']) },
-  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
+  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, sword: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
 }
 
 function isObj(v) {
@@ -223,6 +223,7 @@ export function adapterRecord(view, botId) {
         dice: g.dice,
         rps: g.rps,
         quiz: g.quiz,
+        sword: g.sword,
         cooldownMs: g.cooldownSec * 1000,
         dailyLimit: g.dailyLimit,
         byId: true,
@@ -997,10 +998,13 @@ export function helpLine(view) {
     if (g.word || g.baseball || g.quiz) games.push(p + '포기')
     games.push(p + '랭킹')
   }
+  // 추억의 검 강화(sword.mjs helpLine 과 같은 줄)
+  const sword = gamesLive(view) && cfg.games.sword ? `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}강화도움` : ''
   const room = roomCommandNames(view)
   if (!games.length && !room.length) return ''
   const lines = ['[명령어]']
   if (games.length) lines.push('미니게임 : ' + games.join(' '))
+  if (sword) lines.push(sword)
   if (room.length) lines.push('방 관리 : ' + room.join(' '), `「${p}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.`)
   return lines.join('\n')
 }

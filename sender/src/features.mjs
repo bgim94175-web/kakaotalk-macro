@@ -1,5 +1,7 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
+import * as Sword from './sword.mjs'
+import { cardPng as swordCardPng } from './sword-art.mjs'
 import { josa, profileObserve, visitNoticeText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
@@ -490,9 +492,12 @@ function rt(record) {
   return r
 }
 
-function pushSend(out, chatId, text, delayMs) {
+function pushSend(out, chatId, text, delayMs, image) {
   if (!realId(chatId) || !text || !String(text).trim()) return
-  out.push({ chatId, text: String(text), delayMs: delayMs || 0, images: null })
+  const item = { chatId, text: String(text), delayMs: delayMs || 0, images: null }
+  // 그림 한 장(PNG Buffer). botpool sendAll 이 사진으로 보내고, 못 보내면 text 를 글로 보낸다
+  if (image) item.image = image
+  out.push(item)
 }
 
 // 권리 v2(docs/ACCOUNTS_V1.md 5.1): 부모가 /v1/grants 로 미는 만료 시각으로 판정한다.
@@ -548,7 +553,7 @@ export function onInbound(record, msg) {
   state.knownRooms[room.key] = true
   if (!mine) {
     if (featureOn(record, 'roombot')) roomBot(record, out, room, parsed, who, text, group, now, state)
-    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state, msg.authorId)
+    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state, msg.authorId, msg.mentions)
   }
   return out
 }
@@ -819,10 +824,13 @@ function gameOn(cfg, id) {
   if (id === 'dice') return cfg.dice !== false
   if (id === 'rps') return cfg.rps !== false
   if (id === 'quiz') return cfg.quiz !== false
+  // 검 강화는 방 설치형 설정(7.1 games.sword)으로만 켠다. 계정 단위 옛 기능에는 없다
+  if (id === 'sword') return cfg.sword === true
   return false
 }
 
-function gameSend(state, cfg, room, text, now, out) {
+// 지금 게임 답을 보낼 수 있나(쿨타임·하루 최대 응답 수)
+function gameReady(state, cfg, room, now) {
   const cool = Math.max(0, Number(cfg.cooldownMs) || 0)
   const last = Number(state.gameLast[room.key] || 0)
   if (cool && last && now - last < cool) return false
@@ -833,7 +841,12 @@ function gameSend(state, cfg, room, text, now, out) {
   }
   const limit = Number(cfg.dailyLimit) || 0
   if (limit > 0 && (state.gameCount || 0) >= limit) return false
-  pushSend(out, room.chat_id, text, 0)
+  return true
+}
+
+function gameSend(state, cfg, room, text, now, out, image) {
+  if (!gameReady(state, cfg, room, now)) return false
+  pushSend(out, room.chat_id, text, 0, image)
   state.gameLast[room.key] = now
   state.gameCount = (state.gameCount || 0) + 1
   const said = state.said[room.key] || []
@@ -842,7 +855,7 @@ function gameSend(state, cfg, room, text, now, out) {
   return true
 }
 
-function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
+function miniGame(record, out, room, parsed, who, text, now, state, authorId, mentions) {
   const cfg = record.config && record.config.minigame
   if (!cfg || !cfg.enabled) return
   if (!coversList(cfg.rooms || [], room.key)) return
@@ -852,7 +865,7 @@ function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
   if (cfg.byId) state._sk = realId(String(authorId || '')) ? String(authorId) : 'n:' + String(who || '')
   try {
     if (body.startsWith(prefix) && body.length > prefix.length) {
-      gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out)
+      gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out, mentions)
       return
     }
     play(state, cfg, room, who, body, prefix, now, out)
@@ -870,7 +883,7 @@ function roomBotOwnsHelp(record, room, prefix) {
   return p === prefix
 }
 
-function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
+function gameCommand(record, state, cfg, room, who, line, prefix, now, out, mentions) {
   if (!line) return
   const sp = line.search(/\s/)
   const cmd = sp < 0 ? line : line.slice(0, sp)
@@ -883,6 +896,7 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
   if (cmd === '힌트') return hint(state, cfg, room, now, out)
   if (cmd === '정답') return reveal(state, cfg, room, now, out)
   if (cmd === '포기') return giveUp(state, cfg, room, now, out)
+  if (Sword.COMMANDS.has(cmd) && swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions)) return
   if (cmd === '점수') {
     const n = (state.scores[room.key] && state.scores[room.key][scoreKey(state, who)]) || 0
     gameSend(state, cfg, room, `${nameOf(who)}님의 누적 점수는 ${n}점이에요.`, now, out)
@@ -908,11 +922,36 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
       if (gameOn(cfg, 'rps')) on.push(prefix + '가위바위보')
       if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
       on.push(prefix + '포기', prefix + '랭킹')
-      gameSend(state, cfg, room, '[명령어]\n미니게임 : ' + on.join(' '), now, out)
+      const lines = ['[명령어]', '미니게임 : ' + on.join(' ')]
+      if (gameOn(cfg, 'sword')) lines.push(Sword.helpLine(prefix))
+      gameSend(state, cfg, room, lines.join('\n'), now, out)
       return
     }
     gameSend(state, cfg, room, `[명령어]\n미니게임 : ${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
   }
+  // 「수락」·「거절」을 받은 게임이 없다(받은 거래 제안 없음)
+  if ((cmd === '수락' || cmd === '거절') && gameOn(cfg, 'sword')) gameSend(state, cfg, room, '받은 거래 제안이 없어요.', now, out)
+}
+
+// 추억의 검 강화(sword.mjs). 답을 보낼 수 없을 때(쿨타임·하루 한도)는 상태를 바꾸지 않고 조용히 넘긴다 —
+// 강화 결과가 안 보인 채 검이 부서지는 일이 없게. 처리했으면 true(이 명령어는 끝), 아니면 false
+// (「수락」·「거절」인데 받은 검 강화 거래가 없으면 false — 다른 게임이 받을 수 있게. gameCommand 맨 끝이 「없어요」라고 답한다).
+function swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions) {
+  if (!gameOn(cfg, 'sword')) {
+    if (cfg.byId && (cmd === '강화' || cmd === '강화도움')) {
+      gameSend(state, cfg, room, '이 방에서는 검 강화가 꺼져 있어요.', now, out)
+      return true
+    }
+    return false
+  }
+  if (!gameReady(state, cfg, room, now)) return true
+  const key = scoreKey(state, who)
+  const r = Sword.run(state, room.key, { cmd, arg, key, name: who, mentions, prefix, now, rand: Math.random })
+  if (!r) return false
+  if (!r.text) return true
+  const png = r.card && cfg.images !== false ? swordCardPng(r.card) : null
+  gameSend(state, cfg, room, r.text, now, out, png)
+  return true
 }
 
 function busy(state, cfg, room, prefix, now, out, kind) {

@@ -3559,7 +3559,7 @@
     }
     if (r === 'r-games') {
       setSw('r-games-on', c.games.enabled);
-      ['word', 'baseball', 'dice', 'rps', 'quiz'].forEach(function (g) { setSw('r-games-' + g, c.games[g]); });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (g) { setSw('r-games-' + g, c.games[g]); });
       setNum('r-games-cool', c.games.cooldownSec);
       setNum('r-games-limit', c.games.dailyLimit);
     }
@@ -3607,7 +3607,7 @@
     if (r === 'r-guard') return { guard: { enabled: $('r-guard-on').checked, secs: numVal('r-guard-secs'), count: numVal('r-guard-count') } };
     if (r === 'r-games') {
       var g = { enabled: $('r-games-on').checked };
-      ['word', 'baseball', 'dice', 'rps', 'quiz'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
       g.cooldownSec = numVal('r-games-cool');
       g.dailyLimit = numVal('r-games-limit');
       return { games: g };
@@ -3771,7 +3771,9 @@
         if (c.hide && c.hide.command) roomCmds.push(pfx + '가리기');
         roomCmds.push(pfx + '내보내기', pfx + '설정');
       }
-      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') +
+      // 추억의 검 강화 줄(sender/src/sword.mjs helpLine)
+      var sword = $('r-games-sword').checked ? '\n검 강화 : ' + pfx + '강화 ' + pfx + '내검 ' + pfx + '사냥 ' + pfx + '강화도움' : '';
+      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + sword +
         (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') + '\n「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
   }
