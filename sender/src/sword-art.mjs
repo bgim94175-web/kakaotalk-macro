@@ -508,6 +508,7 @@ export function enhanceSvg(c, opt) {
   let s = frame(W, H, R.bg, R.color)
   s += showcaseAt(shownLv, 34, 34, 312, 446, broken, opt && opt.embed)
   s += lvBadge(shownLv, 52, 462, broken ? '#9a9fb0' : L.aura || '#e8e2d4')
+  s += ribbons(c.notes, 48, 48)
   const X = 374
   const RX = 686
   // 머리 글(결과)
@@ -542,8 +543,8 @@ export function enhanceSvg(c, opt) {
     y += 38
   }
   if (c.lv < MAX_LV) {
-    const ch = nextChance(c.lv)
-    s += text(X, y + 4, `다음 성공 ${ch.up}%`, 16, '#4ad98a', { bold: true })
+    const ch = nextChance(c.lv, c.pity)
+    s += text(X, y + 4, `다음 성공 ${ch.up}%${c.pity ? ` (보정 +${c.pity}%)` : ''}`, 16, '#4ad98a', { bold: true })
     if (ch.broke) s += text(RX, y + 4, `파괴 ${ch.broke}%`, 16, '#ff7a6a', { bold: true, anchor: 'end' })
     s += probBar(X, y + 14, RX - X, ch.up, ch.broke)
     y += 44
@@ -563,8 +564,25 @@ export function enhanceSvg(c, opt) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${s}</svg>`
 }
 
-function nextChance(lv) {
-  return chance(lv)
+// 다음 강화 확률(연속 실패 보정 pity % 를 더한다)
+function nextChance(lv, pity) {
+  const ch = chance(lv)
+  const up = Math.min(100, ch.up + (Number(pity) || 0))
+  return { up, broke: Math.min(ch.broke, 100 - up) }
+}
+
+// 진열장 왼쪽 위 리본(방 최고 기록 · 위로금)
+function ribbons(notes, x, y) {
+  let s = ''
+  let yy = y
+  for (const n of (notes || []).slice(0, 2)) {
+    const gold = n === '방 최고 기록'
+    const w = Math.round(textWidth(n, 17, true) + 30)
+    s += `<rect x="${x}" y="${yy}" width="${w}" height="34" rx="17" fill="${gold ? '#3a2a05' : '#0b1a2e'}" fill-opacity=".88" stroke="${gold ? '#ffd84a' : '#7ec8ff'}" stroke-width="2"/>`
+    s += text(x + w / 2, yy + 23, n, 17, gold ? '#ffe17a' : '#bfe4ff', { bold: true, anchor: 'middle' })
+    yy += 42
+  }
+  return s
 }
 
 /** 내 검 카드 SVG */
@@ -596,7 +614,7 @@ export function infoSvg(c, opt) {
     y += 38
   }
   if (c.next) {
-    s += text(X, y + 2, `성공 ${c.next.up}%`, 16, '#4ad98a', { bold: true })
+    s += text(X, y + 2, `성공 ${c.next.up}%${c.next.pity ? ` (보정 +${c.next.pity}%)` : ''}`, 16, '#4ad98a', { bold: true })
     if (c.next.broke) s += text(RX, y + 2, `파괴 ${c.next.broke}%`, 16, '#ff7a6a', { bold: true, anchor: 'end' })
     s += probBar(X, y + 12, RX - X, c.next.up, c.next.broke)
     y += 40

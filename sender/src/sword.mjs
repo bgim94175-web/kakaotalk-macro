@@ -3,8 +3,12 @@
 // features.mjs 가 명령어를 넘기고(run), 답 글과 카드(card)를 받아 보낸다. 카드 그림은 sword-art.mjs.
 //
 // 사람 u = { n: 이름, g: 골드, lv: 검 단계, id: 검 번호, b: 최고 단계, it: {guard, bless, mana, scale}, a: 마지막 활동,
-//            e: 마지막 강화, h: 마지막 사냥, w: 쿨타임 안내를 이미 한 행동 시각, k: 부서진 횟수, s: 판매 횟수 }
-// 거래 t = { id, f: 판 사람, to: 받을 사람, it: 아이템 id 또는 'sword', q: 수량, p: 가격, lv, sid: 검 번호, at }
+//            e: 마지막 강화, h: 마지막 사냥, w: 쿨타임 안내를 이미 한 행동 시각, k: 부서진 횟수, s: 판매 횟수,
+//            f: 연속 실패(실패 보정), d: 마지막 출석 날(KST 날 번호), ds: 연속 출석 일수, du: 마지막 결투 신청,
+//            dw·dl: 결투 승·패, r: 마지막 보스 공격 }
+// 거래 t = { id, f: 판 사람, to: 받을 사람, it: 아이템 id 또는 'sword' 또는 'duel'(결투 신청, p = 내기 골드), q: 수량, p: 가격, lv, sid: 검 번호, at }
+// 방 기록 top = { lv, n } (방에서 나온 가장 높은 검) · 보스 r = { i: 보스 번호, hp, mx, at: 나타난 시각, d: {사람 열쇠: 피해} } | null,
+// rn: 다음 보스가 나타날 수 있는 시각, bk: 쓰러뜨린 보스 수
 import { josa } from './roomfeat.mjs'
 
 export const MAX_LV = 20
@@ -20,6 +24,27 @@ export const TRADE_TTL_MS = 2 * 60 * 1000
 export const MAX_PRICE = 100000000
 export const SELL_CONFIRM_LV = 10 // 이 단계부터 「판매 확인」을 받는다
 export const BLESS_PCT = 10
+export const PITY_STEP = 2 // 연속 실패 1번마다 다음 강화 성공 +2%
+export const PITY_MAX = 10
+export const RECORD_FROM = 10 // 이 단계부터 「방 최고 기록」을 알린다
+export const COMFORT_FROM = 10 // 이 단계부터 부서지면 판매가의 10%를 위로금으로 준다
+export const DAILY_BASE = 300 // 출석: 300G + 연속 일수(7일까지) × 100G, 7일마다 보호·축복 주문서
+export const DAILY_STEP = 100
+export const DAILY_WEEK = 7
+export const DUEL_CD_MS = 30 * 1000
+export const MAX_BET = 1000000
+export const ATTACK_CD_MS = 60 * 1000
+export const BOSS_GAP_MS = 30 * 60 * 1000 // 보스를 쓰러뜨리면 30분 뒤 다음 보스
+export const BOSS_TTL_MS = 24 * 60 * 60 * 1000 // 하루 안에 못 쓰러뜨리면 도망간다
+export const BOSS_REWARD = 0.6 // 체력 × 0.6 골드를 피해량대로 나눈다
+// 방 보스(이름은 모두 이 게임에서 지은 것). 다섯을 다 쓰러뜨리면 처음부터, 체력은 1.5배씩
+export const BOSSES = [
+  { name: '거대 왕슬라임', hp: 4000 },
+  { name: '고블린 족장', hp: 8000 },
+  { name: '서리 거인', hp: 15000 },
+  { name: '화염 드레이크', hp: 28000 },
+  { name: '심연의 마왕', hp: 50000 },
+]
 
 // 단계별 [성공 %, 파괴 %]. 나머지는 실패(검은 그대로).
 const CHANCE = [
@@ -74,6 +99,7 @@ const TREASURE_PCT = 2 // 보물 상자: 골드 5배
 export const COMMANDS = new Set([
   '강화', '검강화', '내검', '검', '검정보', '사냥', '판매', '상점', '구매', '인벤', '인벤토리',
   '거래', '거래취소', '수락', '거절', '강화랭킹', '검랭킹', '강화도움',
+  '출석', '출첵', '결투', '보스', '공격',
 ])
 
 // ── 표 ────────────────────────────────────────────────────────────────────
@@ -140,6 +166,10 @@ export function roomState(runtime, roomKey) {
   if (!isObj(s.u)) s.u = {}
   if (!Array.isArray(s.t)) s.t = []
   if (!(Number(s.q) >= 1)) s.q = 1
+  if (!isObj(s.top) || !(Number(s.top.lv) > 0)) delete s.top
+  if (s.r != null && !(isObj(s.r) && BOSSES[s.r.i] && Number(s.r.mx) > 0 && Number(s.r.hp) > 0 && isObj(s.r.d))) s.r = null
+  s.bk = Math.max(0, Math.floor(Number(s.bk) || 0))
+  s.rn = Math.max(0, Number(s.rn) || 0)
   return s
 }
 
@@ -147,6 +177,7 @@ function cleanUser(u) {
   u.g = Math.max(0, Math.min(MAX_GOLD, Math.floor(Number(u.g) || 0)))
   u.lv = Math.max(0, Math.min(MAX_LV, Math.floor(Number(u.lv) || 0)))
   u.b = Math.max(u.lv, Math.min(MAX_LV, Math.floor(Number(u.b) || 0)))
+  u.f = Math.max(0, Math.min(50, Math.floor(Number(u.f) || 0)))
   if (!isObj(u.it)) u.it = {}
   for (const id of Object.keys(u.it)) if (!ITEMS[id]) delete u.it[id]
   for (const id of ITEM_IDS) {
@@ -170,7 +201,7 @@ export function userOf(s, key, name, now, make) {
   }
   if (!make) return null
   prune(s, now, 1)
-  const u = { n: oneLine(name, 40), g: START_GOLD, lv: 0, id: s.q++, b: 0, it: {}, a: now, e: 0, h: 0, w: 0, k: 0, s: 0 }
+  const u = { n: oneLine(name, 40), g: START_GOLD, lv: 0, id: s.q++, b: 0, it: {}, a: now, e: 0, h: 0, w: 0, k: 0, s: 0, f: 0 }
   s.u[key] = u
   return u
 }
@@ -224,6 +255,7 @@ export function run(runtime, roomKey, req) {
   if (cmd === '강화도움') return { text: helpText(p) }
   if (cmd === '상점') return { text: shopText(p) }
   if (cmd === '강화랭킹' || cmd === '검랭킹') return ranking(ctx)
+  if (cmd === '보스') return bossInfo(ctx)
   const u = userOf(s, key, ctx.name, now, true)
   u.a = now
   ctx.u = u
@@ -235,6 +267,9 @@ export function run(runtime, roomKey, req) {
   if (cmd === '인벤' || cmd === '인벤토리') return { text: invText(ctx) }
   if (cmd === '거래') return offer(ctx)
   if (cmd === '거래취소') return cancelTrade(ctx)
+  if (cmd === '출석' || cmd === '출첵') return attend(ctx)
+  if (cmd === '결투') return duel(ctx)
+  if (cmd === '공격') return attack(ctx)
   return null
 }
 
@@ -256,7 +291,7 @@ export function offerAt(runtime, roomKey, key, now) {
 
 /** 「도움」 목록의 한 줄(roomfeat.helpLine · features 「게임」 · 패널 미리 보기가 같은 모양) */
 export function helpLine(p) {
-  return `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}강화도움`
+  return `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}출석 ${p}결투 ${p}보스 ${p}강화도움`
 }
 
 export function helpText(p) {
@@ -265,10 +300,14 @@ export function helpText(p) {
     `${p}강화 : 골드로 검을 강화해요 (주문서 쓰기 : ${p}강화 보호 축복)`,
     `${p}내검 : 내 검과 골드를 봐요`,
     `${p}사냥 : 골드와 재료를 모아요 (2분에 한 번)`,
+    `${p}출석 : 하루 한 번 골드를 받아요 (7일 연속이면 주문서도)`,
+    `${p}결투 @상대 [골드] : 검끼리 겨뤄요 (높은 검이 유리, 골드를 걸 수 있어요)`,
+    `${p}보스 · ${p}공격 : 방 사람들과 함께 보스를 쓰러뜨리고 골드를 나눠요`,
     `${p}판매 : 검을 팔아 골드로 바꿔요 (아이템 : ${p}판매 마력석 2)`,
     `${p}상점 · ${p}구매 보호 1 · ${p}인벤`,
     `${p}거래 @상대 보호 1 3000 : 아이템이나 검을 팔아요 (상대는 ${p}수락 · ${p}거절)`,
     `${p}강화랭킹`,
+    `강화에 실패하면 다음 강화 성공 확률이 ${PITY_STEP}%씩 올라요 (최대 +${PITY_MAX}%)`,
   ].join('\n')
 }
 
@@ -304,14 +343,20 @@ function cooling(ctx, last, cd, what) {
   return { text: `${ctx.name}님, ${what}${josa(what, '은')} ${secText(left)} 뒤에 다시 할 수 있어요.` }
 }
 
-function nextLine(lv) {
+/** 연속 실패 n번 → 다음 강화 성공 보너스(%) */
+export function pityOf(n) {
+  return Math.min(PITY_MAX, Math.max(0, Math.floor(Number(n) || 0)) * PITY_STEP)
+}
+
+function nextLine(lv, pity) {
   if (lv >= MAX_LV) return '최고 단계예요.'
   const c = cost(lv)
   const ch = chance(lv)
   const need = [g(c.gold)]
   if (c.mana) need.push(`${ITEMS.mana.name} 1개`)
   if (c.scale) need.push(`${ITEMS.scale.name} 1개`)
-  return `다음 강화 : ${need.join(' + ')} · 성공 ${ch.up}%${ch.broke ? ` · 파괴 ${ch.broke}%` : ''}`
+  const up = Math.min(100, ch.up + (pity || 0))
+  return `다음 강화 : ${need.join(' + ')} · 성공 ${up}%${pity ? `(보정 +${pity}%)` : ''}${ch.broke ? ` · 파괴 ${Math.min(ch.broke, 100 - up)}%` : ''}`
 }
 
 function enhance(ctx) {
@@ -345,23 +390,42 @@ function enhance(ctx) {
   if (useGuard) take(u, 'guard', 1)
   if (useBless) take(u, 'bless', 1)
   u.e = ctx.now
-  const up = Math.min(100, ch.up + (useBless ? BLESS_PCT : 0))
+  const pity = pityOf(u.f)
+  const up = Math.min(100, ch.up + (useBless ? BLESS_PCT : 0) + pity)
   const broke = Math.min(ch.broke, 100 - up)
   const roll = ctx.rand() * 100
   let result
+  let record = false
+  let comfort = 0
   if (roll < up) {
     result = 'up'
     u.lv = from + 1
     if (u.lv > u.b) u.b = u.lv
+    u.f = 0
+    const top = ctx.s.top
+    if (u.lv >= RECORD_FROM && u.lv > (top ? Number(top.lv) || 0 : 0)) {
+      ctx.s.top = { lv: u.lv, n: ctx.name }
+      record = true
+    }
   } else if (roll < up + broke) {
-    if (useGuard) result = 'guarded'
-    else {
+    if (useGuard) {
+      result = 'guarded'
+      u.f = Math.min(50, u.f + 1)
+    } else {
       result = 'broke'
       u.lv = 0
       u.id = ctx.s.q++
       u.k = (Number(u.k) || 0) + 1
+      u.f = 0
+      if (from >= COMFORT_FROM) {
+        comfort = Math.floor(price(from) / 10)
+        u.g = Math.min(MAX_GOLD, u.g + comfort)
+      }
     }
-  } else result = 'fail'
+  } else {
+    result = 'fail'
+    u.f = Math.min(50, u.f + 1)
+  }
   const used = []
   if (useGuard) used.push(ITEMS.guard.name)
   if (useBless) used.push(ITEMS.bless.name)
@@ -383,10 +447,17 @@ function enhance(ctx) {
     head = '[강화 파괴]'
     body = `${ctx.name}님의 ${swordLabel(from)}${josa(swordName(from), '이')} 부서졌어요. 새 ${swordLabel(0)}${josa(swordName(0), '을')} 받았어요.`
   }
-  const text = [head, body, `사용 : ${spent.concat(used).join(' · ')} (보유 ${g(u.g)})`, nextLine(u.lv)].join('\n')
+  const lines = [head, body]
+  if (record) lines.push(`[방 최고 기록] 이 방에서 처음 나온 ${swordLabel(u.lv)}${josa(swordName(u.lv), '이에요')}!`)
+  if (comfort) lines.push(`위로금 ${g(comfort)} 받았어요.`)
+  if (pity) lines.push(`실패 보정 +${pity}%가 적용됐어요.`)
+  lines.push(`사용 : ${spent.concat(used).join(' · ')} (보유 ${g(u.g)})`, nextLine(u.lv, pityOf(u.f)))
+  const notes = []
+  if (record) notes.push('방 최고 기록')
+  if (comfort) notes.push(`위로금 ${g(comfort)}`)
   return {
-    text,
-    card: { kind: 'enhance', result, from, lv: u.lv, best: u.b, owner: ctx.name, gold: u.g, spent: c.gold, used },
+    text: lines.join('\n'),
+    card: { kind: 'enhance', result, from, lv: u.lv, best: u.b, owner: ctx.name, gold: u.g, spent: c.gold, used, pity: pityOf(u.f), notes },
   }
 }
 
@@ -413,7 +484,7 @@ function info(ctx) {
     `${swordLabel(u.lv)} · 최고 +${u.b}`,
     `골드 ${g(u.g)} · 판매가 ${g(price(u.lv))}`,
     `아이템 : ${itemsLine(u)}`,
-    nextLine(u.lv),
+    nextLine(u.lv, pityOf(u.f)),
   ].join('\n')
   const ch = chance(u.lv)
   return {
@@ -421,7 +492,7 @@ function info(ctx) {
     card: {
       kind: 'info', lv: u.lv, best: u.b, owner: ctx.name, gold: u.g, price: price(u.lv), broken: u.k || 0,
       items: ITEM_IDS.map((id) => ({ name: ITEMS[id].name, n: u.it[id] || 0 })),
-      next: u.lv >= MAX_LV ? null : { gold: cost(u.lv).gold, up: ch.up, broke: ch.broke, mana: cost(u.lv).mana, scale: cost(u.lv).scale },
+      next: u.lv >= MAX_LV ? null : { gold: cost(u.lv).gold, up: Math.min(100, ch.up + pityOf(u.f)), broke: Math.min(ch.broke, 100 - Math.min(100, ch.up + pityOf(u.f))), pity: pityOf(u.f), mana: cost(u.lv).mana, scale: cost(u.lv).scale },
     },
   }
 }
@@ -587,6 +658,7 @@ function findTarget(ctx, name) {
 }
 
 function tradeWhat(t) {
+  if (t.it === 'duel') return '결투'
   return t.it === 'sword' ? swordLabel(t.lv) : `${ITEMS[t.it].name} ${t.q}개`
 }
 
@@ -639,8 +711,10 @@ function answerTrade(ctx, yes) {
   }
   if (!yes) {
     drop()
+    if (t.it === 'duel') return { text: `[결투 거절] ${ctx.name}님이 ${sName}님의 결투를 거절했어요.` }
     return { text: `[거래 거절] ${ctx.name}님이 ${sName}님의 제안을 거절했어요.` }
   }
+  if (t.it === 'duel') return fight(ctx, t, seller, buyer, drop)
   // 둘 다 아직 그 물건·골드를 가지고 있는지 다시 본다(제안한 뒤 바뀌었을 수 있다)
   if (t.it === 'sword') {
     if (seller.id !== t.sid || seller.lv !== t.lv) {
@@ -673,6 +747,219 @@ function answerTrade(ctx, yes) {
   // 이 사람이 같은 물건으로 보낸 다른 제안이 있으면 지금 기준으로 다시 본다(검을 넘겼으면 그 검 제안은 무효)
   s.t = s.t.filter((x) => !(x.f === t.f && x.it === 'sword' && seller.id !== x.sid))
   return { text: `[거래 완료] ${ctx.name}님이 ${sName}님에게서 ${tradeWhat(t)}${t.p ? `${josa(tradeWhat(t), '을')} ${g(t.p)}에 샀어요.` : `${josa(tradeWhat(t), '을')} 받았어요.`}` }
+}
+
+// ── 출석 ──────────────────────────────────────────────────────────────────
+/** KST 날 번호(하루에 1씩) */
+export function dayNo(now) {
+  return Math.floor((Number(now) + 9 * 3600 * 1000) / 86400000)
+}
+
+function attend(ctx) {
+  const { u } = ctx
+  const day = dayNo(ctx.now)
+  if (Number(u.d) === day) return { text: `${ctx.name}님은 오늘 이미 출석했어요. (${Math.max(1, Number(u.ds) || 1)}일 연속) 내일 또 와 주세요.` }
+  u.ds = Number(u.d) === day - 1 ? Math.min(9999, (Number(u.ds) || 0) + 1) : 1
+  u.d = day
+  const gold = DAILY_BASE + DAILY_STEP * Math.min(DAILY_WEEK, u.ds)
+  u.g = Math.min(MAX_GOLD, u.g + gold)
+  const week = u.ds % DAILY_WEEK === 0
+  if (week) {
+    give(u, 'guard', 1)
+    give(u, 'bless', 1)
+  }
+  const lines = [u.ds > 1 ? `[출석] ${ctx.name}님 ${u.ds}일 연속 출석!` : `[출석] ${ctx.name}님 출석했어요.`]
+  lines.push(`+${g(gold)}${week ? ` · ${ITEMS.guard.name} 1개 · ${ITEMS.bless.name} 1개` : ''} (보유 ${g(u.g)})`)
+  if (week) lines.push(`${DAILY_WEEK}일 연속 보너스를 받았어요.`)
+  else lines.push(`${DAILY_WEEK - (u.ds % DAILY_WEEK)}일 더 연속으로 오면 ${ITEMS.guard.name}·${ITEMS.bless.name}${josa(ITEMS.bless.name, '을')} 받아요.`)
+  return { text: lines.join('\n') }
+}
+
+// ── 결투 ──────────────────────────────────────────────────────────────────
+/** 도전한 사람(검 a단계)이 상대(b단계)를 이길 확률(%) */
+export function duelChance(a, b) {
+  return Math.max(10, Math.min(90, 50 + (a - b) * 4))
+}
+
+function duel(ctx) {
+  const { s, u, p, key } = ctx
+  const usage = `「${p}결투 @상대」 또는 골드를 걸어 「${p}결투 @상대 3000」처럼 입력해 주세요.`
+  const toks = ctx.arg.split(/\s+/).filter(Boolean)
+  let bet = 0
+  if (toks.length > 1) {
+    const n = numTok(toks[toks.length - 1])
+    if (n && n.unit !== 'q') {
+      bet = n.n
+      toks.pop()
+    }
+  }
+  const name = toks.join(' ').replace(/^@/, '').trim()
+  if (!name && !ctx.mentions.length) return { text: usage }
+  const to = findTarget(ctx, name)
+  if (!to) return { text: `「${oneLine(name, 40)}」님을 찾지 못했어요. 상대가 먼저 「${p}내검」을 한 번 입력해야 결투할 수 있어요.` }
+  if (!(bet >= 0 && bet <= MAX_BET)) return { text: `내기 골드는 0~${won(MAX_BET)}G로 입력해 주세요.` }
+  if (u.g < bet) return { text: `골드가 부족해요. (보유 ${g(u.g)})` }
+  const v = s.u[to]
+  if (v.g < bet) return { text: `${v.n || '상대'}님의 골드가 ${g(bet)}보다 적어요. 내기를 줄여 주세요.` }
+  const cd = cooling(ctx, u.du, DUEL_CD_MS, '결투 신청')
+  if (cd) return cd
+  const busyTo = s.t.find((t) => t.to === to && t.f !== key)
+  if (busyTo) return { text: `${v.n || '상대'}님이 다른 신청을 받고 있어요. 잠시 뒤 다시 해 주세요.` }
+  const replaced = s.t.some((t) => t.f === key)
+  s.t = s.t.filter((t) => t.f !== key)
+  if (s.t.length >= MAX_TRADES) return { text: '지금은 신청이 많아요. 잠시 뒤 다시 해 주세요.' }
+  u.du = ctx.now
+  s.t.push({ id: s.q++, f: key, to, it: 'duel', q: 1, p: bet, lv: u.lv, sid: u.id, at: ctx.now })
+  const lines = [
+    `[결투 신청] ${ctx.name}(+${u.lv}) → ${v.n || '상대'}(+${v.lv})`,
+    `${bet ? `내기 ${g(bet)}` : '내기 없음'} · ${ctx.name}님 승률 ${duelChance(u.lv, v.lv)}%`,
+    `${v.n || '상대'}님, 2분 안에 「${p}수락」 또는 「${p}거절」을 입력해 주세요.`,
+  ]
+  if (replaced) lines.push('(먼저 보낸 신청은 취소했어요)')
+  return { text: lines.join('\n') }
+}
+
+const DUEL_WIN = ['꺾었어요', '튕겨 냈어요', '압도했어요', '한 번에 베어 냈어요']
+
+// 결투 수락: a = 신청한 사람, b = 받은 사람(지금 「수락」한 사람)
+function fight(ctx, t, a, b, drop) {
+  const bet = t.p
+  const aName = a.n || '상대'
+  const bName = ctx.name
+  if (a.g < bet) {
+    drop()
+    return { text: `${aName}님의 골드가 부족해서 결투를 취소했어요.` }
+  }
+  if (b.g < bet) return { text: `골드가 부족해요. 결투에 ${g(bet)}가 필요해요. (보유 ${g(b.g)})` }
+  drop()
+  const pa = duelChance(a.lv, b.lv)
+  const aWin = ctx.rand() * 100 < pa
+  const W = aWin ? a : b
+  const L = aWin ? b : a
+  const wName = aWin ? aName : bName
+  W.g = Math.min(MAX_GOLD, W.g + bet)
+  L.g = Math.max(0, L.g - bet)
+  W.dw = (Number(W.dw) || 0) + 1
+  L.dl = (Number(L.dl) || 0) + 1
+  const upset = (aWin ? pa : 100 - pa) < 35
+  const ws = swordName(W.lv)
+  const ls = swordName(L.lv)
+  const how = pick(ctx.rand, DUEL_WIN)
+  const lines = [`[결투] ${aName}(+${a.lv}) vs ${bName}(+${b.lv})`]
+  lines.push(`${upset ? '대역전! ' : ''}${wName}님의 ${ws}${josa(ws, '이')} ${ls}${josa(ls, '을')} ${how}.`)
+  lines.push(`승리 : ${wName}님${bet ? ` +${g(bet)}` : ''}`)
+  lines.push(`전적 : ${aName} ${a.dw || 0}승 ${a.dl || 0}패 · ${bName} ${b.dw || 0}승 ${b.dl || 0}패`)
+  return { text: lines.join('\n') }
+}
+
+// ── 방 보스 ────────────────────────────────────────────────────────────────
+function bossHp(bk) {
+  const b = BOSSES[bk % BOSSES.length]
+  return Math.round(b.hp * (1 + 0.5 * Math.floor(bk / BOSSES.length)))
+}
+
+/** 검 단계로 정하는 한 번의 피해(크게 오른다) */
+export function hitBase(lv) {
+  return 60 + lv * 40 + lv * lv * 8
+}
+
+function hpBar(hp, mx) {
+  const n = Math.max(0, Math.min(10, Math.ceil((hp / mx) * 10)))
+  return '■'.repeat(n) + '□'.repeat(10 - n)
+}
+
+function minLeft(ms) {
+  return Math.max(1, Math.ceil(ms / 60000))
+}
+
+// 보스 상태를 맞춘다: 도망갔으면 지우고, 나올 때가 됐으면 새로 부른다. → { boss, fled, spawned }
+function bossTick(s, now, spawn) {
+  let fled = null
+  if (s.r && now - (Number(s.r.at) || 0) >= BOSS_TTL_MS) {
+    fled = BOSSES[s.r.i].name
+    s.r = null
+    s.rn = now + BOSS_GAP_MS
+  }
+  let spawned = false
+  if (!s.r && spawn && now >= s.rn) {
+    const mx = bossHp(s.bk)
+    s.r = { i: s.bk % BOSSES.length, hp: mx, mx, at: now, d: {} }
+    spawned = true
+  }
+  return { boss: s.r, fled, spawned }
+}
+
+function bossAppear(r, p) {
+  const nm = BOSSES[r.i].name
+  return [`[보스 등장] ${nm}${josa(nm, '이')} 나타났어요!`, `체력 ${won(r.mx)}`, `「${p}공격」으로 함께 쓰러뜨리면 피해량만큼 골드를 나눠 받아요.`]
+}
+
+function bossInfo(ctx) {
+  const { s, p } = ctx
+  const t = bossTick(s, ctx.now, true)
+  const lines = []
+  if (t.fled) lines.push(`${t.fled}${josa(t.fled, '이')} 도망갔어요.`)
+  if (!t.boss) {
+    lines.push(`다음 보스는 ${minLeft(s.rn - ctx.now)}분 뒤에 나타나요.`)
+    return { text: lines.join('\n') }
+  }
+  if (t.spawned) return { text: lines.concat(bossAppear(t.boss, p)).join('\n') }
+  const r = t.boss
+  const nm = BOSSES[r.i].name
+  const ppl = Object.keys(r.d).length
+  lines.push(`[보스] ${nm}`, `체력 ${won(r.hp)} / ${won(r.mx)}`, hpBar(r.hp, r.mx))
+  lines.push(`${ppl ? `참여 ${ppl}명 · ` : ''}「${p}공격」으로 함께 쓰러뜨려요.`)
+  return { text: lines.join('\n') }
+}
+
+function attack(ctx) {
+  const { s, u, p, key, rand } = ctx
+  const t = bossTick(s, ctx.now, true)
+  const head = []
+  if (t.fled) head.push(`${t.fled}${josa(t.fled, '이')} 도망갔어요.`)
+  if (!t.boss) return { text: head.concat(`다음 보스는 ${minLeft(s.rn - ctx.now)}분 뒤에 나타나요.`).join('\n') }
+  if (t.spawned) head.push(...bossAppear(t.boss, p))
+  const cd = cooling(ctx, u.r, ATTACK_CD_MS, '공격')
+  if (cd) return head.length ? { text: head.join('\n') } : cd
+  u.r = ctx.now
+  const r = t.boss
+  const nm = BOSSES[r.i].name
+  const crit = rand() < 0.1
+  let dmg = Math.round(hitBase(u.lv) * (0.8 + rand() * 0.4) * (crit ? 2 : 1))
+  dmg = Math.max(1, Math.min(dmg, r.hp))
+  r.hp -= dmg
+  r.d[key] = (Number(r.d[key]) || 0) + dmg
+  const lines = head.concat(`[공격] ${ctx.name}님이 ${nm}에게 ${won(dmg)} 피해!${crit ? ' (치명타)' : ''}`)
+  if (r.hp > 0) {
+    lines.push(`남은 체력 ${won(r.hp)} / ${won(r.mx)}`, hpBar(r.hp, r.mx))
+    return { text: lines.join('\n') }
+  }
+  // 쓰러뜨렸다: 피해량대로 골드를 나누고, 마지막 일격·가장 큰 피해에 아이템
+  const pool = Math.round(r.mx * BOSS_REWARD)
+  const rows = Object.keys(r.d)
+    .filter((k) => has(s.u, k) && isObj(s.u[k]))
+    .map((k) => ({ k, d: Number(r.d[k]) || 0 }))
+    .sort((a, b) => b.d - a.d)
+  const total = rows.reduce((n, x) => n + x.d, 0) || 1
+  for (const x of rows) {
+    x.g = Math.max(100, Math.floor((pool * x.d) / total))
+    const v = s.u[x.k]
+    v.g = Math.min(MAX_GOLD, v.g + x.g)
+  }
+  give(u, 'scale', 1)
+  give(u, 'guard', 1)
+  const mvp = rows[0]
+  if (mvp) give(s.u[mvp.k], 'bless', 2)
+  s.bk += 1
+  s.r = null
+  s.rn = ctx.now + BOSS_GAP_MS
+  lines.push(`[보스 처치] ${ctx.name}님의 마지막 일격으로 ${nm}${josa(nm, '을')} 쓰러뜨렸어요!`)
+  lines.push(`마지막 일격 : ${ctx.name}님 (${ITEMS.scale.name} · ${ITEMS.guard.name})`)
+  if (mvp) lines.push(`가장 큰 피해 : ${s.u[mvp.k].n || '참가자'}님 (${ITEMS.bless.name} 2개)`)
+  rows.slice(0, 5).forEach((x, i) => lines.push(`${i + 1}. ${s.u[x.k].n || '참가자'} ${won(x.d)} 피해 +${g(x.g)}`))
+  if (rows.length > 5) lines.push(`외 ${rows.length - 5}명도 골드를 받았어요.`)
+  lines.push(`다음 보스는 ${minLeft(BOSS_GAP_MS)}분 뒤에 나타나요.`)
+  return { text: lines.join('\n') }
 }
 
 // ── 랭킹 ──────────────────────────────────────────────────────────────────
