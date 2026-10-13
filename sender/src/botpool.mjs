@@ -2974,7 +2974,7 @@ export class BotSlot {
       v.dirty = true
     }
     if (R.gamesLive(v)) {
-      const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mine: false })
+      const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mentions, mine: false })
       this.sendAll(v, sends, 'reply')
       v.dirty = true
     }
