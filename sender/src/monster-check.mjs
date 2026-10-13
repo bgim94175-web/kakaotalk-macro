@@ -474,7 +474,7 @@ function allIds(rt) {
     const say = (text, id, name, mentions) => onInbound(rec, { chatId: '555', text, authorName: name || '홍', authorId: id || '101', mentions, mine: false })
     // 도움말
     // 검 강화(sword.mjs)도 기본 켜짐 — 몬스터 수집 줄은 검 강화 줄 다음
-    eq(RF.helpLine(v), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움\n몬스터 수집 : ' + M.helpCommands('!'), 'helpLine has the monster line')
+    eq(RF.helpLine(v), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움\n몬스터 수집 : ' + M.helpCommands('!'), 'helpLine has the monster line')
     const p2 = view({ cmdPrefix: '#' })
     assert(RF.helpLine(p2).endsWith('\n몬스터 수집 : ' + M.helpCommands('#')), 'helpLine uses the prefix')
     eq(RF.helpLine(view({ games: { monster: false } })).includes('몬스터'), false, 'monster off → not in help')

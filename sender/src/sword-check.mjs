@@ -70,7 +70,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(S.tierOf(2), 0, 'tier 2')
   eq(S.tierOf(18), 6, 'tier 18')
   eq(S.won(1234567), '1,234,567', 'won')
-  eq(S.helpLine('#'), '검 강화 : #강화 #내검 #사냥 #강화도움', 'help line')
+  eq(S.helpLine('#'), '검 강화 : #강화 #내검 #사냥 #출석 #결투 #보스 #강화도움', 'help line')
 }
 
 // ── 강화: 확률 경계(고정 난수) ────────────────────────────────────────────
@@ -84,7 +84,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(g.u('1').lv, 1, 'level 1')
   eq(g.u('1').b, 1, 'best 1')
   // +9: 성공 50 · 파괴 6 · 실패 44
-  const setLv = (lv, gold) => Object.assign(g.u('1'), { lv, g: gold == null ? 100000 : gold, e: 0, w: 0 })
+  const setLv = (lv, gold) => Object.assign(g.u('1'), { lv, g: gold == null ? 100000 : gold, e: 0, w: 0, f: 0 })
   setLv(9)
   eq(g.run('1', '가', '강화', { rand: fixed(0.4999) }).card.result, 'up', '+9 roll 49.99 → up')
   setLv(9)
@@ -157,7 +157,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(g.run('1', '가', '강화').text, '가님의 검은 이미 최고 단계 +20 추억의 전설검이에요. 「!판매」로 팔 수 있어요.', 'max level')
 }
 
-// ── 강화: 씨앗 난수로 확률이 표대로인지(2만 번) ──────────────────────────
+// ── 강화: 씨앗 난수로 확률이 표대로인지(2만 번, 실패 보정 없이) ──────────────
 {
   const g = game()
   const rand = seeded(20261017)
@@ -166,7 +166,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
     const got = { up: 0, broke: 0, fail: 0 }
     for (let i = 0; i < n; i++) {
       g.run('p', '확률', '내검')
-      Object.assign(g.u('p'), { lv, g: 1e6, e: 0, w: 0, it: { mana: 1, scale: 1, bless: 1 } })
+      Object.assign(g.u('p'), { lv, g: 1e6, e: 0, w: 0, f: 0, it: { mana: 1, scale: 1, bless: 1 } })
       const r = g.run('p', '확률', bless ? '강화 축복' : '강화', { rand })
       got[r.card.result === 'guarded' ? 'broke' : r.card.result]++
     }
@@ -472,6 +472,189 @@ function sums(g, keys) {
   eq(S.run(two, 'b', { cmd: '강화랭킹', arg: '', key: '1', name: '가', prefix: '!', now: T0 }).text, '아직 강화 기록이 없어요. 「!강화」로 시작해 보세요.', 'rooms are separate')
 }
 
+// ── 실패 보정 · 방 최고 기록 · 위로금 ─────────────────────────────────────
+{
+  const g = game()
+  g.run('1', '가', '내검')
+  // +9 성공 50%: 실패 2번 → 보정 +4% → 53.99 는 성공
+  Object.assign(g.u('1'), { lv: 9, g: 100000, e: 0, w: 0, f: 0, it: { mana: 9 } })
+  eq(g.run('1', '가', '강화', { rand: fixed(0.6) }).card.result, 'fail', 'pity: first fail')
+  eq(g.u('1').f, 1, 'pity: one fail counted')
+  g.tick(S.ENHANCE_CD_MS)
+  const f2 = g.run('1', '가', '강화', { rand: fixed(0.6) })
+  eq(f2.card.pity, 4, 'pity: card shows +4 for the next try')
+  assert(f2.text.includes('실패 보정 +2%가 적용됐어요.') && f2.text.includes('성공 54%(보정 +4%)'), 'pity text ' + f2.text)
+  g.tick(S.ENHANCE_CD_MS)
+  const up = g.run('1', '가', '강화', { rand: fixed(0.5399) })
+  eq(up.card.result, 'up', 'pity: 53.99 succeeds with +4')
+  eq(g.u('1').f, 0, 'pity resets on success')
+  // +10 은 방 최고 기록(처음 +10 이상)
+  assert(up.text.includes('[방 최고 기록] 이 방에서 처음 나온 +10 푸른 서리검이에요!') && up.card.notes.includes('방 최고 기록'), 'room record ' + up.text)
+  eq(g.s().top.lv, 10, 'room record saved')
+  // 보정은 최대 +10
+  eq(S.pityOf(3), 6, 'pity 3')
+  eq(S.pityOf(40), S.PITY_MAX, 'pity max')
+  // 다른 사람이 +10 을 다시 만들면 기록이 아니다
+  g.run('2', '나', '내검')
+  Object.assign(g.u('2'), { lv: 9, g: 100000, it: { mana: 9 } })
+  const again = g.run('2', '나', '강화', { rand: fixed(0.1) })
+  assert(!again.text.includes('방 최고 기록') && !again.card.notes.length, 'same level is not a new record')
+  // +12 이 부서지면 판매가의 10% 위로금, 보정은 0
+  Object.assign(g.u('1'), { lv: 12, g: 100000, e: 0, w: 0, f: 3, it: { mana: 9 } })
+  const before = g.u('1').g
+  const br = g.run('1', '가', '강화', { rand: fixed(0.999 - 0.2) }) // 35+6=41 성공 · 파괴 12 → 41~53, 79.9 는 실패
+  eq(br.card.result, 'fail', 'pity +6: 79.9 is still a fail at +12')
+  Object.assign(g.u('1'), { e: 0, w: 0, f: 0 })
+  const br2 = g.run('1', '가', '강화', { rand: fixed(0.4) })
+  eq(br2.card.result, 'broke', '+12 roll 40 → broke')
+  eq(g.u('1').g, before - S.cost(12).gold * 2 + Math.floor(S.price(12) / 10), 'comfort gold paid')
+  assert(br2.text.includes(`위로금 ${S.won(S.price(12) / 10)}G 받았어요.`) && br2.card.notes[0] === `위로금 ${S.won(S.price(12) / 10)}G`, 'comfort text ' + br2.text)
+  eq(g.u('1').f, 0, 'pity resets on break')
+  // 낮은 단계는 위로금 없음
+  Object.assign(g.u('1'), { lv: 6, e: 0, w: 0 })
+  assert(!g.run('1', '가', '강화', { rand: fixed(0.66) }).text.includes('위로금'), 'no comfort below +10')
+}
+
+// ── 출석 ──────────────────────────────────────────────────────────────────
+{
+  const g = game()
+  const a1 = g.run('1', '가', '출석')
+  eq(a1.text, `[출석] 가님 출석했어요.\n+400G (보유 1,400G)\n6일 더 연속으로 오면 보호 주문서·축복 주문서를 받아요.`, 'attend day 1')
+  eq(g.run('1', '가', '출첵').text, '가님은 오늘 이미 출석했어요. (1일 연속) 내일 또 와 주세요.', 'attend twice a day')
+  for (let d = 2; d <= 7; d++) {
+    g.tick(24 * 3600 * 1000)
+    const r = g.run('1', '가', '출석')
+    if (d === 2) assert(r.text.startsWith('[출석] 가님 2일 연속 출석!\n+500G'), 'attend day 2 ' + r.text)
+    if (d === 7) eq(r.text, `[출석] 가님 7일 연속 출석!\n+1,000G · 보호 주문서 1개 · 축복 주문서 1개 (보유 ${S.won(g.u('1').g)}G)\n7일 연속 보너스를 받았어요.`, 'attend day 7')
+  }
+  eq(g.u('1').it.guard, 1, 'week bonus guard')
+  g.tick(2 * 24 * 3600 * 1000) // 하루 건너뜀
+  assert(g.run('1', '가', '출석').text.startsWith('[출석] 가님 출석했어요.\n+400G'), 'streak resets after a missed day')
+  // 날은 KST 자정에 바뀐다(T0 = KST 정오)
+  eq(S.dayNo(T0 + 11 * 3600 * 1000 + 59 * 60 * 1000) , S.dayNo(T0), 'KST 23:59 same day')
+  eq(S.dayNo(T0 + 12 * 3600 * 1000), S.dayNo(T0) + 1, 'KST midnight next day')
+}
+
+// ── 결투 ──────────────────────────────────────────────────────────────────
+{
+  const g = game()
+  g.run('1', '가', '내검')
+  g.run('2', '나', '내검')
+  Object.assign(g.u('1'), { lv: 12, g: 10000 })
+  Object.assign(g.u('2'), { lv: 9, g: 5000 })
+  eq(S.duelChance(12, 9), 62, 'duel chance +3 levels')
+  eq(S.duelChance(20, 0), 90, 'duel chance cap')
+  eq(S.duelChance(0, 20), 10, 'duel chance floor')
+  eq(g.run('1', '가', '결투').text, '「!결투 @상대」 또는 골드를 걸어 「!결투 @상대 3000」처럼 입력해 주세요.', 'duel usage')
+  eq(g.run('1', '가', '결투 @없는사람').text.startsWith('「없는사람」님을 찾지 못했어요.'), true, 'duel unknown target')
+  eq(g.run('1', '가', '결투 @나 6000').text, '나님의 골드가 6,000G보다 적어요. 내기를 줄여 주세요.', 'duel bet above target gold')
+  const o = g.run('1', '가', '결투 @나 3000')
+  eq(o.text, '[결투 신청] 가(+12) → 나(+9)\n내기 3,000G · 가님 승률 62%\n나님, 2분 안에 「!수락」 또는 「!거절」을 입력해 주세요.', 'duel offer')
+  eq(S.offerAt(g.rt, 'r', '2', g.now), g.now, 'duel offer is visible to 수락 routing')
+  // 받은 사람이 수락 → 61.99 는 신청한 사람 승
+  const r = g.run('2', '나', '수락', { rand: fixed(0.6199) })
+  assert(r.text.startsWith('[결투] 가(+12) vs 나(+9)\n가님의 붉은 화염검이 푸른 서리검을 ') && r.text.includes('\n승리 : 가님 +3,000G\n전적 : 가 1승 0패 · 나 0승 1패'), 'duel result ' + r.text)
+  eq(g.u('1').g + g.u('2').g, 15000, 'duel moves gold, not made')
+  eq(g.u('1').g, 13000, 'winner takes the bet')
+  eq(g.s().t.length, 0, 'duel offer used')
+  // 신청은 30초에 한 번, 거절, 낮은 검의 대역전
+  eq(g.run('1', '가', '결투 @나').text, '가님, 결투 신청은 30초 뒤에 다시 할 수 있어요.', 'duel cooldown')
+  g.tick(S.DUEL_CD_MS)
+  g.run('2', '나', '결투 @가')
+  eq(g.run('1', '가', '거절').text, '[결투 거절] 가님이 나님의 결투를 거절했어요.', 'duel refused')
+  g.tick(S.DUEL_CD_MS)
+  g.run('2', '나', '결투 @가 1000')
+  const up = g.run('1', '가', '수락', { rand: fixed(0.3) }) // 나 승률 38% → 30 은 나 승(역전 아님)
+  assert(up.text.includes('나님의 푸른 서리검이 붉은 화염검을') && !up.text.includes('대역전'), 'underdog wins ' + up.text)
+  Object.assign(g.u('2'), { lv: 0 })
+  g.tick(S.DUEL_CD_MS)
+  g.run('2', '나', '결투 @가')
+  assert(g.run('1', '가', '수락', { rand: fixed(0.01) }).text.includes('대역전! 나님의 녹슨 철검이'), 'upset is called out')
+  // 수락할 때 신청한 사람 골드가 모자라면 취소
+  g.tick(S.DUEL_CD_MS)
+  g.run('2', '나', '결투 @가 100')
+  g.u('2').g = 0
+  eq(g.run('1', '가', '수락').text, '나님의 골드가 부족해서 결투를 취소했어요.', 'duel cancelled when bet is gone')
+  // 멘션으로도
+  g.tick(S.DUEL_CD_MS)
+  assert(g.run('1', '가', '결투 @나나', { mentions: ['2'] }).text.startsWith('[결투 신청] 가(+12) → 나(+0)'), 'duel by mention')
+}
+
+// ── 방 보스 ────────────────────────────────────────────────────────────────
+{
+  const g = game()
+  for (const [k, n, lv] of [['1', '가', 12], ['2', '나', 5], ['3', '다', 0]]) {
+    g.run(k, n, '내검')
+    Object.assign(g.u(k), { lv, g: 0 })
+  }
+  eq(S.hitBase(0), 60, 'hit +0')
+  eq(S.hitBase(10), 1260, 'hit +10')
+  eq(S.hitBase(20), 4060, 'hit +20')
+  const b = g.run('1', '가', '보스')
+  eq(b.text, '[보스 등장] 거대 왕슬라임이 나타났어요!\n체력 4,000\n「!공격」으로 함께 쓰러뜨리면 피해량만큼 골드를 나눠 받아요.', 'boss appears')
+  // rand 0.5 → 피해 ×1.0, 치명타 없음(0.5 ≥ 0.1)
+  eq(g.run('1', '가', '공격', { rand: fixed(0.5) }).text, '[공격] 가님이 거대 왕슬라임에게 1,692 피해!\n남은 체력 2,308 / 4,000\n■■■■■■□□□□', 'attack')
+  eq(g.run('1', '가', '공격').text, '가님, 공격은 1분 뒤에 다시 할 수 있어요.', 'attack cooldown')
+  eq(g.run('1', '가', '공격').text, '', 'attack cooldown said once')
+  const crit = g.run('2', '나', '공격', { rand: fixed(0.05) }) // 치명타 ×2, 피해 ×0.82
+  eq(crit.text.split('\n')[0], `[공격] 나님이 거대 왕슬라임에게 ${S.won(Math.round(S.hitBase(5) * 0.82 * 2))} 피해! (치명타)`, 'critical hit')
+  assert(g.run('3', '다', '보스').text.startsWith('[보스] 거대 왕슬라임\n체력 ') && g.run('3', '다', '보스').text.endsWith('참여 2명 · 「!공격」으로 함께 쓰러뜨려요.'), 'boss status')
+  g.run('3', '다', '공격', { rand: fixed(0.5) })
+  g.tick(S.ATTACK_CD_MS)
+  const kill = g.run('1', '가', '공격', { rand: fixed(0.5) })
+  assert(kill.text.includes('[보스 처치] 가님의 마지막 일격으로 거대 왕슬라임을 쓰러뜨렸어요!\n마지막 일격 : 가님 (용의 비늘 · 보호 주문서)\n가장 큰 피해 : 가님 (축복 주문서 2개)\n1. 가 '), 'boss killed ' + kill.text)
+  assert(kill.text.endsWith('다음 보스는 30분 뒤에 나타나요.'), 'next boss time')
+  const paid = ['1', '2', '3'].map((k) => g.u(k).g)
+  assert(paid.every((x) => x >= 100) && paid.reduce((a, x) => a + x, 0) <= 4000 * S.BOSS_REWARD + 300 && paid[0] > paid[1] && paid[1] > paid[2], 'reward split by damage ' + paid)
+  eq(g.u('1').it.scale, 1, 'last hit scale')
+  eq(g.u('1').it.bless, 2, 'mvp bless')
+  eq(g.s().r, null, 'boss gone')
+  eq(g.s().bk, 1, 'boss count')
+  eq(g.run('2', '나', '공격').text, '다음 보스는 30분 뒤에 나타나요.', 'no boss during the gap')
+  g.tick(S.BOSS_GAP_MS)
+  assert(g.run('2', '나', '공격', { rand: fixed(0.5) }).text.startsWith('[보스 등장] 고블린 족장이 나타났어요!\n체력 8,000\n「!공격」으로 함께 쓰러뜨리면 피해량만큼 골드를 나눠 받아요.\n[공격] 나님이 고블린 족장에게'), 'attack spawns the next boss')
+  // 하루 안에 못 쓰러뜨리면 도망
+  g.tick(S.BOSS_TTL_MS)
+  eq(g.run('3', '다', '보스').text, '고블린 족장이 도망갔어요.\n다음 보스는 30분 뒤에 나타나요.', 'boss flees')
+  eq(g.s().bk, 1, 'fled boss is not counted')
+  // 다섯을 다 쓰러뜨린 뒤에는 체력 1.5배
+  g.s().bk = 5
+  g.tick(S.BOSS_GAP_MS)
+  assert(g.run('3', '다', '보스').text.startsWith('[보스 등장] 거대 왕슬라임이 나타났어요!\n체력 6,000'), 'second round is tougher')
+  // 망가진 저장본은 지운다
+  g.s().r = { i: 99, hp: 1, mx: 1, d: {} }
+  S.roomState(g.rt, 'r')
+  eq(g.s().r, null, 'bad boss dropped')
+}
+
+// ── 결투·보스 아무렇게나 2,000번: 골드가 생기지 않고(보스 보상 빼고) 한도를 지킨다 ──
+{
+  const g = game()
+  const rand = seeded(11)
+  const keys = ['1', '2', '3']
+  const names = { 1: '가', 2: '나', 3: '다' }
+  for (const k of keys) {
+    g.run(k, names[k], '내검')
+    Object.assign(g.u(k), { g: 50000, lv: Number(k) * 5 })
+  }
+  for (let i = 0; i < 2000; i++) {
+    const k = keys[Math.floor(rand() * 3)]
+    const to = names[keys[Math.floor(rand() * 3)]]
+    const line = [`결투 @${to} ${Math.floor(rand() * 60000)}`, `결투 @${to}`, '수락', '거절', '공격', '보스', '출석'][Math.floor(rand() * 7)]
+    const before = keys.reduce((n, kk) => n + g.u(kk).g, 0)
+    const r = g.run(k, names[k], line, { rand })
+    const after = keys.reduce((n, kk) => n + g.u(kk).g, 0)
+    if (r && r.text.startsWith('[결투]')) eq(after, before, 'fuzz duel: gold moves, not made')
+    for (const kk of keys) {
+      const u = g.u(kk)
+      assert(u.g >= 0 && u.g <= S.MAX_GOLD && Number.isFinite(u.g), 'fuzz duel bounds ' + JSON.stringify(u))
+    }
+    const r2 = g.s().r
+    if (r2) assert(r2.hp > 0 && r2.hp <= r2.mx, 'fuzz boss hp')
+    g.tick(1000 + Math.floor(rand() * 60000))
+  }
+}
+
 // ── 랭킹 ──────────────────────────────────────────────────────────────────
 {
   const g = game()
@@ -558,7 +741,7 @@ function sums(g, keys) {
   eq(R.helpLine(mk({ games: { sword: false, monster: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹', 'helpLine without either game')
   const both = mk({ profile: { enabled: true } }, { roombot: true, minigame: true })
   both.perm = 4
-  eq(R.helpLine(both).split('\n')[2], '검 강화 : !강화 !내검 !사냥 !강화도움', 'sword line sits before the room line')
+  eq(R.helpLine(both).split('\n')[2], '검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움', 'sword line sits before the room line')
 
   let now = Date.now()
   const send = (view, text, id, name, opt) => {
@@ -606,7 +789,7 @@ function sums(g, keys) {
   assert(t[0].text.startsWith('[거래 제안] 검사님 → 둘님'), 'mention through onInbound ' + t[0].text)
   assert(send(w, '!수락', '502', '둘')[0].text.startsWith('[거래 완료]'), 'accept through onInbound')
   // 방 설치형 「게임」 목록에도
-  eq(send(w, '!게임', '502', '둘')[0].text, '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터', 'game list')
+  eq(send(w, '!게임', '502', '둘')[0].text, '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터', 'game list')
   // 계정 단위 옛 기능(byId 아님)에는 검 강화가 없다
   const legacy = { config: { minigame: { enabled: true, rooms: ['k'], cmdPrefix: '!', cooldownMs: 0 } }, rooms: [{ key: 'k', chat_id: '88', name: '옛방', kind: 'open', list_kind: 'open_room' }], runtime: {}, features: { macro: false, roombot: false, minigame: true } }
   eq(onInbound(legacy, { chatId: '88', text: '!강화', authorName: '옛', mine: false }).length, 0, 'legacy account path has no sword game')
