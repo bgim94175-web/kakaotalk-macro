@@ -165,6 +165,39 @@ if (macroNotifyReply(record)) throw new Error('notify reply off')
 delete record.config.macro.notifyReply
 if (macroNotifyReply(record)) throw new Error('notify reply absent')
 
+// 갠톡 응답: 오픈프로필 1:1(list_kind open_dm)은 라이브러리 분류(kind)가 'open' 이어도 답한다.
+// 오픈 단체방·일반 단톡방에는 답하지 않고, 목록 종류가 없는 예전 줄과 일반 1:1 은 예전처럼 kind 로 본다.
+{
+  const dmRec = (room) => ({
+    features: { v: 2, macro_until: Date.now() + 60000 },
+    config: {
+      accounts: [],
+      triggers: [],
+      autoreply: { enabled: true, message: '{이름}님, 문의 감사합니다.', scope: 'ALL', cooldownMs: 6 * 3600000, dailyLimit: 0, hourFrom: 0, hourTo: 24, delayMaxMs: 0 },
+    },
+    rooms: [Object.assign({ key: parseRoomKey('0\u0001민지').key, chat_id: '777', name: '민지' }, room)],
+    runtime: {},
+  })
+  const ask = (rec, mine) => onInbound(rec, { chatId: '777', text: '안녕하세요, 거래 문의드립니다.', authorName: '민지', mine: !!mine })
+  const od = dmRec({ kind: 'open', list_kind: 'open_dm' })
+  const first = ask(od)
+  if (first.length !== 1 || first[0].chatId !== '777' || first[0].text !== '민지님, 문의 감사합니다.') throw new Error('autoreply: open-profile 1:1 gets a reply ' + JSON.stringify(first))
+  if (ask(od).length !== 0) throw new Error('autoreply: open-profile 1:1 keeps the cooldown')
+  if (ask(dmRec({ kind: 'open', list_kind: 'open_dm' }), true).length !== 0) throw new Error('autoreply: never answers own message')
+  if (ask(dmRec({ kind: 'open', list_kind: 'open_room' })).length !== 0) throw new Error('autoreply: never in an open group room')
+  if (ask(dmRec({ kind: 'dm', list_kind: 'open_room' })).length !== 0) throw new Error('autoreply: never in an open group room even when kind says dm')
+  // 2026-10-11 전에 불러온 목록: 3명 이상인 type 14·16 단체방이 open_dm 으로 남아 있다 → 답하지 않는다
+  if (ask(dmRec({ kind: 'open', list_kind: 'open_dm', members: 50 })).length !== 0) throw new Error('autoreply: never in an old open_dm row with 50 members')
+  if (ask(dmRec({ kind: 'open', list_kind: 'open_dm', members: 2 })).length !== 1) throw new Error('autoreply: an open_dm row with 2 members gets a reply')
+  if (ask(dmRec({ kind: 'group', list_kind: 'normal' })).length !== 0) throw new Error('autoreply: never in a normal group')
+  if (ask(dmRec({ kind: 'open' })).length !== 0) throw new Error('autoreply: an old row without list_kind keeps the old rule')
+  if (ask(dmRec({ kind: 'dm', list_kind: 'normal' })).length !== 1) throw new Error('autoreply: a normal 1:1 still gets a reply')
+  if (ask(dmRec({ kind: 'dm' })).length !== 1) throw new Error('autoreply: an old dm row still gets a reply')
+  const ended = dmRec({ kind: 'open', list_kind: 'open_dm' })
+  ended.features.macro_until = Date.now() - 1000
+  if (ask(ended).length !== 0) throw new Error('autoreply: no reply after the macro period')
+}
+
 const neverImages = {
   features: { macro: true },
   config: {
@@ -857,6 +890,107 @@ if (chatSlot.inbox.get('5').unread !== 0) throw new Error('chat: thread did not 
 if (!t5.length || t5[t5.length - 1].mine !== true) throw new Error('chat: thread order wrong')
 const photoRow = t5.find((m) => m.log_id === '101')
 if (!photoRow || photoRow.label !== '사진') throw new Error('chat: media label wrong')
+
+// 대화방 불러오기 전에 처음 온 갠톡: 방 하나만 카카오에 물어(CHATINFO) 오픈프로필 1:1 이면 목록에 더한다
+{
+  const dmRec = {
+    credentials: { user_id: '111' }, needs_register: false, reason: 'ok',
+    features: { v: 2, macro_until: Date.now() + 3 * 3600000 },
+    config: {
+      accounts: [],
+      triggers: [],
+      autoreply: { enabled: true, message: '{이름}님, 문의 감사합니다.', scope: 'ALL', cooldownMs: 6 * 3600000, dailyLimit: 0, hourFrom: 0, hourTo: 24, delayMaxMs: 0 },
+    },
+    // 같은 이름의 오픈 단체방이 이미 있어도 새 줄의 키는 겹치지 않는다
+    rooms: [{ key: parseRoomKey('0\u0001민지').key, chat_id: '500', name: '민지', kind: 'open', list_kind: 'open_room' }],
+    runtime: {},
+  }
+  const asked = []
+  const dmSlot = new Slot('dm-new', dmRec)
+  dmSlot.client = {
+    async getChat(id) {
+      asked.push(id)
+      if (id === '801') return { chat_id: '801', type: 'OD', display_name: '민지', title: null, link_id: '9301', active_members: 2 }
+      if (id === '802') return { chat_id: '802', type: 13, display_name: '가, 나', title: null, link_id: '9302', active_members: 30 }
+      if (id === '803') return { chat_id: '803', type: 11, display_name: '친구', title: null, link_id: null, active_members: 2 }
+      throw Object.assign(new Error('CHATINFO response missing chatInfo'), { code: 'get_chat_failed' })
+    },
+  }
+  const { value: addedOk, lines: addLines } = await withLog(() => dmSlot.addDirectRoom('801'))
+  if (addedOk !== true) throw new Error('new 1:1: an open-profile 1:1 is added')
+  const added = dmRec.rooms.find((r) => r.chat_id === '801')
+  if (!added || added.list_kind !== 'open_dm' || added.kind !== 'open' || added.name !== '민지' || added.key === dmRec.rooms[0].key) throw new Error('new 1:1: row ' + JSON.stringify(added))
+  if (addLines.some((l) => /민지|801/.test(l))) throw new Error('new 1:1: the log has no names or ids')
+  const reply = onInbound(dmRec, { chatId: '801', text: '안녕하세요', authorName: '민지', mine: false })
+  if (reply.length !== 1 || reply[0].chatId !== '801' || reply[0].text !== '민지님, 문의 감사합니다.') throw new Error('new 1:1: replied ' + JSON.stringify(reply))
+  if (onInbound(dmRec, { chatId: '500', text: '안녕하세요', authorName: '철수', mine: false }).length !== 0) throw new Error('new 1:1: the open room of the same name gets no reply')
+  if (await dmSlot.addDirectRoom('801')) throw new Error('new 1:1: a listed chat is not asked again')
+  if (await dmSlot.addDirectRoom('802')) throw new Error('new 1:1: an open group room is not added')
+  if (await dmSlot.addDirectRoom('802')) throw new Error('new 1:1: an open group room is asked once')
+  if (await dmSlot.addDirectRoom('803')) throw new Error('new 1:1: a normal 1:1 is not added (scope unchanged)')
+  const { value: failed, lines: failLines } = await withLog(() => dmSlot.addDirectRoom('804'))
+  if (failed) throw new Error('new 1:1: an unreadable chat is not added')
+  if (failLines.some((l) => /804/.test(l))) throw new Error('new 1:1: the failure log has no ids')
+  if (asked.join(',') !== '801,802,803,804') throw new Error('new 1:1: asked ' + asked.join(','))
+  if (dmRec.rooms.length !== 2) throw new Error('new 1:1: only the 1:1 is added')
+  // 11분 뒤: 읽지 못한 방만 다시 묻는다. 갠톡이 아닌 것으로 밝혀진 방은 하루 동안 묻지 않는다
+  const realNow = Date.now
+  const t0 = realNow()
+  Date.now = () => t0 + 11 * 60000
+  try {
+    await withLog(async () => {
+      for (const id of ['802', '803', '804']) await dmSlot.addDirectRoom(id)
+    })
+  } finally {
+    Date.now = realNow
+  }
+  if (asked.join(',') !== '801,802,803,804,804') throw new Error('new 1:1: only the failed lookup is retried after 10 min ' + asked.join(','))
+  // 채팅 화면 목록(catalog)이 이미 단체방으로 아는 방은 묻지 않는다
+  dmSlot.catalogCache.list = [{ chat_id: '807', list_kind: 'open_room' }]
+  if ((await dmSlot.addDirectRoom('807')) || asked.length !== 5) throw new Error('new 1:1: a chat the catalog knows as a group is not asked')
+  dmSlot.catalogCache.list = []
+  dmRec.config.autoreply.enabled = false
+  if ((await dmSlot.addDirectRoom('805')) || asked.length !== 5) throw new Error('new 1:1: nothing is asked while auto reply is off')
+  dmRec.config.autoreply.enabled = true
+  dmRec.features.macro_until = Date.now() - 1000
+  if ((await dmSlot.addDirectRoom('806')) || asked.length !== 5) throw new Error('new 1:1: nothing is asked after the macro period')
+  dmRec.features.macro_until = Date.now() + 3 * 3600000
+  // 확실한 1:1 type(OD·14·16)만 더한다: 링크 있는 2명 방이어도 type 2·모르는 type 은 단체방일 수 있어 더하지 않는다(하루 동안 묻지 않음).
+  // 상대 이름을 못 읽은 1:1 은 더하지 않고 10분 뒤 다시 묻는다. 매크로 대상에 남은 키는 새 줄이 받지 않는다.
+  dmSlot.client.getChat = async (id) => {
+    asked.push(id)
+    if (id === '811') return { chat_id: '811', type: 2, display_name: '하나', title: null, link_id: '9311', active_members: 2 }
+    if (id === '812') return { chat_id: '812', type: 'OC', display_name: '두리', title: null, link_id: '9312', active_members: 2 }
+    if (id === '813') return { chat_id: '813', type: 'OD', display_name: null, title: null, link_id: '9313', active_members: 2 }
+    if (id === '814') return { chat_id: '814', type: 'OD', display_name: '수진', title: null, link_id: '9314', active_members: 2 }
+    if (id === '815') return { chat_id: '815', type: 14, display_name: '가, 나, 다', title: null, link_id: null, active_members: 3 }
+    throw Object.assign(new Error('CHATINFO response missing chatInfo'), { code: 'get_chat_failed' })
+  }
+  dmRec.config.macro = { enabled: true, message: '홍보 글', rooms: ['0\u0001수진'] }
+  const before = asked.length
+  await withLog(async () => {
+    for (const id of ['811', '812', '813', '815']) {
+      if (await dmSlot.addDirectRoom(id)) throw new Error('new 1:1: not added ' + id)
+    }
+  })
+  if (dmRec.rooms.some((r) => ['811', '812', '813', '815'].includes(r.chat_id))) throw new Error('new 1:1: unsure or unnamed chats stay out')
+  if (macroRoomsDue(dmRec, Date.now()).length !== 0) throw new Error('new 1:1: the stale macro key has no room yet')
+  if (!(await withLog(() => dmSlot.addDirectRoom('814'))).value) throw new Error('new 1:1: a named OD chat is added')
+  const sj = dmRec.rooms.find((r) => r.chat_id === '814')
+  if (!sj || sj.name !== '수진' || sj.key === '0\u0001수진') throw new Error('new 1:1: a stale macro key is not reused ' + JSON.stringify(sj))
+  if (macroRoomsDue(dmRec, Date.now()).length !== 0) throw new Error('new 1:1: macro posts never go to the new 1:1')
+  const t1 = realNow()
+  Date.now = () => t1 + 11 * 60000
+  try {
+    await withLog(async () => {
+      for (const id of ['811', '812', '813', '815']) await dmSlot.addDirectRoom(id)
+    })
+  } finally {
+    Date.now = realNow
+  }
+  if (asked.slice(before).join(',') !== '811,812,813,815,814,813') throw new Error('new 1:1: only the unnamed 1:1 is asked again ' + asked.slice(before).join(','))
+  delete dmRec.config.macro
+}
 
 const backfillSlot = new Slot('bf', { credentials: { user_id: '111' }, needs_register: false })
 let backfillReads = 0
@@ -1921,6 +2055,110 @@ async function withLog(fn) {
         botA.slot.opts = pool.opts
       }
     })
+  }
+  // #29 나간 사람 재입장 차단(7.2 (b)): 카카오가 나간 사람의 내보내기를 받지 않아도(FAKE_KICK_LEFT=0) 그 실패는
+  //   연속 실패 멈춤으로 세지 않는다(권한은 실패마다 다시 읽는다). 방 안 사람의 진짜 실패는 그대로 세어 3번이면 10분 멈춘다.
+  //   멈춤·올킥 감지·한도로 건너뛴 나간 사람도 bans 에 적고 kick_fail 로 남긴다(패널 표에서 해제). 다시 들어오면 내보내고 bans 를 지운다.
+  //   방 관리봇이 꺼져 있어 건너뛴 사람은 적지 않는다. 적어 둔 뒤 제외 대상이 되거나 재입장 차단을 끄면 다시 들어와도 내보내지 않는다.
+  //   레이트리밋 답은 나간 사람이어도 센다.
+  {
+    const iK = install('lkickx1', { config: { leaveKick: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iK).state === 'waiting_host', 5000, '#29 join')
+    const chat = rowOf(iK).chat_id
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iK).state === 'active', 3000, '#29 promotion')
+    const vk = botA.slot.byInstall.get(iK)
+    const prevLeft = process.env.FAKE_KICK_LEFT
+    const kMark = [botA.slot.limits.kickH.list.length, botA.slot.limits.kickD.list.length]
+    let seq = 0
+    const leave = (uid) => botA.slot.onVisit(vk, { kind: 'leave', userId: uid, name: '나간' + uid, logId: uid + String(++seq).padStart(4, '0'), at: Date.now() })
+    const logsOf = (uid, kind) => store.logs.filter((l) => l.install_id === iK && l.user_id === uid && l.kind === kind)
+    const banned = (uid) => RF.bannedNow(vk.runtime, uid, Date.now())
+    const kicks = () => packets('KICKMEM', (p) => p.chat === chat)
+    process.env.FAKE_KICK_LEFT = '0'
+    try {
+      // 나간 3명: KICKMEM 3번 모두 거절 → 멈추지 않음, 3명 모두 bans + kick_fail, 권한은 실패마다 다시 읽음
+      const perm0 = packets('CHATONROOM', (p) => p.chat === chat).length
+      for (const uid of ['7301', '7302', '7303']) await leave(uid)
+      if (kicks().length !== 3) throw new Error('#29 one KICKMEM per leaver ' + kicks().length)
+      if (vk.failStreak !== 0 || vk.actPausedUntil > Date.now()) throw new Error('#29 refused leaver kicks do not pause the room ' + vk.failStreak + ' ' + vk.actPausedUntil)
+      if (!['7301', '7302', '7303'].every((u) => banned(u) && logsOf(u, 'kick_fail').length === 1)) throw new Error('#29 every refused leaver is banned and logged')
+      if (packets('CHATONROOM', (p) => p.chat === chat).length - perm0 < 3) throw new Error('#29 each failure still re-reads the permission')
+      // 방 안 사람의 실패(여기서는 manual)는 센다. 나간 사람의 실패는 세지도 되돌리지도 않는다 → 세 번째에서 멈춤
+      await botA.slot.kick(vk, '7311', 'm1', 'manual')
+      await leave('7304')
+      if (vk.failStreak !== 1 || !banned('7304')) throw new Error('#29 a leaver failure leaves the streak alone ' + vk.failStreak)
+      await botA.slot.kick(vk, '7312', 'm2', 'manual')
+      await botA.slot.kick(vk, '7313', 'm3', 'manual')
+      if (!(vk.actPausedUntil > Date.now() + 9 * 60000)) throw new Error('#29 three real failures still pause for 10 min')
+      // 멈춘 동안 나감 → KICKMEM 없이 bans + skip(paused) + kick_fail
+      const k0 = kicks().length
+      await leave('7305')
+      if (kicks().length !== k0 || !banned('7305')) throw new Error('#29 a leaver while paused is still banned')
+      if (!logsOf('7305', 'skip').some((l) => l.detail.note === 'paused') || logsOf('7305', 'kick_fail').length !== 1) throw new Error('#29 paused leaver logs ' + JSON.stringify(store.logs.filter((l) => l.user_id === '7305')))
+      // 방 한도(시간 10회)로 건너뜀 → bans + kick_fail
+      vk.actPausedUntil = 0
+      vk.failStreak = 0
+      while (vk.limits.kick.ok(Date.now())) vk.limits.kick.add(Date.now())
+      await leave('7306')
+      if (kicks().length !== k0 || !banned('7306') || logsOf('7306', 'kick_fail').length !== 1) throw new Error('#29 a leaver over the room limit is still banned')
+      vk.limits.kick.list.length = 0
+      // 올킥 감지로 멈춘 동안 나감 → KICKMEM 없이 bans + skip(wave) + kick_fail
+      const g0 = vk.runtime.guard
+      vk.runtime.guard = Object.assign({}, g0, { halt: Object.assign({}, g0 && g0.halt, { [chat]: Date.now() + 60000 }) })
+      try {
+        await leave('7308')
+      } finally {
+        vk.runtime.guard = g0
+      }
+      if (kicks().length !== k0 || !banned('7308') || !logsOf('7308', 'skip').some((l) => l.detail.note === 'wave') || logsOf('7308', 'kick_fail').length !== 1) throw new Error('#29 a leaver during a kick wave halt is still banned')
+      // 방 관리봇이 꺼진 동안(권한 없음)은 적지 않는다
+      const perm = vk.perm
+      vk.perm = 2
+      await botA.slot.doLeaveKick(vk, { type: 'kick', userId: '7307', name: '나간7307' })
+      vk.perm = perm
+      if (banned('7307') || logsOf('7307', 'kick_fail').length) throw new Error('#29 no ban while the room bot is off')
+      // 적어 둔 사람이 다시 들어옴 → 방 안이라 내보내기 성공, bans 지움
+      fs.byChat(chat).members['7305'] = { mt: 2, nick: '나간7305', ptp: 1, pli: null, photo: '', status: null }
+      await botA.slot.onVisit(vk, { kind: 'join', userId: '7305', name: '나간7305', logId: '73059999', at: Date.now() })
+      if (banned('7305') || !fs.byChat(chat).kicked.includes('7305') || logsOf('7305', 'kick').length !== 1) throw new Error('#29 a banned leaver who comes back is kicked')
+      // 해제는 그대로: kick_fail 만 있는 사람 → bans 만 지움(KLDELITEM 없음)
+      const kl0 = packets('KLDELITEM').length
+      if (!(await pool.unkick(iK, '7306')).ok || banned('7306') || packets('KLDELITEM').length !== kl0) throw new Error('#29 unkick a held leaver')
+      // 적어 둔 뒤 제외 대상이 된 사람, 재입장 차단을 끈 방: 다시 들어와도 내보내지 않는다(적어 둔 것은 그대로)
+      const cfg0 = vk.cfg
+      const k1 = kicks().length
+      try {
+        vk.cfg = Object.assign({}, cfg0, { exempt: [{ user_id: '7301', name: '나간7301' }] })
+        fs.byChat(chat).members['7301'] = { mt: 2, nick: '나간7301', ptp: 1, pli: null, photo: '', status: null }
+        await botA.slot.onVisit(vk, { kind: 'join', userId: '7301', name: '나간7301', logId: '73019999', at: Date.now() })
+        vk.cfg = Object.assign({}, cfg0, { leaveKick: Object.assign({}, cfg0.leaveKick, { enabled: false }) })
+        fs.byChat(chat).members['7302'] = { mt: 2, nick: '나간7302', ptp: 1, pli: null, photo: '', status: null }
+        await botA.slot.onVisit(vk, { kind: 'join', userId: '7302', name: '나간7302', logId: '73029999', at: Date.now() })
+      } finally {
+        vk.cfg = cfg0
+      }
+      if (kicks().length !== k1 || !banned('7301') || !banned('7302') || logsOf('7301', 'kick').length || logsOf('7302', 'kick').length) throw new Error('#29 no rejoin kick for an exempt person or with the feature off')
+      // 레이트리밋 답(-805)은 나간 사람이어도 센다 → 세 번이면 10분 멈춤
+      vk.failStreak = 0
+      vk.actPausedUntil = 0
+      const openAction0 = botA.slot.openAction
+      botA.slot.openAction = async (v, method, extra) => (method === 'KICKMEM' ? { ok: false, status: -805 } : openAction0.call(botA.slot, v, method, extra))
+      try {
+        for (const uid of ['7321', '7322', '7323']) await leave(uid)
+      } finally {
+        delete botA.slot.openAction
+      }
+      if (!(vk.actPausedUntil > Date.now() + 9 * 60000) || !['7321', '7322', '7323'].every((u) => banned(u))) throw new Error('#29 rate-limited leaver kicks still pause the room ' + vk.failStreak)
+    } finally {
+      if (prevLeft === undefined) delete process.env.FAKE_KICK_LEFT
+      else process.env.FAKE_KICK_LEFT = prevLeft
+      vk.actPausedUntil = 0
+      vk.failStreak = 0
+      botA.slot.limits.kickH.list.splice(kMark[0])
+      botA.slot.limits.kickD.list.splice(kMark[1])
+    }
   }
   botA.slot.joinH.list.splice(joinMark[0])
   botA.slot.joinD.list.splice(joinMark[1])

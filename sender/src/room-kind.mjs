@@ -31,7 +31,8 @@ function multiType(s) {
   return s === 'OM' || s === 'OpenMulti' || s === 'OpenMultiChat' || s === '13' || s === '15'
 }
 
-function directType(s) {
+// 오픈 1:1 type(OD·14·16). runner 의 addDirectRoom 이 처음 온 방을 목록에 더할 때도 이것만 받는다.
+export function directType(s) {
   return s === 'OD' || s === 'OpenDirect' || s === 'OpenDirectChat' || s === '14' || s === '16'
 }
 
