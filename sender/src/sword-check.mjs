@@ -494,6 +494,21 @@ function sums(g, keys) {
   }
   const b = A.swordSvg(12, 'k', { broken: true })
   assert(b.body.includes('saturate') || b.defs.includes('saturate'), 'broken sword is grey')
+  // 묶음마다 그려 둔 검 그림(assets/swords): 8장 모두 있고, 서로 다르고, 진열장·랭킹이 그 그림을 쓴다
+  const arts = new Set()
+  for (const t of S.TIERS) {
+    const art = A.artOf(t.from)
+    assert(art && art.uri.startsWith('data:image/png;base64,') && art.w > 40 && art.h > 300, 'sword art for tier ' + t.name)
+    arts.add(art && art.uri)
+  }
+  eq(arts.size, S.TIERS.length, 'every tier has its own sword art')
+  eq(A.artOf(S.MAX_LV), A.artOf(20), 'top level uses the last tier art')
+  const up = A.cardSvg({ kind: 'info', lv: 13, best: 13, owner: '하늘', gold: 1, price: 1, broken: 0, items: [], next: null })
+  assert(up.includes(A.artOf(13).uri) && !up.includes(A.artOf(12 - 3).uri), 'showcase shows the tier art')
+  const brk = A.cardSvg({ kind: 'enhance', result: 'broke', from: 18, lv: 0, best: 18, owner: '구름', gold: 0, spent: 1, used: [] })
+  assert(brk.includes(A.artOf(18).uri) && brk.includes('saturate') && (brk.split(A.artOf(18).uri).length - 1) === 2, 'broken: the old sword in two grey pieces')
+  const rk = A.cardSvg({ kind: 'rank', rows: [{ name: '가', lv: 20, best: 20 }, { name: '나', lv: 0, best: 0 }] })
+  assert(rk.includes(A.artOf(20).uri) && rk.includes(A.artOf(0).uri), 'rank rows show the tier art')
   const cards = [
     { kind: 'enhance', result: 'up', from: 6, lv: 7, best: 7, owner: '<b>&"이름\'', gold: 3200, spent: 800, used: ['축복 주문서'], seed: 1 },
     { kind: 'enhance', result: 'broke', from: 12, lv: 0, best: 12, owner: '하늘', gold: 0, spent: 3000, used: [], seed: 2 },
@@ -506,7 +521,8 @@ function sums(g, keys) {
   ]
   for (const c of cards) {
     const svg = A.cardSvg(c)
-    assert(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && svg.endsWith('</svg>') && !/NaN|undefined/.test(svg), 'card svg ' + c.kind + ' ' + c.result)
+    // 붙인 그림(base64) 안의 글자는 빼고 본다
+    assert(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && svg.endsWith('</svg>') && !/NaN|undefined/.test(svg.replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, '')), 'card svg ' + c.kind + ' ' + c.result)
     eq(A.cardSvg(c), svg, 'card svg deterministic')
   }
   const esc = A.cardSvg(cards[0])
