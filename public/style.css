@@ -766,6 +766,43 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .moved { padding-block: 56px; color: var(--fg-2); }
 .moved a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
 
+/* 체험 소개(구매 화면 맨 위 · 로그아웃 상태 · 6.6): 왼쪽 글 + [체험하기], 오른쪽 작은 카카오톡 방(방 화면 자체는 kk.css).
+   방 글은 들어올 때 차례로 하나씩 나타난다(--i 번째). 미리보기는 누르면 체험 화면으로 간다 */
+.intro { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 356px; align-items: center; gap: 40px; margin-bottom: 32px; padding: 30px 32px 30px 36px; border: 1px solid var(--line-2); border-radius: 16px; background: radial-gradient(70% 120% at 100% 100%, var(--p-room-soft), transparent 60%), linear-gradient(180deg, var(--bg-2), var(--bg-1)); overflow: hidden; }
+.intro h2 { margin-top: 10px; font-size: var(--t-24); font-weight: 600; letter-spacing: -0.03em; line-height: 1.35; }
+.intro .lead { margin-top: 12px; max-width: 520px; color: var(--fg-2); font-size: var(--t-14); line-height: 1.75; }
+.intro-act { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.intro-sc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.intro-sc a { --acc: var(--fg-3); display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--fg-2); font-size: var(--t-13); transition: color var(--d1) var(--ease), border-color var(--d1) var(--ease), background var(--d1) var(--ease); }
+.intro-sc a::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.intro-sc a[data-prod="minigame"] { --acc: var(--p-game); }
+.intro-sc a[data-prod="roombot"] { --acc: var(--p-room); }
+.intro-sc a[data-prod="macro"] { --acc: var(--p-macro); }
+.intro-sc a:hover { color: var(--fg); border-color: var(--line-3); background: var(--bg-3); }
+.intro-ph { display: block; padding: 7px; border: 1px solid var(--line-2); border-radius: 34px; background: var(--bg-2); box-shadow: var(--shadow); transition: transform var(--d2) var(--ease); }
+.intro-ph:hover { transform: translateY(-2px); }
+.intro .kk { height: 490px; border-radius: 27px; pointer-events: none; }
+.intro { animation: riseIn 560ms var(--ease) backwards; animation-delay: 140ms; }
+.intro .kk-top { height: 50px; }
+.intro .kk-title { font-size: 16px; }
+.intro .kk-log { overflow: hidden; justify-content: flex-end; }
+.intro .kk-log > :first-child { margin-top: 0; }
+.intro .kk-log > * { animation: kkIn 420ms var(--ease) backwards; animation-delay: calc(450ms + var(--i, 0) * 700ms); }
+.intro .kk-bub { font-size: 14px; }
+.intro .kk-fake { flex: 1; align-self: center; padding: 0 4px; color: var(--kk-input-fg); font-size: 15px; }
+@media (max-width: 960px) {
+  .intro { grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; padding: 26px 24px 26px 28px; }
+  .intro .kk { height: 470px; }
+}
+@media (max-width: 760px) {
+  .intro { grid-template-columns: minmax(0, 1fr); gap: 22px; margin-bottom: 24px; padding: 22px 18px 18px; }
+  .intro h2 { font-size: 20px; }
+  .intro-act .btn { flex: 1 1 auto; }
+  .intro-sc a { min-height: 40px; }
+  .intro-ph { padding: 0; border: 0; border-radius: 20px; background: none; box-shadow: none; }
+  .intro .kk { height: 450px; border-radius: 18px; }
+}
+
 /* ---------- 움직임 (공개 페이지) ----------
    들어올 때 위에서부터 차례로 살짝 떠오른다. 숨겨 뒀다 보여 주는 칸(#macroSec · #rooms 등)도 보일 때 같은 움직임.
    fill 은 backwards 만 — 끝난 뒤 :hover 의 transform 을 막지 않게. 움직임 줄이기 설정이면 맨 아래에서 끈다 */
@@ -884,7 +921,7 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; transition-delay: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   .rv.armed { transform: none; }
-  .caret, .dot.pulse, .pub-page::before { animation: none !important; }
+  .caret, .dot.pulse, .pub-page::before, .intro .kk-log > * { animation: none !important; }
   .how-fig .pk { display: none; }
   .kkt-line.enter, .kkt-row.in, .tbl tr.in, .feed li.in, .alerts li.in, .rule.new, .room.pop, .wchip.new, .img-t, .spark rect, .kt-k, .mviz-strip i, .pass-code span { animation: none !important; }
 }

@@ -999,7 +999,7 @@ if (!v || !v.licensed || v.state === 'error') return
 | `/panel` | panel.html | — | 5 |
 | `/manage` | manage.html | — | 6 |
 
-캐시 무효화: `style.css?v=12`, `app.js?v=17`, `support.js?v=1`, `demo.css?v=1`, `demo.js?v=1`, `panel.css?v=15`, `panel.js?v=19`, `manage.js?v=5`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
+캐시 무효화: `style.css?v=13`, `app.js?v=18`, `support.js?v=1`, `kk.css?v=1`, `demo.css?v=2`, `demo.js?v=1`, `panel.css?v=15`, `panel.js?v=19`, `manage.js?v=5`. 브랜드 마크업은 `BRAND.md` 대로 빈 `<span class="brand-mark" aria-hidden="true"></span>` 이다.
 
 **보안 헤더**(작업 1, server.js 의 HTML 응답 전부 — `page(...)` 와 정적 `.html`): `X-Frame-Options: DENY` + `Content-Security-Policy: frame-ancestors 'none'`. `/panel`·`/manage` 에는 여기에 `script-src 'self'; object-src 'none'; base-uri 'self'` 를 더한다(두 화면은 제3자 스크립트를 싣지 않는다, D25). 사이트 화면은 채널톡 SDK 가 여러 호스트를 쓰므로 `script-src` 를 걸지 않는다.
 
@@ -1013,7 +1013,7 @@ if (!v || !v.licensed || v.state === 'error') return
   <a class="btn ghost icon-s" href="/login" data-auth="out" aria-label="로그인"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
   <a class="btn ghost hide-s" href="/account" data-nav="account" data-auth="in" hidden>내 계정</a>
   <a class="btn ghost icon-s" href="/account" data-auth="in" hidden aria-label="내 계정"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-user"></use></svg></a>
-  <a class="btn ghost hide-s" href="/demo" data-nav="demo">체험</a>
+  <a class="btn ghost" href="/demo" data-nav="demo">체험</a>
   <a class="btn ghost" href="/buy" data-nav="buy">구매</a>
   <a class="btn primary" href="/panel" data-nav="panel">패널 열기</a>
 </nav>
@@ -1021,7 +1021,7 @@ if (!v || !v.licensed || v.state === 'error') return
 
 - 지금의 `내 키`(`/my`) 버튼은 없앤다.
 - HTML 기본은 로그아웃 상태. `window.kbSite`(support.js 가 만든 `/api/site` 프라미스)가 `member` 를 주면 `[data-auth="in"]` 를 보이고 `[data-auth="out"]` 를 숨긴다. `.icon-s` 는 760px 이하에서만 보인다(style.css 에 규칙 추가). 로그아웃 상태의 휴대폰 상단에도 로그인 진입점(아이콘)이 있다.
-- `체험`(`/demo`)은 `hide-s` 라 760px 이하 상단 바에서는 숨는다. 휴대폰에서는 바닥글과 구매 화면 카드의 `[체험하기]` 로 들어간다.
+- `체험`(`/demo`)은 휴대폰(760px 이하)에서도 상단 바에 보인다(360px 에서도 한 줄에 든다). 바닥글 · 구매 화면 맨 위 체험 소개(6.6) · 상품 카드의 `[체험하기]` · 패널 왼쪽 아래 링크(`구매` 옆 `체험`)로도 들어간다.
 - 바닥글 링크: `체험`, `구매`, `내 계정`, `주문 조회`, `패널`, `<button type="button" data-support>문의하기</button>`. `.foot .links button` 에 `a` 와 같은 규칙을 준다. `[data-support]` 를 보일지는 `hidden` 이 아니라 `<html data-support>` 값으로 CSS 가 정한다(6.10).
 - 모든 사이트 페이지 `<head>` 에 `<script src="/support.js?v=1" defer></script>` 를 `app.js` 보다 먼저.
 
@@ -1083,6 +1083,7 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 ### 6.6 구매 `/buy`
 
 - 상품 카드(`.prods` 안에 세로로 3개, 가격은 `/api/price`): 왼쪽 위 상품 아이콘 칸(`.p-ic` — 매크로 `i-macro`, 방 관리봇 `i-shield`, 미니게임봇 `i-game`) + 이름, 설명, 체크 글머리, 맨 아래 가격 줄(`20,000원 / 1개월(30일)` + 작은 칸 `한 번에 1~12개월`·`기간 제한 없음`). 상품마다 색 하나(공용 `:root` 토큰 `--p-macro` 파랑 · `--p-room` 보라 · `--p-game` 분홍과 그 `-soft`·`-line`·`-glow`, `.prod[data-prod]` 가 `--acc*` 로 받는다)를 아이콘 칸·체크·고른 카드 테두리·금액에만 쓴다.
+- 체험 소개(로그아웃 상태, `data-auth="out"` — 로그인하면 숨는다): 머리말 바로 아래 `section.intro`. 왼쪽 `체험` · `K bot이 방에서 하는 일을 구매 전에 볼 수 있습니다` · 리드(실제 방과 같은 문구 · 카카오톡에 아무것도 보내지 않음) · `[체험하기]`(`/demo`) · 장면 바로 열기(미니게임 `#games` · 입장·퇴장 기록 `#visit` · 홍보 금지 `#promo` · 자동 발송 `#macro`). 오른쪽 작은 카카오톡 방(kk.css, 누르면 `/demo`): `하늘님이 들어왔습니다.` → K bot `[입장 안내]` → 나 `!주사위` → K bot 주사위 답이 차례로 나타난다(움직임 줄이기면 한 번에). K bot 글은 실제 봇 함수 결과와 같아야 한다 — `lib/demo-check.js` 가 `visitNoticeText` · `onInbound('!주사위')` 와 비교한다. 시각은 app.js `introNow()` 가 지금(한국 시간)으로 바꾼다.
 - 로그아웃 상태: 상품 카드와 `#loginGate` 카드(`로그인`·`회원가입`, 둘 다 `next=` 지금 주소). 상품 카드마다 맨 아래 `{상품} 구매하기` 버튼 → `/login?next=/buy?p={상품}`(로그인하면 그 상품을 고른 채로 돌아온다). 옆에 `[체험하기]` → `/demo#macro`·`#visit`·`#games`(6.13, app.js `PROD_DEMO`). 폼은 숨김.
 - 로그인 상태 `#buyForm.form` — **상품부터 고른다**(예전엔 방 관리봇을 사려면 `설치할 방` 의 `방 추가` 만 보여 손님이 어떻게 사는지 몰랐다). `.fsec` 마다 `.fsec-h` 단계 제목(`.step` + 번호 `.sn`, 번호는 보이는 칸 순서대로 다시 매긴다):
   1. `#pickSec` `상품 고르기` — hint `구매할 상품을 누르세요. 여러 개를 함께 골라도 됩니다.` `#picks.prods.picks` 안 상품 카드 3개(로그아웃 화면과 같은 카드). 카드 전체를 덮는 `.chk`(`#pick-{상품}`)라 카드 어디를 눌러도 고르고, 오른쪽 위 동그라미가 체크 표시다. 고른 카드는 `.sel` — 상품 색 테두리·빛, 아이콘 칸이 상품 색으로 차고, 체크가 톡 튀어나온다.
@@ -1297,7 +1298,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 ### 6.13 체험 `/demo` (화면)
 
-공개 화면(로그인 없음). `demo.html` + `demo.css?v=1` + `demo.js?v=1`(자체 IIFE — app.js 는 헤더만 맡는다). 방에 나오는 K bot 글은 서버(`lib/demo.js` · `routes/demo.js`, `/api/demo*` — 3.7)가 실제 봇 함수로 만들고, 화면은 받은 글을 textContent 로만 그린다. 실제 카카오톡에는 아무것도 보내지 않는다.
+공개 화면(로그인 없음). `demo.html` + `kk.css?v=1`(카카오톡 방 화면 `.kk-*` — 구매 화면 체험 소개와 같이 쓴다) + `demo.css?v=2`(체험 화면 배치 · 휴대폰 틀) + `demo.js?v=1`(자체 IIFE — app.js 는 헤더만 맡는다). 방에 나오는 K bot 글은 서버(`lib/demo.js` · `routes/demo.js`, `/api/demo*` — 3.7)가 실제 봇 함수로 만들고, 화면은 받은 글을 textContent 로만 그린다. 실제 카카오톡에는 아무것도 보내지 않는다.
 
 - 문구: 제목 `K bot 체험`, 리드 `카카오톡 방과 같은 화면에서 미니게임봇, 방 관리봇, 매크로가 하는 일을 확인합니다. 체험 중에는 실제 카카오톡에 아무것도 보내지 않습니다.` 화면에서는 `데모` 대신 `체험`(TONE.md). 버튼 묶음 이름 `상황 만들기`(장면의 actions) · `바로 입력`(chips).
 - 배치: 1100px 이상 `장면 목록(상품 묶음 → 장면) | 휴대폰(400px) | 설명 · 고르기 칸 · 버튼 · 패널 기록 · [구매] · [다시 시작]`. 760~1100 장면 탭(가로 스크롤)이 위, 휴대폰과 설명이 나란히. 760 미만 탭 → 설명(고르기 칸) → 버튼(`바로 입력` 은 한 줄 가로 스크롤) → 휴대폰(높이 `min(60svh, 560px)`, 최소 400px, 테두리 없음) → 안내 한 줄 → `[구매]` · `[다시 시작]` — 첫 화면에 누를 버튼이 보이고, 안내가 나타나도 버튼이 밀리지 않는다. 1099px 이하·터치 화면에서 누르는 곳 44px. 360·390px 에서 가로 스크롤 없음. 체험 화면은 머리말 여백을 줄이고(`.pub-head` 위 32px · 아래 24px) 휴대폰 높이를 `clamp(460px, 100vh - 290px, 760px)`(760~1100 은 `clamp(420px, 100vh - 370px, 760px)`)로 둬 1366×768 · 1440×900 에서 처음부터 입력 칸까지 보인다. 대화는 아래(입력 칸 쪽)에 붙여 쌓는다(글이 적어도 새 글은 입력 칸 바로 위). `상황 만들기` · `바로 입력` 을 눌렀을 때 휴대폰 아래쪽(새 글 · 입력 칸 · 안내)이 화면 밖이면 그만큼만 페이지를 내린다(모든 너비, 휴대폰 위가 머리 막대 밑으로 들어가지 않는 데까지).
@@ -1308,7 +1309,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - 움직임: 새 말풍선 · 알약은 300ms 살짝 떠오른다. 움직임 줄이기 설정이면 움직임만 없애고 간격(`wait`)은 그대로.
 - 들어오는 길: 상단 바 `체험`(760px 초과), 바닥글 `체험`, 구매 화면 로그아웃 카드의 `[체험하기]`(매크로 `#macro` · 방 관리봇 `#visit` · 미니게임봇 `#games`, app.js `PROD_DEMO`). 로그인 상태의 고르기 카드에는 넣지 않는다(카드 전체가 고르기 칸).
 - 스프라이트: buy.html 과 같은 심볼 + 이 화면에만 `i-notice`(공지 띠).
-- 검사: `lib/panel-check.js` 가 demo.css 의 색(토큰만) · demo.css 에 `:root` 없음 · demo.html/demo.js 의 이모지 · `데모` · `해 보세요` 를 본다.
+- 검사: `lib/panel-check.js` 가 demo.css · kk.css 의 색(토큰만) · 두 파일에 `:root` 없음 · demo.html/demo.js 의 이모지 · `데모` · `해 보세요` 를 본다.
 
 ---
 

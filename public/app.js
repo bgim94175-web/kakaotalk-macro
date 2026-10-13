@@ -721,7 +721,17 @@
   /* 문구 옆에 [문의하기] 를 붙이는 사유 (6.6) */
   var SUPPORT_REASONS = { room_taken: 1, taken: 1, pending_exists: 1, blocked_room: 1, too_many_pending: 1 };
 
+  /* 체험 소개(구매 화면 맨 위): 미리보기 방의 시각을 지금(한국 시간)으로. 모양은 봇과 같다 — 오후 9:14 · 10.13 오후 9:14 */
+  function introNow() {
+    var t = new Date(Date.now() + 9 * 3600000);
+    var h = t.getUTCHours();
+    var clock = (h < 12 ? '오전 ' : '오후 ') + (h % 12 || 12) + ':' + pad2(t.getUTCMinutes());
+    $$('.intro [data-clock]').forEach(function (n) { n.textContent = clock; });
+    $$('.intro [data-when]').forEach(function (n) { n.textContent = pad2(t.getUTCMonth() + 1) + '.' + pad2(t.getUTCDate()) + ' ' + clock; });
+  }
+
   function pageBuy() {
+    introNow();
     var q = qs();
     var bootBox = $('#buyBoot'), gate = $('#gateWrap'), form = $('#buyForm'), out = $('#result');
     var picksBox = $('#picks'), macroSec = $('#macroSec'), roomsSec = $('#rooms');
