@@ -1,5 +1,7 @@
 import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
+import * as Mon from './monster.mjs'
+import { cardPng } from './monster-card.mjs'
 import { josa, profileObserve, visitNoticeText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
@@ -548,7 +550,7 @@ export function onInbound(record, msg) {
   state.knownRooms[room.key] = true
   if (!mine) {
     if (featureOn(record, 'roombot')) roomBot(record, out, room, parsed, who, text, group, now, state)
-    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state, msg.authorId)
+    if (featureOn(record, 'minigame')) miniGame(record, out, room, parsed, who, text, now, state, msg.authorId, msg.mentions)
   }
   return out
 }
@@ -819,10 +821,12 @@ function gameOn(cfg, id) {
   if (id === 'dice') return cfg.dice !== false
   if (id === 'rps') return cfg.rps !== false
   if (id === 'quiz') return cfg.quiz !== false
+  if (id === 'monster') return cfg.monster !== false
   return false
 }
 
-function gameSend(state, cfg, room, text, now, out) {
+// 지금 게임 답을 보낼 수 있나(쿨타임·하루 최대 응답 수). 몬스터 수집은 먼저 이것을 보고, 못 보내면 상태를 바꾸지 않는다.
+function gameCan(state, cfg, room, now) {
   const cool = Math.max(0, Number(cfg.cooldownMs) || 0)
   const last = Number(state.gameLast[room.key] || 0)
   if (cool && last && now - last < cool) return false
@@ -833,7 +837,24 @@ function gameSend(state, cfg, room, text, now, out) {
   }
   const limit = Number(cfg.dailyLimit) || 0
   if (limit > 0 && (state.gameCount || 0) >= limit) return false
+  return true
+}
+
+// card 가 있으면 보낼 때 그림(PNG)을 만든다(image 를 처음 읽을 때 한 번). 그림을 못 만들면 text 를 글로 보낸다.
+function gameSend(state, cfg, room, text, now, out, card) {
+  if (!gameCan(state, cfg, room, now)) return false
+  const before = out.length
   pushSend(out, room.chat_id, text, 0)
+  if (card && out.length > before) {
+    let png
+    Object.defineProperty(out[out.length - 1], 'image', {
+      enumerable: true,
+      get() {
+        if (png === undefined) png = cardPng(card)
+        return png
+      },
+    })
+  }
   state.gameLast[room.key] = now
   state.gameCount = (state.gameCount || 0) + 1
   const said = state.said[room.key] || []
@@ -842,7 +863,7 @@ function gameSend(state, cfg, room, text, now, out) {
   return true
 }
 
-function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
+function miniGame(record, out, room, parsed, who, text, now, state, authorId, mentions) {
   const cfg = record.config && record.config.minigame
   if (!cfg || !cfg.enabled) return
   if (!coversList(cfg.rooms || [], room.key)) return
@@ -850,6 +871,7 @@ function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
   if (saidRecently(state, room.key, body, now)) return
   const prefix = cfg.cmdPrefix && String(cfg.cmdPrefix).trim() ? String(cfg.cmdPrefix).trim() : '!'
   if (cfg.byId) state._sk = realId(String(authorId || '')) ? String(authorId) : 'n:' + String(who || '')
+  state._mn = Array.isArray(mentions) ? mentions.map(String).filter((id) => realId(id)) : []
   try {
     if (body.startsWith(prefix) && body.length > prefix.length) {
       gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out)
@@ -858,6 +880,7 @@ function miniGame(record, out, room, parsed, who, text, now, state, authorId) {
     play(state, cfg, room, who, body, prefix, now, out)
   } finally {
     delete state._sk
+    delete state._mn
   }
 }
 
@@ -875,6 +898,11 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
   const sp = line.search(/\s/)
   const cmd = sp < 0 ? line : line.slice(0, sp)
   const arg = sp < 0 ? '' : line.slice(sp).trim()
+  if (Mon.isCommand(cmd) && monster(state, cfg, room, who, cmd, arg, prefix, now, out)) return
+  if (cmd === '수락' || cmd === '거절') {
+    if (cfg.byId && gameOn(cfg, 'monster')) gameSend(state, cfg, room, '받은 신청이 없어요.', now, out)
+    return
+  }
   if (cmd === '끝말잇기') return startWord(state, cfg, room, who, prefix, now, out)
   if (cmd === '숫자야구' || cmd === '야구') return startBaseball(state, cfg, room, who, prefix, now, out)
   if (cmd === '주사위') return dice(state, cfg, room, who, arg, prefix, now, out)
@@ -908,11 +936,30 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out) {
       if (gameOn(cfg, 'rps')) on.push(prefix + '가위바위보')
       if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
       on.push(prefix + '포기', prefix + '랭킹')
-      gameSend(state, cfg, room, '[명령어]\n미니게임 : ' + on.join(' '), now, out)
+      const mon = gameOn(cfg, 'monster') ? '\n몬스터 수집 : ' + Mon.helpCommands(prefix) : ''
+      gameSend(state, cfg, room, '[명령어]\n미니게임 : ' + on.join(' ') + mon, now, out)
       return
     }
     gameSend(state, cfg, room, `[명령어]\n미니게임 : ${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
   }
+}
+
+// 몬스터 수집(monster.mjs) — 방 설치형 봇(cfg.byId)에서만. 처리했으면 true. 수락·거절에 기다리는 몬스터 신청이 없으면 false(다른 게임 차례).
+// 쿨타임·하루 최대 응답 수에 걸리면 상태를 바꾸지 않고 조용히 넘어간다(답이 버려졌는데 탐험·포획만 되는 일이 없게).
+function monster(state, cfg, room, who, cmd, arg, prefix, now, out) {
+  if (!cfg.byId) return false
+  const shared = cmd === '수락' || cmd === '거절'
+  if (!gameOn(cfg, 'monster')) {
+    if (shared) return false
+    gameSend(state, cfg, room, '이 방에서는 몬스터 수집이 꺼져 있어요.', now, out)
+    return true
+  }
+  if (!gameCan(state, cfg, room, now)) return true
+  const key = state._sk != null ? String(state._sk) : 'n:' + String(who || '')
+  const r = Mon.handle(state, { cmd, arg, key, name: who, mentions: state._mn || [], prefix }, { now, rand: Math.random })
+  if (!r) return false
+  gameSend(state, cfg, room, r.text, now, out, r.card)
+  return true
 }
 
 function busy(state, cfg, room, prefix, now, out, kind) {

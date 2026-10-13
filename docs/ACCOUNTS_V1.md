@@ -1353,6 +1353,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `guard.count` | int | 5 | 3~30 |
 | `games.enabled` | bool | **true** | 미니게임. 기본이 켜짐이라 미니게임봇은 입장하자마자 `!도움`·게임에 답한다(소유자 요구 "링크 첨부하면 바로 드가고"). 처음 `minigame` 이 켜지는 설치에 이 기본값을 채운다(4.2) |
 | `games.word` `.baseball` `.dice` `.rps` `.quiz` | bool | true | 랭킹은 항상 켜짐 |
+| `games.monster` | bool | true | 몬스터 수집(7.3.1). 저장본에 없으면 켜짐 |
 | `games.cooldownSec` | int | 3 | **1**~60 (0 은 공용 봇 발송 한도를 한 방이 다 쓰게 하므로 받지 않음) |
 | `games.dailyLimit` | int | 0 | 0~5000, 0 = 제한 없음(방 발송 6/분 한도가 따로 막는다, 5.5) |
 
@@ -1440,8 +1441,22 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
 - 점수는 `authorId` 로 저장하고 `{id: name}` 표로 이름을 보인다(이름 빈 사람 둘이 섞이지 않게).
-- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `방 관리 : …`(켜진 가리기·프로필) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
+- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `몬스터 수집 : …`(켜졌을 때) · `방 관리 : …`(켜진 가리기·프로필) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
 - 미니게임만 있는 방에서는 입장·퇴장·홍보·가리기가 조용하다.
+
+#### 7.3.1 몬스터 수집 (`games.monster`, `sender/src/monster.mjs`)
+
+K bot 이 직접 만든 몬스터 35종(`monster-data.mjs`: 16×16 점 그림 · 기운 5가지 · 등급 4가지 · 진화)만 쓴다. 다른 게임·작품의 이름·모습·상성표를 쓰지 않는다.
+
+- 기운: 햇살 → 물결 → 바위 → 바람 → 별빛 → 햇살(앞이 뒤에 1.5배, 거꾸로 0.7배). 등급: 보통 62 · 희귀 27 · 영웅 9 · 전설 2(야생에서 나오는 비율). 진화한 몬스터는 야생에 나오지 않는다.
+- 명령어(앞글자 뒤): `탐험`(1분에 한 번, KST 하루 첫 탐험에 그물 3개, 10%는 코인·별그물 줍기) · `포획 [그물|별그물|황금그물]`(만남은 5분, 실패하면 등급별로 도망) · `도감 [이름]` · `내몬스터 [번호|@상대]` · `대표 번호` · `놓아주기 번호` · `그물 [종류] [개수]`(상점, 20·60·150코인, 한 번에 1~20개) · `배틀 @상대` · `교환 @상대 내번호 상대번호` · `수락` · `거절` · `몬스터랭킹`(잡은 종류 수 → 최고 레벨, 상위 10) · `몬스터`(전체 명령어와 상성).
+- 처음 하는 사람: 코인 100 · 그물 5. 잡으면 코인(등급별 10·20·40·100)과 대표 몬스터 경험치(6 + 레벨×2). 레벨 업 경험치 `5 + 3×레벨`, 최고 30. 진화 레벨에 닿으면 바로 진화하고 도감에도 올린다.
+- 배틀: 서로의 대표 몬스터가 최대 10번씩 주고받는다(빠른 쪽 먼저, 급소 1/12). 쓰러지지 않으면 남은 체력 비율이 큰 쪽이 이긴다. 이긴 사람 코인 30 · 경험치 12+상대 레벨, 진 사람 코인 10 · 경험치 5 — 보상은 사람마다 KST 하루 5번까지.
+- 신청(배틀·교환)은 받는 사람마다 하나, 보내는 사람마다 하나, 3분 뒤 사라진다. `수락` 은 받은 사람만, `거절` 은 받은 사람(거절)·보낸 사람(취소) 모두. 교환은 수락할 때 두 몬스터가 아직 각자 보관함에 있는지 몬스터 번호(방마다 늘어나는 고유 번호)로 다시 보고 한 번에 맞바꾼다 — 복제되지 않는다.
+- 상대: 멘션이 있으면 멘션 사람 번호(botpool 이 `onInbound` 에 `mentions` 를 넘긴다), 없으면 `@이름` 을 이 방 참가자 이름과 맞춘다.
+- 상태: `runtime.mon = {v, seq, u:{사람 열쇠: {n, c, nets, m:[[번호, 도감번호, 레벨, 경험치]…], ld, dx, e, x, dd, bd, bn, w, l, at}}, p:{받는 사람: 신청}}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 사람 200명(넘으면 마지막 활동이 오래된 사람부터 지움) · 보관함 30마리 상한.
+- 게이트: 몬스터 명령은 먼저 미니게임 쿨타임·하루 최대 응답 수를 보고, 걸리면 상태를 바꾸지 않고 조용히 넘어간다. 한 명령에 답 하나. 꺼진 방 → `이 방에서는 몬스터 수집이 꺼져 있어요.`(`수락`·`거절` 은 조용).
+- 그림: 발견·포획·도감·내 몬스터·몬스터 정보·배틀 결과는 `monster-card.mjs` 가 SVG → PNG(`card.mjs`)로 그려 사진으로 보낸다. 답 항목의 `image` 는 처음 읽을 때 한 번 그린다. 그림을 못 만들거나 사진 전송이 실패하면 같은 내용의 글(`text`)을 보낸다.
 
 ### 7.4 콘솔 칸 (작업 5, id 고정)
 
@@ -1452,7 +1467,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `r-promo` | `#r-promo-on` `#r-promo-links` `#r-promo-cards`(`공유 카드·프로필 공유`) `#r-promo-media`(`사진·동영상·파일`) `#r-promo-hide` `#r-promo-kick`(.num 0~10, hint `0이면 내보내지 않습니다`) `#r-promo-reset`(.num 1~720 시간) `#r-promo-notice` · 미리 보기 `#r-promo-preview`(.preview-chat) |
 | `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
 | `r-guard` | `#r-guard-on` `#r-guard-secs` `#r-guard-count` `#r-guard-sent` · 표 `#r-guard-tbl` |
-| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
+| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-monster`(몬스터 수집) `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
 | `room` | `#r-prefix` `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` |
 
 화면 문구 규칙: 강퇴 대신 `내보내기`, `들낙 방지` 금지(`들낙 감지`), `쿨다운`→`쿨타임`, `접두사`→`앞글자`, `1일`→`하루`. 내보내기 관련 화면에는 `.limit` `내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.`
@@ -1471,7 +1486,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
     profile: { enabled: cfg.profile.enabled, rooms: ['r'] },
     cover:   { enabled: cfg.cover.enabled, rooms: ['r'], words: cfg.cover.words, links: cfg.cover.links && !(cfg.promo.enabled && cfg.promo.links) },
     guard:   { kickOn: cfg.guard.enabled, rooms: ['r'], kickSecs: cfg.guard.secs, kickCount: cfg.guard.count },
-    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz,
+    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz, monster,
                cooldownMs: cfg.games.cooldownSec * 1000, dailyLimit: cfg.games.dailyLimit },
   },
   rooms: [{ key: 'r', chat_id, name: link_name, kind: 'open', list_kind: 'open_room' }],
@@ -1502,7 +1517,9 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 15. v2 권리: `macro_until` 지난 고객 기록 → `onInbound` 매크로 없음. `legacy_room_until` 0 → `visitRoom` null.
 16. 입장 오류 매핑: -324 → `link_gone`, -312 → `joining`+`rate_limited`, -815 → `kicked`, -444 → 행은 `rate_limited` + 전역 `join_paused_until`(봇은 `bot_down` 아님), 오픈프로필 입장(`ptp:16`) 거절(`noopen`) → `profile_blocked` 이고 다른 프로필로 다시 보내지 않음, 기본 프로필을 막은 방(`noprof`)도 `ptp:16` 으로 들어감, 모든 JOINLINK 가 `ptp:16`, 참여코드 실패 → `passcode_wrong`(9.4 의 가짜 연결로, 실제 `sendPacket` 경로를 탄다).
 17. 게이트: 미니게임만 산 방(perm 4, `active`)에서 `/v1/bot/hide`·`/v1/bot/unkick`·`/v1/bot/people` → `no_roombot`. 방 관리봇 방이 `waiting_host` 면 `not_active`. unkick 대상이 `bans`·kick 기록에 없으면 `not_kicked`.
-18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐).
+18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐, 몬스터 수집 줄 포함).
+
+몬스터 수집(7.3.1)은 `sender/src/monster-check.mjs` 가 따로 본다: 도감 자료 모양·상성 한 바퀴, 씨앗 난수로 탐험·포획·도망·출석 보상, 진화, 배틀 결정성·보상 하루 5번, 교환 맞바꿈·두 번 수락·놓아준 뒤 수락(복제 없음)·만료, 사람 200명 정리, JSON 왕복, 모든 카드 SVG·PNG, `onInbound` 연결(쿨타임·하루 한도에 상태 그대로, 멘션 전달, 꺼진 방).
 19. 권한 읽기: CHATONROOM 응답 `{olu:{lmt:4}}` → `active`, `olu` 없음 + MEMBER `{members:[{mt:2}]}` → `waiting_host`, 둘 다 없음 → 상태 유지.
 20. 푸시 모양(가짜 연결의 `onPush` 로 주입): SYNCMEMT `{c, li, mids:[self], mts:[4]}` → 3초 뒤 권한 읽기 1회. 피드 11 MSG(`type:0`, `message` JSON `{feedType:11, members:[{userId:self}]}`) → 같음. LINKKICKED `{c, li, chatLog:{type:0, message:'{"feedType":6,"members":[{"userId":self}]}'}}` → `error/kicked`. LNKDELETED `{li}` → `error/room_deleted`. KICKOUT `{reason:-2}` → `markDead` 없음, `{reason:0}` → `bot_down`.
 21. 나가기 대기열: 같은 설치에 두 행(봇 A, 봇 B) → 둘 다 처리. 나갈 봇 = 지금 봇이고 link_id 같음 → `kept`, `leaveChat` 없음. 나가기가 입장보다 먼저.

@@ -28,7 +28,7 @@ export const DEFAULTS = Object.freeze({
   cover: { enabled: false, words: [], links: true },
   hide: { command: true },
   guard: { enabled: false, secs: 30, count: 5 },
-  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, cooldownSec: 3, dailyLimit: 0 },
+  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, monster: true, cooldownSec: 3, dailyLimit: 0 },
 })
 
 const B = { t: 'bool' }
@@ -43,7 +43,7 @@ const SPEC = {
   cover: { enabled: B, links: B },
   hide: { command: B },
   guard: { enabled: B, secs: I(5, 300), count: I(3, 30) },
-  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
+  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, monster: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
 }
 
 function isObj(v) {
@@ -221,6 +221,7 @@ export function adapterRecord(view, botId) {
         dice: g.dice,
         rps: g.rps,
         quiz: g.quiz,
+        monster: g.monster,
         cooldownMs: g.cooldownSec * 1000,
         dailyLimit: g.dailyLimit,
         byId: true,
@@ -945,6 +946,8 @@ export function helpLine(view) {
     if (g.word || g.baseball || g.quiz) games.push(p + '포기')
     games.push(p + '랭킹')
   }
+  // 몬스터 수집은 따로 한 줄(monster.mjs helpCommands 와 같은 목록 — monster-check 가 맞춰 본다)
+  const monster = gamesLive(view) && cfg.games.monster ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '몬스터'].map((c) => p + c) : []
   const room = []
   if (roombotLive(view)) {
     if (cfg.hide.command) room.push(p + '가리기')
@@ -953,6 +956,7 @@ export function helpLine(view) {
   if (!games.length && !room.length) return ''
   const lines = ['[명령어]']
   if (games.length) lines.push('미니게임 : ' + games.join(' '))
+  if (monster.length) lines.push('몬스터 수집 : ' + monster.join(' '))
   if (room.length) lines.push('방 관리 : ' + room.join(' '))
   return lines.join('\n')
 }
