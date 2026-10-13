@@ -860,7 +860,7 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .login-foot { flex-wrap: wrap; align-items: center; }
 .login-foot button { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--t-12); }
 .login-foot button:hover { color: var(--fg); }
-.side-foot .links { flex-wrap: wrap; gap: 2px; }
+.side-foot .links { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }   /* 구매 · 체험 / 문의하기 · 로그아웃 — 두 줄 두 칸 */
 .side-foot .links a, .side-foot .links button { padding: 0 6px; gap: 5px; }
 #r-games-preview .bub { align-self: flex-start; }
 .nav-a .rd { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
