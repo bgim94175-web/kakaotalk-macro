@@ -784,19 +784,20 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .intro-act > .btn { margin-right: 6px; }
 .intro-ph { display: block; padding: 6px; border: 1px solid var(--line-2); border-radius: 30px; background: var(--bg-2); box-shadow: var(--shadow); transition: transform var(--d2) var(--ease); }
 .intro-ph:hover { transform: translateY(-2px); }
-.intro .kk { height: 320px; border-radius: 24px; pointer-events: none; }
+/* 높이는 말풍선에 맞춘다: !도움 답(roomfeat.helpLine, 두 게임 · 방 관리 줄)이 위에서 잘리지 않게 */
+.intro .kk { height: auto; border-radius: 24px; pointer-events: none; }
 .intro .kk-top { height: 46px; }
 .intro .kk-title { font-size: 15px; }
-.intro .kk-log { overflow: hidden; justify-content: flex-end; padding-bottom: 10px; -webkit-mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); }
+.intro .kk-log { flex: none; overflow: hidden; justify-content: flex-end; padding-top: 18px; padding-bottom: 10px; -webkit-mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); mask-image: linear-gradient(to bottom, transparent, var(--kk-ink) 20px); }
 .intro .kk-log > :first-child { margin-top: 0; }
 .intro .kk-log > * { animation: kkIn 420ms var(--ease) backwards; animation-delay: calc(450ms + var(--i, 0) * 700ms); }
-.intro .kk-bub { font-size: 13.5px; }
+.intro .kk-bub { font-size: 13px; }
 .intro .kk-in { padding-block: 2px; }
 .intro .kk-fake { flex: 1; align-self: center; padding: 0 4px; color: var(--kk-input-fg); font-size: 14px; }
 /* 입력 칸이 비어 있으니 보내기는 회색(실제 방과 같다) */
 .intro .kk .kk-send > span { background: var(--kk-send-off); color: var(--kk-input-fg); }
 @media (max-width: 960px) {
-  .intro { grid-template-columns: minmax(0, 1fr) 270px; gap: 24px; padding: 20px 18px 20px 24px; }
+  .intro { grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; padding: 20px 18px 20px 24px; }
 }
 @media (max-width: 760px) {
   .intro { grid-template-columns: minmax(0, 1fr); gap: 18px; margin-bottom: 24px; padding: 20px 16px 16px; }
@@ -806,7 +807,7 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   .intro-act > *, .intro-sc a { flex: none; }
   .intro-sc a { min-height: 40px; }
   .intro-ph { padding: 0; border: 0; border-radius: 18px; background: none; box-shadow: none; }
-  .intro .kk { height: 320px; border-radius: 18px; }
+  .intro .kk { border-radius: 18px; }
 }
 
 /* ---------- 움직임 (공개 페이지) ----------

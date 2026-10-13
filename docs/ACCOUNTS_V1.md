@@ -463,7 +463,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
     { "id": "roombot",  "label": "방 관리봇", "unit": "room", "price": 10000,
       "desc": "입장·퇴장 로그 · 들낙 감지 · 나갔을 때 내보내기 · 프로필 로그 · 홍보 금지 · 가리기 · 금지어 검열 · 올킥 방지" },
     { "id": "minigame", "label": "미니게임봇", "unit": "room", "price": 10000,
-      "desc": "끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹" } ],
+      "desc": "끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 추억의 검 강화 · 몬스터 수집 · 랭킹" } ],
   "max_rooms": 10, "bank": "…", "contact": null, "purchase_base": "https://kmacro.cloud", "auto_approve": true }
 ```
 
