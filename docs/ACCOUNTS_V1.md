@@ -1383,6 +1383,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `games.enabled` | bool | **true** | 미니게임. 기본이 켜짐이라 미니게임봇은 입장하자마자 `!도움`·게임에 답한다(소유자 요구 "링크 첨부하면 바로 드가고"). 처음 `minigame` 이 켜지는 설치에 이 기본값을 채운다(4.2) |
 | `games.word` `.baseball` `.dice` `.rps` `.quiz` | bool | true | 랭킹은 항상 켜짐 |
 | `games.sword` | bool | true | 추억의 검 강화(7.3.1). 이 칸이 없는 예전 저장본도 켜짐으로 읽는다 |
+| `games.monster` | bool | true | 몬스터 수집(7.3.2). 저장본에 없으면 켜짐 |
 | `games.cooldownSec` | int | 3 | **1**~60 (0 은 공용 봇 발송 한도를 한 방이 다 쓰게 하므로 받지 않음) |
 | `games.dailyLimit` | int | 0 | 0~5000, 0 = 제한 없음(방 발송 6/분 한도가 따로 막는다, 5.5) |
 
@@ -1499,21 +1500,42 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
 - 점수는 `authorId` 로 저장하고 `{id: name}` 표로 이름을 보인다(이름 빈 사람 둘이 섞이지 않게).
-- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `검 강화 : …`(켜졌을 때, 7.3.1) · `방 관리 : …`(7.2 (g)) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
+- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `검 강화 : …`(켜졌을 때, 7.3.1) · `몬스터 수집 : …`(켜졌을 때, 7.3.2) · `방 관리 : …`(7.2 (g)) 줄과 `「!도움 관리」를 입력하면 …` 안내 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기와 `/buy` 의 `!도움` 말풍선(`data-real="help"`, 두 게임·방 관리 모두 켜진 기본값)도 같은 모양.
 - 미니게임만 있는 방에서는 입장·퇴장·홍보·가리기가 조용하다.
 
 #### 7.3.1 추억의 검 강화 (`sender/src/sword.mjs` 규칙 · `sword-art.mjs` 그림)
 
 - 켜기: `games.sword`(기본 켜짐). 방 설치형 봇(`byId`)에서만 — 계정 단위 옛 기능에는 없다. 꺼진 방에서 `!강화`·`!강화도움` → `이 방에서는 검 강화가 꺼져 있어요.`, 다른 검 강화 명령어는 조용하다.
-- `{앞글자}도움` 에 `검 강화 : !강화 !내검 !사냥 !강화도움` 줄(`미니게임 :` 줄 다음, `방 관리 :` 줄 앞). `!게임` 목록과 패널 미리 보기도 같다.
+- `{앞글자}도움` 에 `검 강화 : !강화 !내검 !사냥 !강화도움` 줄(`미니게임 :` 줄 다음, `몬스터 수집 :`·`방 관리 :` 줄 앞). `!게임` 목록과 패널 미리 보기도 같다.
 - 명령어: `!강화 [보호] [축복]`(별칭 `검강화`) · `!내검`(`검`·`검정보`) · `!사냥` · `!판매 [확인]` / `!판매 아이템 [수량]` · `!상점` · `!구매 아이템 [수량]` · `!인벤`(`인벤토리`) · `!거래 @상대 아이템|검 [수량] [가격]` → 받은 사람 `!수락` / `!거절`, 보낸 사람 `!거래취소` · `!강화랭킹`(`검랭킹`) · `!강화도움`.
-- 상태: `room_state.runtime.sword.r = {v, u:{사람 열쇠: {n 이름, g 골드, lv 검 단계, id 검 번호, b 최고 단계, it 아이템, a 마지막 활동, e 강화 시각, h 사냥 시각, w 쿨타임 안내, k 부서진 수, s 판 수}}, t:[거래 제안], q 다음 번호}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 200명까지 — 넘으면 가장 오래 안 한 사람부터, 180일 안 한 사람은 새 사람이 올 때 지운다(거래 중인 사람은 남김). 아이템은 종류마다 999개, 골드 999,999,999. 랭킹 초기화(`games-reset`)는 검 강화 기록을 지우지 않는다.
+- 상태: `room_state.runtime.sword.r = {v, u:{사람 열쇠: {n 이름, g 골드, lv 검 단계, id 검 번호, b 최고 단계, it 아이템, a 마지막 활동, e 강화 시각, h 사냥 시각, w 쿨타임 안내, k 부서진 수, s 판 수}}, t:[거래 제안], q 다음 번호}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 200명까지 — 넘으면 가장 오래 안 한 사람부터, 180일 안 한 사람은 새 사람이 올 때 지운다(거래 중인 사람은 남김). 아이템은 종류마다 999개, 골드 999,999,999. 랭킹 초기화(`games-reset`)는 검 강화 기록도 지운다(7.3.3).
 - 강화: 처음 1,000G 와 `+0 녹슨 철검`. 단계 0~20, 이름은 3단계마다(`녹슨 철검` `강철 장검` `은빛 기사검` `푸른 서리검` `붉은 화염검` `황금 용검` `칠흑의 마검`, +20 `추억의 전설검`). 성공 95%(+0)에서 5%(+19)까지 줄고, +5부터 실패 중 일부가 파괴(2%~30%) — 파괴되면 새 +0 검. 실패는 단계 그대로. 비용 100G~10,000G, +10~+14 는 마력석 1개, +15~+19 는 용의 비늘 1개를 더 쓴다. `보호` 주문서는 파괴를 한 번 막고(+5부터만 받음), `축복` 주문서는 성공 +10%p. 쓴 주문서는 결과와 상관없이 사라진다. 한 사람 10초에 한 번.
 - 사냥: 2분에 한 번. 검 단계 3마다 센 몬스터(이름은 모두 이 게임에서 지은 것) → 골드, 2% 보물 상자(5배), 마력석 12% · 축복 6% · 보호 2% · 용의 비늘 1%(+10부터 4%).
 - 판매: 검은 단계별 판매가(+20 250,000G), +10부터 `!판매 확인` 을 받는다. 아이템은 상점가의 일부(보호 1,000G · 축복 500G · 마력석 800G · 비늘 3,000G). 상점: 보호 4,000G · 축복 2,000G · 마력석 2,500G (비늘은 팔지 않음). 한 번에 1~99개.
-- 거래: 받는 사람은 이 방에서 검 강화를 한 번 한 사람(멘션이 있으면 아이디로, 없으면 같은 이름이 한 명일 때). 끝의 수 2개 = 수량·가격, 1개 = 가격, 없으면 무료. 제안은 2분 동안, 보낸 사람마다 1개(새 제안은 앞 제안을 바꾼다), 받는 사람마다 1개. `!수락` 때 판 사람의 물건(검은 같은 검 번호·단계)과 산 사람의 골드를 다시 보고 한 번에 옮긴다 — 물건이 모자라거나 검이 바뀌었으면 취소, 산 사람 골드가 모자라거나(검이면) 이미 +1 이상 검이 있으면 제안은 남는다. 받은 제안이 없으면 `받은 거래 제안이 없어요.`
+- 거래: 받는 사람은 이 방에서 검 강화를 한 번 한 사람(멘션이 있으면 아이디로, 없으면 같은 이름이 한 명일 때). 끝의 수 2개 = 수량·가격, 1개 = 가격, 없으면 무료. 제안은 2분 동안, 보낸 사람마다 1개(새 제안은 앞 제안을 바꾼다), 받는 사람마다 1개. `!수락` 때 판 사람의 물건(검은 같은 검 번호·단계)과 산 사람의 골드를 다시 보고 한 번에 옮긴다 — 물건이 모자라거나 검이 바뀌었으면 취소, 산 사람 골드가 모자라거나(검이면) 이미 +1 이상 검이 있으면 제안은 남는다. 받은 제안이 없으면 7.3.3(`받은 신청이 없어요.`).
 - 보내기: 다른 게임처럼 방 쿨타임·하루 최대 응답 수를 따른다. 단, 답을 보낼 수 없을 때는 검 강화 상태를 바꾸지 않는다(결과가 안 보인 채 검이 부서지지 않게). 개인 쿨타임 중이면 한 번만 `{이름}님, 강화는 N초 뒤에 다시 할 수 있어요.` 하고 그다음은 조용하다.
 - 그림: 강화 결과 · `!내검` · `!강화랭킹` 은 카드 PNG(720px, card.mjs) 한 장으로 보낸다. 같은 글(`[강화 성공]` · `[내 검]` · `[강화 랭킹]` …)을 대체 글로 붙여, 사진을 못 보내면 글이 나간다. 검 그림은 단계 묶음마다 날·코등이·보석·빛이 바뀐다. 진열장(검·빛)은 단계마다 한 번 그려 둔다. 체험(`lib/demo.js`)은 `images:false` 로 글만 쓴다.
+
+#### 7.3.2 몬스터 수집 (`games.monster`, `sender/src/monster.mjs`)
+
+K bot 이 직접 만든 몬스터 35종(`monster-data.mjs`: 16×16 점 그림 · 기운 5가지 · 등급 4가지 · 진화)만 쓴다. 다른 게임·작품의 이름·모습·상성표를 쓰지 않는다.
+
+- 기운: 햇살 → 물결 → 바위 → 바람 → 별빛 → 햇살(앞이 뒤에 1.5배, 거꾸로 0.7배). 등급: 보통 62 · 희귀 27 · 영웅 9 · 전설 2(야생에서 나오는 비율). 진화한 몬스터는 야생에 나오지 않는다.
+- 명령어(앞글자 뒤): `탐험`(1분에 한 번, KST 하루 첫 탐험에 그물 3개, 10%는 코인·별그물 줍기) · `포획 [그물|별그물|황금그물]`(만남은 5분, 실패하면 등급별로 도망) · `도감 [이름]` · `내몬스터 [번호|@상대]` · `대표 번호` · `놓아주기 번호` · `그물 [종류] [개수]`(상점, 20·60·150코인, 한 번에 1~20개) · `배틀 @상대` · `교환 @상대 내번호 상대번호` · `수락` · `거절` · `몬스터랭킹`(잡은 종류 수 → 최고 레벨, 상위 10) · `몬스터`(전체 명령어와 상성).
+- 처음 하는 사람: 코인 100 · 그물 5. 잡으면 코인(등급별 10·20·40·100)과 대표 몬스터 경험치(6 + 레벨×2). 레벨 업 경험치 `5 + 3×레벨`, 최고 30. 진화 레벨에 닿으면 바로 진화하고 도감에도 올린다.
+- 배틀: 서로의 대표 몬스터가 최대 10번씩 주고받는다(빠른 쪽 먼저, 급소 1/12). 쓰러지지 않으면 남은 체력 비율이 큰 쪽이 이긴다. 이긴 사람 코인 30 · 경험치 12+상대 레벨, 진 사람 코인 10 · 경험치 5 — 보상은 사람마다 KST 하루 5번까지.
+- 신청(배틀·교환)은 받는 사람마다 하나, 보내는 사람마다 하나, 3분 뒤 사라진다. `수락` 은 받은 사람만, `거절` 은 받은 사람(거절)·보낸 사람(취소) 모두. 교환은 수락할 때 두 몬스터가 아직 각자 보관함에 있는지 몬스터 번호(방마다 늘어나는 고유 번호)로 다시 보고 한 번에 맞바꾼다 — 복제되지 않는다.
+- 상대: 멘션이 있으면 멘션 사람 번호(botpool 이 `onInbound` 에 `mentions` 를 넘긴다), 없으면 `@이름` 을 이 방 참가자 이름과 맞춘다.
+- 상태: `runtime.mon = {v, seq, u:{사람 열쇠: {n, c, nets, m:[[번호, 도감번호, 레벨, 경험치]…], ld, dx, e, x, dd, bd, bn, w, l, at}}, p:{받는 사람: 신청}}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 사람 200명(넘으면 마지막 활동이 오래된 사람부터 지움) · 보관함 30마리 상한.
+- 게이트: 몬스터 명령은 먼저 미니게임 쿨타임·하루 최대 응답 수를 보고, 걸리면 상태를 바꾸지 않고 조용히 넘어간다. 한 명령에 답 하나. 꺼진 방 → `이 방에서는 몬스터 수집이 꺼져 있어요.`(`수락`·`거절` 은 조용).
+- 그림: 발견·포획·도감·내 몬스터·몬스터 정보·배틀 결과는 `monster-card.mjs` 가 SVG → PNG(`card.mjs`)로 그려 사진으로 보낸다. 답 항목의 `image` 는 처음 읽을 때 한 번 그린다. 그림을 못 만들거나 사진 전송이 실패하면 같은 내용의 글(`text`)을 보낸다.
+
+#### 7.3.3 두 게임이 같이 쓰는 것
+
+- `수락` · `거절`: 검 강화 거래 제안과 몬스터 배틀·교환 신청이 같은 명령어를 쓴다(`features.answerOffer`). 이 사람이 **받은** 살아 있는 제안·신청이 두 게임에 다 있으면 **가장 최근에 받은 것**의 게임이 답한다. 받은 것이 없을 때 `거절` 은 이 사람이 보낸 몬스터 신청을 취소한다. 아무것도 없으면 `받은 신청이 없어요.`(두 게임이 다 꺼져 있으면 조용).
+- 명령어 이름이 겹치지 않는다: 검 강화 `강화 검강화 내검 검 검정보 사냥 판매 상점 구매 인벤 인벤토리 거래 거래취소 강화랭킹 검랭킹 강화도움` · 몬스터 수집 `탐험 포획 도감 내몬스터 대표 놓아주기 그물 배틀 교환 몬스터랭킹 몬스터` · 방 관리 명령어(7.2 (g))와 기존 미니게임 명령어와도 다르다(selfcheck 가 맞춰 본다).
+- 그림 카드: 답 항목의 `image` 는 처음 읽을 때 한 번 그린다(`pushSend` 에 그리는 함수를 넘긴다). 체험(`images:false`)은 그리지 않는다.
+- 패널 `랭킹 초기화`(`games-reset`)는 점수와 함께 그 방의 검 강화(`runtime.sword`)·몬스터 수집(`runtime.mon`) 기록도 지운다.
 
 ### 7.4 콘솔 칸 (작업 5, id 고정)
 
@@ -1524,7 +1546,7 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 | `r-promo` | `#r-promo-on` `#r-promo-links` `#r-promo-cards`(`공유 카드·프로필 공유`) `#r-promo-media`(`사진·동영상·파일`) `#r-promo-hide` `#r-promo-kick`(.num 0~10, hint `0이면 내보내지 않습니다`) `#r-promo-reset`(.num 1~720 시간) `#r-promo-notice` · 미리 보기 `#r-promo-preview`(.preview-chat) |
 | `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
 | `r-guard` | `#r-guard-on` `#r-guard-secs` `#r-guard-count` `#r-guard-sent` · 표 `#r-guard-tbl` |
-| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-sword`(추억의 검 강화) `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
+| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-sword`(추억의 검 강화) `#r-games-monster`(몬스터 수집) `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
 | `room` | `#r-prefix` · `#row-r-cmds`(방 관리봇이 있으면: 방에서 `!설정`·`!입장기록 켜기`·`!도움 관리` 안내) `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` · 옮기기·다시 설치 `#room-move-grp` `#r-reinstall-act` `#r-reinstall-btn` `#r-reinstall-note` `#r-move-form` `#r-move-link` `#r-move-check` `#r-move-note` `#r-move-pv` `#r-move-q` `#r-move-passcode` `#r-move-yes` `#r-move-no` `#r-move-err` `#r-move-rule` `#room-move-go` |
 
 화면 문구 규칙: 강퇴 대신 `내보내기`, `들낙 방지` 금지(`들낙 감지`), `쿨다운`→`쿨타임`, `접두사`→`앞글자`, `1일`→`하루`. 내보내기 관련 화면에는 `.limit` `내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.`
@@ -1543,7 +1565,7 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
     profile: { enabled: cfg.profile.enabled, rooms: ['r'] },
     cover:   { enabled: cfg.cover.enabled, rooms: ['r'], words: cfg.cover.words, links: cfg.cover.links && !(cfg.promo.enabled && cfg.promo.links) },
     guard:   { kickOn: cfg.guard.enabled, rooms: ['r'], kickSecs: cfg.guard.secs, kickCount: cfg.guard.count },
-    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz, sword,
+    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz, sword, monster,
                cooldownMs: cfg.games.cooldownSec * 1000, dailyLimit: cfg.games.dailyLimit },
   },
   rooms: [{ key: 'r', chat_id, name: link_name, kind: 'open', list_kind: 'open_room' }],
@@ -1571,11 +1593,12 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 12. `locoOk({statusCode:0, body:{status:-203}}) === false`.
 13. 미니게임: 방 A 하루 한도가 방 B 를 막지 않음. 끈 게임 → 사용 중지 문구. 이름 빈 두 사람 점수 분리. 미니게임만 있는 방 → `!주사위` 답, 입장 안내·홍보·가리기 조용.
 13-1. 추억의 검 강화(`sender/src/sword-check.mjs`, 따로 실행): 확률 표(성공은 줄고 파괴는 +5부터), 고정 난수로 성공·파괴·실패 경계와 보호·축복 주문서, 씨앗 난수 2만 번으로 확률이 표대로(±1.2%p), 골드·재료 부족 → 아무것도 바뀌지 않음, 개인 쿨타임(한 번만 안내), 사냥 드롭, 판매 확인, 상점 한도, 거래(읽기 · 옮긴 뒤 합계가 같음 · 두 번 수락 없음 · 제안 뒤 물건이 바뀌면 취소 · 만료 · 멘션 · 같은 이름 둘), 검 거래(검 번호가 하나뿐), 아무렇게나 3,000번(음수·한도 초과·검 복제 없음), 200명 정원·180일 정리·JSON 저장·망가진 저장본, 랭킹, 21단계 그림이 늘 같은 SVG · PNG 렌더, `onInbound` 연결(방 쿨타임·하루 한도에 막히면 상태 그대로, 꺼진 방, `images:false`, 멘션 전달, 옛 계정 경로에는 없음).
+13-2. 몬스터 수집(7.3.2, `sender/src/monster-check.mjs`, 따로 실행): 도감 자료 모양·상성 한 바퀴, 씨앗 난수로 탐험·포획·도망·출석 보상, 진화, 배틀 결정성·보상 하루 5번, 교환 맞바꿈·두 번 수락·놓아준 뒤 수락(복제 없음)·만료, 사람 200명 정리, JSON 왕복, 모든 카드 SVG·PNG, `onInbound` 연결(쿨타임·하루 한도에 상태 그대로, 멘션 전달, 꺼진 방).
 14. 격리: 방 A 어댑터의 `logsView` 에 방 B 기록 없음.
 15. v2 권리: `macro_until` 지난 고객 기록 → `onInbound` 매크로 없음. `legacy_room_until` 0 → `visitRoom` null.
 16. 입장 오류 매핑: -324 → `link_gone`, -312 → `joining`+`rate_limited`, -815 → `kicked`, -444 → 행은 `rate_limited` + 전역 `join_paused_until`(봇은 `bot_down` 아님), 오픈프로필 입장(`ptp:16`) 거절(`noopen`) → `profile_blocked` 이고 다른 프로필로 다시 보내지 않음, 기본 프로필을 막은 방(`noprof`)도 `ptp:16` 으로 들어감, 모든 JOINLINK 가 `ptp:16`, 참여코드 실패 → `passcode_wrong`(9.4 의 가짜 연결로, 실제 `sendPacket` 경로를 탄다).
 17. 게이트: 미니게임만 산 방(perm 4, `active`)에서 `/v1/bot/hide`·`/v1/bot/unkick`·`/v1/bot/people` → `no_roombot`. 방 관리봇 방이 `waiting_host` 면 `not_active`. unkick 대상이 `bans`·kick 기록에 없으면 `not_kicked`.
-18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐).
+18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐, 검 강화·몬스터 수집 줄 포함).
 19. 권한 읽기: CHATONROOM 응답 `{olu:{lmt:4}}` → `active`, `olu` 없음 + MEMBER `{members:[{mt:2}]}` → `waiting_host`, 둘 다 없음 → 상태 유지.
 20. 푸시 모양(가짜 연결의 `onPush` 로 주입): SYNCMEMT `{c, li, mids:[self], mts:[4]}` → 3초 뒤 권한 읽기 1회. 피드 11 MSG(`type:0`, `message` JSON `{feedType:11, members:[{userId:self}]}`) → 같음. LINKKICKED `{c, li, chatLog:{type:0, message:'{"feedType":6,"members":[{"userId":self}]}'}}` → `error/kicked`. LNKDELETED `{li}` → `error/room_deleted`. KICKOUT `{reason:-2}` → `markDead` 없음, `{reason:0}` → `bot_down`.
 21. 나가기 대기열: 같은 설치에 두 행(봇 A, 봇 B) → 둘 다 처리. 나갈 봇 = 지금 봇이고 link_id 같음 → `kept`, `leaveChat` 없음. 나가기가 입장보다 먼저.

@@ -677,6 +677,9 @@ export class BotPool {
     if (rt.scores) rt.scores.r = {}
     if (rt.names) rt.names.r = {}
     if (rt.games) delete rt.games.r
+    // 검 강화(sword.mjs, 방 열쇠 r)·몬스터 수집(monster.mjs) 기록도 지운다(docs/ACCOUNTS_V1.md 7.3.3)
+    if (rt.sword) delete rt.sword.r
+    delete rt.mon
     if (got.slot) got.view.dirty = true
     else await this.store.saveRoomState(got.view.install_id, rt)
     return { ok: true }

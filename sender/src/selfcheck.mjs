@@ -1579,7 +1579,7 @@ async function withLog(fn) {
   {
     const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
     const h = RF.helpLine(v)
-    if (h !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    if (h !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
     const ah = RF.adminHelp(v)
     if (!ah.startsWith('[방 관리 명령어]\n!옾링 @닉네임 : 옾링 보기\n!프로필조회 @닉네임 : 프로필 기록 보기\n!가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n!내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n!금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
     const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
@@ -1749,7 +1749,7 @@ async function withLog(fn) {
     const sent = sentIn(iMini)
     if (sent[0] !== '[K bot]\n미니게임봇이 입장했어요.\n「!도움」을 입력하면 명령어를 볼 수 있어요.') throw new Error('7.7#18 join notice first ' + JSON.stringify(sent))
     if (sent.filter((t) => t.startsWith('[명령어]')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
-    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
+    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
     // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
     const before = packets('REWRITE').length
     fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })
@@ -1766,6 +1766,13 @@ async function withLog(fn) {
     for (const r of [await pool.hide(iMini, { last: 3 }), await pool.unkick(iMini, '502'), await pool.people(iMini)]) {
       if (r.ok || r.error !== 'no_roombot') throw new Error('7.7#17 no_roombot ' + JSON.stringify(r))
     }
+    // 랭킹 초기화(games-reset)는 점수와 함께 검 강화·몬스터 수집 기록도 지운다(7.3.3)
+    const vm = botA.slot.byInstall.get(iMini)
+    vm.runtime.scores = { r: { 501: 3 } }
+    vm.runtime.sword = { r: { v: 1, u: { 501: { n: '손님', g: 5000, lv: 7 } }, t: [], q: 2 } }
+    vm.runtime.mon = { v: 1, seq: 3, u: { 501: { n: '손님', c: 100, m: [[1, 1, 5, 0]] } }, p: {} }
+    if (!(await pool.gamesReset(iMini)).ok) throw new Error('7.3.3 games-reset ok')
+    if (Object.keys(vm.runtime.scores.r).length || (vm.runtime.sword && vm.runtime.sword.r) || vm.runtime.mon) throw new Error('7.3.3 games-reset clears scores · sword · monster ' + JSON.stringify(vm.runtime))
   }
 
   // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링을 안다(GETMEM + INFOLINK)

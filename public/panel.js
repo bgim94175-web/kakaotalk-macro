@@ -3559,7 +3559,7 @@
     }
     if (r === 'r-games') {
       setSw('r-games-on', c.games.enabled);
-      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (g) { setSw('r-games-' + g, c.games[g]); });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword', 'monster'].forEach(function (g) { setSw('r-games-' + g, c.games[g] !== false); });
       setNum('r-games-cool', c.games.cooldownSec);
       setNum('r-games-limit', c.games.dailyLimit);
     }
@@ -3607,7 +3607,7 @@
     if (r === 'r-guard') return { guard: { enabled: $('r-guard-on').checked, secs: numVal('r-guard-secs'), count: numVal('r-guard-count') } };
     if (r === 'r-games') {
       var g = { enabled: $('r-games-on').checked };
-      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword', 'monster'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
       g.cooldownSec = numVal('r-games-cool');
       g.dailyLimit = numVal('r-games-limit');
       return { games: g };
@@ -3754,7 +3754,7 @@
     }
     if (r === 'r-games') {
       $('r-games-preview-q').textContent = pfx + '도움';
-      // sender/src/roomfeat.mjs helpLine 과 같은 모양: [명령어] / 미니게임 : … / 방 관리 : …
+      // sender/src/roomfeat.mjs helpLine 과 같은 모양: [명령어] / 미니게임 : … / 검 강화 : … / 몬스터 수집 : … / 방 관리 : … / 「!도움 관리」 안내
       var out = [];
       if ($('r-games-word').checked) out.push(pfx + '끝말잇기');
       if ($('r-games-baseball').checked) out.push(pfx + '숫자야구');
@@ -3773,7 +3773,9 @@
       }
       // 추억의 검 강화 줄(sender/src/sword.mjs helpLine)
       var sword = $('r-games-sword').checked ? '\n검 강화 : ' + pfx + '강화 ' + pfx + '내검 ' + pfx + '사냥 ' + pfx + '강화도움' : '';
-      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + sword +
+      // 몬스터 수집 줄(sender/src/monster.mjs helpCommands)
+      var monCmds = $('r-games-monster').checked ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '몬스터'].map(function (x) { return pfx + x; }) : [];
+      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + sword + (monCmds.length ? '\n몬스터 수집 : ' + monCmds.join(' ') : '') +
         (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') + '\n「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
   }
@@ -4223,7 +4225,7 @@
     }
   }
   function rankAsk() {
-    $('r-rank-act').innerHTML = '<span class="q">랭킹을 초기화합니다.</span><button type="button" class="btn sm" data-rank-no>취소</button>' +
+    $('r-rank-act').innerHTML = '<span class="q">랭킹과 검 강화·몬스터 수집 기록을 초기화합니다.</span><button type="button" class="btn sm" data-rank-no>취소</button>' +
       '<button type="button" class="btn sm danger solid" data-rank-yes><span class="spin"></span><span class="lbl-idle">초기화</span></button>';
     qs('[data-rank-no]', $('r-rank-act')).focus();
   }

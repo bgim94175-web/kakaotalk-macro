@@ -536,8 +536,10 @@ function sums(g, keys) {
   const mk = (cfg, products) => ({ chat_id: '77', link_name: '검방', products: products || { roombot: false, minigame: true }, perm: 2, state: 'active', cfg: R.normRoomConfig(cfg || {}), runtime: {} })
   const v = mk({ cmdPrefix: '#' })
   eq(R.adapterRecord(v, 'b').config.minigame.sword, true, 'adapter passes games.sword')
-  eq(R.helpLine(v), '[명령어]\n미니게임 : #끝말잇기 #숫자야구 #주사위 #가위바위보 #퀴즈 #힌트 #정답 #포기 #랭킹\n' + S.helpLine('#'), 'helpLine sword line')
-  eq(R.helpLine(mk({ games: { sword: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹', 'helpLine without sword')
+  // 몬스터 수집(monster.mjs)도 기본 켜짐 — 검 강화 줄 바로 다음 줄
+  eq(R.helpLine(v), '[명령어]\n미니게임 : #끝말잇기 #숫자야구 #주사위 #가위바위보 #퀴즈 #힌트 #정답 #포기 #랭킹\n' + S.helpLine('#') + '\n몬스터 수집 : #탐험 #포획 #도감 #내몬스터 #배틀 #교환 #몬스터', 'helpLine sword line')
+  eq(R.helpLine(mk({ games: { sword: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터', 'helpLine without sword')
+  eq(R.helpLine(mk({ games: { sword: false, monster: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹', 'helpLine without either game')
   const both = mk({ profile: { enabled: true } }, { roombot: true, minigame: true })
   both.perm = 4
   eq(R.helpLine(both).split('\n')[2], '검 강화 : !강화 !내검 !사냥 !강화도움', 'sword line sits before the room line')
@@ -576,10 +578,11 @@ function sums(g, keys) {
   const off = mk({ games: { sword: false } })
   eq(send(off, '!강화', '801', '끔')[0].text, '이 방에서는 검 강화가 꺼져 있어요.', 'sword off message')
   eq(send(off, '!사냥', '801', '끔').length, 0, 'sword off → other sword commands silent')
-  eq(send(off, '!수락', '801', '끔').length, 0, 'sword off → 수락 silent')
+  eq(send(off, '!수락', '801', '끔')[0].text, '받은 신청이 없어요.', 'sword off, monster on → 수락 answered by the shared fallback')
+  eq(send(mk({ games: { sword: false, monster: false } }), '!수락', '801', '끔').length, 0, 'both games off → 수락 silent')
   assert(!off.runtime.sword, 'sword off → no state')
   // 받은 제안 없음
-  eq(send(w, '!수락', '502', '둘')[0].text, '받은 거래 제안이 없어요.', 'no trade to accept')
+  eq(send(w, '!수락', '502', '둘')[0].text, '받은 신청이 없어요.', 'no trade to accept')
   // 멘션이 onInbound 로 들어온다
   send(w, '!내검', '502', '둘')
   w.runtime.sword.r.u['501'].it = { guard: 1 }
@@ -587,7 +590,7 @@ function sums(g, keys) {
   assert(t[0].text.startsWith('[거래 제안] 검사님 → 둘님'), 'mention through onInbound ' + t[0].text)
   assert(send(w, '!수락', '502', '둘')[0].text.startsWith('[거래 완료]'), 'accept through onInbound')
   // 방 설치형 「게임」 목록에도
-  eq(send(w, '!게임', '502', '둘')[0].text, '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움', 'game list')
+  eq(send(w, '!게임', '502', '둘')[0].text, '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !강화도움' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !몬스터', 'game list')
   // 계정 단위 옛 기능(byId 아님)에는 검 강화가 없다
   const legacy = { config: { minigame: { enabled: true, rooms: ['k'], cmdPrefix: '!', cooldownMs: 0 } }, rooms: [{ key: 'k', chat_id: '88', name: '옛방', kind: 'open', list_kind: 'open_room' }], runtime: {}, features: { macro: false, roombot: false, minigame: true } }
   eq(onInbound(legacy, { chatId: '88', text: '!강화', authorName: '옛', mine: false }).length, 0, 'legacy account path has no sword game')

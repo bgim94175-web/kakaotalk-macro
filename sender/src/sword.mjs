@@ -238,6 +238,22 @@ export function run(runtime, roomKey, req) {
   return null
 }
 
+/**
+ * 이 사람(key)이 받은, 아직 살아 있는 거래 제안 중 가장 최근 것의 시각(ms). 없으면 0. 상태를 바꾸지 않는다.
+ * features 가 「수락」·「거절」을 검 강화와 몬스터 수집 중 어느 쪽에 넘길지 고를 때 쓴다.
+ */
+export function offerAt(runtime, roomKey, key, now) {
+  const s = isObj(runtime && runtime.sword) ? runtime.sword[roomKey] : null
+  if (!isObj(s) || !isObj(s.u) || !Array.isArray(s.t)) return 0
+  let at = 0
+  for (const t of s.t) {
+    if (!isObj(t) || t.to !== String(key) || !has(s.u, t.f) || !has(s.u, t.to)) continue
+    const a = Number(t.at) || 0
+    if (now - a < TRADE_TTL_MS && a > at) at = a
+  }
+  return at
+}
+
 /** 「도움」 목록의 한 줄(roomfeat.helpLine · features 「게임」 · 패널 미리 보기가 같은 모양) */
 export function helpLine(p) {
   return `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}강화도움`

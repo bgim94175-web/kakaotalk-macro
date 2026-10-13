@@ -2,6 +2,8 @@ import * as Word from './word.mjs'
 import * as Quiz from './quiz.mjs'
 import * as Sword from './sword.mjs'
 import { cardPng as swordCardPng } from './sword-art.mjs'
+import * as Mon from './monster.mjs'
+import { cardPng as monsterCardPng } from './monster-card.mjs'
 import { josa, profileObserve, visitNoticeText } from './roomfeat.mjs'
 
 const SEP = '\u0001'
@@ -495,8 +497,18 @@ function rt(record) {
 function pushSend(out, chatId, text, delayMs, image) {
   if (!realId(chatId) || !text || !String(text).trim()) return
   const item = { chatId, text: String(text), delayMs: delayMs || 0, images: null }
-  // 그림 한 장(PNG Buffer). botpool sendAll 이 사진으로 보내고, 못 보내면 text 를 글로 보낸다
-  if (image) item.image = image
+  // 그림 한 장(PNG Buffer). botpool sendAll 이 사진으로 보내고, 못 보내면 text 를 글로 보낸다.
+  // 함수면 image 를 처음 읽을 때 한 번 그린다(그림을 읽지 않는 곳 — 체험 등 — 은 그리지 않는다). 못 그리면 null → 글.
+  if (typeof image === 'function') {
+    let png
+    Object.defineProperty(item, 'image', {
+      enumerable: true,
+      get() {
+        if (png === undefined) png = image() || null
+        return png
+      },
+    })
+  } else if (image) item.image = image
   out.push(item)
 }
 
@@ -824,12 +836,12 @@ function gameOn(cfg, id) {
   if (id === 'dice') return cfg.dice !== false
   if (id === 'rps') return cfg.rps !== false
   if (id === 'quiz') return cfg.quiz !== false
-  // 검 강화는 방 설치형 설정(7.1 games.sword)으로만 켠다. 계정 단위 옛 기능에는 없다
-  if (id === 'sword') return cfg.sword === true
+  // 검 강화·몬스터 수집은 방 설치형 설정(7.1 games.sword · games.monster)으로만 켠다. 계정 단위 옛 기능에는 없다
+  if (id === 'sword' || id === 'monster') return cfg.byId === true && cfg[id] !== false
   return false
 }
 
-// 지금 게임 답을 보낼 수 있나(쿨타임·하루 최대 응답 수)
+// 지금 게임 답을 보낼 수 있나(쿨타임·하루 최대 응답 수). 검 강화·몬스터 수집은 먼저 이것을 보고, 못 보내면 상태를 바꾸지 않는다.
 function gameReady(state, cfg, room, now) {
   const cool = Math.max(0, Number(cfg.cooldownMs) || 0)
   const last = Number(state.gameLast[room.key] || 0)
@@ -844,6 +856,7 @@ function gameReady(state, cfg, room, now) {
   return true
 }
 
+// image: 그림을 만드는 함수(gameArt) — 보낼 때 한 번 그린다. 그림을 못 만들면 text 를 글로 보낸다.
 function gameSend(state, cfg, room, text, now, out, image) {
   if (!gameReady(state, cfg, room, now)) return false
   pushSend(out, room.chat_id, text, 0, image)
@@ -863,9 +876,11 @@ function miniGame(record, out, room, parsed, who, text, now, state, authorId, me
   if (saidRecently(state, room.key, body, now)) return
   const prefix = cfg.cmdPrefix && String(cfg.cmdPrefix).trim() ? String(cfg.cmdPrefix).trim() : '!'
   if (cfg.byId) state._sk = realId(String(authorId || '')) ? String(authorId) : 'n:' + String(who || '')
+  // 멘션된 사람 번호(botpool 이 넘긴다) — 검 강화 거래·몬스터 배틀·교환의 상대
+  const mn = Array.isArray(mentions) ? mentions.map(String).filter((id) => realId(id)) : []
   try {
     if (body.startsWith(prefix) && body.length > prefix.length) {
-      gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out, mentions)
+      gameCommand(record, state, cfg, room, who, body.slice(prefix.length).trim(), prefix, now, out, mn)
       return
     }
     play(state, cfg, room, who, body, prefix, now, out)
@@ -888,6 +903,10 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out, ment
   const sp = line.search(/\s/)
   const cmd = sp < 0 ? line : line.slice(0, sp)
   const arg = sp < 0 ? '' : line.slice(sp).trim()
+  // 검 강화·몬스터 수집(방 설치형). 「수락」·「거절」은 두 게임이 같이 쓴다(answerOffer)
+  if (cmd === '수락' || cmd === '거절') return answerOffer(state, cfg, room, who, cmd, prefix, now, out, mentions)
+  if (Sword.COMMANDS.has(cmd) && swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions)) return
+  if (Mon.isCommand(cmd) && monsterCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions)) return
   if (cmd === '끝말잇기') return startWord(state, cfg, room, who, prefix, now, out)
   if (cmd === '숫자야구' || cmd === '야구') return startBaseball(state, cfg, room, who, prefix, now, out)
   if (cmd === '주사위') return dice(state, cfg, room, who, arg, prefix, now, out)
@@ -896,7 +915,6 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out, ment
   if (cmd === '힌트') return hint(state, cfg, room, now, out)
   if (cmd === '정답') return reveal(state, cfg, room, now, out)
   if (cmd === '포기') return giveUp(state, cfg, room, now, out)
-  if (Sword.COMMANDS.has(cmd) && swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions)) return
   if (cmd === '점수') {
     const n = (state.scores[room.key] && state.scores[room.key][scoreKey(state, who)]) || 0
     gameSend(state, cfg, room, `${nameOf(who)}님의 누적 점수는 ${n}점이에요.`, now, out)
@@ -922,20 +940,49 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out, ment
       if (gameOn(cfg, 'rps')) on.push(prefix + '가위바위보')
       if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
       on.push(prefix + '포기', prefix + '랭킹')
+      // roomfeat.helpLine 과 같은 줄 순서: 미니게임 · 검 강화 · 몬스터 수집
       const lines = ['[명령어]', '미니게임 : ' + on.join(' ')]
       if (gameOn(cfg, 'sword')) lines.push(Sword.helpLine(prefix))
+      if (gameOn(cfg, 'monster')) lines.push('몬스터 수집 : ' + Mon.helpCommands(prefix))
       gameSend(state, cfg, room, lines.join('\n'), now, out)
       return
     }
     gameSend(state, cfg, room, `[명령어]\n미니게임 : ${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
   }
-  // 「수락」·「거절」을 받은 게임이 없다(받은 거래 제안 없음)
-  if ((cmd === '수락' || cmd === '거절') && gameOn(cfg, 'sword')) gameSend(state, cfg, room, '받은 거래 제안이 없어요.', now, out)
+}
+
+// 그림 카드(검 강화 sword-art · 몬스터 수집 monster-card) → pushSend 가 보낼 때 한 번 그리는 함수. 체험(images:false)은 글만.
+function gameArt(cfg, card, render) {
+  if (!card || cfg.images === false) return null
+  return () => render(card)
+}
+
+// 「수락」·「거절」: 검 강화 거래 제안과 몬스터 배틀·교환 신청이 같이 쓴다. 이 사람이 받은 것 중 가장 최근에 받은 게임이 답한다.
+// 받은 것이 없으면 「거절」은 이 사람이 보낸 몬스터 신청을 취소한다(monster.mjs). 아무것도 없으면 「받은 신청이 없어요.」
+// 두 게임이 다 꺼져 있으면 조용하다. 쿨타임·하루 한도에 걸리면 상태를 바꾸지 않고 조용히 넘어간다.
+function answerOffer(state, cfg, room, who, cmd, prefix, now, out, mentions) {
+  const sword = gameOn(cfg, 'sword')
+  const mon = gameOn(cfg, 'monster')
+  if (!sword && !mon) return
+  if (!gameReady(state, cfg, room, now)) return
+  const key = scoreKey(state, who)
+  const offers = []
+  if (sword) {
+    const at = Sword.offerAt(state, room.key, key, now)
+    if (at) offers.push({ got: 1, at, run: () => swordCommand(state, cfg, room, who, cmd, '', prefix, now, out, mentions) })
+  }
+  if (mon) {
+    const o = Mon.offerAt(state, key, cmd, now)
+    if (o) offers.push({ got: o.got ? 1 : 0, at: o.at, run: () => monsterCommand(state, cfg, room, who, cmd, '', prefix, now, out, mentions) })
+  }
+  offers.sort((a, b) => b.got - a.got || b.at - a.at)
+  for (const o of offers) if (o.run()) return
+  gameSend(state, cfg, room, '받은 신청이 없어요.', now, out)
 }
 
 // 추억의 검 강화(sword.mjs). 답을 보낼 수 없을 때(쿨타임·하루 한도)는 상태를 바꾸지 않고 조용히 넘긴다 —
 // 강화 결과가 안 보인 채 검이 부서지는 일이 없게. 처리했으면 true(이 명령어는 끝), 아니면 false
-// (「수락」·「거절」인데 받은 검 강화 거래가 없으면 false — 다른 게임이 받을 수 있게. gameCommand 맨 끝이 「없어요」라고 답한다).
+// (「수락」·「거절」인데 받은 검 강화 거래가 없으면 false — answerOffer 가 다른 게임에 넘기거나 「없어요」라고 답한다).
 function swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions) {
   if (!gameOn(cfg, 'sword')) {
     if (cfg.byId && (cmd === '강화' || cmd === '강화도움')) {
@@ -949,8 +996,24 @@ function swordCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mention
   const r = Sword.run(state, room.key, { cmd, arg, key, name: who, mentions, prefix, now, rand: Math.random })
   if (!r) return false
   if (!r.text) return true
-  const png = r.card && cfg.images !== false ? swordCardPng(r.card) : null
-  gameSend(state, cfg, room, r.text, now, out, png)
+  gameSend(state, cfg, room, r.text, now, out, gameArt(cfg, r.card, swordCardPng))
+  return true
+}
+
+// 몬스터 수집(monster.mjs) — 방 설치형 봇(cfg.byId)에서만. 처리했으면 true. 수락·거절에 기다리는 몬스터 신청이 없으면 false(answerOffer 차례).
+// 쿨타임·하루 최대 응답 수에 걸리면 상태를 바꾸지 않고 조용히 넘어간다(답이 버려졌는데 탐험·포획만 되는 일이 없게).
+function monsterCommand(state, cfg, room, who, cmd, arg, prefix, now, out, mentions) {
+  if (!cfg.byId) return false
+  if (!gameOn(cfg, 'monster')) {
+    if (cmd === '수락' || cmd === '거절') return false
+    gameSend(state, cfg, room, '이 방에서는 몬스터 수집이 꺼져 있어요.', now, out)
+    return true
+  }
+  if (!gameReady(state, cfg, room, now)) return true
+  const key = scoreKey(state, who)
+  const r = Mon.handle(state, { cmd, arg, key, name: who, mentions, prefix }, { now, rand: Math.random })
+  if (!r) return false
+  gameSend(state, cfg, room, r.text, now, out, gameArt(cfg, r.card, monsterCardPng))
   return true
 }
 
