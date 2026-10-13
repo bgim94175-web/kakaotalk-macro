@@ -687,6 +687,12 @@ tr.detail:not(.open) td { border-bottom: 0; }
 .preview-chat .bub { max-width: 82%; font-size: var(--t-13); }
 .preview-chat .bub.notice { font-size: var(--t-12); line-height: 1.6; overflow-wrap: anywhere; }
 .preview-chat .who-l { color: var(--fg-3); font-size: var(--t-11); }
+/* 방에 보내는 안내 모양(이미지·글): 고르는 탭 · 한 줄 설명 · 미리 보기(이미지 + 멘션 한 줄 / 글) */
+.style-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.style-note { margin: 0; color: var(--fg-3); font-size: var(--t-12); line-height: 1.5; }
+.preview-chat .style-v { display: flex; flex-direction: column; gap: 6px; }
+.preview-chat .style-v[hidden] { display: none; }
+.preview-chat .bub-img { display: block; width: 100%; max-width: 280px; height: auto; border: 1px solid var(--line); border-radius: 10px; }
 .rule { border-top: 1px solid var(--line); }
 .rule:first-child { border-top: 0; }
 .rule-h { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 14px 18px 14px 20px; cursor: pointer; transition: background var(--d1); }
@@ -934,6 +940,23 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .srow.rowlink:hover { background: var(--bg-2); }
 .srow-r .del-wrap { flex-wrap: wrap; }
 .bub.notice.dim { color: var(--fg-3); }
+/* 봇 옮기기·다시 설치 (ACCOUNTS_V1 6.9 · 3.4.3) */
+.move-f { display: flex; gap: 8px; align-items: center; }
+.move-f .inp { flex: 1; min-width: 0; height: 32px; }
+.move-pv { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--bg-1); }
+.move-q { flex-basis: 100%; margin: 0; color: var(--fg-2); font-size: var(--t-13); line-height: 1.55; }
+.move-pv .pc, #r-reinstall-act .pc { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-3); }
+.move-pv .pc .inp, #r-reinstall-act .pc .inp { width: 128px; height: 30px; }
+#r-move-err { margin-top: 6px; }
+#r-move-err:empty { display: none; }
+.srow-l p.hint { color: var(--fg-2); font-size: var(--t-12); }
+@media (max-width: 760px) {
+  .move-f { flex-wrap: wrap; }
+  .move-f .inp { flex-basis: 100%; height: 42px; }
+  .move-pv .pc { flex: 1; min-width: 0; }
+  .move-pv .pc .inp { width: 100%; height: 40px; }
+}
 
 
 /* ---------- responsive: shared primitives (style.css + panel.css) ---------- */

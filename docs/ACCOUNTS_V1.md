@@ -57,7 +57,7 @@
 | D5 | 카카오톡 매크로 범위 | 고객 자기 카카오 계정으로 발송. 계정 등록은 지금 흐름 그대로. 회원당 계정 **3개**(`MEMBER_MAX_ACCOUNTS`). 이미 3개를 넘는 기존 회원(키 이관)은 그대로 두고 추가만 막는다 | 무료 Render 512MB 에 고객 계정과 봇 계정의 LOCO 연결이 함께 산다. 1인 1구독 기준 |
 | D6 | 매크로 기간 | 결제 확인 시점부터 30일 × 개월. 다시 사면 `max(지금, 만료) + 30일 × 개월`. "첫 로그인부터 시작" 규칙은 회원 구매에 없다 | 소유자 요구 2. 회원 단위라 미개시 상태를 둘 이유가 없다 |
 | D7 | 매크로 만료 | 만료되면 sender 가 그 회원의 고객 계정 연결을 끊는다(기록은 보존). 다시 사면 이어서 붙는다. 콘솔은 계속 들어갈 수 있다(내 방 관리 때문에) | 만료 뒤에도 연결을 붙잡으면 메모리만 쓴다. 지금은 만료가 발송에 전혀 반영되지 않는 결함이 있다 |
-| D8 | 방 식별 | 설치 권리는 **link_id** 에 영구히 묶는다. 같은 방(link_id, 미확인이면 링크 주소)에는 **결제된**(`installed`) 설치 행이 1개뿐(부분 UNIQUE). 한 방에 두 상품을 함께 둘 수 있고 같은 봇이 둘 다 맡는다. 설치의 주인은 회원 1명이고 상품 추가도 그 회원만 한다. 봇이 방에서 **내보내지면**(`error/kicked`) 그 설치는 배타권을 잃는다 — 다른 회원(대개 방장 본인)이 같은 방을 새로 살 수 있다 | 이름·키는 바꿀 수 있어 위조된다. link_id 는 카카오가 정한 방 id 다. 방장의 의사 표시(봇 내보내기)가 곧 남이 산 설치를 푸는 수단이다. 상품별로 주인을 나누면 명령어 앞글자·제외 목록처럼 방 단위 설정의 주인이 둘이 되어 받지 않는다(옮기기는 관리자 `room-transfer`) |
+| D8 | 방 식별 | 설치 권리는 **link_id** 에 묶는다(기간 없음). 2026-10-17 부터 고객은 사이트(패널)에서 봇을 다른 방으로 옮기거나 같은 방에 다시 설치할 수 있다 — 무료, 설치마다 옮기기 24시간·다시 설치 30분 간격(3.4.3). 같은 방(link_id, 미확인이면 링크 주소)에는 **결제된**(`installed`) 설치 행이 1개뿐(부분 UNIQUE). 한 방에 두 상품을 함께 둘 수 있고 같은 봇이 둘 다 맡는다. 설치의 주인은 회원 1명이고 상품 추가도 그 회원만 한다. 봇이 방에서 **내보내지면**(`error/kicked`) 그 설치는 배타권을 잃는다 — 다른 회원(대개 방장 본인)이 같은 방을 새로 살 수 있다 | 이름·키는 바꿀 수 있어 위조된다. link_id 는 카카오가 정한 방 id 다. 방장의 의사 표시(봇 내보내기)가 곧 남이 산 설치를 푸는 수단이다. 상품별로 주인을 나누면 명령어 앞글자·제외 목록처럼 방 단위 설정의 주인이 둘이 되어 받지 않는다(옮기기는 관리자 `room-transfer`) |
 | D9 | 방 상품 구매 흐름 | 구매 화면에서 링크 붙여넣기 → 서버가 봇으로 링크를 조회해 방 이름·참여코드 필요 여부를 보여 줌(`POST /api/room-preview`) → 주문 접수 때 그 회원의 설치 행을 `입금 대기` 로 예약 → 입금 매칭(자동 또는 관리자) 때 같은 트랜잭션에서 `installed` + 봇 배정 → sender 가 입장. **미입금 예약은 다른 회원을 막지 않는다**: 같은 방을 여러 회원이 동시에 주문할 수 있고 **먼저 입금된 주문이 갖는다.** 늦게 입금된 주문은 `needs_review`(관리자가 나머지만 적용하고 그 방 금액을 환불, 4.2) | 미입금 주문으로 남의 방을 48시간씩 막는 것을 없앤다. 같은 회원 안에서는 예약이 중복 방지다 |
 | D10 | 조회 실패 시 | 봇이 하나도 연결되어 있지 않거나 조회 예산(5.3)이 바닥나 링크를 조회하지 못하면 주문은 받되 `link_id` 를 비워 둔다(링크 주소로 중복 검사). 그 방 줄은 **고객이 확인란에 동의해야** 주문된다(6.6). 입장할 때 처음 조회한 방에 묶인다. 설치할 수 없는 링크로 밝혀지면(`link_gone`·`not_group`) 관리자가 `room-rebind` 로 링크를 바꾸거나 환불한다 | sender 장애가 판매를 막지 않게. 확인하지 못한 방에 돈을 받는다는 사실을 고객이 알고 산다 |
 | D11 | 봇 계정 풀 | `/manage` 에서 운영자가 봇 카카오 계정을 지금 등록 흐름(휴대폰 확인 포함)으로 여러 개 등록. 배정은 **가장 적게 맡은 봇**, 봇마다 상한 `room_cap`(기본 20). 상한이 다 찼거나 봇이 없으면 `입장 중 · 순서 대기` 로 두고 1분마다 다시 배정 | 방이 늘면 계정 1개가 감당 못 한다(방마다 20초 점검 부하). 사용 가능한 봇이 생기면 자동으로 이어진다 |
@@ -65,15 +65,15 @@
 | D13 | 부방장 감지 | 봇 자신의 권한은 `CHATONROOM` 응답의 `olu.lmt`(클라이언트 자신의 오픈링크 사용자 정보)를 먼저 읽고, `olu` 가 없으면 `MEMBER{chatId,[self]}`(=`getMembersByIds`)로 읽는다(node-kakao 와 같은 순서). 부방장 대기 방은 **60초(±15초)**, 사용 중 방은 **10분**마다. 푸시(`SYNCMEMT`, 피드 11·12·15)와 재접속은 즉시 확인의 신호로만 쓴다 | 푸시 모양이 실측되지 않았다. 폴링은 방 1개당 작은 패킷 1개라 싸다. 감지까지 최대 75초 + 콘솔 폴링 10초라 화면 문구는 "**1~2분 안에** 감지"로 정직하게 쓴다 |
 | D14 | 강등 | 사용 중에 부방장이 해제되면 `부방장 지정 대기` 로 돌아간다. 방 관리 기능은 멈추고 미니게임은 계속한다 | 소유자 요구 3 |
 | D15 | 설정 시점 | 방 관리봇 설정은 `사용 중` 일 때만 저장된다(서버가 409). 미니게임과 명령어 앞글자는 설치되면 언제든 저장된다. 방 관리 기능의 기본값은 전부 꺼짐이므로, 부방장 지정 안내는 "콘솔에서 켠 기능이 동작한다"고 말하고(7.9), 사용 중인데 켜진 기능이 없으면 화면이 `사용 중 · 켜진 기능 없음` 과 `입장·퇴장 로그` 바로가기를 보인다(RoomView `on_count`) | 소유자 요구 3 ("부방장을 얻으면 설정 가능"). 켜지 않은 기능을 "시작합니다"라고 말하지 않는다 |
-| D16 | 내보내짐·방 삭제 | 봇이 내보내지면 `오류 · 내보내짐`(배타권 해제, D8), 방이 삭제되면 `오류 · 방 삭제됨`. 권리는 그 방(link_id)에 남는다. 고객 `다시 시도` 는 설치마다 간격이 2분부터 두 배씩 늘고(최대 6시간) 연속 10번이면 관리자만 할 수 있다(3.4.3). 내보내짐은 방장이 내보내기 목록에서 해제한 뒤에만 의미가 있으므로 같은 규칙 + 그 사이 다른 회원이 그 방을 설치했으면 409. 방이 삭제된 경우는 관리자만 다른 링크로 옮길 수 있다(`room-rebind`, 감사 기록) | 영구 설치 권리지만 방이 사라지면 쓸 곳이 없다. 옮기기를 고객에게 열면 권리 1개로 방을 돌려 쓸 수 있다. 실패할 입장을 고객이 무한히 반복시키면 공용 봇 계정이 제재받는다 |
+| D16 | 내보내짐·방 삭제 | 봇이 내보내지면 `오류 · 내보내짐`(배타권 해제, D8), 방이 삭제되면 `오류 · 방 삭제됨`. 권리는 그 방(link_id)에 남는다. 고객 `다시 시도` 는 설치마다 간격이 2분부터 두 배씩 늘고(최대 6시간) 연속 10번이면 관리자만 할 수 있다(3.4.3). 내보내짐은 방장이 내보내기 목록에서 해제한 뒤에만 의미가 있으므로 같은 규칙 + 그 사이 다른 회원이 그 방을 설치했으면 409. 방이 삭제되었거나 링크가 바뀐 경우는 고객이 [다른 방으로 옮기기]에 새 링크를 넣는다(3.4.3, 무료·간격 있음·감사 기록). 관리자 `room-rebind` 도 그대로 있다 | 영구 설치 권리지만 방이 사라지면 쓸 곳이 없다. 옮기기를 고객에게 열면 권리 1개로 방을 돌려 쓸 수 있다. 실패할 입장을 고객이 무한히 반복시키면 공용 봇 계정이 제재받는다 |
 | D17 | 봇 계정 장애 | 봇 계정이 끊기면(다른 기기 로그인 `KICKOUT` 사유 0·1, 토큰 만료) 그 봇의 방은 `오류 · K bot 점검`. `KICKOUT` 사유 -2(CHANGE_SERVER)는 재접속일 뿐이다. `-444`(BLOCKED_IP)는 서버 IP 문제라 봇을 내리지 않고 **모든 입장을 멈춘다**(5.3). **자동으로 다른 봇에 옮기지 않는다.** 관리자가 같은 봇을 다시 등록하면 그대로 이어지고, 다른 봇으로 옮기면 방장이 새 봇을 부방장으로 다시 지정해야 한다 | 자동 이동은 모든 방장에게 부방장 재지정을 강요한다. 대부분은 재등록으로 복구된다 |
-| D18 | 설치 해제·이전 | 고객은 설치를 지울 수 없다(영구 권리). 관리자만 해제(`room-remove`) — 봇은 방에서 나간다. 관리자는 설치를 다른 회원에게 넘길 수 있다(`room-transfer`, 방장 확인은 상담에서). 환불은 범위 밖(운영자가 계좌로 처리) | 단순하게. 남이 먼저 산 방의 방장이 상담으로 넘겨받을 길을 둔다 |
+| D18 | 설치 해제·이전 | 고객은 설치를 지울 수 없다(영구 권리). 다른 방으로 옮기기·같은 방에 다시 설치는 고객도 직접 한다(3.4.3). 관리자만 해제(`room-remove`) — 봇은 방에서 나간다. 관리자는 설치를 다른 회원에게 넘길 수 있다(`room-transfer`, 방장 확인은 상담에서). 환불은 범위 밖(운영자가 계좌로 처리) | 단순하게. 남이 먼저 산 방의 방장이 상담으로 넘겨받을 길을 둔다 |
 | D19 | 기존 키 이관 | 회원이 `/account` 에서 기존 키를 입력해 1회 이관(`/api/auth/claim`). 매크로 남은 기간은 회원 매크로 기간에 **더한다**. 키에 묶인 콘솔 계정(`panel_accounts`)은 회원 것이 된다. 고객 스스로는 다른 회원에게 다시 이관할 수 없고, 잘못 이관된 키는 관리자가 `license-reassign` 으로 옮긴다(이관 IP·시각은 감사 기록에 남음). 이관된 키에 대한 옛 키 경로 지급(`/admin/grant`, 늦게 입금된 연장 주문)은 회원에게 적용하거나 409 로 막는다(4.2) | 소유자 요구 7. 키는 공유되던 물건이라 엉뚱한 사람이 먼저 이관할 수 있다 |
 | D20 | 기존 계정 기능 유예 | 예전에는 고객 계정 위에서 입장·퇴장 로그·프로필 로그·올킥 방지·금지어 검열이 돌았다(키만 있으면 무조건). 이관한 회원은 그 키의 가장 늦은 만료일(`legacy_room_until`)까지 이 4개 화면을 계정 단위로 계속 쓴다. 새 회원에게는 보이지 않는다 | 이미 돈을 낸 고객의 기능을 기간 중에 빼앗지 않는다 |
 | D21 | 미이관 키 | `/panel` 의 키 로그인은 없어진다. 미이관 키에 묶인 고객 계정은 키 만료일까지 발송을 계속하고(서버가 키 만료일로 권리를 밀어 줌), 콘솔은 회원 가입·이관 뒤 쓸 수 있다 | 로그인 수단은 하나로 |
 | D22 | 주문 만료·취소 | 지금처럼 48시간 미입금 시 자동 취소(`ORDER_PENDING_TTL_MS`). 회원은 자기 미입금 주문을 직접 취소할 수 있다(`POST /api/my/orders/cancel`). 어느 쪽이든 그 주문이 예약한 `입금 대기` 설치도 `canceled`. 관리자가 늦은 입금으로 되살리면, 그 방이 그 사이 다른 회원에게 가지 않았을 때만 설치가 되살아난다. 회원당 미입금 주문 **3건**, 미입금 방 줄 **10개**, IP당 미입금 주문 **10건**까지(`MEMBER_MAX_PENDING_ORDERS`·`MEMBER_MAX_PENDING_ROOMS`·`IP_MAX_PENDING_ORDERS`) | 예약이 방을 막지 않고(D9), 미입금 주문이 금액 뒷자리(총액마다 99개)를 다 차지하지 못하게 |
 | D23 | 고유 금액 | 주문 총액 + 1~99원 뒷자리(`pickAmount` 그대로). 가격이 모두 5,000원 배수라 총액이 다르면 뒷자리 구간이 겹치지 않는다. 입금자명이 달라도 지금처럼 감사 경고만 남기고 자동 적용한다 | 자동 입금 매칭 유지. 가족 이름 입금이 흔해 이름 불일치를 수동 처리로 돌리면 자동 확인이 거의 사라진다. 뒷자리까지 같은 금액이 우연히 남의 주문과 맞을 확률은 낮다 |
-| D24 | 한도 | 주문 1건: 매크로 0~12개월, 방 0~10개. 총액 최대 540,000원 | 금액 오입력 방지 |
+| D24 | 한도 | 주문 1건: 매크로 0~12개월, 방 0~10개. 총액 최대 440,000원 | 금액 오입력 방지 |
 | D25 | 실시간 상담 | 채널톡(channel.io) 위젯. 소유자가 쓴 "채널 웍스"를 채널톡으로 본다. 떠 있는 기본 말풍선은 끄고 `[data-support]` 버튼으로만 연다. `CHANNEL_PLUGIN_KEY` 가 없거나 SDK 가 뜨지 않으면(차단·카카오톡 웹뷰) 버튼은 `CONTACT_INFO` 연락처 안내로 바뀌고, 둘 다 없을 때만 숨는다. **콘솔(`/panel`)에는 SDK 를 띄우지 않는다** — 콘솔의 상담 버튼은 새 창으로 `/support` 를 연다. 로그인한 회원은 아이디를 이름으로 넘기고, 회원 식별자(`memberId`, 추측할 수 없는 HMAC 값)는 `CHANNEL_MEMBER_SECRET` 이 있고 채널 데스크의 회원 해시 검증을 켠 경우에만 넘긴다 | 기본 말풍선은 색이 있어 디자인 원칙에 어긋나고 토스트·저장 바와 겹친다. 콘솔은 고객의 1:1 대화를 보여 주는 화면이라 제3자 스크립트를 들이지 않는다 |
 | D26 | 방 기록 보존 | `room_log` 30일(`ROOM_LOG_KEEP_DAYS`). 부모 서버가 하루 1번 지운다(`entitle.startLoop`) | 무료 Neon 용량. **운영자 확인 필요 항목**(10.2) |
 | D27 | 차단된 회원 | 로그인 거부, 세션 전부 종료, 고객 계정 발송 정지, 설치한 방의 봇 기능 정지(봇은 방에 남아 조용히 있음). 차단 해제 시 그대로 이어짐 | 관리자가 상황을 되돌릴 수 있게 |
@@ -269,6 +269,11 @@ ALTER TABLE bot_accounts
   ADD COLUMN IF NOT EXISTS open_profile_li   TEXT,      -- sender: 지금 입장에 쓰는 오픈프로필 li(없으면 NULL)
   ADD COLUMN IF NOT EXISTS open_profile_name TEXT,      -- sender: 그 이름(방장에게 보이는 봇 이름)
   ADD COLUMN IF NOT EXISTS open_profile_at   BIGINT;    -- sender: 목록을 마지막으로 읽은 시각
+
+-- [고객 봇 옮기기·다시 설치(3.4.3)] 단계 이름 upd-1017:room_installs.self_moves. 부모 칸, 칸 추가뿐, NULL 허용
+ALTER TABLE room_installs
+  ADD COLUMN IF NOT EXISTS self_move_at      BIGINT,    -- 고객이 마지막으로 다른 방으로 옮긴 때(ROOM_SELF_MOVE_GAP_MS)
+  ADD COLUMN IF NOT EXISTS self_reinstall_at BIGINT;    -- 고객이 마지막으로 같은 방에 다시 설치한 때(ROOM_SELF_REINSTALL_GAP_MS)
 ```
 
 `room_state`·`room_log` 는 sender 의 `store.mjs` `SCHEMA` 에도 **글자 그대로** 넣는다(sender 단독 실행용, `IF NOT EXISTS` 라 겹쳐도 안전).
@@ -280,9 +285,10 @@ ALTER TABLE bot_accounts
 | 표·칸 | 쓰는 쪽 | 메모 |
 |---|---|---|
 | `members`, `member_sessions`, `member_google` | 부모 | |
-| `room_installs` 의 `member_id link_url passcode_ct roombot minigame phase order_id bot_device_id hold_reason retry_n config* retry_at installed_at removed_at note` | 부모 | |
+| `room_installs` 의 `member_id link_url passcode_ct roombot minigame phase order_id bot_device_id hold_reason retry_n config* retry_at self_move_at self_reinstall_at installed_at removed_at note` | 부모 | |
 | 〃 "다시 입장" 묶음 | 부모 | 배정·다시 시도·옮기기·링크 바꾸기 때 부모는 **한 UPDATE 로** `state='queued', error_code=NULL, error_detail=NULL, next_try_at=NULL, perm=NULL, perm_at=NULL, state_at=$now` 를 함께 쓴다(이 칸들을 부모가 쓰는 유일한 경우). `assignBot` 이 봇을 못 찾았을 때 `error_detail='no_bot'` 을 쓰는 것도 이 예외에 든다 |
 | `room_installs` 의 `state error_code error_detail chat_id perm perm_at joined_at state_at next_try_at attempts link_id link_name`(조회 결과) | sender | 항상 `WHERE id=$1 AND phase='installed' AND bot_device_id=$봇` 조건으로만(옮긴 뒤 옛 봇이 덮어쓰지 못하게) |
+| 〃 `config config_rev config_at` (방 안 설정 명령어) | sender(예외) | 방장·부방장이 방에서 기능을 켜고 끌 때만(7.2 (g)). 패널 저장과 같은 규칙: 저장본을 다시 읽어 바꾼 칸만 합치고(모르는 칸 유지) `AND config_rev=$읽은 값` 일 때만 쓰며 `config_rev+1`. 패널과 겹치면 다시 읽어 3번까지. 위 `WHERE` 조건도 그대로(`store.saveRoomConfig`) |
 | `room_leaves` | 부모가 INSERT(와 30일 지난 처리 행 삭제), sender 가 `done_at result` | sender 는 `WHERE id=$1 AND bot_device_id=$봇` |
 | `room_blocklist` | 부모 | sender 는 읽기만 |
 | `bot_accounts` 의 `nickname state state_at` | sender | 나머지 칸은 부모(관리자). 예외: sender 는 `bot.` 등록이 끝나면 `INSERT … (device_id, email, created_at, state) ON CONFLICT DO NOTHING` 으로 최소 행을 만든다(3.5, 봇이 고아가 되지 않게) |
@@ -298,8 +304,8 @@ ALTER TABLE bot_accounts
 ```json
 [
   { "product": "macro",    "months": 2, "unit_price": 20000, "amount": 40000 },
-  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 },
-  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 }
+  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 },
+  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 }
 ]
 ```
 
@@ -312,7 +318,7 @@ ALTER TABLE bot_accounts
 ```json
 { "macro": { "days": 60, "until": 1767225600000 },
   "rooms": [ { "install_id": 12, "products": ["roombot","minigame"] } ],
-  "skipped": [ { "install_id": 13, "products": ["minigame"], "amount": 15000, "why": "room_taken" } ] }
+  "skipped": [ { "install_id": 13, "products": ["minigame"], "amount": 10000, "why": "room_taken" } ] }
 ```
 
 `skipped` 는 관리자가 충돌 줄을 빼고 승인했을 때만 있다(4.2). 그 금액은 운영자가 환불한다.
@@ -348,7 +354,7 @@ ALTER TABLE bot_accounts
 | `auth` | `RATE_AUTH_PER_MIN` | 10 | POST `/api/auth/login` `/api/auth/password` `/api/auth/claim` `/api/auth/google/unlink` |
 | `signup` | `RATE_SIGNUP_PER_MIN` | 5 | POST `/api/auth/signup` (+ 라우트 안에서 IP당 시간 20회) |
 | `oauth` | `RATE_OAUTH_PER_MIN` | 20 | GET `/auth/google/start` `/auth/google/callback` |
-| `preview` | `RATE_PREVIEW_PER_MIN` | 20 | POST `/api/room-preview` (+ 회원당 시간 60회. 전체 카카오 조회량은 sender 예산이 막는다, 5.3) |
+| `preview` | `RATE_PREVIEW_PER_MIN` | 20 | POST `/api/room-preview` (+ 회원당 시간 60회. 전체 카카오 조회량은 sender 예산이 막는다, 5.3), POST `/panel/api/bot-room/move`(봇 옮기기, + 회원당 시간 20회, 3.4.3) |
 | `member` | `RATE_MEMBER_PER_MIN` | 180 | 나머지 `/api/auth/*`, GET `/api/site` `/api/me` `/api/my/*`, POST `/api/my/orders/cancel` |
 | `demo` | `RATE_DEMO_PER_MIN` | 180 | GET `/api/demo`, POST `/api/demo/start` `/api/demo/step` (사이트 체험 3.7, 로그인 없음 · 서버 안에서만 계산하고 카카오에는 보내지 않는다) |
 | 기존 | | | `order-read` `order-write` `deposit` `admin` `panel` 그대로. `panel-login` 은 키 로그인이 없어지므로 쓰지 않는다(정의는 남겨도 됨). `/v1/*` 는 더 이상 공개하지 않는다(8.5) |
@@ -454,10 +460,10 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
   "products": [
     { "id": "macro",    "label": "카카오톡 매크로", "unit": "month", "price": 20000, "days": 30, "min": 1, "max": 12,
       "desc": "내 카카오 계정으로 대화방 주기 발송 · 이미지 첨부 · 갠톡 응답 · 저격 규칙" },
-    { "id": "roombot",  "label": "방 관리봇", "unit": "room", "price": 15000,
+    { "id": "roombot",  "label": "방 관리봇", "unit": "room", "price": 10000,
       "desc": "입장·퇴장 로그 · 들낙 감지 · 나갔을 때 내보내기 · 프로필 로그 · 홍보 금지 · 가리기 · 금지어 검열 · 올킥 방지" },
-    { "id": "minigame", "label": "미니게임봇", "unit": "room", "price": 15000,
-      "desc": "끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹" } ],
+    { "id": "minigame", "label": "미니게임봇", "unit": "room", "price": 10000,
+      "desc": "끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 추억의 검 강화 · 몬스터 수집 · 랭킹" } ],
   "max_rooms": 10, "bank": "…", "contact": null, "purchase_base": "https://kmacro.cloud", "auto_approve": true }
 ```
 
@@ -595,13 +601,17 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
   "bot": { "nickname": "K bot 3" },
   "on_count": 0,
   "order": null,
-  "perm": 2, "joined_at": 0, "state_at": 0, "config_rev": 3 }
+  "perm": 2, "joined_at": 0, "state_at": 0, "config_rev": 3,
+  "can_move": true, "move_after": 0, "move_note": "",
+  "can_reinstall": true, "reinstall_after": 0, "reinstall_note": "",
+  "self_rule": "옮기기와 다시 설치는 무료입니다. 다른 방으로 옮기기는 방마다 24시간에 한 번, 다시 설치는 30분에 한 번 할 수 있습니다." }
 ```
 
 - `pending_products` = 이 설치를 가리키는 처리 대기 주문 줄(`pending`·`paid`). 콘솔은 상품 칩 옆에 `입금 대기` 를 붙인다.
 - `bot.nickname` 이 비어 있으면 `K bot`. 고객 화면에는 봇의 카카오 계정 이메일·device_id 를 절대 내보내지 않는다.
 - `on_count` = 켜진 방 관리 기능 수(`visit churn leaveKick profile promo cover guard` 의 `enabled`, 방 관리봇이 없으면 0). `display==='active'` 이고 방 관리봇이 있는데 0 이면 `label` = `사용 중 · 켜진 기능 없음`, `detail` = `방 관리 기능이 모두 꺼져 있습니다. 필요한 기능을 켜 주세요.`(D15).
 - `order` = `phase='pending_payment'` 일 때 `{id, url}`(토큰 포함 주문 화면 주소), 그 밖에는 null. 콘솔은 `입금 안내` 링크로 보인다.
+- `can_move`·`can_reinstall` = 고객이 이 설치를 다른 방으로 옮기거나 같은 방에 다시 설치할 수 있는가(3.4.3, `installs.selfView`). 간격 때문에 기다릴 때도 true 이고 `move_after`·`reinstall_after` 에 그 시각(ms, 0 이면 지금)이 온다. `move_note`·`reinstall_note` = 지금 못 하는 까닭(간격이면 `… {M월 D일} HH:MM 이후에 다시 시도해 주세요.`), 화면은 이 문구를 그대로 쓴다. `self_rule` = 간격 안내 한 줄(환경변수 값으로 만든다).
 - `can_retry` = 오류 코드가 고객 다시 시도 대상(5.6)이고 `retry_admin_only` 가 아님. `retry_after` = 다음 다시 시도 가능 시각(ms, 0 이면 지금). `retry_admin_only` = `retry_n >= 10`(이때 `detail` 끝에 `다시 시도 횟수를 넘었습니다. 문의해 주세요.`).
 
 #### 3.4.3 내 방 경로
@@ -611,6 +621,8 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | GET `/panel/api/bot-rooms` | — | `{ok, rooms:[RoomView]}` (`phase` installed·pending_payment, 최근순) | — |
 | GET `/panel/api/bot-room?id=` | — | `{ok, room:RoomView, config:presentRoomConfig, ranking:[{name,score}]\|null, live:{connected, perm}\|null, sender_up}` (`ranking`·`live` 는 sender 가 있을 때만) | 404 `없는 방입니다.` |
 | POST `/panel/api/bot-room/settings` | `{id, rev?, cmdPrefix?, exempt?, visit?, churn?, leaveKick?, profile?, promo?, cover?, hide?, guard?, games?}` — 온 부분만 바꾼다 | `{ok, room, config}` | 403 `no_roombot` `이 방에는 방 관리봇이 설치되어 있지 않습니다.` / `no_minigame` `이 방에는 미니게임봇이 설치되어 있지 않습니다.`, 409 `not_active` `부방장 지정을 기다리는 중입니다. 방장이 K bot 계정을 부방장으로 지정하면 설정할 수 있습니다.`, 409 `stale` (`rev` 가 있고 `config_rev` 와 다름) `다른 화면에서 설정이 바뀌었습니다. 새로 불러온 뒤 다시 저장하십시오.`, 400 검증 문구(7장) |
+| POST `/panel/api/bot-room/move` | `{id, link, passcode?}` — 봇 옮기기(무료). kind `preview`(IP 분당 20) + 회원당 시간 20번 | `{ok, kind:'move'\|'reinstall', same_room, held, room}` — `link` 가 지금 방과 같은 방(같은 `link_id`, 또는 같은 주소)이면 `kind:'reinstall'`(나가지 않고 링크만 바꿔 다시 입장) | 400 `bad_link`·`profile_link`·`post_link`·`bad_passcode`, 404 `not_found`(남의 방·없는 방 또는 링크 만료), 422 `not_group`, 503 `not_verified` `지금은 링크를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.`, 403 `blocked_room`, 409 `not_installed`(입금 대기) · `held`(관리자 확인 대기) · `room_taken`(다른 회원의 K bot) · `own_room` `이 방에는 이미 내 K bot이 있습니다. 두 방을 합치려면 문의해 주세요.` · `pending_exists` · `order_pending`(이 설치에 상품을 더하는 입금 대기 주문) · `need_support` · `bot_check`, 403 `admin_only`, 429 `too_soon`(`retry_after` + `Retry-After`), 429 `rate_limited` |
+| POST `/panel/api/bot-room/reinstall` | `{id, passcode?}` — 같은 방에 다시 설치(무료). kind `panel` | `{ok, kind:'reinstall', same_room:true, held:false, room}` | 404, 409 `not_installed`·`held`·`joining` `K bot이 지금 이 방에 들어가고 있습니다. 입장이 끝난 뒤에 다시 설치할 수 있습니다.`·`need_link` `지금 링크로는 들어갈 수 없습니다. [다른 방으로 옮기기]에 방 링크를 입력해 주세요.`·`need_support`(5.6 의 그 코드 문구)·`bot_check` `K bot을 점검하고 있습니다. 복구되면 자동으로 다시 동작합니다.`·`room_taken`, 403 `admin_only`, 429 `too_soon` |
 | POST `/panel/api/bot-room/retry` | `{id, passcode?}` | `{ok, room}` | 409 `not_retryable` `지금은 다시 시도할 수 없습니다.`, 403 `admin_only` `다시 시도 횟수를 넘었습니다. 문의하십시오.`, 429 `too_soon` `{HH:MM} 이후에 다시 시도하십시오.`(`retry_after` 동봉), 409 `room_taken`(내보내진 동안 다른 회원이 그 방을 설치함) |
 | GET `/panel/api/bot-room/logs?id=` | — | `{ok, visit:[], profile:[], guard:[], actions:[RoomLogRow], sender_up}` — 앞의 셋은 sender `/v1/bot/logs`, `actions` 는 DB `room_log` 최근 100건 | sender 없으면 앞의 셋은 빈 배열 + `sender_up:false`. **방 관리봇이 없으면 앞의 셋은 늘 빈 배열**이고 `actions` 는 `state`·`perm` 종류만 |
 | GET `/panel/api/bot-room/people?id=` | — | `{ok, people:[{user_id, name, count}]}` (최근 300개 글의 작성자, sender) | 403 `no_roombot`, 409 `not_active`, 503 |
@@ -622,6 +634,14 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 방 관리 경로(`people`·`hide`·`hide 상태`·`unkick`, settings 의 방 관리 절)의 공통 게이트는 부모와 sender 양쪽에서 같은 순서로 검사한다: 방 관리봇 상품 없음 → 403 `no_roombot`, `display !== 'active'` → 409 `not_active`. 미니게임만 산 방은 봇이 부방장이어도 가리기·내보내기 해제를 쓸 수 없다.
 
 다시 시도 규칙(`installs.retry`, 고객): `can_retry` 아니면 409. `retry_n >= 10` 이면 403 `admin_only`. 직전 다시 시도 뒤 입장에 성공했으면(`joined_at > retry_at`, 또는 `retry_at` 없음) 새 사건이므로 `retry_n = 0` 으로 보고 간격 검사 없이 통과. 아니면 간격 = `ROOM_RETRY_BASE_MS`(기본 120000) `× 2^(retry_n-1)`(최대 6시간), `now < retry_at + 간격` 이면 429. 통과하면 한 UPDATE 로 `retry_n = retry_n + 1, retry_at = $now` + 2.2 의 "다시 입장" 묶음. 오류 코드가 `kicked` 이면 그 전에 3.3 의 충돌 SQL 로 다른 회원의 결제된 설치를 확인한다(있으면 409 `room_taken`; UPDATE 의 23505 도 같은 응답). 관리자 다시 시도는 간격·횟수를 보지 않고 `retry_n=0` 으로 만든다.
+
+봇 옮기기·다시 설치 규칙(`installs.selfMove`·`installs.selfReinstall`, 고객, 무료 — 2026-10-17 소유자 공지 "봇을 옮기거나 재설치는 무료(사이트에서 본인이 직접)"):
+
+- **소유**: 라우트가 `roomFor`(회원 소유 installed·pending_payment)로 먼저 404 를 가르고, `installs` 가 잠근 행으로 `member_id` 를 다시 본다. 입금 대기(`pending_payment`)는 409 `not_installed`, 관리자 확인 대기(`hold_reason`)는 409 `held`.
+- **다른 방으로 옮기기**(`selfMove`, 새 방 링크): 링크는 반드시 봇 조회(`resolveLink`, 10분 캐시)로 확인한다 — 관리자 `room-rebind` 와 달리 확인하지 못한 링크로는 옮기지 않는다(503 `not_verified`). 금지 방(주소·`link_id`) 403, 3.3 충돌 SQL(다른 회원의 결제된 설치 409 `room_taken`, 내 다른 설치 409 `own_room`, 내 입금 대기 예약 409 `pending_exists`), 이 설치에 상품을 더하는 처리 대기 주문이 있으면 409 `order_pending`. 통과하면 한 트랜잭션: 옛 봇·`chat_id`·`link_id` 로 `room_leaves` INSERT(`why:'rebind'`) → `link_url`·`link_id`·`link_name` 교체, `chat_id=NULL`, `passcode_ct` = 새 참여코드 봉인값 또는 NULL(옛 방 참여코드는 버린다), `retry_n=0, retry_at=NULL`, `self_move_at=$now` + 2.2 의 "다시 입장" 묶음. 봇은 그대로(같은 봇이 새 방에 들어가므로 봇 상한이 바뀌지 않는다), 봇이 없으면 `assignBot`. 새 방 이름이 `ROOM_HOLD_WORDS` 에 걸리면 `hold_reason='name:{낱말}'`, `bot_device_id=NULL`(D28 — 옮기기로 확인 대기를 건너뛰지 못하게). 설정(`config`)·상품·조치 기록·랭킹은 설치에 붙어 있어 그대로 따라간다(랭킹은 [랭킹 초기화]로 비운다). 방 관리봇이 있으면 새 방에서 다시 부방장 지정을 기다린다.
+- **같은 방에 다시 설치**(`selfReinstall`, 또는 `selfMove` 에 같은 방의 새 링크·지금 링크): 나가지 않는다. 한 UPDATE 로 `retry_n = (3.4.3 의 새 사건 판정) + 1, retry_at = self_reinstall_at = $now`, `passcode_ct=COALESCE(새 값, 옛 값)`, 링크가 오면 `link_url`·`link_name` 교체 + "다시 입장" 묶음(`chat_id` 는 그대로). 봇이 이미 방에 있으면 sender 가 5.3 의 사전 확인으로 JOINLINK 없이 상태만 다시 읽는다. 오류 코드가 `kicked` 이면 다시 시도와 같은 충돌 검사(409 `room_taken`). 링크 없이 다시 설치는 `queued`·`joining` 이면 409 `joining`, `link_gone`·`room_deleted`·`not_group`·`link_changed` 면 409 `need_link`(새 링크로는 된다). `duplicate_room`·`room_taken`·`blocked` 는 409 `need_support`, `bot_down`·`bot_no_open_profile` 은 409 `bot_check`(링크가 와도 같다).
+- **남용 한도**: 다른 방으로 옮기기는 설치마다 `ROOM_SELF_MOVE_GAP_MS`(기본 24시간)에 1번(`self_move_at`), 다시 설치(같은 방 새 링크 포함)는 `ROOM_SELF_REINSTALL_GAP_MS`(기본 30분)에 1번(`self_reinstall_at`). 둘 다 DB 칸이라 서버를 다시 띄워도 남는다. 다시 설치는 고객 다시 시도와 같은 `retry_n` 을 세므로 입장에 성공하지 못한 채 연속 10번이면 403 `admin_only`(D16·D29, 공용 봇 보호). 옮기기 시도(링크 조회)는 IP 버킷 `preview`(분당 20)와 회원당 시간 20번(라우트 메모리)으로 묶는다. 쓰기 경로는 `/panel/api/` 라 `sameOriginWrites`(8.3)가 걸린다.
+- **감사**: `install` 종류, `member_move 설치 #{id} {옛 주소} → {새 주소} (li …) / 나갈 봇 … / 확인 대기 …`, `member_relink 설치 #{id} {옛 주소} → {새 주소} / 이전 {state}:{code} (n회)`, `member_reinstall 설치 #{id} / 이전 … (n회) / 참여코드 변경`. `member_id` 와 IP 를 남긴다.
 
 `RoomLogRow` = `{at, kind, user_id, name, ok, text}` — `text` 는 부모가 7.8 표로 만든 한 줄 한국어.
 
@@ -705,11 +725,11 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | POST `/api/demo/start` | `{scene, opts?}` | `{ok, scene, state, out, clock}`. 모르는 장면은 400 `bad_scene`. `opts` 는 장면의 고르기 칸 값(모르는 칸·값은 기본값) |
 | POST `/api/demo/step` | `{state, ev}` — `ev` = `{type:'say', text, cid}`(글은 앞뒤 공백을 지우고 1,000자까지, `cid` 는 화면의 글 번호 40자까지) 또는 `{type:'act', id}` | `{ok, state, out, clock}`. 상태가 틀리면(48KB 초과 · `v` 다름 · 모양 · 그 장면에 없는 버튼 · 엔진 처리 실패) 400 `bad_state` `체험을 처음부터 다시 시작합니다.` → 화면이 장면을 다시 시작한다. 손님이 일으킨 문제로 500 을 내지 않는다 |
 
-- 장면 12개(id 고정): 미니게임봇 `games` · 방 관리봇 `visit` `churn` `leavekick` `profile` `promo` `cover` `hide` `guard` · 카카오톡 매크로 `macro` `reply` `snipe`. `scene`(방 이름·인원·공지, 손님 `me`, 사람 목록, 버튼 `actions`, 바로 입력 `chips`, 고르기 칸 `controls`, 구매 링크)과 `out` 항목(`day` `feed` `msg` `hide` `member` `panel` `hint`, 앞 항목 뒤 `wait` ms)의 모양은 `lib/demo.js` 머리 주석. `msg.mention` 은 반각 `@` 부터 이름 끝까지의 `{start, len}` 이고 실제 발송에서 멘션이 붙는 글(`visitMentionExtra`)에만 있다. `clock` 은 체험 시계 — 손님 글을 미리 그릴 때 시각으로 쓴다(매크로 30분 진행 뒤에는 실제 시각보다 앞선다).
+- 장면 12개(id 고정): 미니게임봇 `games` · 방 관리봇 `visit` `churn` `leavekick` `profile` `promo` `cover` `hide` `guard` · 카카오톡 매크로 `macro` `reply` `snipe`. `scene`(방 이름·인원·공지, 손님 `me`, 사람 목록, 버튼 `actions`, 바로 입력 `chips`, 고르기 칸 `controls`, 구매 링크)과 `out` 항목(`day` `feed` `msg` `hide` `member` `panel` `hint`, 앞 항목 뒤 `wait` ms)의 모양은 `lib/demo.js` 머리 주석. `msg.mention` 은 반각 `@` 부터 이름 끝까지의 `{start, len}` 이고 실제 발송에서 멘션이 붙는 글(`visitMentionExtra`)에만 있다. `msg.img`(SVG `data:` 주소)는 K bot 의 기록 카드(7.2 (f))이고, 그때 `text` 는 같은 내용의 글 안내(읽기 도구용)다. 방 관리 명령어(7.2 (g))로 바꾼 설정은 상태의 `cfg`(장면 설정에 합치는 바뀐 칸)에 남는다. 체험에서는 글 속 `@닉네임` 이 방에 있는 사람이면 멘션으로 본다(카카오톡에서 @ 로 사람을 고른 것과 같게). `clock` 은 체험 시계 — 손님 글을 미리 그릴 때 시각으로 쓴다(매크로 30분 진행 뒤에는 실제 시각보다 앞선다).
 - **문구:** K bot(과 고객 계정)이 방에 보내는 글은 전부 실제 봇 함수(`sender/src/roomfeat.mjs` · `features.mjs`)를 이 프로세스 안에서 불러 만든다(처음 쓸 때 `import()` 한 번). 엔진이 쓰는 글은 사람들의 대화, 카카오톡 시스템 줄(`…님이 들어왔습니다.` `…님이 나갔습니다.` `…님을 내보냈습니다.`), 고객이 써 둔 예시(매크로 글 · 자동 응답 · 저격 규칙), 화면 설명(`hint`, 합니다체)뿐이다. `botpool.mjs` 안에만 있는 가리기 답 4개는 그대로 옮기고 `lib/demo-check.js` 가 botpool.mjs 에 같은 글이 있는지 본다.
 - **botpool 순서를 다시 짠 것(5.7):** 메시지는 링 버퍼 → 닉네임 비교(프로필 변경) → `!도움` → `!가리기` → `!프로필` → 홍보 금지/금지어 검열 → 올킥 감지 → 미니게임. 입장·퇴장은 중복 판정 → 안내(`guardOnChat`) → 재입장 차단 → 들낙 감지. 내보내기는 연속 실패 멈춤(`actionFailed` — 내보내기·가리기가 3번 이어서 실패하면 10분 동안 둘 다 건너뛰고, 성공하면 0 으로)과 올킥 멈춤·방 한도(시간 10회)를 보고, 이미 나간 사람의 내보내기는 실패로 보되 botpool 처럼 연속 실패로 세지 않고, 멈춤·올킥 감지·한도로 건너뛰어도 적어 둔다(7.2 (b) 의 실측 전 항목 — 그래서 목록에 바로 올리지 못한 경우의 `noteBan` 길을 보이고, 화면 설명도 「바로 올리지 못하면」으로 쓴다). `leavekick` 은 한 번에 한 사람만 나간다(나감 → 다시 들어옴). 가리기는 300ms 간격으로 하나씩, 그동안 다시 명령하면 `이미 글을 가리는 중이에요.` 링 버퍼는 80개(봇은 300). 매크로는 runner 의 20초 점검(`macroRoomsDue` → 다른 사람 글 수 → `noteMacroWait`/`noteMacroSent`), 갠톡 자동 응답·저격 규칙은 고객 계정 기록(v2 매크로 기간 안)의 `onInbound`.
 - **시계:** 장면을 열 때 서버 시각에서 시작해 단계마다 실제로 흐른 시간(6시간까지)만큼 가고, 시간이 드는 버튼(들낙 1분 머묾 · 홍보 20초 · 매크로 30분)은 그만큼 더 간다. 입장·퇴장 · 재입장 차단 · 프로필 장면의 버튼은 1분씩 간다(안내 맨 아래 기록 시각이 한 분에 몰리지 않게). 방 관리봇 함수는 이 시계를 `now` 로 받는다. 미니게임·갠톡·저격 규칙의 `onInbound` 은 실제 `Date.now()` 를 쓰므로 쿨타임(자동 응답 6시간·저격 60초)도 실제 시간이다. 미니게임 쿨타임만 0 으로 둔다(selfcheck 7.7 #13 과 같은 방법). 같은 방 안내 4초 간격·답 1초는 화면 간격 750~900ms 로 줄이고, 방당 분당 6회 송신 한도(Pacer)는 흉내 내지 않는다.
-- **체험 설정:** 장면마다 그 기능만 켜고 나머지는 7.1 기본값(`!가리기` 명령도 기본값대로 켜져 있어 어느 방 관리봇 장면에서나 `!도움` 에 답한다). 예외: `leavekick` 은 다시 들어온 사람의 `[입장 안내]` 를 보이려고 입장·퇴장 기록과 재입장 차단 안내(기본은 꺼짐 — 장면 설명에 `설정에서 켠 경우에만` 이라고 적는다)도 켠다. 미니게임만 있는 `games` 방의 K bot 은 일반 참여자(권한 2, 부방장 표시 없음 — botpool 이 미니게임만 있는 방은 권한을 보지 않는다). 손님 이름은 `체험자`(봇 문구가 `{이름}님` 을 붙인다). `profile` 은 처음부터 `!프로필 하늘` 에 기록이 나오게 이틀 전 닉네임 변경(`하늘이` → `하늘`) 하나를 실제 `profileChange` 로 남겨 둔다(그때 안내는 그리지 않는다). 상태의 사람 목록·장면 설정은 서버가 장면 정의로 다시 맞추고, `__proto__` 같은 열쇠가 섞인 상태는 받지 않는다. 장면 카운터(`x`)의 글은 그 장면 사람의 아이디만 받고, 명부는 제 칸(`hasOwnProperty`)으로만 찾는다. 고르기 칸 값은 글자·수만 읽는다. 매크로 점검 시각(`x.t`)은 체험 시계에서 1시간 안이어야 하고, 한 단계의 화면 항목은 300개까지(넘으면 `bad_state`).
+- **체험 설정:** 장면마다 그 기능만 켜고 나머지는 7.1 기본값(`!가리기` 명령도 기본값대로 켜져 있어 어느 방 관리봇 장면에서나 `!도움` 에 답한다). 예외: `leavekick` 은 다시 들어온 사람의 `[입장 안내]` 를 보이려고 입장·퇴장 기록과 재입장 차단 안내(기본은 꺼짐 — 장면 설명에 `설정에서 켠 경우에만` 이라고 적는다)도 켠다. 미니게임만 있는 `games` 방의 K bot 은 일반 참여자(권한 2, 부방장 표시 없음 — botpool 이 미니게임만 있는 방은 권한을 보지 않는다). 손님 이름은 `체험자`(봇 문구가 `{이름}님` 을 붙인다). `profile` 은 처음부터 `!프로필조회 하늘` 에 기록이 나오게 이틀 전 닉네임 변경(`하늘이` → `하늘`) 하나를 실제 `profileChange` 로 남겨 둔다(그때 안내는 그리지 않는다). 상태의 사람 목록·장면 설정은 서버가 장면 정의로 다시 맞추고, `__proto__` 같은 열쇠가 섞인 상태는 받지 않는다. 장면 카운터(`x`)의 글은 그 장면 사람의 아이디만 받고, 명부는 제 칸(`hasOwnProperty`)으로만 찾는다. 고르기 칸 값은 글자·수만 읽는다. 매크로 점검 시각(`x.t`)은 체험 시계에서 1시간 안이어야 하고, 한 단계의 화면 항목은 300개까지(넘으면 `bad_state`).
 - 검사: `lib/demo-check.js`(`npm run check:w4`) — 목록 모양, 장면마다 모든 버튼·명령어, K bot 글 = 같은 입력으로 부른 실제 함수 결과, 멘션 위치, 가리기 대상, 틀린 상태 거절(던지지 않음), 무작위 200단계 뒤 상태 48KB 미만, 화면 문구에 이모지·영문 없음, 레이트리밋 `demo` 버킷.
 
 ---
@@ -721,8 +741,8 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 ```js
 PRODUCTS = {
   macro:    { id:'macro',    label:'카카오톡 매크로', unit:'month', price:20000, days:30, min:1, max:12, desc:'…' },
-  roombot:  { id:'roombot',  label:'방 관리봇',       unit:'room',  price:15000, desc:'…' },
-  minigame: { id:'minigame', label:'미니게임봇',      unit:'room',  price:15000, desc:'…' },
+  roombot:  { id:'roombot',  label:'방 관리봇',       unit:'room',  price:10000, desc:'…' },
+  minigame: { id:'minigame', label:'미니게임봇',      unit:'room',  price:10000, desc:'…' },
 }
 MAX_ROOMS = 10
 quote({ macro_months, rooms:[{ products:[…] }] })
@@ -732,7 +752,8 @@ table()  → /api/price 본체
 label(id), bankInfo(), contactInfo()
 ```
 
-- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 15000`. 할인 없음.
+- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 10000`. 할인 없음.
+- 방 상품 가격은 2026-10-17 에 15,000원 → **10,000원**(방 1개, 영구)으로 내렸다. 이미 접수된 주문은 그때의 `unit_price`·`amount` 를 주문 줄에 갖고 있어 바뀌지 않고, 설치한 방도 그대로다. `/buy`·`/manage` 의 HTML 대체 금액은 `lib/purchase-check.js` 가 `pricing.js` 와 같은지 본다.
 - `lib/features.js` `LABELS`·`DESCS` 를 위 이름으로 바꾼다(`/admin` 옛 화면과 `/api/lookup` 이 씀).
 - 예전 `PRICE`·`PLAN`·`NAME` 상수와 인자 없는 `quote()` 는 없앤다(호출부 전부 작업 2 소유).
 
@@ -937,10 +958,10 @@ hide(view, logId, type)          // REWRITE {logId, t}
 | `left` | 방 나감 | K bot이 방에서 나갔습니다. [다시 시도]를 누르면 K bot이 다시 들어갑니다. | 예 |
 | `profile_blocked` | 프로필 제한 | 카카오가 K bot의 오픈프로필 입장을 거부했습니다. 오픈채팅방의 참여 프로필 설정을 확인한 뒤 다시 시도해 주세요. | 예 |
 | `kakao_error` | 입장 거부 | 카카오 서버가 입장을 거부했습니다. 잠시 뒤 다시 시도해 주세요. | 예 |
-| `link_gone` | 링크 만료 | 링크가 만료되었거나 방이 삭제되었습니다. 새 링크로 바꾸려면 문의해 주세요. | 아니오(관리자 rebind) |
-| `room_deleted` | 방 삭제됨 | 오픈채팅방이 삭제되었습니다. 다른 방으로 옮기려면 문의해 주세요. | 아니오 |
-| `not_group` | 설치 불가 링크 | 그룹 오픈채팅방 링크가 아닙니다. 새 링크로 바꾸려면 문의해 주세요. | 아니오 |
-| `link_changed` | 링크 불일치 | 처음 등록한 방과 다른 방의 링크입니다. 문의해 주세요. | 아니오 |
+| `link_gone` | 링크 만료 | 링크가 만료되었거나 방이 삭제되었습니다. 방 링크가 바뀌었으면 [다른 방으로 옮기기]에 새 링크를 입력해 주세요. | 아니오(고객 [다른 방으로 옮기기] 또는 관리자 rebind) |
+| `room_deleted` | 방 삭제됨 | 오픈채팅방이 삭제되었습니다. [다른 방으로 옮기기]에 새 방의 링크를 입력하면 K bot이 그 방으로 옮겨 갑니다. | 아니오(고객 옮기기) |
+| `not_group` | 설치 불가 링크 | 그룹 오픈채팅방 링크가 아닙니다. [다른 방으로 옮기기]에 그룹 오픈채팅방 링크를 입력해 주세요. | 아니오(고객 옮기기) |
+| `link_changed` | 링크 불일치 | 등록한 링크가 지금은 다른 방을 가리킵니다. [다른 방으로 옮기기]에 방 링크를 다시 입력해 주세요. | 아니오(고객 옮기기) |
 | `duplicate_room` | 중복된 방 | 이 방에는 이미 K bot이 있습니다. 문의해 주세요. | 아니오 |
 | `room_taken` | 다른 회원 사용 중 | K bot이 내보내진 동안 다른 회원이 이 방에 K bot을 설치했습니다. 문의해 주세요. | 아니오 |
 | `blocked` | 설치 불가 | 이 방에는 K bot을 설치할 수 없습니다. 문의해 주세요. | 아니오 |
@@ -1131,7 +1152,7 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 
 index.html·buy.html·order.html 의 키 시대 문구는 **부록 A 의 문자열 표**대로 전부 바꾼다(`data-manual` 변형 포함, 줄 번호는 `9db383a` 기준). 요지:
 - 메타 설명·히어로·기능·구조도·동작 방식·가격·FAQ·CTA·바닥글에서 `라이선스 키`·`키 발급`·`8개`·`계정마다` 를 없앤다. 방 관리 기능은 "카카오 계정마다"가 아니라 "K bot 계정이 방마다" 동작한다고 쓴다.
-- 가격 섹션: `.prods` 행 3개(카드 3개를 가로로 늘어놓지 않는다). 매크로 `20,000원 / 1개월(30일)`, 방 관리봇 `15,000원 / 방 1개 · 기간 제한 없음`, 미니게임봇 같은 형식.
+- 가격 섹션: `.prods` 행 3개(카드 3개를 가로로 늘어놓지 않는다). 매크로 `20,000원 / 1개월(30일)`, 방 관리봇 `10,000원 / 방 1개 · 기간 제한 없음`, 미니게임봇 같은 형식.
 - `항상 켜져 있다고 보장하지 않습니다` 문구는 남긴다.
 - `site-accounts.mjs` 가 `public/index.html`·`buy.html`·`order.html`·`login.html`·`signup.html`·`support.html` 과 `app.js` 의 회원 주문 문구에 `키 발급`·`키가 발급`·`8개`·`계정마다`·`자동응답` 이 없음을 단언한다(예외: `account.html` 의 `#claim` 카드, app.js 의 예전 키 주문·`/my` 분기).
 
@@ -1200,7 +1221,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
   <section class="sec clip"><div class="tbl-wrap">
     <table class="tbl stack" id="rooms-tbl"><thead><tr><th>대화방</th><th>상품</th><th>상태</th><th>K bot 계정</th><th><span class="sr">열기</span></th></tr></thead>
       <tbody id="rooms-list"></tbody></table></div>
-    <p class="empty" id="rooms-empty" hidden>설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다. 방 1개 · 상품당 15,000원입니다.</p>
+    <p class="empty" id="rooms-empty" hidden>설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다. 방 1개 · 상품당 10,000원입니다.</p>
     <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>부방장 지정은 1~2분 안에 자동으로 감지합니다.</span></div></section>
  </div>
 </section>
@@ -1238,6 +1259,11 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - `active` 이고 `on_count === 0` 이면 `.note` `방 관리 기능이 모두 꺼져 있습니다.` + `입장·퇴장 로그 설정`(→`#r-visit/<id>`) (방 관리봇이 있을 때만).
 - `error` 이면 `.banner#room-err`: 긴 문구 + `can_retry` 면 `#room-retry` `다시 시도`(참여코드 오류면 그 앞에 `#r-passcode` 칸; `retry_after` 가 미래면 비활성 + `{HH:MM} 이후에 다시 시도할 수 있습니다`) + `[data-support]` `문의하기`(`data-support-ctx="방 #<id> · {label}"`).
 - 상품 묶음: 상품 2줄(설치됨 `.tag.line` / 미설치는 `상품 추가` → `/buy?add=<id>`).
+- **봇 옮기기·다시 설치**(3.4.3, 무료) `.grp#room-move-grp`, 제목 `봇 옮기기·다시 설치` + 오른쪽 `무료`. 상품 묶음 바로 아래, `room-form` 위. 입금 대기(`pending`)면 숨긴다.
+  - `.srow#row-r-reinstall` `같은 방에 다시 설치` — 설명 `K bot이 방에서 내보내졌거나 방에서 답하지 않을 때 같은 방에 다시 들어갑니다. K bot이 방에 있으면 나가지 않고 상태만 다시 확인합니다. 내보내졌다면 먼저 오픈채팅방의 내보내기 목록에서 K bot을 해제해 주세요.` 오른쪽 `#r-reinstall-act` 안 `#r-reinstall-btn` `다시 설치`. 누르면 같은 자리가 인라인 확인으로 바뀐다: `K bot이 같은 방에 다시 들어갑니다.`(참여코드 오류인 방이면 `#r-reinstall-pc` 칸) + `취소` + `다시 설치`(primary). 성공 `notify('같은 방에 다시 설치합니다.', '{방} · K bot이 방에 들어가 상태를 다시 확인합니다.')`, 실패 `notify('다시 설치하지 못했습니다.', 서버 문구, {kind:'crit'})`. `can_reinstall` 이 아니거나 `reinstall_after` 가 미래면 버튼 비활성 + `p.hint#r-reinstall-note` = RoomView `reinstall_note`.
+  - `.srow.stack#row-r-move` `다른 방으로 옮기기` — 설명 `옮길 오픈채팅방 링크를 입력합니다. K bot이 지금 방에서 나가고 새 방에 들어가며, 설정은 그대로 옮겨집니다. 방 링크만 바뀌었다면 바뀐 링크를 입력해 주세요. 같은 방이면 나가지 않고 다시 설치합니다.` 아래 `form#r-move-form`: `#r-move-link`(mono, placeholder `https://open.kakao.com/o/…`) + `#r-move-check` `링크 확인`. 2단계: ① `링크 확인` → `POST /api/room-preview`(3.3) → `.move-pv#r-move-pv` 에 `#r-move-q` 문장 — 다른 방이면 `「{방 이름}」 방으로 옮깁니다. K bot은 지금 방에서 나갑니다.`(+ 방 관리봇이 있으면 ` 새 방에서 K bot을 부방장으로 다시 지정해야 방 관리 기능이 동작합니다.`), 같은 방이면(`mine.install_id` 가 이 방) `지금 방과 같은 방입니다. 이 링크로 바꾸고 K bot이 같은 방에 다시 들어갑니다.`; 참여코드가 필요한 방이면 `#r-move-passcode`; `#r-move-no` `취소` · `#r-move-yes` `옮기기`/`다시 설치`. 미리 보기에서 막히는 경우(확인 못 한 링크, 내 다른 방, 입금 대기 예약, 옮기기 간격 안의 다른 방)는 확인 칸을 열지 않고 `#r-move-err` 에 까닭. ② `옮기기` → `POST /panel/api/bot-room/move` → 성공 `notify('K bot을 옮깁니다.', '{새 방} · K bot이 지금 방에서 나가고 새 방에 들어갑니다.')`(확인 대기면 `… · 관리자가 확인한 뒤 K bot이 들어갑니다.`, 같은 방이면 `notify('같은 방에 다시 설치합니다.', …)`), 방 제목·링크·상태가 RoomView 로 바뀐다. 실패는 `#r-move-err`. `can_move` 가 아니면 입력·버튼 비활성, `move_after` 가 미래면 `p.hint#r-move-note` = `move_note`(같은 방의 새 링크는 받으므로 입력은 막지 않는다). Esc 는 열린 확인을 닫는다.
+  - `.sec-f` `#r-move-rule` = RoomView `self_rule`.
+  - `error` 이고 오류 코드가 `link_gone`·`room_deleted`·`not_group`·`link_changed` 면 배너에 `#room-move-go` `새 링크 입력`(→ `#r-move-link` 로 포커스·강조), `#rooms` 의 확인 필요 줄 버튼도 `새 링크 입력`(`#room/<id>` + `data-focus="r-move-link"`).
 - `room-form`: `.srow.inline` `명령어 앞글자` `.seg#r-prefix`(`!` `/` `.` `#`), 설명 `방 관리봇과 미니게임봇 명령어가 같은 앞글자를 씁니다.`
 - 조치 기록 `table#r-log-tbl`(최근 100, `actions`): 시각 · 종류 · 대상 · 결과.
 - 강등 감지(폴링 비교로 `active`→`waiting`, 직전 폴링에서도 `products.roombot` 이던 방만 — 미니게임만 쓰던 방에 방 관리봇을 더해 부방장 대기가 된 것은 강등이 아니다): `notify('부방장 권한이 해제되었습니다.', '{방} · 다시 지정하면 자동으로 이어집니다.', {kind:'warn'})`. 승격 감지(`waiting`→`active`): `notify('부방장 지정을 확인했습니다.', '{방} · 이제 방 관리 기능을 설정할 수 있습니다.')`.
@@ -1288,7 +1314,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 ### 6.12 관리 화면 `/manage` (작업 6)
 
-- 머리 설명(manage.html:235) → `상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 15,000원/방 · 미니게임봇 15,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.`
+- 머리 설명(manage.html:235) → `상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 10,000원/방 · 미니게임봇 10,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.`
 - 탭: `주문 · 입금 · 회원 · 봇 · 방 · 키 · 기록`. `.mg-tabs { overflow-x:auto; scrollbar-width:none }`.
 - 요약 타일 8개(`repeat(4)`): 처리 대기 주문 · 확인 필요 입금 · 회원 · 이용 중 매크로 · 설치된 방 · 부방장 대기 · 오류 방 · K bot 계정(`접속 n / 전체 n`).
 - `/v1/bot/status.join_paused_until` 이 미래면 화면 맨 위 crit 띠 `카카오가 서버 IP 의 입장을 막았습니다. {HH:MM}까지 모든 방 입장을 멈춥니다.`
@@ -1327,6 +1353,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `cmdPrefix` | str | `!` | `!` `/` `.` `#` 중 하나 |
 | `exempt` | `[{user_id, name}]` | `[]` | 최대 50, `user_id` `/^[1-9][0-9]{0,19}$/`, name 40자. 방장(1)·부방장(4)·봇(8)은 항상 제외 |
 | `visit.enabled` | bool | false | 입장·퇴장 로그(지금 동작: 방 안내 + 기록) |
+| `visit.style` | str | `image` | `image` \| `text` — 방에 보내는 입장·퇴장 안내 모양(7.2 (f)) |
 | `churn.enabled` | bool | false | 들낙 감지 |
 | `churn.joins` | int | 3 | 2~20 |
 | `churn.windowMin` | int | 10 | 1~1440 |
@@ -1336,7 +1363,8 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `leaveKick.notice` | bool | false | |
 | `profile.enabled` | bool | false | 프로필 로그 |
 | `profile.name` / `.status` | bool | true | 예전 `.photo` 는 무시(7.2 (c)) |
-| `profile.lookup` | str | `staff` | `staff` \| `all` \| `off` |
+| `profile.lookup` | str | `staff` | `staff` \| `all` \| `off` — `{앞글자}프로필조회` |
+| `profile.style` | str | `image` | `image` \| `text` — 프로필 변경 안내 모양(7.2 (f)) |
 | `promo.enabled` | bool | false | 홍보 금지 |
 | `promo.links` / `.cards` | bool | true | |
 | `promo.media` | bool | false | |
@@ -1351,13 +1379,17 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `guard.enabled` | bool | false | 올킥 방지 |
 | `guard.secs` | int | 30 | 5~300 |
 | `guard.count` | int | 5 | 3~30 |
+| `cmd.link` | str | `staff` | `staff` \| `all` \| `off` — 방 안 `{앞글자}옾링` 을 쓸 수 있는 사람(7.2 (g)). 프로필 기록을 꺼도 동작한다 |
 | `games.enabled` | bool | **true** | 미니게임. 기본이 켜짐이라 미니게임봇은 입장하자마자 `!도움`·게임에 답한다(소유자 요구 "링크 첨부하면 바로 드가고"). 처음 `minigame` 이 켜지는 설치에 이 기본값을 채운다(4.2) |
 | `games.word` `.baseball` `.dice` `.rps` `.quiz` | bool | true | 랭킹은 항상 켜짐 |
+| `games.sword` | bool | true | 추억의 검 강화(7.3.1). 이 칸이 없는 예전 저장본도 켜짐으로 읽는다 |
+| `games.monster` | bool | true | 몬스터 수집(7.3.2). 저장본에 없으면 켜짐 |
 | `games.cooldownSec` | int | 3 | **1**~60 (0 은 공용 봇 발송 한도를 한 방이 다 쓰게 하므로 받지 않음) |
 | `games.dailyLimit` | int | 0 | 0~5000, 0 = 제한 없음(방 발송 6/분 한도가 따로 막는다, 5.5) |
 
 검증 실패는 저장 거부(조용히 버리지 않음): 400 `bad_<path>`, 문구 예 `들낙 감지 횟수는 2~20회로 입력하십시오.`, `금지어는 300개까지 등록할 수 있습니다.`, `제외할 사람은 50명까지 등록할 수 있습니다.`
-제품 검사: roombot 절(`exempt visit churn leaveKick profile promo cover hide guard`)은 `products.roombot` 과 `display==='active'` 필요, `games` 는 `products.minigame` 필요, `cmdPrefix` 는 설치됨이면 언제나.
+sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글자 그대로 같아야 한다(selfcheck #40-5 가 본다).
+제품 검사: roombot 절(`exempt visit churn leaveKick profile promo cover hide guard cmd`)은 `products.roombot` 과 `display==='active'` 필요, `games` 는 `products.minigame` 필요, `cmdPrefix` 는 설치됨이면 언제나.
 
 ### 7.2 기능별 동작
 
@@ -1395,7 +1427,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - **옾링 값**: 주소 / `없음`(오픈프로필이 아님, 또는 INFOLINK 가 없다고 답함) / `확인 못 함`(오픈프로필인데 옾링을 읽지 못함). 입장·퇴장·프로필 변경 안내를 보내기 전에 명부에서 옾링을 모르는 사람은 INFOLINK 를 혼자 한 번(실패하면 한 번 더) 읽는다(동기화 한 번에 20명까지, 퇴장의 옾링만 읽기는 방마다 10초 간격 없이). 묶음 읽기에서 혼자서도 실패한 pli 는 '없음'으로 두지 않고 30분 동안 묶음 읽기에서 뺀다. 저장된 `link ''`(pli 있음)는 예전 읽기 실패일 수 있어 모름으로 읽어 다시 확인한다.
 - **멤버 프로필 사진은 쓰지 않는다**: 입장·퇴장·프로필 변경 안내와 프로필 기록에 사진을 싣지 않는다. 저장된 설정·저장 요청의 `profile.photo` 는 오류 없이 버리고, `room_members.photo` 는 더 쓰지 않는다(열은 남겨 둔다). 예전 `changes` 의 `kind:'photo'` 는 화면·조회에 싣지 않는다.
 - 입장·퇴장 안내: `[입장 안내]`|`[퇴장 안내]` / `이름 : @{닉네임}` / `옾링 : {링크|없음|확인 못 함}` / 입장(퇴장) 기록. 기록은 14일 안의 입장(퇴장) 시각이고, 머문 시간·예전 프로필은 기록(관리 화면)에만 남는다.
-- 조회 명령 `{앞글자}프로필 @닉네임` 또는 `{앞글자}프로필 닉네임`: 대상은 멘션 user_id → 현재 이름 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 기록이 없으면 `이 사람의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만) / `all` / `off`. 답(멘션 없음):
+- 조회 명령 `{앞글자}프로필조회 @닉네임` / `옾링 주소` / `닉네임`(예전 `{앞글자}프로필` 도 같다, 7.2 (g)): 대상은 멘션 user_id → 옾링 주소(멤버 명부) → 닉네임(명부, 없으면 기록의 현재 이름) 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 명부에서 찾았는데 바뀐 적이 없는 사람(기록 행 없음)도 지금 이름 · `이전 이름 : 없음` · 입장·퇴장 횟수로 답한다(예전에는 `기록이 없어요` 라 헷갈렸다). 명부·기록 어디에도 없으면 `「{닉네임}」의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만 — 다른 사람에게는 `프로필 조회는 방장과 부방장만 할 수 있어요.`) / `all` / `off`(조용, 다음 처리로). 프로필 기록이 꺼져 있으면 방장·부방장에게 `프로필 기록이 꺼져 있어요. 「{앞글자}프로필기록 켜기」로 켤 수 있어요.` 답(멘션 없음):
 
 ```
 [프로필 기록]
@@ -1404,7 +1436,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 최근 14일 : 입장 {n}회 · 퇴장 {n}회
 ```
 
-- 오픈채팅에서 상태 메시지가 늘 null 이면(실측) 화면의 `상태 메시지` 스위치를 숨기고 `오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.` 를 보인다. `presentRoomConfig` 가 상수 `status_supported`(기본 `true`, 실측 뒤 필요하면 `false`)를 같이 내보내고, 작업 5 는 `false` 일 때 스위치를 숨긴다.
+- 화면의 `상태 메시지` 스위치는 숨기고 `오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.` 를 보인다. `presentRoomConfig` 가 상수 `status_supported` 를 같이 내보내고 지금 값은 **`false`** 다(2026-10): 방 관리봇은 멤버 명부(GETMEM·MEMBER)의 닉네임·pli 만 비교하고 상태 메시지는 읽지 않으므로, 켜도 아무 일도 하지 않는 스위치였다. 저장된 `profile.status` 값은 그대로 둔다.
 
 #### (d) 홍보 금지
 
@@ -1430,6 +1462,34 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - 결과 안내: `[글 가리기]\n글 {n}개를 가렸어요.` + 실패가 있으면 `\n({m}개는 가리지 못했어요)`. `room_log 'hide'` 에 개수·실패·누가(`panel`/user_id).
 - 금지어 상한 300(방 설정만. 계정 단위 옛 금지어는 200 그대로).
 
+#### (f) 기록 카드(이미지) — 입장·퇴장·프로필 변경 안내
+
+- `visit.style`·`profile.style` 이 `image`(기본)이면 `[입장 안내]`·`[퇴장 안내]`·`[프로필 변경 감지]` 를 그림 한 장(PNG, 폭 720)으로 보낸다. 내용은 글 안내와 **같다**: 제목 · 닉네임(크게) · 옾링(주소 / `없음` / `확인 못 함`, 긴 주소는 두 줄) · 프로필 변경은 `변경전` 닉네임과 `옾링 변경전/후` · 기록(`입장 기록` + 횟수 + 최근 시각 5개, 마지막이 이번 — 굵게) · 이번 시각(머리 오른쪽) · 방 이름(작게). 머리 색: 입장 초록 `#15803D` · 퇴장 회색 `#475569` · 프로필 변경 남색 `#4338CA`. 바탕은 흰색(투명 없음 — 카카오톡이 JPEG 로 바꿔도 검게 되지 않게).
+- 값은 `roomfeat.visitNoticeText`·`profileChangeNotice` 가 글과 함께 만드는 `card`(`{kind, title, name, before, fields:[{label, value}], record:{label, count, times}, at}`)이고, 그림은 `sender/src/logcard.mjs`(`logCardSvg` → `card.mjs svgToPng`)가 그린다.
+- **멘션**: 그림에는 멘션을 넣을 수 없다. 그림 바로 뒤에 한 줄 `[입장 안내] @{닉네임}`(`roomfeat.cardMentionLine`, 멘션 @ 하나)을 보내 그 사람을 부른다. 까닭: 안내의 목적(그 사람에게 알림 · 방 사람들이 눌러 프로필을 봄)을 지키면서 긴 글 대신 읽기 쉬운 그림을 보이고, 채팅 목록·알림 미리보기에도 무슨 안내인지 한 줄로 보인다. id 를 모르면(이름만 아는 입장) 그림만 보낸다.
+- 그림 + 한 줄은 발송 대기 목록의 한 항목이지만 방·봇 발송 한도(5.5)는 **2개**로 센다(`Pacer` 의 `cost`). 그림이 나간 뒤에만 한 줄을 보낸다.
+- **글로 대신**: 렌더러를 못 불러오거나 그림을 못 만들면(`png null`) 또는 사진 보내기가 실패하면 지금의 글 안내 **하나**(멘션 포함)를 보낸다(한 줄은 보내지 않는다 — 두 번 부르지 않게). `style: 'text'` 면 처음부터 글 안내.
+- 패널 미리 보기 그림 `public/img/logcard-join.png`·`logcard-profile.png` 는 `node sender/src/logcard-sample.mjs` 가 만든다(카드 모양이나 안내 내용을 바꾸면 다시 만들어 함께 올린다). 체험(3.7)은 같은 SVG 를 `img`(data: 주소)로 보낸다.
+
+#### (g) 방 관리 명령어 (`sender/src/roomcmd.mjs`)
+
+순수 함수(`parseRoomCommand`·`findPerson`·`configChange`·답 문구)는 `roomcmd.mjs`, 실행(권한 읽기·내보내기·저장)은 `botpool.roomCommand`, 체험은 `lib/demo.js roomCommand` 가 같은 함수를 부른다. 방 관리 기능이 동작할 때(`roombotLive`)만 답한다. 부방장 지정 대기 방에서 방장·부방장이 쓰면 `방 관리 명령어는 K bot이 부방장이 된 뒤에 쓸 수 있어요. 방장님이 「{봇 이름}」을 부방장으로 지정해 주세요.`, 다른 사람에게는 조용하다. 답한 명령어 글은 게임으로 넘기지 않는다. 방장·부방장이 아닌 사람의 명령어 글도 홍보 금지·금지어 검사를 그대로 받는다(명령어 뒤에 링크를 숨겨 올리지 못하게).
+
+| 명령어 | 누가 | 하는 일 · 답 |
+|---|---|---|
+| `{앞글자}옾링 [@멘션 \| 옾링 주소 \| 닉네임]` | `cmd.link`(기본 방장·부방장) | `[옾링]\n이름 : {닉네임}\n옾링 : {주소\|없음\|확인 못 함}`. 멘션이면 카드(MEMBER)를 다시 읽어 지금 옾링. 방에 없는 사람을 멘션으로 고르면 `그 사람은 지금 이 방에 없어요.` `off` 면 조용(다음 처리로) |
+| `{앞글자}프로필조회 [@멘션 \| 옾링 주소 \| 닉네임]` (`{앞글자}프로필` 도 같다) | `profile.lookup` | 7.2 (c) |
+| `{앞글자}내보내기 [@멘션 \| 옾링 주소]` | 방장·부방장 | 닉네임만으로는 고르지 않는다(다른 사람을 내보내지 않게 — 사용법 답). 카드로 방에 있는지·권한을 읽고, 방장·부방장·제외 대상·K bot 이면 `방장·부방장·제외 대상은 내보낼 수 없어요.` 그 밖은 `kick(…, 'command', by)` — 한도·연속 실패 멈춤·올킥 감지 멈춤·기록(`kick` `why:'command'`, `by`)이 그대로 걸린다. 답: `{닉네임}님을 내보냈어요.` / `올킥 감지로 K bot의 내보내기가 멈춰 있어요. {n}분쯤 뒤에 다시 입력해 주세요.` / `내보내기가 여러 번 실패해 잠시 멈춰 있어요. …` / `K bot이 짧은 시간에 내보낼 수 있는 인원을 넘었어요. …` / `{닉네임}님을 내보내지 못했어요. 잠시 뒤 다시 입력해 주세요.` |
+| `{앞글자}차단해제 [@멘션 \| 옾링 주소 \| 닉네임]` | 방장·부방장 | 패널의 `내보내기 해제`(3.4.3 `unkick`)와 같다: K bot 이 내보낸 사람이면 `KLDELITEM`, 재입장 차단 목록(`bans`)에서 지움. 나간 사람은 멘션할 수 없어 닉네임(명부 + `bans` 의 이름)으로도 고른다. `{닉네임}님의 내보내기·재입장 차단을 풀었어요. 다시 들어올 수 있어요.` / `K bot이 내보내거나 차단한 사람이 아니에요.` |
+| `{앞글자}설정` | 방장·부방장 | `[설정]` + 기능별 `입장·퇴장 기록 : 켜짐` … `금지어 검열 : 꺼짐 (금지어 n개)` … + `「{앞글자}입장기록 켜기」처럼 켜고 끌 수 있어요.` |
+| `{앞글자}입장기록` · `들낙감지` · `재입장차단` · `프로필기록` · `홍보금지` · `금지어`(=`금지어검열`) · `올킥감지` + `켜기`\|`끄기` | 방장·부방장 | 그 절의 `enabled` 를 바꿔 **패널과 같은 방 설정**(`room_installs.config`)에 저장(2.2 예외, `config_rev+1` → 패널은 다음 새로고침에 그 값을 읽는다). `{기능}을 켰어요.` / `{기능}은 이미 켜져 있어요.` / 뒤가 없으면 사용법 + 지금 상태. 저장이 안 되면 `설정을 저장하지 못했어요. 잠시 뒤 다시 입력해 주세요.` `room_log 'config'`(`detail.text`, `by:'room'`) |
+| `{앞글자}금지어 추가 단어[, 단어]` · `삭제 단어` · `목록` | 방장·부방장 | 7.1 과 같은 규칙(30자 · 300개 · 대소문자 무시 중복). 답에 금지어를 다시 쓰지 않는다(`금지어 2개를 추가했어요. 지금 n개예요.`, 검열이 꺼져 있으면 켜는 법 한 줄). `목록` 은 방장·부방장이 요청했을 때만 `[금지어]\n{단어, …}`(50개까지 + `외 n개`) |
+| `{앞글자}도움 관리` | 누구나 | `[방 관리 명령어]` + 위 명령어와 하는 일(켜진 것만: 옾링·프로필조회·가리기) |
+
+- 사람 고르기(`findPerson`): 멘션 → 옾링 주소(`open.kakao.com/o/{코드}`, https·끝 `/`·`?` 뒤는 봐주고 코드는 대소문자 구분) → 닉네임(허용한 명령어만, 앞의 `@` 는 뗀다). 명부 = 멤버 명부(`v.members`) + (차단해제만) `bans`. 같은 닉네임이 여럿이면 지난 동기화 뒤에 본 사람이 하나일 때 그 사람, 아니면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 못 찾으면 `「{닉네임}」을 이 방에서 찾지 못했어요.` / `그 옾링을 쓰는 사람을 이 방에서 찾지 못했어요.`
+- 옾링·닉네임으로 찾기 전 명부를 30분 넘게 읽지 않았으면(입장·퇴장 기록·프로필 기록이 꺼진 방) GETMEM 동기화를 한 번 한다(최대 8초).
+- `{앞글자}도움` 의 `방 관리 :` 줄: `옾링`(cmd.link 가 off 아님) · `프로필조회`(프로필 기록 켬 + 조회 off 아님) · `가리기`(hide.command) · `내보내기` · `설정`, 그리고 `「{앞글자}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.`
+
 #### 올킥 방지·입장·퇴장 로그·금지어 검열 (기존 기능을 봇 위에서)
 
 - 지금 `guardOnChat`·`guardDue`·`applyVisit`·`coverPlan` 을 방 어댑터 기록으로 그대로 쓴다.
@@ -1440,20 +1500,54 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
 - 점수는 `authorId` 로 저장하고 `{id: name}` 표로 이름을 보인다(이름 빈 사람 둘이 섞이지 않게).
-- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `방 관리 : …`(켜진 가리기·프로필) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
+- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `검 강화 : …`(켜졌을 때, 7.3.1) · `몬스터 수집 : …`(켜졌을 때, 7.3.2) · `방 관리 : …`(7.2 (g)) 줄과 `「!도움 관리」를 입력하면 …` 안내 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기와 `/buy` 의 `!도움` 말풍선(`data-real="help"`, 두 게임·방 관리 모두 켜진 기본값)도 같은 모양.
 - 미니게임만 있는 방에서는 입장·퇴장·홍보·가리기가 조용하다.
+
+#### 7.3.1 추억의 검 강화 (`sender/src/sword.mjs` 규칙 · `sword-art.mjs` 그림)
+
+- 켜기: `games.sword`(기본 켜짐). 방 설치형 봇(`byId`)에서만 — 계정 단위 옛 기능에는 없다. 꺼진 방에서 `!강화`·`!강화도움` → `이 방에서는 검 강화가 꺼져 있어요.`, 다른 검 강화 명령어는 조용하다.
+- `{앞글자}도움` 에 `검 강화 : !강화 !내검 !사냥 !강화도움` 줄(`미니게임 :` 줄 다음, `몬스터 수집 :`·`방 관리 :` 줄 앞). `!게임` 목록과 패널 미리 보기도 같다.
+- 명령어: `!강화 [보호] [축복]`(별칭 `검강화`) · `!내검`(`검`·`검정보`) · `!사냥` · `!판매 [확인]` / `!판매 아이템 [수량]` · `!상점` · `!구매 아이템 [수량]` · `!인벤`(`인벤토리`) · `!거래 @상대 아이템|검 [수량] [가격]` → 받은 사람 `!수락` / `!거절`, 보낸 사람 `!거래취소` · `!강화랭킹`(`검랭킹`) · `!강화도움`.
+- 상태: `room_state.runtime.sword.r = {v, u:{사람 열쇠: {n 이름, g 골드, lv 검 단계, id 검 번호, b 최고 단계, it 아이템, a 마지막 활동, e 강화 시각, h 사냥 시각, w 쿨타임 안내, k 부서진 수, s 판 수}}, t:[거래 제안], q 다음 번호}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 200명까지 — 넘으면 가장 오래 안 한 사람부터, 180일 안 한 사람은 새 사람이 올 때 지운다(거래 중인 사람은 남김). 아이템은 종류마다 999개, 골드 999,999,999. 랭킹 초기화(`games-reset`)는 검 강화 기록도 지운다(7.3.3).
+- 강화: 처음 1,000G 와 `+0 녹슨 철검`. 단계 0~20, 이름은 3단계마다(`녹슨 철검` `강철 장검` `은빛 기사검` `푸른 서리검` `붉은 화염검` `황금 용검` `칠흑의 마검`, +20 `추억의 전설검`). 성공 95%(+0)에서 5%(+19)까지 줄고, +5부터 실패 중 일부가 파괴(2%~30%) — 파괴되면 새 +0 검. 실패는 단계 그대로. 비용 100G~10,000G, +10~+14 는 마력석 1개, +15~+19 는 용의 비늘 1개를 더 쓴다. `보호` 주문서는 파괴를 한 번 막고(+5부터만 받음), `축복` 주문서는 성공 +10%p. 쓴 주문서는 결과와 상관없이 사라진다. 한 사람 10초에 한 번.
+- 사냥: 2분에 한 번. 검 단계 3마다 센 몬스터(이름은 모두 이 게임에서 지은 것) → 골드, 2% 보물 상자(5배), 마력석 12% · 축복 6% · 보호 2% · 용의 비늘 1%(+10부터 4%).
+- 판매: 검은 단계별 판매가(+20 250,000G), +10부터 `!판매 확인` 을 받는다. 아이템은 상점가의 일부(보호 1,000G · 축복 500G · 마력석 800G · 비늘 3,000G). 상점: 보호 4,000G · 축복 2,000G · 마력석 2,500G (비늘은 팔지 않음). 한 번에 1~99개.
+- 거래: 받는 사람은 이 방에서 검 강화를 한 번 한 사람(멘션이 있으면 아이디로, 없으면 같은 이름이 한 명일 때). 끝의 수 2개 = 수량·가격, 1개 = 가격, 없으면 무료. 제안은 2분 동안, 보낸 사람마다 1개(새 제안은 앞 제안을 바꾼다), 받는 사람마다 1개. `!수락` 때 판 사람의 물건(검은 같은 검 번호·단계)과 산 사람의 골드를 다시 보고 한 번에 옮긴다 — 물건이 모자라거나 검이 바뀌었으면 취소, 산 사람 골드가 모자라거나(검이면) 이미 +1 이상 검이 있으면 제안은 남는다. 받은 제안이 없으면 7.3.3(`받은 신청이 없어요.`).
+- 보내기: 다른 게임처럼 방 쿨타임·하루 최대 응답 수를 따른다. 단, 답을 보낼 수 없을 때는 검 강화 상태를 바꾸지 않는다(결과가 안 보인 채 검이 부서지지 않게). 개인 쿨타임 중이면 한 번만 `{이름}님, 강화는 N초 뒤에 다시 할 수 있어요.` 하고 그다음은 조용하다.
+- 그림: 강화 결과 · `!내검` · `!강화랭킹` 은 카드 PNG(720px, card.mjs) 한 장으로 보낸다. 같은 글(`[강화 성공]` · `[내 검]` · `[강화 랭킹]` …)을 대체 글로 붙여, 사진을 못 보내면 글이 나간다. 검 그림은 단계 묶음마다 날·코등이·보석·빛이 바뀐다. 진열장(검·빛)은 단계마다 한 번 그려 둔다. 체험(`lib/demo.js`)은 `images:false` 로 글만 쓴다.
+
+#### 7.3.2 몬스터 수집 (`games.monster`, `sender/src/monster.mjs`)
+
+K bot 이 직접 만든 몬스터 35종(`monster-data.mjs`: 16×16 점 그림 · 기운 5가지 · 등급 4가지 · 진화)만 쓴다. 다른 게임·작품의 이름·모습·상성표를 쓰지 않는다.
+
+- 기운: 햇살 → 물결 → 바위 → 바람 → 별빛 → 햇살(앞이 뒤에 1.5배, 거꾸로 0.7배). 등급: 보통 62 · 희귀 27 · 영웅 9 · 전설 2(야생에서 나오는 비율). 진화한 몬스터는 야생에 나오지 않는다.
+- 명령어(앞글자 뒤): `탐험`(1분에 한 번, KST 하루 첫 탐험에 그물 3개, 10%는 코인·별그물 줍기) · `포획 [그물|별그물|황금그물]`(만남은 5분, 실패하면 등급별로 도망) · `도감 [이름]` · `내몬스터 [번호|@상대]` · `대표 번호` · `놓아주기 번호` · `그물 [종류] [개수]`(상점, 20·60·150코인, 한 번에 1~20개) · `배틀 @상대` · `교환 @상대 내번호 상대번호` · `수락` · `거절` · `몬스터랭킹`(잡은 종류 수 → 최고 레벨, 상위 10) · `몬스터`(전체 명령어와 상성).
+- 처음 하는 사람: 코인 100 · 그물 5. 잡으면 코인(등급별 10·20·40·100)과 대표 몬스터 경험치(6 + 레벨×2). 레벨 업 경험치 `5 + 3×레벨`, 최고 30. 진화 레벨에 닿으면 바로 진화하고 도감에도 올린다.
+- 배틀: 서로의 대표 몬스터가 최대 10번씩 주고받는다(빠른 쪽 먼저, 급소 1/12). 쓰러지지 않으면 남은 체력 비율이 큰 쪽이 이긴다. 이긴 사람 코인 30 · 경험치 12+상대 레벨, 진 사람 코인 10 · 경험치 5 — 보상은 사람마다 KST 하루 5번까지.
+- 신청(배틀·교환)은 받는 사람마다 하나, 보내는 사람마다 하나, 3분 뒤 사라진다. `수락` 은 받은 사람만, `거절` 은 받은 사람(거절)·보낸 사람(취소) 모두. 교환은 수락할 때 두 몬스터가 아직 각자 보관함에 있는지 몬스터 번호(방마다 늘어나는 고유 번호)로 다시 보고 한 번에 맞바꾼다 — 복제되지 않는다.
+- 상대: 멘션이 있으면 멘션 사람 번호(botpool 이 `onInbound` 에 `mentions` 를 넘긴다), 없으면 `@이름` 을 이 방 참가자 이름과 맞춘다.
+- 상태: `runtime.mon = {v, seq, u:{사람 열쇠: {n, c, nets, m:[[번호, 도감번호, 레벨, 경험치]…], ld, dx, e, x, dd, bd, bn, w, l, at}}, p:{받는 사람: 신청}}`. 사람 열쇠는 점수와 같다(`authorId`, 없으면 `n:이름`). 사람 200명(넘으면 마지막 활동이 오래된 사람부터 지움) · 보관함 30마리 상한.
+- 게이트: 몬스터 명령은 먼저 미니게임 쿨타임·하루 최대 응답 수를 보고, 걸리면 상태를 바꾸지 않고 조용히 넘어간다. 한 명령에 답 하나. 꺼진 방 → `이 방에서는 몬스터 수집이 꺼져 있어요.`(`수락`·`거절` 은 조용).
+- 그림: 발견·포획·도감·내 몬스터·몬스터 정보·배틀 결과는 `monster-card.mjs` 가 SVG → PNG(`card.mjs`)로 그려 사진으로 보낸다. 답 항목의 `image` 는 처음 읽을 때 한 번 그린다. 그림을 못 만들거나 사진 전송이 실패하면 같은 내용의 글(`text`)을 보낸다.
+
+#### 7.3.3 두 게임이 같이 쓰는 것
+
+- `수락` · `거절`: 검 강화 거래 제안과 몬스터 배틀·교환 신청이 같은 명령어를 쓴다(`features.answerOffer`). 이 사람이 **받은** 살아 있는 제안·신청이 두 게임에 다 있으면 **가장 최근에 받은 것**의 게임이 답한다. 받은 것이 없을 때 `거절` 은 이 사람이 보낸 몬스터 신청을 취소한다. 아무것도 없으면 `받은 신청이 없어요.`(두 게임이 다 꺼져 있으면 조용).
+- 명령어 이름이 겹치지 않는다: 검 강화 `강화 검강화 내검 검 검정보 사냥 판매 상점 구매 인벤 인벤토리 거래 거래취소 강화랭킹 검랭킹 강화도움` · 몬스터 수집 `탐험 포획 도감 내몬스터 대표 놓아주기 그물 배틀 교환 몬스터랭킹 몬스터` · 방 관리 명령어(7.2 (g))와 기존 미니게임 명령어와도 다르다(selfcheck 가 맞춰 본다).
+- 그림 카드: 답 항목의 `image` 는 처음 읽을 때 한 번 그린다(`pushSend` 에 그리는 함수를 넘긴다). 체험(`images:false`)은 그리지 않는다.
+- 패널 `랭킹 초기화`(`games-reset`)는 점수와 함께 그 방의 검 강화(`runtime.sword`)·몬스터 수집(`runtime.mon`) 기록도 지운다.
 
 ### 7.4 콘솔 칸 (작업 5, id 고정)
 
 | 화면 | 칸 |
 |---|---|
-| `r-visit` | `#r-visit-on`(입장·퇴장 로그) · 들낙 감지 `#r-churn-on` `#r-churn-joins`(.num 2~20 회) `#r-churn-min`(.num 1~1,440 분) `#r-churn-action`(.seg `경고만`=warn / `내보내기`=kick) `#r-churn-notice` + 문장 미리 보기 `#r-churn-sent` `<b>10분</b> 안에 <b>3회</b> 이상 들어오면 경고합니다.` · 나갔을 때 내보내기 `#r-leave-on`(설명: `방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.` — 10.1 #5 실측 뒤 한쪽 문장만 남긴다) `#r-leave-notice` · 제외할 사람 `#r-exempt`(.chips) + `#r-exempt-pick`(최근 작성자 select) · 표 `#r-visit-tbl`(기록), `#r-kick-tbl`(K bot 이 내보낸 사람, 행마다 `내보내기 해제`) |
-| `r-profile` | `#r-profile-on` `#r-profile-name` `#r-profile-status` `#r-profile-lookup`(.seg `관리자만`=staff / `모두`=all / `끄기`=off) · 표 `#r-profile-tbl`(열 `항목` 추가) |
+| `r-visit` | `#r-visit-on`(입장·퇴장 로그) · 들낙 감지 `#r-churn-on` `#r-churn-joins`(.num 2~20 회) `#r-churn-min`(.num 1~1,440 분) `#r-churn-action`(.seg `경고만`=warn / `내보내기`=kick) `#r-churn-notice` + 문장 미리 보기 `#r-churn-sent` `<b>10분</b> 안에 <b>3회</b> 이상 들어오면 경고합니다.` · 나갔을 때 내보내기 `#r-leave-on`(설명: `방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.` — 10.1 #5 실측 뒤 한쪽 문장만 남긴다) `#r-leave-notice` · 제외할 사람 `#r-exempt`(.chips) + `#r-exempt-pick`(최근 작성자 select) · 방에 보내는 안내 `#r-visit-style`(.seg `이미지`=image / `글`=text, 미리 보기는 `public/img/logcard-join.png` + 멘션 한 줄 / 글 안내) · 표 `#r-visit-tbl`(기록), `#r-kick-tbl`(K bot 이 내보낸 사람, 행마다 `내보내기 해제`. 방의 `!내보내기`·`!차단해제` 도 여기에 걸린다) |
+| `r-profile` | `#r-profile-on` `#r-profile-name` `#r-profile-status`(`status_supported:false` 라 숨김) `#r-profile-lookup`(.seg `방장·부방장만`=staff / `모두`=all / `끄기`=off, `!프로필조회`) `#r-profile-style`(.seg `이미지`/`글`) · 오픈프로필 조회 명령어 `#r-cmd-link`(.seg 같은 세 값, `!옾링`, 프로필 기록과 따로) · 표 `#r-profile-tbl`(열 `항목` 추가) |
 | `r-promo` | `#r-promo-on` `#r-promo-links` `#r-promo-cards`(`공유 카드·프로필 공유`) `#r-promo-media`(`사진·동영상·파일`) `#r-promo-hide` `#r-promo-kick`(.num 0~10, hint `0이면 내보내지 않습니다`) `#r-promo-reset`(.num 1~720 시간) `#r-promo-notice` · 미리 보기 `#r-promo-preview`(.preview-chat) |
 | `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
 | `r-guard` | `#r-guard-on` `#r-guard-secs` `#r-guard-count` `#r-guard-sent` · 표 `#r-guard-tbl` |
-| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
-| `room` | `#r-prefix` `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` |
+| `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-sword`(추억의 검 강화) `#r-games-monster`(몬스터 수집) `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
+| `room` | `#r-prefix` · `#row-r-cmds`(방 관리봇이 있으면: 방에서 `!설정`·`!입장기록 켜기`·`!도움 관리` 안내) `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` · 옮기기·다시 설치 `#room-move-grp` `#r-reinstall-act` `#r-reinstall-btn` `#r-reinstall-note` `#r-move-form` `#r-move-link` `#r-move-check` `#r-move-note` `#r-move-pv` `#r-move-q` `#r-move-passcode` `#r-move-yes` `#r-move-no` `#r-move-err` `#r-move-rule` `#room-move-go` |
 
 화면 문구 규칙: 강퇴 대신 `내보내기`, `들낙 방지` 금지(`들낙 감지`), `쿨다운`→`쿨타임`, `접두사`→`앞글자`, `1일`→`하루`. 내보내기 관련 화면에는 `.limit` `내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.`
 
@@ -1471,7 +1565,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
     profile: { enabled: cfg.profile.enabled, rooms: ['r'] },
     cover:   { enabled: cfg.cover.enabled, rooms: ['r'], words: cfg.cover.words, links: cfg.cover.links && !(cfg.promo.enabled && cfg.promo.links) },
     guard:   { kickOn: cfg.guard.enabled, rooms: ['r'], kickSecs: cfg.guard.secs, kickCount: cfg.guard.count },
-    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz,
+    minigame:{ enabled: cfg.games.enabled, rooms: ['r'], cmdPrefix: cfg.cmdPrefix, word, baseball, dice, rps, quiz, sword, monster,
                cooldownMs: cfg.games.cooldownSec * 1000, dailyLimit: cfg.games.dailyLimit },
   },
   rooms: [{ key: 'r', chat_id, name: link_name, kind: 'open', list_kind: 'open_room' }],
@@ -1498,17 +1592,20 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 11. 금지어 300개 통과·301번째 거절, 300개로 일치 동작.
 12. `locoOk({statusCode:0, body:{status:-203}}) === false`.
 13. 미니게임: 방 A 하루 한도가 방 B 를 막지 않음. 끈 게임 → 사용 중지 문구. 이름 빈 두 사람 점수 분리. 미니게임만 있는 방 → `!주사위` 답, 입장 안내·홍보·가리기 조용.
+13-1. 추억의 검 강화(`sender/src/sword-check.mjs`, 따로 실행): 확률 표(성공은 줄고 파괴는 +5부터), 고정 난수로 성공·파괴·실패 경계와 보호·축복 주문서, 씨앗 난수 2만 번으로 확률이 표대로(±1.2%p), 골드·재료 부족 → 아무것도 바뀌지 않음, 개인 쿨타임(한 번만 안내), 사냥 드롭, 판매 확인, 상점 한도, 거래(읽기 · 옮긴 뒤 합계가 같음 · 두 번 수락 없음 · 제안 뒤 물건이 바뀌면 취소 · 만료 · 멘션 · 같은 이름 둘), 검 거래(검 번호가 하나뿐), 아무렇게나 3,000번(음수·한도 초과·검 복제 없음), 200명 정원·180일 정리·JSON 저장·망가진 저장본, 랭킹, 21단계 그림이 늘 같은 SVG · PNG 렌더, `onInbound` 연결(방 쿨타임·하루 한도에 막히면 상태 그대로, 꺼진 방, `images:false`, 멘션 전달, 옛 계정 경로에는 없음).
+13-2. 몬스터 수집(7.3.2, `sender/src/monster-check.mjs`, 따로 실행): 도감 자료 모양·상성 한 바퀴, 씨앗 난수로 탐험·포획·도망·출석 보상, 진화, 배틀 결정성·보상 하루 5번, 교환 맞바꿈·두 번 수락·놓아준 뒤 수락(복제 없음)·만료, 사람 200명 정리, JSON 왕복, 모든 카드 SVG·PNG, `onInbound` 연결(쿨타임·하루 한도에 상태 그대로, 멘션 전달, 꺼진 방).
 14. 격리: 방 A 어댑터의 `logsView` 에 방 B 기록 없음.
 15. v2 권리: `macro_until` 지난 고객 기록 → `onInbound` 매크로 없음. `legacy_room_until` 0 → `visitRoom` null.
 16. 입장 오류 매핑: -324 → `link_gone`, -312 → `joining`+`rate_limited`, -815 → `kicked`, -444 → 행은 `rate_limited` + 전역 `join_paused_until`(봇은 `bot_down` 아님), 오픈프로필 입장(`ptp:16`) 거절(`noopen`) → `profile_blocked` 이고 다른 프로필로 다시 보내지 않음, 기본 프로필을 막은 방(`noprof`)도 `ptp:16` 으로 들어감, 모든 JOINLINK 가 `ptp:16`, 참여코드 실패 → `passcode_wrong`(9.4 의 가짜 연결로, 실제 `sendPacket` 경로를 탄다).
 17. 게이트: 미니게임만 산 방(perm 4, `active`)에서 `/v1/bot/hide`·`/v1/bot/unkick`·`/v1/bot/people` → `no_roombot`. 방 관리봇 방이 `waiting_host` 면 `not_active`. unkick 대상이 `bans`·kick 기록에 없으면 `not_kicked`.
-18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐).
+18. 기본 설정: 미니게임만 있는 설치를 기본 config 로 만들고 가짜 입장 직후 `!도움` → 게임 목록 답 1개(`games.enabled` 기본 켜짐, 검 강화·몬스터 수집 줄 포함).
 19. 권한 읽기: CHATONROOM 응답 `{olu:{lmt:4}}` → `active`, `olu` 없음 + MEMBER `{members:[{mt:2}]}` → `waiting_host`, 둘 다 없음 → 상태 유지.
 20. 푸시 모양(가짜 연결의 `onPush` 로 주입): SYNCMEMT `{c, li, mids:[self], mts:[4]}` → 3초 뒤 권한 읽기 1회. 피드 11 MSG(`type:0`, `message` JSON `{feedType:11, members:[{userId:self}]}`) → 같음. LINKKICKED `{c, li, chatLog:{type:0, message:'{"feedType":6,"members":[{"userId":self}]}'}}` → `error/kicked`. LNKDELETED `{li}` → `error/room_deleted`. KICKOUT `{reason:-2}` → `markDead` 없음, `{reason:0}` → `bot_down`.
 21. 나가기 대기열: 같은 설치에 두 행(봇 A, 봇 B) → 둘 다 처리. 나갈 봇 = 지금 봇이고 link_id 같음 → `kept`, `leaveChat` 없음. 나가기가 입장보다 먼저.
 22. 다시 접속 금지: JOINLINK 가 알 수 없는 status → `client.close`/새 로그인 없이 `getChats` 확인만. 이미 그 `li` 의 방에 있으면 JOINLINK 를 보내지 않음.
 23. 예산: 봇 시간 예산 20 을 다 쓰면 21번째 입장은 `rate_limited` + `next_try_at` = 예산 복귀 시각. 조회 예산이 없으면 `/v1/bot/resolve` 가 `budget`.
 24. 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다. 방 A 강퇴 11번째(1시간 안) → `skip`.
+40. 방 관리 명령어·기록 카드: #40-1 명령어 읽기(띄어쓰기·별칭·켜고 끄기가 조회보다 먼저)·사람 고르기(멘션·옾링 주소·닉네임·같은 닉네임·내보내기는 닉네임 거절)·설정 바꾸기 답·저장본 합치기·문구 규칙. #40-2 `!도움`·`!도움 관리`(스위치 따라). #40-3 카드 = 글 안내와 같은 값, 멘션 한 줄 extra, SVG 이스케이프, PNG 폭 720, 패널 미리 보기 그림. #40-4 발송 한도 cost 2. #40-5 sender 기본값 = `room-config` 기본값. #40(가짜 연결): 부방장 지정 대기 답, `!옾링`(권한·사용법·닉네임·멘션·주소·같은 닉네임·못 찾음·`off` 조용·`all`), `!프로필조회`(바뀐 적 없는 사람·별칭·권한), `!내보내기`(권한·닉네임 거절·방장·K bot 보호·올킥 감지 멈춤 답·주소로 KICKMEM + 기록 `why:'command'`·`by`·방에 없음), `!차단해제`(KLDELITEM·아닌 사람·권한), `!설정`·켜고 끄기(저장본·`config_rev`·모르는 칸 유지·`room_log 'config'`·이미 켬·사용법·옛 재조정 행이 되돌리지 않음·패널 저장과 겹치면 다시 읽어 패널 값 유지·저장 실패 답), 금지어 추가·목록·삭제·켜기, 부모 검증 통과, 방장·부방장이 아닌 사람의 명령어 글 홍보 금지, 입장 안내 = 사진(720) + 바로 뒤 멘션 한 줄, 사진 실패 → 글 안내 하나(멘션), `style:'text'` → 글, png 없음 → 글.
 27. 오픈프로필(D12, 5.8): SYNCLINK 걸러내기(lt 1 + `op`/`/me/` 만, 남의 것·lt 2·`/o/` 뺌). (1) 오픈프로필 1개 → JOINLINK `ptp:16` + 그 `pli`, 방 구성원 이름·입장 안내 = 오픈프로필 이름, `bot_accounts` 칸 기록, `/v1/bot/status`·`/v1/bot/room` 의 `profile:'open'`, 트레이스(`raw SYNCLINK`·`CHATONROOM.olu`, `pc`·`tk` 가림). (2) 오픈프로필 없음 → `bot_no_open_profile`(`none`), JOININFO·JOINLINK 없음. (3) 오픈프로필을 만들면(SYNCLINKCR) 스스로 다시 입장. (4) 2개 → 고르지 않으면 첫 번째, 고르면 그것(이미 들어간 방은 `other`), 고른 것이 사라지면 `gone`(입장 멈춤), 자동으로 돌리면 지난번 것으로 다시 입장. (5) 기본 프로필로 들어가 있는 방 → `off` 면 스스로 바꾸지 않음, 관리자 요청에 `UPLINKPROF` 1번(권한·상태 유지, LEAVE·JOINLINK 없음), `auto` 면 부방장 대기 방을 바꾸고 새 이름 안내. (6) `UPLINKPROF` 거절(`noopen`) → 방 그대로, `fail` 기록, 24시간 안에 다시 보내지 않음, 나가지 않음. 관리자 `rejoin` → LEAVE → JOININFO → JOINLINK `ptp:16`, 새 이름으로 입장 안내. (8) SYNCLINK 실패 + 남긴 값 없음 → 행은 `queued`(오류 아님), 관리자 다시 읽기에 성공하면 입장. 남긴 값이 있으면 실패해도 `ok`. 링크 확인은 이 계정 오픈프로필만. (9) `ptp:16` 응답 유실 → 방 목록으로 성공 처리, 방 프로필 `open`.
 
 ### 7.8 `room_log.kind` 와 패널 한 줄
@@ -1517,9 +1614,10 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 |---|---|
 | `join` `leave` | (기록 표가 따로 그림, 조치 기록에는 넣지 않음) |
 | `churn` | 들낙 감지 · {이름} {M}분 {n}회 · {경고/내보내기/내보내기 실패} |
-| `kick` | 내보내기 · {이름} · {사유: 들낙/퇴장/홍보/수동} |
+| `kick` | 내보내기 · {이름} · {사유: 들낙/퇴장/홍보/수동/방 명령어} |
 | `kick_fail` | 내보내기 실패 · {이름} · {사유} |
 | `unkick` | 내보내기 해제 · {이름} |
+| `config` | 방에서 설정 변경 · {이름} · {들낙 감지 켜기 / 금지어 2개 추가 …}(7.2 (g)) |
 | `promo` | 홍보 금지 · {이름} · 경고 {n}회 |
 | `hide` | 글 가리기 · {n}개 (실패 {m}개) · {패널/방장} |
 | `cover` | 금지어 가림 · {이름} |
@@ -1553,9 +1651,9 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 7. **OAuth**: PKCE S256 + state + nonce, id_token 의 iss·aud(·azp)·exp·nonce 검사, `sub` 로만 식별, 상태 쿠키는 콜백에서 항상 삭제, 링크 모드는 세션 id 가 같아야 함, `next` 는 `^/(?!/)[\w\-./?=&#%]{0,200}$` 만, 웹뷰 UA 차단, 끝점 덮어쓰기는 localhost/https 만.
 8. **채널톡**: `memberId` 는 `CHANNEL_MEMBER_SECRET` 이 있을 때만, 값은 회원 번호가 아니라 `CONFIG_SECRET` 파생 키의 HMAC(6.10 7, 추측 불가). `memberHash` = hex 비밀로 HMAC-SHA256. **채널 데스크에서 회원 해시(Member Hash) 검증을 켠 뒤에** `CHANNEL_MEMBER_SECRET` 을 넣는다(꺼져 있으면 아무 브라우저나 남의 memberId 로 부팅해 그 회원의 지난 상담을 볼 수 있다) — DEPLOY.md·`warnEnv` 가 이를 알린다. 없으면 이름만 보내는 익명 부팅. 전화번호·이메일은 보내지 않는다. 콘솔에는 SDK 를 싣지 않는다(D25).
 9. **레이트리밋·잠금**: 3.1 표. 로그인 실패 잠금은 `(아이디, IP)` 단위, 아이디 단독은 늦추기만(남이 본인을 내쫓지 못하게, 존재 여부 노출 없음). 미리 보기는 회원당 시간 60회 + sender 의 봇별 조회 예산(봇 계정 보호, 5.3).
-10. **봇 보호**: 입장 간격·백오프·봇별 입장/조회 예산(5.3), 입장 실패로 다시 접속하지 않음, 고객 다시 시도 지수 간격·상한(3.4.3), 방별 공정 몫 한도(5.5), 설치 금지 방·확인 대기(D28), 강퇴·가리기 예산, 방장·부방장·제외는 절대 내보내지 않음, 이름만으로는 내보내지 않음, 모든 강퇴 기록·해제 가능(K bot 이 내보낸 사람만). 기본값은 `경고만`.
+10. **봇 보호**: 입장 간격·백오프·봇별 입장/조회 예산(5.3), 입장 실패로 다시 접속하지 않음, 고객 다시 시도 지수 간격·상한과 고객 옮기기(24시간)·다시 설치(30분) 간격·회원당 시간 20번(3.4.3), 방별 공정 몫 한도(5.5), 설치 금지 방·확인 대기(D28), 강퇴·가리기 예산, 방장·부방장·제외는 절대 내보내지 않음, 이름만으로는 내보내지 않음, 모든 강퇴 기록·해제 가능(K bot 이 내보낸 사람만). 기본값은 `경고만`.
 11. **개인정보**: 멤버 프로필 사진은 저장하거나 안내·화면에 내보내지 않는다. 방 기록·작성자 목록은 그 방 주인 회원에게만, 그리고 방 관리봇이 있는 방에서만(미니게임만 산 회원은 남의 방 구성원 id·이름을 받지 않는다, 3.4.3). 관리자 화면도 봇 계정 비밀번호를 저장하지 않는다(등록 흐름은 sender 메모리에만, 지금과 같음).
-12. **감사 기록**(`lib/audit.js` `KINDS` 추가): `member`(signup·pw_change·pw_reset_google·pw_reset_admin·google_link·google_unlink·claim·claim_reassign·logout_all·block·unblock·grant), `member_lockout`(알림 종류), `install`(retry·move·remove·rebind·products·grant·transfer·block·release), `order`(기존 + member_cancel), `bot`(register·update·remove). `audit.log(kind, {key?, member_id?, detail, ip})`. 실패한 로그인을 하나하나 남기지 않는다.
+12. **감사 기록**(`lib/audit.js` `KINDS` 추가): `member`(signup·pw_change·pw_reset_google·pw_reset_admin·google_link·google_unlink·claim·claim_reassign·logout_all·block·unblock·grant), `member_lockout`(알림 종류), `install`(retry·move·remove·rebind·products·grant·transfer·block·release, 고객 옮기기·다시 설치는 member_move·member_relink·member_reinstall), `order`(기존 + member_cancel), `bot`(register·update·remove). `audit.log(kind, {key?, member_id?, detail, ip})`. 실패한 로그인을 하나하나 남기지 않는다.
 13. **XSS**: 사이트·관리 화면은 서버 문자열을 `textContent` 로만, 콘솔은 `esc()` 를 거쳐서만 `innerHTML`. 방 이름·닉네임은 고객이 정하는 값이다.
 14. **화면 틀 막기·스크립트 제한**: 모든 HTML 에 `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'`, `/panel`·`/manage` 는 CSP `script-src 'self'` 추가(6.1).
 
@@ -1762,6 +1860,8 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `AUTH_HASH_QUEUE_MAX` | 20 | scrypt 대기열 상한 |
 | `MEMBER_MAX_PENDING_ORDERS` `MEMBER_MAX_PENDING_ROOMS` `IP_MAX_PENDING_ORDERS` | 3 / 10 / 10 | D22 |
 | `ROOM_RETRY_BASE_MS` | 120000 | 고객 다시 시도 첫 간격(3.4.3) |
+| `ROOM_SELF_MOVE_GAP_MS` | 86400000 | 고객 봇 옮기기(다른 방) 설치마다 간격(3.4.3) |
+| `ROOM_SELF_REINSTALL_GAP_MS` | 1800000 | 고객 같은 방에 다시 설치 설치마다 간격(3.4.3) |
 | `ROOM_HOLD_WORDS` | — | 쉼표 목록. 방 이름이 걸리면 확인 대기(D28) |
 | `RATE_AUTH_PER_MIN` `RATE_SIGNUP_PER_MIN` `RATE_OAUTH_PER_MIN` `RATE_PREVIEW_PER_MIN` `RATE_MEMBER_PER_MIN` | 10/5/20/20/180 | |
 | `RATE_DEMO_PER_MIN` | 180 | 사이트 체험 `/api/demo*` (3.7) |
@@ -1823,7 +1923,7 @@ DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설�
 | 줄·자리 | 지금 (요약) | 바꿀 문구 |
 |---|---|---|
 | 7 `meta description` | 카카오톡 자동발송 매크로 · 대화방 관리봇 · 미니게임봇. K bot 1개월 하나로… | K bot은 카카오톡 오픈채팅방 매크로와 방 관리봇·미니게임봇을 제공합니다. 매크로는 내 카카오 계정으로 발송하고, 방 관리봇과 미니게임봇은 K bot 계정이 방에 들어가 동작합니다. |
-| 9 `og:description` | 여러 카카오 계정을… K bot 1개월 하나에… | 카카오톡 매크로는 1개월 20,000원, 방 관리봇과 미니게임봇은 방 1개 15,000원입니다. 회원 계정으로 구매하고 웹 콘솔에서 설정합니다. |
+| 9 `og:description` | 여러 카카오 계정을… K bot 1개월 하나에… | 카카오톡 매크로는 1개월 20,000원, 방 관리봇과 미니게임봇은 방 1개 10,000원입니다. 회원 계정으로 구매하고 웹 콘솔에서 설정합니다. |
 | 66 상단 `내 키` | `/my` 버튼 | 지운다(6.2 의 상단 바로 바꿈) |
 | 75 kicker | 라이선스 키 1개 · 카카오 계정 최대 8개 | `<span>상품 3종</span><span class="sep" aria-hidden="true"></span><span>회원 계정</span>` |
 | 76 h1 | 여러 카카오 계정을 / 하나의 콘솔에서 운영합니다 | `카카오톡 오픈채팅방을<br><span class="dim">하나의 콘솔에서</span> 운영합니다` |

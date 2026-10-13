@@ -803,8 +803,85 @@ router.post('/panel/api/bot-room/retry', wrap(async (req, res) => {
   res.json({ ok: true, room: again ? again.view : got.view });
 }));
 
+// ── 봇 옮기기·다시 설치 (무료, 3.4.3) ──────────────────────────────────────
+// 방마다 간격(옮기기 24시간 · 다시 설치 30분)과 연속 횟수는 installs 가 DB 로 센다. 여기서는 옮기기 시도를 회원당 시간 20번으로
+// 묶는다 — 옮기기는 실제 봇 계정이 카카오에 링크를 조회한다(실패한 시도는 DB 간격에 잡히지 않으므로). IP 버킷은 preview(분당 20).
+const MOVE_PER_HOUR = 20;
+const moveHits = new Map();   // memberId → {start, n}
+
+function moveAllowed(memberId, now) {
+  const t = now || Date.now();
+  if (moveHits.size > 5000) {
+    for (const [k, v] of moveHits) if (t - v.start >= 3600000) moveHits.delete(k);
+  }
+  const cur = moveHits.get(memberId);
+  if (!cur || t - cur.start >= 3600000) {
+    moveHits.set(memberId, { start: t, n: 1 });
+    return { ok: true };
+  }
+  cur.n += 1;
+  if (cur.n > MOVE_PER_HOUR) return { ok: false, retryAfter: Math.ceil((cur.start + 3600000 - t) / 1000) };
+  return { ok: true };
+}
+
+function bodyPasscode(res, body) {
+  if (body.passcode === undefined || body.passcode === null || body.passcode === '') return { ok: true, value: undefined };
+  if (typeof body.passcode !== 'string' && typeof body.passcode !== 'number') { fail(res, 400, 'bad_passcode', TEXT.bad_passcode); return null; }
+  const v = String(body.passcode).trim();
+  if (v.length > 20) { fail(res, 400, 'bad_passcode', TEXT.bad_passcode); return null; }
+  return { ok: true, value: v || undefined };
+}
+
+function selfFail(res, r) {
+  const extra = {};
+  if (r && r.retry_after !== undefined) {
+    extra.retry_after = r.retry_after;
+    const sec = Math.ceil((Number(r.retry_after) - Date.now()) / 1000);
+    if (sec > 0) res.set('Retry-After', String(sec));
+  }
+  return fail(res, (r && r.status) || 409, (r && r.reason) || 'failed', (r && r.error) || TEXT.bot_failed, extra);
+}
+
+router.post('/panel/api/bot-room/move', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const got = await roomFor(res, s.member.id, body.id);
+  if (!got) return;
+  if (typeof body.link !== 'string' || !body.link.trim() || body.link.length > 2000) {
+    return fail(res, 400, 'bad_link', installs.TEXT.bad_link);
+  }
+  const pc = bodyPasscode(res, body);
+  if (!pc) return;
+  const lim = moveAllowed(Number(s.member.id));
+  if (!lim.ok) {
+    res.set('Retry-After', String(lim.retryAfter));
+    return fail(res, 429, 'rate_limited', '요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.');
+  }
+  const r = await installs.selfMove(got.id, body.link, { memberId: s.member.id, passcode: pc.value, req: req });
+  if (!r || !r.ok) return selfFail(res, r);
+  nudge(got.id);
+  const again = await installs.getForMember(s.member.id, got.id);
+  res.json({ ok: true, kind: r.kind, same_room: !!r.same_room, held: !!r.held, room: again ? again.view : got.view });
+}));
+
+router.post('/panel/api/bot-room/reinstall', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const got = await roomFor(res, s.member.id, body.id);
+  if (!got) return;
+  const pc = bodyPasscode(res, body);
+  if (!pc) return;
+  const r = await installs.selfReinstall(got.id, { memberId: s.member.id, passcode: pc.value, req: req });
+  if (!r || !r.ok) return selfFail(res, r);
+  nudge(got.id);
+  const again = await installs.getForMember(s.member.id, got.id);
+  res.json({ ok: true, kind: 'reinstall', same_room: true, held: false, room: again ? again.view : got.view });
+}));
+
 // ── 조치 기록 한 줄 (7.8). detail 칸은 sender(작업 3)가 쓴다 — 아래 이름들을 읽는다.
-const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '수동' };
+const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '방 명령어' };
 const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '글 가리기', rewrite: '글 가리기' };
 // 건너뛴 까닭(sender 의 detail.note). note 가 없으면 K bot 자체 한도(방·시간·하루)를 넘은 것이다.
 const SKIP_WHY = { wave: '올킥 감지 중이라 건너뜀', paused: '실패가 이어져 잠시 멈춤', stale: '늦어져서 건너뜀' };
@@ -839,6 +916,11 @@ function roomLogText(row) {
       (note && typeof note === 'string' && note.length <= 20 ? ' · ' + note : '');
   }
   if (kind === 'unkick') return '내보내기 해제 · ' + name;
+  // 방 안 설정 명령어(7.2 (g)): detail.text 는 sender 가 만든 짧은 글(「들낙 감지 켜기」·「금지어 2개 추가」)
+  if (kind === 'config') {
+    const what = pick(d, ['text']);
+    return '방에서 설정 변경 · ' + name + (typeof what === 'string' && what.length <= 40 ? ' · ' + what : '');
+  }
   if (kind === 'promo') {
     const n = pick(d, ['n', 'count', 'warn']);
     return '홍보 금지 · ' + name + (n !== undefined ? ' · 경고 ' + n + '회' : '');

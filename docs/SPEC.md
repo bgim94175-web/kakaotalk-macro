@@ -22,7 +22,7 @@
 - `BANK_INFO` `CONTACT_INFO` `PURCHASE_BASE` — 구매 페이지 표시값·주문 주소.
 - `DEPOSIT_TOKEN` `DEPOSIT_AUTO_APPROVE` — 자동 입금확인.
 - `SENDER_TOKEN` `SENDER_KEY` — 발송 자식. 없으면 발송 자식만 안 뜨고 나머지는 열린다.
-- 회원·주문 한도: `MEMBER_MAX_SESSIONS`(3) `MEMBER_MAX_ACCOUNTS`(3) `MEMBER_MAX_PENDING_ORDERS`(3) `MEMBER_MAX_PENDING_ROOMS`(10) `IP_MAX_PENDING_ORDERS`(10) `ROOM_RETRY_BASE_MS`(120000) `ROOM_HOLD_WORDS` `ROOM_LOG_KEEP_DAYS`(30) `ORDER_PENDING_TTL_MS`(48시간).
+- 회원·주문 한도: `MEMBER_MAX_SESSIONS`(3) `MEMBER_MAX_ACCOUNTS`(3) `MEMBER_MAX_PENDING_ORDERS`(3) `MEMBER_MAX_PENDING_ROOMS`(10) `IP_MAX_PENDING_ORDERS`(10) `ROOM_RETRY_BASE_MS`(120000) `ROOM_SELF_MOVE_GAP_MS`(24시간) `ROOM_SELF_REINSTALL_GAP_MS`(30분) `ROOM_HOLD_WORDS` `ROOM_LOG_KEEP_DAYS`(30) `ORDER_PENDING_TTL_MS`(48시간).
 
 ---
 
@@ -31,12 +31,12 @@
 | id | 화면 이름 | 가격 | 단위 | 동작 주체 |
 |---|---|---|---|---|
 | `macro` | 카카오톡 매크로 | 20,000원 | 1개월(30일), 1~12개월 | 고객 **자기** 카카오 계정(콘솔에 등록, 회원당 3개) |
-| `roombot` | 방 관리봇 | 15,000원 | 방 1개, 기간 없음 | 운영자 **K bot 계정**(방장이 부방장으로 지정해야 방 관리 기능 동작) |
-| `minigame` | 미니게임봇 | 15,000원 | 방 1개, 기간 없음 | 운영자 K bot 계정(입장하면 바로 동작) |
+| `roombot` | 방 관리봇 | 10,000원 | 방 1개, 기간 없음 | 운영자 **K bot 계정**(방장이 부방장으로 지정해야 방 관리 기능 동작) |
+| `minigame` | 미니게임봇 | 10,000원 | 방 1개, 기간 없음 | 운영자 K bot 계정(입장하면 바로 동작) |
 
 ```
 PRODUCTS = { macro:{id,label,unit:'month',price:20000,days:30,min:1,max:12,desc},
-             roombot:{id,label,unit:'room',price:15000,desc}, minigame:{…} }
+             roombot:{id,label,unit:'room',price:10000,desc}, minigame:{…} }
 MAX_ROOMS = 10
 quote({macro_months, rooms:[{products:[…]}]})
   → {ok:true, lines:[{product, months?, room?, unit_price, amount}], total}
@@ -44,7 +44,7 @@ quote({macro_months, rooms:[{products:[…]}]})
 table()  → GET /api/price 본체      label(id) · bankInfo() · contactInfo()
 ```
 
-- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 15000`. 할인 없음. 주문 1건 최대 540,000원(매크로 12개월 + 방 10개 × 2상품).
+- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 10000`. 할인 없음. 주문 1건 최대 440,000원(매크로 12개월 + 방 10개 × 2상품).
 - 카카오톡 매크로 기간: 결제 확인 시점부터 30일 × 개월. 다시 사면 `max(지금, 만료) + 30일 × 개월`(`members.macro_until`). 만료되면 sender 가 그 회원의 고객 계정 접속을 멈춘다.
 - 방 상품: 설치 권리는 오픈채팅방의 **link_id**(카카오가 정한 방 id)에 영구히 묶인다. 한 방에 두 상품을 함께 둘 수 있고 같은 K bot 계정이 맡는다. 결제된 설치는 방마다 1개(부분 UNIQUE). 미입금 예약은 다른 회원을 막지 않고 **먼저 입금된 주문이 방을 갖는다**(D9).
 - 화면 이름·설명은 `lib/features.js` `LABELS`·`DESCS` 가 단일 소스다(`자동발송 매크로`·`대화방 관리봇` 은 더 쓰지 않는다).
@@ -73,12 +73,12 @@ table()  → GET /api/price 본체      label(id) · bankInfo() · contactInfo()
 **`orders.items`**(줄 단위, 방 상품은 상품마다 한 줄이고 항상 `install_id` 가 있다):
 ```json
 [ { "product": "macro",    "months": 2, "unit_price": 20000, "amount": 40000 },
-  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 },
-  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 } ]
+  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 },
+  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 } ]
 ```
 확인하지 못한 방 줄은 `"unverified": true`, 확인 대기 낱말(`ROOM_HOLD_WORDS`)에 걸린 방 줄은 `"hold": true`. 참여코드는 줄에 넣지 않는다(`room_installs.passcode_ct` 에만, AES-256-GCM 봉인).
 
-**`orders.applied`**: `{ "macro": {"days":60, "until":ms}, "rooms":[{"install_id":12, "products":["roombot","minigame"]}], "skipped":[{"install_id":13, "products":["minigame"], "amount":15000, "why":"room_taken"}] }`.
+**`orders.applied`**: `{ "macro": {"days":60, "until":ms}, "rooms":[{"install_id":12, "products":["roombot","minigame"]}], "skipped":[{"install_id":13, "products":["minigame"], "amount":10000, "why":"room_taken"}] }`.
 예전 키 주문이 이관된 키를 가리킨 경우 `{"legacy_to_member": true, "macro": {...}, "legacy_room_until": ms}`.
 
 ---
