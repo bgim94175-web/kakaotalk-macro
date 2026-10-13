@@ -73,7 +73,7 @@
 | D21 | 미이관 키 | `/panel` 의 키 로그인은 없어진다. 미이관 키에 묶인 고객 계정은 키 만료일까지 발송을 계속하고(서버가 키 만료일로 권리를 밀어 줌), 콘솔은 회원 가입·이관 뒤 쓸 수 있다 | 로그인 수단은 하나로 |
 | D22 | 주문 만료·취소 | 지금처럼 48시간 미입금 시 자동 취소(`ORDER_PENDING_TTL_MS`). 회원은 자기 미입금 주문을 직접 취소할 수 있다(`POST /api/my/orders/cancel`). 어느 쪽이든 그 주문이 예약한 `입금 대기` 설치도 `canceled`. 관리자가 늦은 입금으로 되살리면, 그 방이 그 사이 다른 회원에게 가지 않았을 때만 설치가 되살아난다. 회원당 미입금 주문 **3건**, 미입금 방 줄 **10개**, IP당 미입금 주문 **10건**까지(`MEMBER_MAX_PENDING_ORDERS`·`MEMBER_MAX_PENDING_ROOMS`·`IP_MAX_PENDING_ORDERS`) | 예약이 방을 막지 않고(D9), 미입금 주문이 금액 뒷자리(총액마다 99개)를 다 차지하지 못하게 |
 | D23 | 고유 금액 | 주문 총액 + 1~99원 뒷자리(`pickAmount` 그대로). 가격이 모두 5,000원 배수라 총액이 다르면 뒷자리 구간이 겹치지 않는다. 입금자명이 달라도 지금처럼 감사 경고만 남기고 자동 적용한다 | 자동 입금 매칭 유지. 가족 이름 입금이 흔해 이름 불일치를 수동 처리로 돌리면 자동 확인이 거의 사라진다. 뒷자리까지 같은 금액이 우연히 남의 주문과 맞을 확률은 낮다 |
-| D24 | 한도 | 주문 1건: 매크로 0~12개월, 방 0~10개. 총액 최대 540,000원 | 금액 오입력 방지 |
+| D24 | 한도 | 주문 1건: 매크로 0~12개월, 방 0~10개. 총액 최대 440,000원 | 금액 오입력 방지 |
 | D25 | 실시간 상담 | 채널톡(channel.io) 위젯. 소유자가 쓴 "채널 웍스"를 채널톡으로 본다. 떠 있는 기본 말풍선은 끄고 `[data-support]` 버튼으로만 연다. `CHANNEL_PLUGIN_KEY` 가 없거나 SDK 가 뜨지 않으면(차단·카카오톡 웹뷰) 버튼은 `CONTACT_INFO` 연락처 안내로 바뀌고, 둘 다 없을 때만 숨는다. **콘솔(`/panel`)에는 SDK 를 띄우지 않는다** — 콘솔의 상담 버튼은 새 창으로 `/support` 를 연다. 로그인한 회원은 아이디를 이름으로 넘기고, 회원 식별자(`memberId`, 추측할 수 없는 HMAC 값)는 `CHANNEL_MEMBER_SECRET` 이 있고 채널 데스크의 회원 해시 검증을 켠 경우에만 넘긴다 | 기본 말풍선은 색이 있어 디자인 원칙에 어긋나고 토스트·저장 바와 겹친다. 콘솔은 고객의 1:1 대화를 보여 주는 화면이라 제3자 스크립트를 들이지 않는다 |
 | D26 | 방 기록 보존 | `room_log` 30일(`ROOM_LOG_KEEP_DAYS`). 부모 서버가 하루 1번 지운다(`entitle.startLoop`) | 무료 Neon 용량. **운영자 확인 필요 항목**(10.2) |
 | D27 | 차단된 회원 | 로그인 거부, 세션 전부 종료, 고객 계정 발송 정지, 설치한 방의 봇 기능 정지(봇은 방에 남아 조용히 있음). 차단 해제 시 그대로 이어짐 | 관리자가 상황을 되돌릴 수 있게 |
@@ -298,8 +298,8 @@ ALTER TABLE bot_accounts
 ```json
 [
   { "product": "macro",    "months": 2, "unit_price": 20000, "amount": 40000 },
-  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 },
-  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 15000, "amount": 15000 }
+  { "product": "roombot",  "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 },
+  { "product": "minigame", "install_id": 12, "link_url": "https://open.kakao.com/o/gAbCdEf", "link_name": "동네모임", "unit_price": 10000, "amount": 10000 }
 ]
 ```
 
@@ -312,7 +312,7 @@ ALTER TABLE bot_accounts
 ```json
 { "macro": { "days": 60, "until": 1767225600000 },
   "rooms": [ { "install_id": 12, "products": ["roombot","minigame"] } ],
-  "skipped": [ { "install_id": 13, "products": ["minigame"], "amount": 15000, "why": "room_taken" } ] }
+  "skipped": [ { "install_id": 13, "products": ["minigame"], "amount": 10000, "why": "room_taken" } ] }
 ```
 
 `skipped` 는 관리자가 충돌 줄을 빼고 승인했을 때만 있다(4.2). 그 금액은 운영자가 환불한다.
@@ -454,9 +454,9 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
   "products": [
     { "id": "macro",    "label": "카카오톡 매크로", "unit": "month", "price": 20000, "days": 30, "min": 1, "max": 12,
       "desc": "내 카카오 계정으로 대화방 주기 발송 · 이미지 첨부 · 갠톡 응답 · 저격 규칙" },
-    { "id": "roombot",  "label": "방 관리봇", "unit": "room", "price": 15000,
+    { "id": "roombot",  "label": "방 관리봇", "unit": "room", "price": 10000,
       "desc": "입장·퇴장 로그 · 들낙 감지 · 나갔을 때 내보내기 · 프로필 로그 · 홍보 금지 · 가리기 · 금지어 검열 · 올킥 방지" },
-    { "id": "minigame", "label": "미니게임봇", "unit": "room", "price": 15000,
+    { "id": "minigame", "label": "미니게임봇", "unit": "room", "price": 10000,
       "desc": "끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 랭킹" } ],
   "max_rooms": 10, "bank": "…", "contact": null, "purchase_base": "https://kmacro.cloud", "auto_approve": true }
 ```
@@ -721,8 +721,8 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 ```js
 PRODUCTS = {
   macro:    { id:'macro',    label:'카카오톡 매크로', unit:'month', price:20000, days:30, min:1, max:12, desc:'…' },
-  roombot:  { id:'roombot',  label:'방 관리봇',       unit:'room',  price:15000, desc:'…' },
-  minigame: { id:'minigame', label:'미니게임봇',      unit:'room',  price:15000, desc:'…' },
+  roombot:  { id:'roombot',  label:'방 관리봇',       unit:'room',  price:10000, desc:'…' },
+  minigame: { id:'minigame', label:'미니게임봇',      unit:'room',  price:10000, desc:'…' },
 }
 MAX_ROOMS = 10
 quote({ macro_months, rooms:[{ products:[…] }] })
@@ -732,7 +732,7 @@ table()  → /api/price 본체
 label(id), bankInfo(), contactInfo()
 ```
 
-- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 15000`. 할인 없음.
+- 금액 = `macro_months × 20000 + (방 상품 줄 수) × 10000`. 할인 없음.
 - `lib/features.js` `LABELS`·`DESCS` 를 위 이름으로 바꾼다(`/admin` 옛 화면과 `/api/lookup` 이 씀).
 - 예전 `PRICE`·`PLAN`·`NAME` 상수와 인자 없는 `quote()` 는 없앤다(호출부 전부 작업 2 소유).
 
@@ -1131,7 +1131,7 @@ aside: `.note.dim` `오류가 발생하면 문의하십시오. 주문번호를 �
 
 index.html·buy.html·order.html 의 키 시대 문구는 **부록 A 의 문자열 표**대로 전부 바꾼다(`data-manual` 변형 포함, 줄 번호는 `9db383a` 기준). 요지:
 - 메타 설명·히어로·기능·구조도·동작 방식·가격·FAQ·CTA·바닥글에서 `라이선스 키`·`키 발급`·`8개`·`계정마다` 를 없앤다. 방 관리 기능은 "카카오 계정마다"가 아니라 "K bot 계정이 방마다" 동작한다고 쓴다.
-- 가격 섹션: `.prods` 행 3개(카드 3개를 가로로 늘어놓지 않는다). 매크로 `20,000원 / 1개월(30일)`, 방 관리봇 `15,000원 / 방 1개 · 기간 제한 없음`, 미니게임봇 같은 형식.
+- 가격 섹션: `.prods` 행 3개(카드 3개를 가로로 늘어놓지 않는다). 매크로 `20,000원 / 1개월(30일)`, 방 관리봇 `10,000원 / 방 1개 · 기간 제한 없음`, 미니게임봇 같은 형식.
 - `항상 켜져 있다고 보장하지 않습니다` 문구는 남긴다.
 - `site-accounts.mjs` 가 `public/index.html`·`buy.html`·`order.html`·`login.html`·`signup.html`·`support.html` 과 `app.js` 의 회원 주문 문구에 `키 발급`·`키가 발급`·`8개`·`계정마다`·`자동응답` 이 없음을 단언한다(예외: `account.html` 의 `#claim` 카드, app.js 의 예전 키 주문·`/my` 분기).
 
@@ -1200,7 +1200,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
   <section class="sec clip"><div class="tbl-wrap">
     <table class="tbl stack" id="rooms-tbl"><thead><tr><th>대화방</th><th>상품</th><th>상태</th><th>K bot 계정</th><th><span class="sr">열기</span></th></tr></thead>
       <tbody id="rooms-list"></tbody></table></div>
-    <p class="empty" id="rooms-empty" hidden>설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다. 방 1개 · 상품당 15,000원입니다.</p>
+    <p class="empty" id="rooms-empty" hidden>설치한 방이 없습니다. 방 추가에서 오픈채팅방 링크를 입력하고 구매합니다. 방 1개 · 상품당 10,000원입니다.</p>
     <div class="sec-f"><span class="poll" data-poll><svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="bg" cx="7" cy="7" r="5"/><circle class="fg" cx="7" cy="7" r="5"/></svg><span>10초마다 갱신</span></span><span>부방장 지정은 1~2분 안에 자동으로 감지합니다.</span></div></section>
  </div>
 </section>
@@ -1288,7 +1288,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 ### 6.12 관리 화면 `/manage` (작업 6)
 
-- 머리 설명(manage.html:235) → `상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 15,000원/방 · 미니게임봇 15,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.`
+- 머리 설명(manage.html:235) → `상품: 카카오톡 매크로 20,000원/1개월 · 방 관리봇 10,000원/방 · 미니게임봇 10,000원/방. 주문 승인과 입금 매칭은 자동 입금확인과 같은 방식으로 회원 계정에 적용됩니다.`
 - 탭: `주문 · 입금 · 회원 · 봇 · 방 · 키 · 기록`. `.mg-tabs { overflow-x:auto; scrollbar-width:none }`.
 - 요약 타일 8개(`repeat(4)`): 처리 대기 주문 · 확인 필요 입금 · 회원 · 이용 중 매크로 · 설치된 방 · 부방장 대기 · 오류 방 · K bot 계정(`접속 n / 전체 n`).
 - `/v1/bot/status.join_paused_until` 이 미래면 화면 맨 위 crit 띠 `카카오가 서버 IP 의 입장을 막았습니다. {HH:MM}까지 모든 방 입장을 멈춥니다.`
@@ -1823,7 +1823,7 @@ DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설�
 | 줄·자리 | 지금 (요약) | 바꿀 문구 |
 |---|---|---|
 | 7 `meta description` | 카카오톡 자동발송 매크로 · 대화방 관리봇 · 미니게임봇. K bot 1개월 하나로… | K bot은 카카오톡 오픈채팅방 매크로와 방 관리봇·미니게임봇을 제공합니다. 매크로는 내 카카오 계정으로 발송하고, 방 관리봇과 미니게임봇은 K bot 계정이 방에 들어가 동작합니다. |
-| 9 `og:description` | 여러 카카오 계정을… K bot 1개월 하나에… | 카카오톡 매크로는 1개월 20,000원, 방 관리봇과 미니게임봇은 방 1개 15,000원입니다. 회원 계정으로 구매하고 웹 콘솔에서 설정합니다. |
+| 9 `og:description` | 여러 카카오 계정을… K bot 1개월 하나에… | 카카오톡 매크로는 1개월 20,000원, 방 관리봇과 미니게임봇은 방 1개 10,000원입니다. 회원 계정으로 구매하고 웹 콘솔에서 설정합니다. |
 | 66 상단 `내 키` | `/my` 버튼 | 지운다(6.2 의 상단 바로 바꿈) |
 | 75 kicker | 라이선스 키 1개 · 카카오 계정 최대 8개 | `<span>상품 3종</span><span class="sep" aria-hidden="true"></span><span>회원 계정</span>` |
 | 76 h1 | 여러 카카오 계정을 / 하나의 콘솔에서 운영합니다 | `카카오톡 오픈채팅방을<br><span class="dim">하나의 콘솔에서</span> 운영합니다` |
