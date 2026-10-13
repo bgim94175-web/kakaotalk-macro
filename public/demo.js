@@ -418,7 +418,12 @@
 
     var row = el('div', { cls: 'kk-msg ' + (mine ? 'me' : 'them') + (cont ? ' cont' : ' first') + (hist ? '' : ' in') });
     var bub = el('div', { cls: 'kk-bub' });
-    fillBubble(bub, text, it.mention);
+    /* K bot 기록 카드(입장·퇴장·프로필 변경): 실제 봇처럼 사진 한 장. 글(같은 내용)은 읽기 도구용 대체 글 */
+    var img = str(it.img);
+    if (img && /^data:image\/svg\+xml;base64,[A-Za-z0-9+\/=]+$/.test(img)) {
+      bub.className = 'kk-bub kk-img';
+      bub.appendChild(el('img', { src: img, alt: text, width: '720', height: '600', decoding: 'async' }));
+    } else fillBubble(bub, text, it.mention);
     var unread = el('span', { cls: 'kk-unread', 'aria-hidden': 'true' });
     var time = el('span', { cls: 'kk-time', text: kkClock(at) });
     var line = el('div', { cls: 'kk-line' }, [bub, el('span', { cls: 'kk-meta' }, [unread, time])]);

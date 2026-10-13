@@ -283,6 +283,7 @@ ALTER TABLE bot_accounts
 | `room_installs` 의 `member_id link_url passcode_ct roombot minigame phase order_id bot_device_id hold_reason retry_n config* retry_at installed_at removed_at note` | 부모 | |
 | 〃 "다시 입장" 묶음 | 부모 | 배정·다시 시도·옮기기·링크 바꾸기 때 부모는 **한 UPDATE 로** `state='queued', error_code=NULL, error_detail=NULL, next_try_at=NULL, perm=NULL, perm_at=NULL, state_at=$now` 를 함께 쓴다(이 칸들을 부모가 쓰는 유일한 경우). `assignBot` 이 봇을 못 찾았을 때 `error_detail='no_bot'` 을 쓰는 것도 이 예외에 든다 |
 | `room_installs` 의 `state error_code error_detail chat_id perm perm_at joined_at state_at next_try_at attempts link_id link_name`(조회 결과) | sender | 항상 `WHERE id=$1 AND phase='installed' AND bot_device_id=$봇` 조건으로만(옮긴 뒤 옛 봇이 덮어쓰지 못하게) |
+| 〃 `config config_rev config_at` (방 안 설정 명령어) | sender(예외) | 방장·부방장이 방에서 기능을 켜고 끌 때만(7.2 (g)). 패널 저장과 같은 규칙: 저장본을 다시 읽어 바꾼 칸만 합치고(모르는 칸 유지) `AND config_rev=$읽은 값` 일 때만 쓰며 `config_rev+1`. 패널과 겹치면 다시 읽어 3번까지. 위 `WHERE` 조건도 그대로(`store.saveRoomConfig`) |
 | `room_leaves` | 부모가 INSERT(와 30일 지난 처리 행 삭제), sender 가 `done_at result` | sender 는 `WHERE id=$1 AND bot_device_id=$봇` |
 | `room_blocklist` | 부모 | sender 는 읽기만 |
 | `bot_accounts` 의 `nickname state state_at` | sender | 나머지 칸은 부모(관리자). 예외: sender 는 `bot.` 등록이 끝나면 `INSERT … (device_id, email, created_at, state) ON CONFLICT DO NOTHING` 으로 최소 행을 만든다(3.5, 봇이 고아가 되지 않게) |
@@ -705,11 +706,11 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | POST `/api/demo/start` | `{scene, opts?}` | `{ok, scene, state, out, clock}`. 모르는 장면은 400 `bad_scene`. `opts` 는 장면의 고르기 칸 값(모르는 칸·값은 기본값) |
 | POST `/api/demo/step` | `{state, ev}` — `ev` = `{type:'say', text, cid}`(글은 앞뒤 공백을 지우고 1,000자까지, `cid` 는 화면의 글 번호 40자까지) 또는 `{type:'act', id}` | `{ok, state, out, clock}`. 상태가 틀리면(48KB 초과 · `v` 다름 · 모양 · 그 장면에 없는 버튼 · 엔진 처리 실패) 400 `bad_state` `체험을 처음부터 다시 시작합니다.` → 화면이 장면을 다시 시작한다. 손님이 일으킨 문제로 500 을 내지 않는다 |
 
-- 장면 12개(id 고정): 미니게임봇 `games` · 방 관리봇 `visit` `churn` `leavekick` `profile` `promo` `cover` `hide` `guard` · 카카오톡 매크로 `macro` `reply` `snipe`. `scene`(방 이름·인원·공지, 손님 `me`, 사람 목록, 버튼 `actions`, 바로 입력 `chips`, 고르기 칸 `controls`, 구매 링크)과 `out` 항목(`day` `feed` `msg` `hide` `member` `panel` `hint`, 앞 항목 뒤 `wait` ms)의 모양은 `lib/demo.js` 머리 주석. `msg.mention` 은 반각 `@` 부터 이름 끝까지의 `{start, len}` 이고 실제 발송에서 멘션이 붙는 글(`visitMentionExtra`)에만 있다. `clock` 은 체험 시계 — 손님 글을 미리 그릴 때 시각으로 쓴다(매크로 30분 진행 뒤에는 실제 시각보다 앞선다).
+- 장면 12개(id 고정): 미니게임봇 `games` · 방 관리봇 `visit` `churn` `leavekick` `profile` `promo` `cover` `hide` `guard` · 카카오톡 매크로 `macro` `reply` `snipe`. `scene`(방 이름·인원·공지, 손님 `me`, 사람 목록, 버튼 `actions`, 바로 입력 `chips`, 고르기 칸 `controls`, 구매 링크)과 `out` 항목(`day` `feed` `msg` `hide` `member` `panel` `hint`, 앞 항목 뒤 `wait` ms)의 모양은 `lib/demo.js` 머리 주석. `msg.mention` 은 반각 `@` 부터 이름 끝까지의 `{start, len}` 이고 실제 발송에서 멘션이 붙는 글(`visitMentionExtra`)에만 있다. `msg.img`(SVG `data:` 주소)는 K bot 의 기록 카드(7.2 (f))이고, 그때 `text` 는 같은 내용의 글 안내(읽기 도구용)다. 방 관리 명령어(7.2 (g))로 바꾼 설정은 상태의 `cfg`(장면 설정에 합치는 바뀐 칸)에 남는다. 체험에서는 글 속 `@닉네임` 이 방에 있는 사람이면 멘션으로 본다(카카오톡에서 @ 로 사람을 고른 것과 같게). `clock` 은 체험 시계 — 손님 글을 미리 그릴 때 시각으로 쓴다(매크로 30분 진행 뒤에는 실제 시각보다 앞선다).
 - **문구:** K bot(과 고객 계정)이 방에 보내는 글은 전부 실제 봇 함수(`sender/src/roomfeat.mjs` · `features.mjs`)를 이 프로세스 안에서 불러 만든다(처음 쓸 때 `import()` 한 번). 엔진이 쓰는 글은 사람들의 대화, 카카오톡 시스템 줄(`…님이 들어왔습니다.` `…님이 나갔습니다.` `…님을 내보냈습니다.`), 고객이 써 둔 예시(매크로 글 · 자동 응답 · 저격 규칙), 화면 설명(`hint`, 합니다체)뿐이다. `botpool.mjs` 안에만 있는 가리기 답 4개는 그대로 옮기고 `lib/demo-check.js` 가 botpool.mjs 에 같은 글이 있는지 본다.
 - **botpool 순서를 다시 짠 것(5.7):** 메시지는 링 버퍼 → 닉네임 비교(프로필 변경) → `!도움` → `!가리기` → `!프로필` → 홍보 금지/금지어 검열 → 올킥 감지 → 미니게임. 입장·퇴장은 중복 판정 → 안내(`guardOnChat`) → 재입장 차단 → 들낙 감지. 내보내기는 연속 실패 멈춤(`actionFailed` — 내보내기·가리기가 3번 이어서 실패하면 10분 동안 둘 다 건너뛰고, 성공하면 0 으로)과 올킥 멈춤·방 한도(시간 10회)를 보고, 이미 나간 사람의 내보내기는 실패로 보되 botpool 처럼 연속 실패로 세지 않고, 멈춤·올킥 감지·한도로 건너뛰어도 적어 둔다(7.2 (b) 의 실측 전 항목 — 그래서 목록에 바로 올리지 못한 경우의 `noteBan` 길을 보이고, 화면 설명도 「바로 올리지 못하면」으로 쓴다). `leavekick` 은 한 번에 한 사람만 나간다(나감 → 다시 들어옴). 가리기는 300ms 간격으로 하나씩, 그동안 다시 명령하면 `이미 글을 가리는 중이에요.` 링 버퍼는 80개(봇은 300). 매크로는 runner 의 20초 점검(`macroRoomsDue` → 다른 사람 글 수 → `noteMacroWait`/`noteMacroSent`), 갠톡 자동 응답·저격 규칙은 고객 계정 기록(v2 매크로 기간 안)의 `onInbound`.
 - **시계:** 장면을 열 때 서버 시각에서 시작해 단계마다 실제로 흐른 시간(6시간까지)만큼 가고, 시간이 드는 버튼(들낙 1분 머묾 · 홍보 20초 · 매크로 30분)은 그만큼 더 간다. 입장·퇴장 · 재입장 차단 · 프로필 장면의 버튼은 1분씩 간다(안내 맨 아래 기록 시각이 한 분에 몰리지 않게). 방 관리봇 함수는 이 시계를 `now` 로 받는다. 미니게임·갠톡·저격 규칙의 `onInbound` 은 실제 `Date.now()` 를 쓰므로 쿨타임(자동 응답 6시간·저격 60초)도 실제 시간이다. 미니게임 쿨타임만 0 으로 둔다(selfcheck 7.7 #13 과 같은 방법). 같은 방 안내 4초 간격·답 1초는 화면 간격 750~900ms 로 줄이고, 방당 분당 6회 송신 한도(Pacer)는 흉내 내지 않는다.
-- **체험 설정:** 장면마다 그 기능만 켜고 나머지는 7.1 기본값(`!가리기` 명령도 기본값대로 켜져 있어 어느 방 관리봇 장면에서나 `!도움` 에 답한다). 예외: `leavekick` 은 다시 들어온 사람의 `[입장 안내]` 를 보이려고 입장·퇴장 기록과 재입장 차단 안내(기본은 꺼짐 — 장면 설명에 `설정에서 켠 경우에만` 이라고 적는다)도 켠다. 미니게임만 있는 `games` 방의 K bot 은 일반 참여자(권한 2, 부방장 표시 없음 — botpool 이 미니게임만 있는 방은 권한을 보지 않는다). 손님 이름은 `체험자`(봇 문구가 `{이름}님` 을 붙인다). `profile` 은 처음부터 `!프로필 하늘` 에 기록이 나오게 이틀 전 닉네임 변경(`하늘이` → `하늘`) 하나를 실제 `profileChange` 로 남겨 둔다(그때 안내는 그리지 않는다). 상태의 사람 목록·장면 설정은 서버가 장면 정의로 다시 맞추고, `__proto__` 같은 열쇠가 섞인 상태는 받지 않는다. 장면 카운터(`x`)의 글은 그 장면 사람의 아이디만 받고, 명부는 제 칸(`hasOwnProperty`)으로만 찾는다. 고르기 칸 값은 글자·수만 읽는다. 매크로 점검 시각(`x.t`)은 체험 시계에서 1시간 안이어야 하고, 한 단계의 화면 항목은 300개까지(넘으면 `bad_state`).
+- **체험 설정:** 장면마다 그 기능만 켜고 나머지는 7.1 기본값(`!가리기` 명령도 기본값대로 켜져 있어 어느 방 관리봇 장면에서나 `!도움` 에 답한다). 예외: `leavekick` 은 다시 들어온 사람의 `[입장 안내]` 를 보이려고 입장·퇴장 기록과 재입장 차단 안내(기본은 꺼짐 — 장면 설명에 `설정에서 켠 경우에만` 이라고 적는다)도 켠다. 미니게임만 있는 `games` 방의 K bot 은 일반 참여자(권한 2, 부방장 표시 없음 — botpool 이 미니게임만 있는 방은 권한을 보지 않는다). 손님 이름은 `체험자`(봇 문구가 `{이름}님` 을 붙인다). `profile` 은 처음부터 `!프로필조회 하늘` 에 기록이 나오게 이틀 전 닉네임 변경(`하늘이` → `하늘`) 하나를 실제 `profileChange` 로 남겨 둔다(그때 안내는 그리지 않는다). 상태의 사람 목록·장면 설정은 서버가 장면 정의로 다시 맞추고, `__proto__` 같은 열쇠가 섞인 상태는 받지 않는다. 장면 카운터(`x`)의 글은 그 장면 사람의 아이디만 받고, 명부는 제 칸(`hasOwnProperty`)으로만 찾는다. 고르기 칸 값은 글자·수만 읽는다. 매크로 점검 시각(`x.t`)은 체험 시계에서 1시간 안이어야 하고, 한 단계의 화면 항목은 300개까지(넘으면 `bad_state`).
 - 검사: `lib/demo-check.js`(`npm run check:w4`) — 목록 모양, 장면마다 모든 버튼·명령어, K bot 글 = 같은 입력으로 부른 실제 함수 결과, 멘션 위치, 가리기 대상, 틀린 상태 거절(던지지 않음), 무작위 200단계 뒤 상태 48KB 미만, 화면 문구에 이모지·영문 없음, 레이트리밋 `demo` 버킷.
 
 ---
@@ -1327,6 +1328,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `cmdPrefix` | str | `!` | `!` `/` `.` `#` 중 하나 |
 | `exempt` | `[{user_id, name}]` | `[]` | 최대 50, `user_id` `/^[1-9][0-9]{0,19}$/`, name 40자. 방장(1)·부방장(4)·봇(8)은 항상 제외 |
 | `visit.enabled` | bool | false | 입장·퇴장 로그(지금 동작: 방 안내 + 기록) |
+| `visit.style` | str | `image` | `image` \| `text` — 방에 보내는 입장·퇴장 안내 모양(7.2 (f)) |
 | `churn.enabled` | bool | false | 들낙 감지 |
 | `churn.joins` | int | 3 | 2~20 |
 | `churn.windowMin` | int | 10 | 1~1440 |
@@ -1336,7 +1338,8 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `leaveKick.notice` | bool | false | |
 | `profile.enabled` | bool | false | 프로필 로그 |
 | `profile.name` / `.status` | bool | true | 예전 `.photo` 는 무시(7.2 (c)) |
-| `profile.lookup` | str | `staff` | `staff` \| `all` \| `off` |
+| `profile.lookup` | str | `staff` | `staff` \| `all` \| `off` — `{앞글자}프로필조회` |
+| `profile.style` | str | `image` | `image` \| `text` — 프로필 변경 안내 모양(7.2 (f)) |
 | `promo.enabled` | bool | false | 홍보 금지 |
 | `promo.links` / `.cards` | bool | true | |
 | `promo.media` | bool | false | |
@@ -1351,13 +1354,15 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `guard.enabled` | bool | false | 올킥 방지 |
 | `guard.secs` | int | 30 | 5~300 |
 | `guard.count` | int | 5 | 3~30 |
+| `cmd.link` | str | `staff` | `staff` \| `all` \| `off` — 방 안 `{앞글자}옾링` 을 쓸 수 있는 사람(7.2 (g)). 프로필 기록을 꺼도 동작한다 |
 | `games.enabled` | bool | **true** | 미니게임. 기본이 켜짐이라 미니게임봇은 입장하자마자 `!도움`·게임에 답한다(소유자 요구 "링크 첨부하면 바로 드가고"). 처음 `minigame` 이 켜지는 설치에 이 기본값을 채운다(4.2) |
 | `games.word` `.baseball` `.dice` `.rps` `.quiz` | bool | true | 랭킹은 항상 켜짐 |
 | `games.cooldownSec` | int | 3 | **1**~60 (0 은 공용 봇 발송 한도를 한 방이 다 쓰게 하므로 받지 않음) |
 | `games.dailyLimit` | int | 0 | 0~5000, 0 = 제한 없음(방 발송 6/분 한도가 따로 막는다, 5.5) |
 
 검증 실패는 저장 거부(조용히 버리지 않음): 400 `bad_<path>`, 문구 예 `들낙 감지 횟수는 2~20회로 입력하십시오.`, `금지어는 300개까지 등록할 수 있습니다.`, `제외할 사람은 50명까지 등록할 수 있습니다.`
-제품 검사: roombot 절(`exempt visit churn leaveKick profile promo cover hide guard`)은 `products.roombot` 과 `display==='active'` 필요, `games` 는 `products.minigame` 필요, `cmdPrefix` 는 설치됨이면 언제나.
+sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글자 그대로 같아야 한다(selfcheck #40-5 가 본다).
+제품 검사: roombot 절(`exempt visit churn leaveKick profile promo cover hide guard cmd`)은 `products.roombot` 과 `display==='active'` 필요, `games` 는 `products.minigame` 필요, `cmdPrefix` 는 설치됨이면 언제나.
 
 ### 7.2 기능별 동작
 
@@ -1395,7 +1400,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - **옾링 값**: 주소 / `없음`(오픈프로필이 아님, 또는 INFOLINK 가 없다고 답함) / `확인 못 함`(오픈프로필인데 옾링을 읽지 못함). 입장·퇴장·프로필 변경 안내를 보내기 전에 명부에서 옾링을 모르는 사람은 INFOLINK 를 혼자 한 번(실패하면 한 번 더) 읽는다(동기화 한 번에 20명까지, 퇴장의 옾링만 읽기는 방마다 10초 간격 없이). 묶음 읽기에서 혼자서도 실패한 pli 는 '없음'으로 두지 않고 30분 동안 묶음 읽기에서 뺀다. 저장된 `link ''`(pli 있음)는 예전 읽기 실패일 수 있어 모름으로 읽어 다시 확인한다.
 - **멤버 프로필 사진은 쓰지 않는다**: 입장·퇴장·프로필 변경 안내와 프로필 기록에 사진을 싣지 않는다. 저장된 설정·저장 요청의 `profile.photo` 는 오류 없이 버리고, `room_members.photo` 는 더 쓰지 않는다(열은 남겨 둔다). 예전 `changes` 의 `kind:'photo'` 는 화면·조회에 싣지 않는다.
 - 입장·퇴장 안내: `[입장 안내]`|`[퇴장 안내]` / `이름 : @{닉네임}` / `옾링 : {링크|없음|확인 못 함}` / 입장(퇴장) 기록. 기록은 14일 안의 입장(퇴장) 시각이고, 머문 시간·예전 프로필은 기록(관리 화면)에만 남는다.
-- 조회 명령 `{앞글자}프로필 @닉네임` 또는 `{앞글자}프로필 닉네임`: 대상은 멘션 user_id → 현재 이름 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 기록이 없으면 `이 사람의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만) / `all` / `off`. 답(멘션 없음):
+- 조회 명령 `{앞글자}프로필조회 @닉네임` / `옾링 주소` / `닉네임`(예전 `{앞글자}프로필` 도 같다, 7.2 (g)): 대상은 멘션 user_id → 옾링 주소(멤버 명부) → 닉네임(명부, 없으면 기록의 현재 이름) 유일 일치. 여러 명이면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 명부에서 찾았는데 바뀐 적이 없는 사람(기록 행 없음)도 지금 이름 · `이전 이름 : 없음` · 입장·퇴장 횟수로 답한다(예전에는 `기록이 없어요` 라 헷갈렸다). 명부·기록 어디에도 없으면 `「{닉네임}」의 프로필 기록이 없어요.` 권한 `staff`(기본: 방장·부방장만 — 다른 사람에게는 `프로필 조회는 방장과 부방장만 할 수 있어요.`) / `all` / `off`(조용, 다음 처리로). 프로필 기록이 꺼져 있으면 방장·부방장에게 `프로필 기록이 꺼져 있어요. 「{앞글자}프로필기록 켜기」로 켤 수 있어요.` 답(멘션 없음):
 
 ```
 [프로필 기록]
@@ -1404,7 +1409,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 최근 14일 : 입장 {n}회 · 퇴장 {n}회
 ```
 
-- 오픈채팅에서 상태 메시지가 늘 null 이면(실측) 화면의 `상태 메시지` 스위치를 숨기고 `오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.` 를 보인다. `presentRoomConfig` 가 상수 `status_supported`(기본 `true`, 실측 뒤 필요하면 `false`)를 같이 내보내고, 작업 5 는 `false` 일 때 스위치를 숨긴다.
+- 화면의 `상태 메시지` 스위치는 숨기고 `오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.` 를 보인다. `presentRoomConfig` 가 상수 `status_supported` 를 같이 내보내고 지금 값은 **`false`** 다(2026-10): 방 관리봇은 멤버 명부(GETMEM·MEMBER)의 닉네임·pli 만 비교하고 상태 메시지는 읽지 않으므로, 켜도 아무 일도 하지 않는 스위치였다. 저장된 `profile.status` 값은 그대로 둔다.
 
 #### (d) 홍보 금지
 
@@ -1430,6 +1435,34 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 - 결과 안내: `[글 가리기]\n글 {n}개를 가렸어요.` + 실패가 있으면 `\n({m}개는 가리지 못했어요)`. `room_log 'hide'` 에 개수·실패·누가(`panel`/user_id).
 - 금지어 상한 300(방 설정만. 계정 단위 옛 금지어는 200 그대로).
 
+#### (f) 기록 카드(이미지) — 입장·퇴장·프로필 변경 안내
+
+- `visit.style`·`profile.style` 이 `image`(기본)이면 `[입장 안내]`·`[퇴장 안내]`·`[프로필 변경 감지]` 를 그림 한 장(PNG, 폭 720)으로 보낸다. 내용은 글 안내와 **같다**: 제목 · 닉네임(크게) · 옾링(주소 / `없음` / `확인 못 함`, 긴 주소는 두 줄) · 프로필 변경은 `변경전` 닉네임과 `옾링 변경전/후` · 기록(`입장 기록` + 횟수 + 최근 시각 5개, 마지막이 이번 — 굵게) · 이번 시각(머리 오른쪽) · 방 이름(작게). 머리 색: 입장 초록 `#15803D` · 퇴장 회색 `#475569` · 프로필 변경 남색 `#4338CA`. 바탕은 흰색(투명 없음 — 카카오톡이 JPEG 로 바꿔도 검게 되지 않게).
+- 값은 `roomfeat.visitNoticeText`·`profileChangeNotice` 가 글과 함께 만드는 `card`(`{kind, title, name, before, fields:[{label, value}], record:{label, count, times}, at}`)이고, 그림은 `sender/src/logcard.mjs`(`logCardSvg` → `card.mjs svgToPng`)가 그린다.
+- **멘션**: 그림에는 멘션을 넣을 수 없다. 그림 바로 뒤에 한 줄 `[입장 안내] @{닉네임}`(`roomfeat.cardMentionLine`, 멘션 @ 하나)을 보내 그 사람을 부른다. 까닭: 안내의 목적(그 사람에게 알림 · 방 사람들이 눌러 프로필을 봄)을 지키면서 긴 글 대신 읽기 쉬운 그림을 보이고, 채팅 목록·알림 미리보기에도 무슨 안내인지 한 줄로 보인다. id 를 모르면(이름만 아는 입장) 그림만 보낸다.
+- 그림 + 한 줄은 발송 대기 목록의 한 항목이지만 방·봇 발송 한도(5.5)는 **2개**로 센다(`Pacer` 의 `cost`). 그림이 나간 뒤에만 한 줄을 보낸다.
+- **글로 대신**: 렌더러를 못 불러오거나 그림을 못 만들면(`png null`) 또는 사진 보내기가 실패하면 지금의 글 안내 **하나**(멘션 포함)를 보낸다(한 줄은 보내지 않는다 — 두 번 부르지 않게). `style: 'text'` 면 처음부터 글 안내.
+- 패널 미리 보기 그림 `public/img/logcard-join.png`·`logcard-profile.png` 는 `node sender/src/logcard-sample.mjs` 가 만든다(카드 모양이나 안내 내용을 바꾸면 다시 만들어 함께 올린다). 체험(3.7)은 같은 SVG 를 `img`(data: 주소)로 보낸다.
+
+#### (g) 방 관리 명령어 (`sender/src/roomcmd.mjs`)
+
+순수 함수(`parseRoomCommand`·`findPerson`·`configChange`·답 문구)는 `roomcmd.mjs`, 실행(권한 읽기·내보내기·저장)은 `botpool.roomCommand`, 체험은 `lib/demo.js roomCommand` 가 같은 함수를 부른다. 방 관리 기능이 동작할 때(`roombotLive`)만 답한다. 부방장 지정 대기 방에서 방장·부방장이 쓰면 `방 관리 명령어는 K bot이 부방장이 된 뒤에 쓸 수 있어요. 방장님이 「{봇 이름}」을 부방장으로 지정해 주세요.`, 다른 사람에게는 조용하다. 답한 명령어 글은 게임으로 넘기지 않는다. 방장·부방장이 아닌 사람의 명령어 글도 홍보 금지·금지어 검사를 그대로 받는다(명령어 뒤에 링크를 숨겨 올리지 못하게).
+
+| 명령어 | 누가 | 하는 일 · 답 |
+|---|---|---|
+| `{앞글자}옾링 [@멘션 \| 옾링 주소 \| 닉네임]` | `cmd.link`(기본 방장·부방장) | `[옾링]\n이름 : {닉네임}\n옾링 : {주소\|없음\|확인 못 함}`. 멘션이면 카드(MEMBER)를 다시 읽어 지금 옾링. 방에 없는 사람을 멘션으로 고르면 `그 사람은 지금 이 방에 없어요.` `off` 면 조용(다음 처리로) |
+| `{앞글자}프로필조회 [@멘션 \| 옾링 주소 \| 닉네임]` (`{앞글자}프로필` 도 같다) | `profile.lookup` | 7.2 (c) |
+| `{앞글자}내보내기 [@멘션 \| 옾링 주소]` | 방장·부방장 | 닉네임만으로는 고르지 않는다(다른 사람을 내보내지 않게 — 사용법 답). 카드로 방에 있는지·권한을 읽고, 방장·부방장·제외 대상·K bot 이면 `방장·부방장·제외 대상은 내보낼 수 없어요.` 그 밖은 `kick(…, 'command', by)` — 한도·연속 실패 멈춤·올킥 감지 멈춤·기록(`kick` `why:'command'`, `by`)이 그대로 걸린다. 답: `{닉네임}님을 내보냈어요.` / `올킥 감지로 K bot의 내보내기가 멈춰 있어요. {n}분쯤 뒤에 다시 입력해 주세요.` / `내보내기가 여러 번 실패해 잠시 멈춰 있어요. …` / `K bot이 짧은 시간에 내보낼 수 있는 인원을 넘었어요. …` / `{닉네임}님을 내보내지 못했어요. 잠시 뒤 다시 입력해 주세요.` |
+| `{앞글자}차단해제 [@멘션 \| 옾링 주소 \| 닉네임]` | 방장·부방장 | 패널의 `내보내기 해제`(3.4.3 `unkick`)와 같다: K bot 이 내보낸 사람이면 `KLDELITEM`, 재입장 차단 목록(`bans`)에서 지움. 나간 사람은 멘션할 수 없어 닉네임(명부 + `bans` 의 이름)으로도 고른다. `{닉네임}님의 내보내기·재입장 차단을 풀었어요. 다시 들어올 수 있어요.` / `K bot이 내보내거나 차단한 사람이 아니에요.` |
+| `{앞글자}설정` | 방장·부방장 | `[설정]` + 기능별 `입장·퇴장 기록 : 켜짐` … `금지어 검열 : 꺼짐 (금지어 n개)` … + `「{앞글자}입장기록 켜기」처럼 켜고 끌 수 있어요.` |
+| `{앞글자}입장기록` · `들낙감지` · `재입장차단` · `프로필기록` · `홍보금지` · `금지어`(=`금지어검열`) · `올킥감지` + `켜기`\|`끄기` | 방장·부방장 | 그 절의 `enabled` 를 바꿔 **패널과 같은 방 설정**(`room_installs.config`)에 저장(2.2 예외, `config_rev+1` → 패널은 다음 새로고침에 그 값을 읽는다). `{기능}을 켰어요.` / `{기능}은 이미 켜져 있어요.` / 뒤가 없으면 사용법 + 지금 상태. 저장이 안 되면 `설정을 저장하지 못했어요. 잠시 뒤 다시 입력해 주세요.` `room_log 'config'`(`detail.text`, `by:'room'`) |
+| `{앞글자}금지어 추가 단어[, 단어]` · `삭제 단어` · `목록` | 방장·부방장 | 7.1 과 같은 규칙(30자 · 300개 · 대소문자 무시 중복). 답에 금지어를 다시 쓰지 않는다(`금지어 2개를 추가했어요. 지금 n개예요.`, 검열이 꺼져 있으면 켜는 법 한 줄). `목록` 은 방장·부방장이 요청했을 때만 `[금지어]\n{단어, …}`(50개까지 + `외 n개`) |
+| `{앞글자}도움 관리` | 누구나 | `[방 관리 명령어]` + 위 명령어와 하는 일(켜진 것만: 옾링·프로필조회·가리기) |
+
+- 사람 고르기(`findPerson`): 멘션 → 옾링 주소(`open.kakao.com/o/{코드}`, https·끝 `/`·`?` 뒤는 봐주고 코드는 대소문자 구분) → 닉네임(허용한 명령어만, 앞의 `@` 는 뗀다). 명부 = 멤버 명부(`v.members`) + (차단해제만) `bans`. 같은 닉네임이 여럿이면 지난 동기화 뒤에 본 사람이 하나일 때 그 사람, 아니면 `같은 이름을 쓰는 사람이 {n}명 있어요. @멘션으로 골라 주세요.` 못 찾으면 `「{닉네임}」을 이 방에서 찾지 못했어요.` / `그 옾링을 쓰는 사람을 이 방에서 찾지 못했어요.`
+- 옾링·닉네임으로 찾기 전 명부를 30분 넘게 읽지 않았으면(입장·퇴장 기록·프로필 기록이 꺼진 방) GETMEM 동기화를 한 번 한다(최대 8초).
+- `{앞글자}도움` 의 `방 관리 :` 줄: `옾링`(cmd.link 가 off 아님) · `프로필조회`(프로필 기록 켬 + 조회 off 아님) · `가리기`(hide.command) · `내보내기` · `설정`, 그리고 `「{앞글자}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.`
+
 #### 올킥 방지·입장·퇴장 로그·금지어 검열 (기존 기능을 봇 위에서)
 
 - 지금 `guardOnChat`·`guardDue`·`applyVisit`·`coverPlan` 을 방 어댑터 기록으로 그대로 쓴다.
@@ -1440,20 +1473,20 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
 - 점수는 `authorId` 로 저장하고 `{id: name}` 표로 이름을 보인다(이름 빈 사람 둘이 섞이지 않게).
-- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `방 관리 : …`(켜진 가리기·프로필) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
+- `{앞글자}도움` 은 `[명령어]` 머리 줄 아래 `미니게임 : …`(켜진 게임) · `방 관리 : …`(7.2 (g)) 줄로 답한다(`roomfeat.helpLine`). 패널 미리 보기도 같은 모양.
 - 미니게임만 있는 방에서는 입장·퇴장·홍보·가리기가 조용하다.
 
 ### 7.4 콘솔 칸 (작업 5, id 고정)
 
 | 화면 | 칸 |
 |---|---|
-| `r-visit` | `#r-visit-on`(입장·퇴장 로그) · 들낙 감지 `#r-churn-on` `#r-churn-joins`(.num 2~20 회) `#r-churn-min`(.num 1~1,440 분) `#r-churn-action`(.seg `경고만`=warn / `내보내기`=kick) `#r-churn-notice` + 문장 미리 보기 `#r-churn-sent` `<b>10분</b> 안에 <b>3회</b> 이상 들어오면 경고합니다.` · 나갔을 때 내보내기 `#r-leave-on`(설명: `방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.` — 10.1 #5 실측 뒤 한쪽 문장만 남긴다) `#r-leave-notice` · 제외할 사람 `#r-exempt`(.chips) + `#r-exempt-pick`(최근 작성자 select) · 표 `#r-visit-tbl`(기록), `#r-kick-tbl`(K bot 이 내보낸 사람, 행마다 `내보내기 해제`) |
-| `r-profile` | `#r-profile-on` `#r-profile-name` `#r-profile-status` `#r-profile-lookup`(.seg `관리자만`=staff / `모두`=all / `끄기`=off) · 표 `#r-profile-tbl`(열 `항목` 추가) |
+| `r-visit` | `#r-visit-on`(입장·퇴장 로그) · 들낙 감지 `#r-churn-on` `#r-churn-joins`(.num 2~20 회) `#r-churn-min`(.num 1~1,440 분) `#r-churn-action`(.seg `경고만`=warn / `내보내기`=kick) `#r-churn-notice` + 문장 미리 보기 `#r-churn-sent` `<b>10분</b> 안에 <b>3회</b> 이상 들어오면 경고합니다.` · 나갔을 때 내보내기 `#r-leave-on`(설명: `방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.` — 10.1 #5 실측 뒤 한쪽 문장만 남긴다) `#r-leave-notice` · 제외할 사람 `#r-exempt`(.chips) + `#r-exempt-pick`(최근 작성자 select) · 방에 보내는 안내 `#r-visit-style`(.seg `이미지`=image / `글`=text, 미리 보기는 `public/img/logcard-join.png` + 멘션 한 줄 / 글 안내) · 표 `#r-visit-tbl`(기록), `#r-kick-tbl`(K bot 이 내보낸 사람, 행마다 `내보내기 해제`. 방의 `!내보내기`·`!차단해제` 도 여기에 걸린다) |
+| `r-profile` | `#r-profile-on` `#r-profile-name` `#r-profile-status`(`status_supported:false` 라 숨김) `#r-profile-lookup`(.seg `방장·부방장만`=staff / `모두`=all / `끄기`=off, `!프로필조회`) `#r-profile-style`(.seg `이미지`/`글`) · 오픈프로필 조회 명령어 `#r-cmd-link`(.seg 같은 세 값, `!옾링`, 프로필 기록과 따로) · 표 `#r-profile-tbl`(열 `항목` 추가) |
 | `r-promo` | `#r-promo-on` `#r-promo-links` `#r-promo-cards`(`공유 카드·프로필 공유`) `#r-promo-media`(`사진·동영상·파일`) `#r-promo-hide` `#r-promo-kick`(.num 0~10, hint `0이면 내보내지 않습니다`) `#r-promo-reset`(.num 1~720 시간) `#r-promo-notice` · 미리 보기 `#r-promo-preview`(.preview-chat) |
 | `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
 | `r-guard` | `#r-guard-on` `#r-guard-secs` `#r-guard-count` `#r-guard-sent` · 표 `#r-guard-tbl` |
 | `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
-| `room` | `#r-prefix` `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` |
+| `room` | `#r-prefix` · `#row-r-cmds`(방 관리봇이 있으면: 방에서 `!설정`·`!입장기록 켜기`·`!도움 관리` 안내) `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` |
 
 화면 문구 규칙: 강퇴 대신 `내보내기`, `들낙 방지` 금지(`들낙 감지`), `쿨다운`→`쿨타임`, `접두사`→`앞글자`, `1일`→`하루`. 내보내기 관련 화면에는 `.limit` `내보내기는 K bot 계정이 부방장일 때만 동작합니다. 방장·부방장·제외할 사람은 내보내지 않습니다.`
 
@@ -1509,6 +1542,7 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 22. 다시 접속 금지: JOINLINK 가 알 수 없는 status → `client.close`/새 로그인 없이 `getChats` 확인만. 이미 그 `li` 의 방에 있으면 JOINLINK 를 보내지 않음.
 23. 예산: 봇 시간 예산 20 을 다 쓰면 21번째 입장은 `rate_limited` + `next_try_at` = 예산 복귀 시각. 조회 예산이 없으면 `/v1/bot/resolve` 가 `budget`.
 24. 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다. 방 A 강퇴 11번째(1시간 안) → `skip`.
+40. 방 관리 명령어·기록 카드: #40-1 명령어 읽기(띄어쓰기·별칭·켜고 끄기가 조회보다 먼저)·사람 고르기(멘션·옾링 주소·닉네임·같은 닉네임·내보내기는 닉네임 거절)·설정 바꾸기 답·저장본 합치기·문구 규칙. #40-2 `!도움`·`!도움 관리`(스위치 따라). #40-3 카드 = 글 안내와 같은 값, 멘션 한 줄 extra, SVG 이스케이프, PNG 폭 720, 패널 미리 보기 그림. #40-4 발송 한도 cost 2. #40-5 sender 기본값 = `room-config` 기본값. #40(가짜 연결): 부방장 지정 대기 답, `!옾링`(권한·사용법·닉네임·멘션·주소·같은 닉네임·못 찾음·`off` 조용·`all`), `!프로필조회`(바뀐 적 없는 사람·별칭·권한), `!내보내기`(권한·닉네임 거절·방장·K bot 보호·올킥 감지 멈춤 답·주소로 KICKMEM + 기록 `why:'command'`·`by`·방에 없음), `!차단해제`(KLDELITEM·아닌 사람·권한), `!설정`·켜고 끄기(저장본·`config_rev`·모르는 칸 유지·`room_log 'config'`·이미 켬·사용법·옛 재조정 행이 되돌리지 않음·패널 저장과 겹치면 다시 읽어 패널 값 유지·저장 실패 답), 금지어 추가·목록·삭제·켜기, 부모 검증 통과, 방장·부방장이 아닌 사람의 명령어 글 홍보 금지, 입장 안내 = 사진(720) + 바로 뒤 멘션 한 줄, 사진 실패 → 글 안내 하나(멘션), `style:'text'` → 글, png 없음 → 글.
 27. 오픈프로필(D12, 5.8): SYNCLINK 걸러내기(lt 1 + `op`/`/me/` 만, 남의 것·lt 2·`/o/` 뺌). (1) 오픈프로필 1개 → JOINLINK `ptp:16` + 그 `pli`, 방 구성원 이름·입장 안내 = 오픈프로필 이름, `bot_accounts` 칸 기록, `/v1/bot/status`·`/v1/bot/room` 의 `profile:'open'`, 트레이스(`raw SYNCLINK`·`CHATONROOM.olu`, `pc`·`tk` 가림). (2) 오픈프로필 없음 → `bot_no_open_profile`(`none`), JOININFO·JOINLINK 없음. (3) 오픈프로필을 만들면(SYNCLINKCR) 스스로 다시 입장. (4) 2개 → 고르지 않으면 첫 번째, 고르면 그것(이미 들어간 방은 `other`), 고른 것이 사라지면 `gone`(입장 멈춤), 자동으로 돌리면 지난번 것으로 다시 입장. (5) 기본 프로필로 들어가 있는 방 → `off` 면 스스로 바꾸지 않음, 관리자 요청에 `UPLINKPROF` 1번(권한·상태 유지, LEAVE·JOINLINK 없음), `auto` 면 부방장 대기 방을 바꾸고 새 이름 안내. (6) `UPLINKPROF` 거절(`noopen`) → 방 그대로, `fail` 기록, 24시간 안에 다시 보내지 않음, 나가지 않음. 관리자 `rejoin` → LEAVE → JOININFO → JOINLINK `ptp:16`, 새 이름으로 입장 안내. (8) SYNCLINK 실패 + 남긴 값 없음 → 행은 `queued`(오류 아님), 관리자 다시 읽기에 성공하면 입장. 남긴 값이 있으면 실패해도 `ok`. 링크 확인은 이 계정 오픈프로필만. (9) `ptp:16` 응답 유실 → 방 목록으로 성공 처리, 방 프로필 `open`.
 
 ### 7.8 `room_log.kind` 와 패널 한 줄
@@ -1517,9 +1551,10 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 |---|---|
 | `join` `leave` | (기록 표가 따로 그림, 조치 기록에는 넣지 않음) |
 | `churn` | 들낙 감지 · {이름} {M}분 {n}회 · {경고/내보내기/내보내기 실패} |
-| `kick` | 내보내기 · {이름} · {사유: 들낙/퇴장/홍보/수동} |
+| `kick` | 내보내기 · {이름} · {사유: 들낙/퇴장/홍보/수동/방 명령어} |
 | `kick_fail` | 내보내기 실패 · {이름} · {사유} |
 | `unkick` | 내보내기 해제 · {이름} |
+| `config` | 방에서 설정 변경 · {이름} · {들낙 감지 켜기 / 금지어 2개 추가 …}(7.2 (g)) |
 | `promo` | 홍보 금지 · {이름} · 경고 {n}회 |
 | `hide` | 글 가리기 · {n}개 (실패 {m}개) · {패널/방장} |
 | `cover` | 금지어 가림 · {이름} |

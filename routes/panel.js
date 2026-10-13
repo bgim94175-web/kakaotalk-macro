@@ -804,7 +804,7 @@ router.post('/panel/api/bot-room/retry', wrap(async (req, res) => {
 }));
 
 // ── 조치 기록 한 줄 (7.8). detail 칸은 sender(작업 3)가 쓴다 — 아래 이름들을 읽는다.
-const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '수동' };
+const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '방 명령어' };
 const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '글 가리기', rewrite: '글 가리기' };
 // 건너뛴 까닭(sender 의 detail.note). note 가 없으면 K bot 자체 한도(방·시간·하루)를 넘은 것이다.
 const SKIP_WHY = { wave: '올킥 감지 중이라 건너뜀', paused: '실패가 이어져 잠시 멈춤', stale: '늦어져서 건너뜀' };
@@ -839,6 +839,11 @@ function roomLogText(row) {
       (note && typeof note === 'string' && note.length <= 20 ? ' · ' + note : '');
   }
   if (kind === 'unkick') return '내보내기 해제 · ' + name;
+  // 방 안 설정 명령어(7.2 (g)): detail.text 는 sender 가 만든 짧은 글(「들낙 감지 켜기」·「금지어 2개 추가」)
+  if (kind === 'config') {
+    const what = pick(d, ['text']);
+    return '방에서 설정 변경 · ' + name + (typeof what === 'string' && what.length <= 40 ? ' · ' + what : '');
+  }
   if (kind === 'promo') {
     const n = pick(d, ['n', 'count', 'warn']);
     return '홍보 금지 · ' + name + (n !== undefined ? ' · 경고 ' + n + '회' : '');

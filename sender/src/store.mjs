@@ -271,6 +271,7 @@ export async function listFeatureRows() {
 // ── 방 설치형 봇(K bot 계정)의 DB 쓰기 ─────────────────────────────────────────
 // 2.2 쓰기 소유권: room_installs 는 sender 칸(state error_code error_detail chat_id perm perm_at joined_at
 // state_at next_try_at attempts link_id link_name)만, 그리고 늘 WHERE id AND phase='installed' AND bot_device_id=봇.
+// 예외 하나: 방 안 설정 명령어는 saveRoomConfig 로 config(·config_rev·config_at)를 패널 저장과 같은 규칙으로 쓴다(7.2 (g)).
 const INSTALL_COLS = new Set([
   'state', 'error_code', 'error_detail', 'chat_id', 'perm', 'perm_at', 'joined_at', 'state_at', 'next_try_at', 'link_id', 'link_name',
 ])
@@ -331,6 +332,18 @@ export const dbStore = {
     const r = await q(
       `UPDATE room_installs SET ${sets.join(', ')} WHERE id = $1 AND phase = 'installed' AND bot_device_id = $2`,
       params,
+    )
+    return r.rowCount
+  },
+
+  // 방 안 설정 명령어(7.2 (g), 「!입장기록 켜기」 등)로 바꾼 방 설정. 패널 저장과 같은 칸(config·config_rev·config_at)을
+  // 같은 규칙으로 쓴다: 읽은 config_rev 일 때만(그사이 패널이 저장했으면 0 → 다시 읽어 합친다), config_rev 를 1 올린다.
+  // 이 봇이 맡은 설치(phase 'installed', bot_device_id)만. config 는 roomcmd.applyPatch 가 저장본에 합친 값이다.
+  async saveRoomConfig(id, botId, config, rev, now) {
+    const r = await q(
+      `UPDATE room_installs SET config = $3::jsonb, config_rev = config_rev + 1, config_at = $5
+        WHERE id = $1 AND phase = 'installed' AND bot_device_id = $2 AND config_rev = $4`,
+      [id, botId, JSON.stringify(config || {}), Number(rev) || 0, Number(now) || Date.now()],
     )
     return r.rowCount
   },
