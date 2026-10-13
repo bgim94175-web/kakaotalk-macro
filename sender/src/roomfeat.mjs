@@ -593,15 +593,22 @@ function cardOf(kind, title, name, before, fields, rec) {
 }
 
 /**
- * 그림 카드와 함께 보내는 한 줄(멘션). `[입장 안내] @하늘` — 그림에는 멘션을 넣을 수 없어 이 줄이 그 사람을 부른다.
- * id 를 모르면 null(멘션할 수 없다 → 그림만 보낸다).
+ * 그림 카드와 함께 보내는 글(멘션 + 옾링). 그림에는 멘션을 넣을 수 없고 링크를 누를 수도 없어 이 글이 그 사람을 부르고 옾링을 남긴다.
+ * `[입장 안내]` · `이름 : @하늘` · `옾링 : …` (프로필 변경은 `변경전 : ＠옛닉` · `변경후 : @새닉` · 옾링 칸들). 기록(횟수·시각)은 그림에만.
+ * id 를 모르면 멘션 없이 같은 글(@ 없이).
  */
 export function cardMentionLine(card, userId) {
+  if (!card) return null
   const id = idText(userId)
-  const nm = card ? oneLine(card.name, 40).replace(/@/g, '') : ''
-  if (!card || !id || !nm || nm === '이름 없음') return null
-  const text = `[${card.title}] @${nm}`
-  return { text, mention: { userId: id, len: nm.length, at: text.indexOf('@') + 1 } }
+  const nm = oneLine(card.name, 40).replace(/@/g, '')
+  const named = !!nm && nm !== '이름 없음'
+  const lines = [`[${card.title}]`]
+  if (card.before) lines.push('변경전 : ' + plainName(card.before))
+  const label = card.before ? '변경후' : '이름'
+  lines.push(id && named ? `${label} : @${nm}` : `${label} : ${nm || '이름 없음'}`)
+  for (const f of card.fields || []) lines.push(`${f.label} : ${f.value}`)
+  const text = lines.join('\n')
+  return { text, mention: id && named ? { userId: id, len: nm.length, at: text.indexOf('@') + 1 } : null }
 }
 
 /** 줄들 + 맨 아래(기록 줄들, 기록이 없으면 시각 한 줄 — 모르면 없음) → {text, mention}. 멘션은 글의 첫 @ 다 */

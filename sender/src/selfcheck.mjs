@@ -1609,10 +1609,14 @@ async function withLog(fn) {
       JSON.stringify(pc.fields) !== JSON.stringify([{ label: '옾링 변경전', value: 'https://open.kakao.com/o/sOld' }, { label: '옾링 변경후', value: 'https://open.kakao.com/o/sNew' }]) || pc.record.label !== '변경 기록') throw new Error('#40-3 profile card ' + JSON.stringify(pc))
     const pc2 = RF.profileChangeNotice({ userId: '555', name: '하늘', link: '' }, [{ kind: 'name', from: '하늘이', to: '하늘' }], [t1]).card
     if (JSON.stringify(pc2.fields) !== JSON.stringify([{ label: '옾링', value: '없음' }])) throw new Error('#40-3 profile card keeps the link line')
-    // 멘션 한 줄: 그림 안에는 멘션을 넣을 수 없다 → `[입장 안내] @하늘`(visitMentionExtra 가 받는 모양)
+    // 그림 뒤 글: 그림 안에는 멘션·누를 수 있는 링크를 넣을 수 없다 → `[입장 안내]` · `이름 : @하늘` · `옾링 : …`(visitMentionExtra 가 받는 모양)
     const line = RF.cardMentionLine(c, '555')
-    if (!line || line.text !== '[입장 안내] @하늘' || F.visitMentionExtra(line.text, line.mention) !== '{"mentions":[{"user_id":555,"at":[1],"len":2}]}') throw new Error('#40-3 mention line ' + JSON.stringify(line))
-    if (RF.cardMentionLine(c, '') !== null || RF.cardMentionLine(pc, '555').text !== '[프로필 변경 감지] @하늘_판매') throw new Error('#40-3 mention line without id / profile')
+    if (!line || line.text !== '[입장 안내]\n이름 : @하늘\n옾링 : https://open.kakao.com/o/sAbc' || F.visitMentionExtra(line.text, line.mention) !== '{"mentions":[{"user_id":555,"at":[1],"len":2}]}') throw new Error('#40-3 mention line ' + JSON.stringify(line))
+    const noId = RF.cardMentionLine(c, '')
+    if (!noId || noId.mention !== null || noId.text !== '[입장 안내]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sAbc') throw new Error('#40-3 companion text without id keeps the link ' + JSON.stringify(noId))
+    const pl = RF.cardMentionLine(pc, '555')
+    if (pl.text !== '[프로필 변경 감지]\n변경전 : ＠하늘\n변경후 : @하늘_판매\n옾링 변경전 : https://open.kakao.com/o/sOld\n옾링 변경후 : https://open.kakao.com/o/sNew' ||
+      F.visitMentionExtra(pl.text, pl.mention) !== '{"mentions":[{"user_id":555,"at":[1],"len":5}]}') throw new Error('#40-3 profile companion text ' + JSON.stringify(pl))
     // 카드 그림: 글과 같은 값이 다 들어간다(SVG 글자), 이스케이프, 폭 720 PNG
     const svg = LC.logCardSvg(Object.assign({}, c, { name: '<하늘&>' }), { room: '동네 "모임"' })
     for (const want of ['입장 안내', '오후 7:31', '&lt;하늘&amp;&gt;', '옾링', 'https://open.kakao.com/o/sAbc', '입장 기록', '2회', '10.12 오후 7:29', '10.12 오후 7:31', '동네 &quot;모임&quot;']) {
@@ -2538,7 +2542,7 @@ async function withLog(fn) {
       await quiet('4001', '방장님', '!옾링 구름')
       await setCfg({ cmd: { link: 'all' } })
       await expect(ask('4012', '바다', '!옾링 https://open.kakao.com/o/sky4011'), '[옾링]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sky4011', 'link for everyone')
-      // 입장 안내 그림: 사진(폭 720) 1장 + 바로 뒤 멘션 한 줄 `[입장 안내] @별빛`
+      // 입장 안내 그림: 사진(폭 720) 1장 + 바로 뒤 글(멘션 + 옾링) `[입장 안내]\n이름 : @별빛\n옾링 : …`
       const join = async (uid, name, pli) => {
         room0.members[uid] = mem(2, name, pli)
         if (vc.runtime.visit && vc.runtime.visit.nextAt) vc.runtime.visit.nextAt = {}
@@ -2552,7 +2556,7 @@ async function withLog(fn) {
       const photo = j1[0] && j1[0].extra ? JSON.parse(j1[0].extra) : null
       if (CARD40.available()) {
         if (j1.length !== 2 || j1[0].text !== '(사진)' || !photo || photo.w !== 720 || !(photo.h > 400)) throw new Error('#40 join card photo ' + JSON.stringify(j1))
-        if (j1[1].text !== '[입장 안내] @별빛' || j1[1].extra !== '{"mentions":[{"user_id":4015,"at":[1],"len":2}]}') throw new Error('#40 mention line right after the card ' + JSON.stringify(j1[1]))
+        if (j1[1].text !== '[입장 안내]\n이름 : @별빛\n옾링 : https://open.kakao.com/o/star4015' || j1[1].extra !== '{"mentions":[{"user_id":4015,"at":[1],"len":2}]}') throw new Error('#40 mention line right after the card ' + JSON.stringify(j1[1]))
         const buf = fs.photos[fs.photos.length - 1].buf
         if (buf.readUInt32BE(16) !== 720) throw new Error('#40 photo bytes')
       } else if (j1.length !== 1 || j1[0].text.indexOf('[입장 안내]\n이름 : @별빛\n') !== 0) throw new Error('#40 without the renderer the text notice goes out ' + JSON.stringify(j1))
