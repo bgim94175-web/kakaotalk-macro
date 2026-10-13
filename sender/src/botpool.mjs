@@ -19,7 +19,9 @@ import {
   visitEventsFromMessage,
   visitMentionExtra,
 } from './features.mjs'
+import { logCardPng } from './logcard.mjs'
 import { Owner } from './owner.mjs'
+import * as C from './roomcmd.mjs'
 import * as R from './roomfeat.mjs'
 import { open as openPasscode } from './secretbox.mjs'
 
@@ -1407,9 +1409,11 @@ export class BotSlot {
     v.state = row.state
     v.error_code = row.error_code || null
     v.licensed = !row.member_blocked
-    if (v.rev !== (Number(row.config_rev) || 0) || !v.cfg) {
+    // 방 안 설정 명령어로 이 봇이 방금 쓴 설정(v.revFloor)보다 옛 행(그 전에 읽어 둔 재조정 목록)으로 되돌리지 않는다
+    const rowRev = Number(row.config_rev) || 0
+    if ((v.rev !== rowRev && rowRev >= (v.revFloor || 0)) || !v.cfg) {
       v.cfg = R.normRoomConfig(row.config)
-      v.rev = Number(row.config_rev) || 0
+      v.rev = rowRev
     }
     const chat = row.chat_id ? String(row.chat_id) : ''
     if (v.chat_id !== chat) {
@@ -2817,35 +2821,40 @@ export class BotSlot {
   // 강퇴는 재시도하지 않는다. 한도를 넘으면 건너뛰고 skip 기록.
   // 연속 실패 멈춤·올킥 감지·한도로 건너뛰면 held(부르는 쪽이 나중에 내보내려고 적어 둘 수 있다).
   // left: 이미 나간 사람(7.2 (b)). 카카오가 받지 않아도(실측 전, 10.1 #5) 권한만 다시 읽고 연속 실패로 세지 않는다(레이트리밋 답은 센다).
-  async kick(v, userId, name, why, left = false) {
+  // 건너뛴 결과에는 note('paused'·'wave'·'limit')와 다시 될 때까지의 분(waitMin)을 붙인다(!내보내기 답).
+  // by: 방에서 「!내보내기」를 쓴 사람(기록 detail.by).
+  async kick(v, userId, name, why, left = false, by = '') {
     const now = this.now()
     const uid = String(userId || '')
+    const mins = (at) => Math.max(1, Math.ceil((at - now) / MIN))
     if (!uid) return { ok: false, skipped: true }
     if (!R.roombotLive(v)) return { ok: false, skipped: true }
     if (v.actPausedUntil > now) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'paused' } })
-      return { ok: false, skipped: true, held: true }
+      return { ok: false, skipped: true, held: true, note: 'paused', waitMin: mins(v.actPausedUntil) }
     }
     const g = v.runtime.guard
     if (g && g.halt && Number(g.halt[v.chat_id] || 0) > now) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick', note: 'wave' } })
-      return { ok: false, skipped: true, held: true }
+      return { ok: false, skipped: true, held: true, note: 'wave', waitMin: mins(Number(g.halt[v.chat_id])) }
     }
     if (!v.limits.kick.ok(now) || !this.limits.kickH.ok(now) || !this.limits.kickD.ok(now)) {
       await this.roomLog(v.install_id, 'skip', { user_id: uid, name, detail: { what: 'kick' } })
-      return { ok: false, skipped: true, held: true }
+      const free = Math.max(v.limits.kick.freeAt(now), this.limits.kickH.freeAt(now), this.limits.kickD.freeAt(now))
+      return { ok: false, skipped: true, held: true, note: 'limit', waitMin: mins(free) }
     }
     v.limits.kick.add(now)
     this.limits.kickH.add(now)
     this.limits.kickD.add(now)
     this.ownKicks.set(uid, now)
     const r = await this.openAction(v, 'KICKMEM', { mid: L(uid) })
+    const extra = by ? { by: String(by) } : {}
     if (r.ok) {
       v.failStreak = 0
-      await this.roomLog(v.install_id, 'kick', { user_id: uid, name, detail: { why } })
+      await this.roomLog(v.install_id, 'kick', { user_id: uid, name, detail: Object.assign({ why }, extra) })
       return { ok: true }
     }
-    await this.roomLog(v.install_id, 'kick_fail', { user_id: uid, name, ok: false, detail: { why, status: r.status } })
+    await this.roomLog(v.install_id, 'kick_fail', { user_id: uid, name, ok: false, detail: Object.assign({ why, status: r.status }, extra) })
     // 레이트리밋 답은 나간 사람이어도 센다(사람이 방에 있는지와 상관없이 카카오가 막는 것)
     await this.actionFailed(v, left && !RATE_STATUS.has(r.status))
     return { ok: false, status: r.status }
@@ -2941,13 +2950,14 @@ export class BotSlot {
         return
       }
     }
-    if (live && cfg.profile.enabled && new RegExp('^' + escapeRe(prefix) + '프로필(\\s|$)').test(text.trim())) {
-      if (cfg.profile.lookup === 'staff') await this.permOf(v, m.authorId)
-      const arg = text.trim().slice((prefix + '프로필').length).trim()
-      const reply = R.profileLookup(v.runtime, v.chat_id, cfg, { authorId: m.authorId, arg, mentions }, this.ctxFor(v), now)
-      if (reply) this.say(v, reply, { what: 'reply' })
+    if (v.products.roombot && R.isAdminHelpCommand(text, prefix)) {
+      const line = R.adminHelp(v)
+      if (line) this.say(v, line, { what: 'reply' })
       return
     }
+    // 방 관리 명령어(7.2 (g)): 답한 명령어는 게임으로 넘기지 않는다. 방장·부방장이 아닌 사람의 명령어 글도 홍보·금지어 검사는 받는다.
+    const rc = v.products.roombot ? await this.roomCommand(v, m, mentions) : null
+    if (rc && rc.staff) return
     const adapter = R.adapterRecord(v, this.id)
     if (live) {
       let promo = null
@@ -2973,6 +2983,7 @@ export class BotSlot {
       this.sendAll(v, g.sends)
       v.dirty = true
     }
+    if (rc) return
     if (R.gamesLive(v)) {
       const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mine: false })
       this.sendAll(v, sends, 'reply')
@@ -2998,6 +3009,151 @@ export class BotSlot {
       this.say(v, n.text, { mention: n.mention, what: 'notice' })
     }
     v.dirty = true
+  }
+
+  // ── 방 관리 명령어(7.2 (g)) ─────────────────────────────────────────────────
+  // → null(방 관리 명령어가 아님 · 꺼 둔 명령어 → 게임 등 다음 처리로) | {staff}(답했다. staff 가 아니면 홍보·금지어 검사는 받는다)
+  async roomCommand(v, m, mentions) {
+    const cfg = v.cfg
+    const c = C.parseRoomCommand(m.text, cfg.cmdPrefix)
+    if (!c) return null
+    if (c.cmd === 'link' && cfg.cmd.link === 'off') return null
+    if (c.cmd === 'profile' && cfg.profile.lookup === 'off') return null
+    const staff = C.isStaff(await this.permOf(v, m.authorId))
+    const reply = (t) => { if (t) this.say(v, t, { what: 'reply' }) }
+    const answer = (t) => {
+      reply(t)
+      return { staff }
+    }
+    if (!R.roombotLive(v)) {
+      // 부방장 지정 대기: 방장·부방장에게만 지정이 먼저라고 알린다(방 관리 기능은 그 뒤에 동작한다)
+      if (staff && v.state === 'waiting_host') reply(C.notLiveReply(this.nameIn(v)))
+      return { staff }
+    }
+    const p = cfg.cmdPrefix
+    if (c.cmd === 'link') {
+      if (cfg.cmd.link === 'staff' && !staff) return answer(C.staffOnlyReply('link'))
+      const who = await this.findPerson(v, c.arg, mentions, true)
+      if (!who.userId) return answer(who.usage ? C.usageOf('link', p) : C.findFailReply(who))
+      const mem = await this.freshMember(v, who.userId)
+      if (!mem && !who.name) return answer(C.NOT_HERE_REPLY)
+      return answer(C.linkReply({ name: (mem && mem.name) || who.name, link: mem ? noticeLink(mem) : who.link }))
+    }
+    if (c.cmd === 'profile') {
+      if (!cfg.profile.enabled) {
+        if (staff) reply(`프로필 기록이 꺼져 있어요. 「${p}프로필기록 켜기」로 켤 수 있어요.`)
+        return { staff }
+      }
+      if (cfg.profile.lookup === 'staff' && !staff) return answer(C.staffOnlyReply('profile'))
+      let target = null
+      if (mentions.length || C.isLinkArg(c.arg)) {
+        const who = await this.findPerson(v, c.arg, mentions, false)
+        if (!who.userId) return answer(who.usage ? C.usageOf('profile', p) : C.findFailReply(who))
+        target = { userId: who.userId, name: who.name || v.names.get(who.userId) || '' }
+      } else if (c.arg) {
+        // 닉네임: 명부의 지금 닉네임으로 찾고, 없으면 profileLookup 이 기록의 이름으로 찾는다
+        const who = C.findPerson(this.bookOf(v), { arg: c.arg, allowName: true })
+        if (who.many) return answer(C.findFailReply(who))
+        if (who.userId) target = { userId: who.userId, name: who.name }
+      }
+      const out = R.profileLookup(v.runtime, v.chat_id, cfg, { authorId: m.authorId, arg: c.arg, mentions, target }, this.ctxFor(v), this.now())
+      return answer(out)
+    }
+    if (!staff) return answer(C.staffOnlyReply(c.cmd))
+    if (c.cmd === 'kick') {
+      const who = await this.findPerson(v, c.arg, mentions, false)
+      if (!who.userId) return answer(who.usage ? C.usageOf('kick', p) : C.findFailReply(who))
+      const card = who.userId === this.userId ? null : await this.memberCard(v, who.userId)
+      if (who.userId === this.userId || (card && R.protectedPerson(cfg, this.ctxFor(v), who.userId))) return answer(C.PROTECTED_REPLY)
+      if (!card) return answer(C.NOT_HERE_REPLY)
+      const name = card.name || who.name || ''
+      const r = await this.kick(v, who.userId, name, 'command', false, m.authorId)
+      return answer(C.kickReply(name, r))
+    }
+    if (c.cmd === 'unban') {
+      const who = await this.findPerson(v, c.arg, mentions, true, true)
+      if (!who.userId) return answer(who.usage ? C.usageOf('unban', p) : C.findFailReply(who))
+      const r = await this.unkickUser(v, who.userId)
+      const bans = v.runtime.bans || {}
+      return answer(C.unbanReply(who.name || (bans[who.userId] && bans[who.userId].name) || '', r))
+    }
+    if (c.cmd === 'status') return answer(C.statusReply(cfg))
+    const ch = C.configChange(cfg, c)
+    if (!ch.patch) return answer(ch.reply)
+    const ok = await this.changeConfig(v, ch.patch)
+    if (ok) await this.roomLog(v.install_id, 'config', { user_id: m.authorId, name: m.nick || v.names.get(m.authorId) || '', detail: { text: ch.log, by: 'room' } })
+    return answer(ok ? ch.reply : C.SAVE_FAIL_REPLY)
+  }
+
+  // 명부(멤버 명부 + 재입장 차단 목록)에서 사람 고르기. 옾링·닉네임으로 찾을 때 명부가 오래되었으면 먼저 한 번 읽는다.
+  async findPerson(v, arg, mentions, allowName, withBans) {
+    if (!(mentions && mentions.length) && arg) await this.ensureBook(v)
+    return C.findPerson(this.bookOf(v, withBans), { mentions, arg, allowName })
+  }
+
+  // 명부 → [{userId, name, link, here}]. here: 마지막 동기화(GETMEM) 이후에 본 사람(모르면 true)
+  bookOf(v, withBans) {
+    const from = v.memberSeenFrom || 0
+    const out = []
+    for (const [uid, m] of v.members) out.push({ userId: uid, name: m.name, link: noticeLink(m), here: !from || Number(m.seenAt) >= from })
+    if (withBans) {
+      for (const [uid, b] of Object.entries((v.runtime && v.runtime.bans) || {})) {
+        if (!v.members.has(uid) && b) out.push({ userId: uid, name: b.name || '', link: '', here: false })
+      }
+    }
+    return out
+  }
+
+  // 옾링·닉네임으로 찾기 전: 명부를 30분 넘게 읽지 않았으면(입장·퇴장 기록·프로필 기록이 꺼진 방) 한 번 읽는다(최대 8초)
+  async ensureBook(v) {
+    const now = this.now()
+    if (v.memberOkAt && now - v.memberOkAt < 30 * MIN) return
+    if (this.readPauseUntil > now || this.memberBusy(v, 'memberSyncing', now)) return
+    v.memberSyncing = true
+    v.memberSyncAt = now
+    v.memberJobAt = now
+    const job = this.syncMembers(v).catch((e) => log(this.id, `member sync ${v.install_id} failed: ${errText(e)}`)).finally(() => { v.memberSyncing = false })
+    await withTimeout(job, 8000).catch(() => {})
+  }
+
+  // 한 사람의 지금 카드(닉네임·옾링)를 읽어 명부에 합친다. 방에 없으면(카드가 없음) null.
+  async freshMember(v, uid) {
+    const card = await this.memberCard(v, uid)
+    if (!card) return null
+    await this.mergeMembers(v, [{ uid, name: card.name || '', pli: card.pli || '' }], 'refresh')
+    const m = v.members.get(uid)
+    if (m && m.pli && !m.link) await withTimeout(this.fillLink(v, uid), LEAVE_READ_MS).catch(() => {})
+    return v.members.get(uid) || null
+  }
+
+  // 방 안 설정 명령어의 저장: 저장본을 다시 읽어 patch 를 합치고 읽은 config_rev 일 때만 쓴다(패널 저장과 겹치면 다시, 3번까지).
+  async changeConfig(v, patch) {
+    for (let i = 0; i < 3; i++) {
+      let row = null
+      try {
+        row = await this.store.getInstall(v.install_id)
+      } catch (e) {
+        log(this.id, `config read failed: ${errText(e)}`)
+        return false
+      }
+      if (!row || row.phase !== 'installed' || row.bot_device_id !== this.id) return false
+      const next = C.applyPatch(row.config, patch)
+      const rev = Number(row.config_rev) || 0
+      let n = 0
+      try {
+        n = await this.store.saveRoomConfig(v.install_id, this.id, next, rev, this.now())
+      } catch (e) {
+        log(this.id, `config save failed: ${errText(e)}`)
+        return false
+      }
+      if (n) {
+        v.cfg = R.normRoomConfig(next)
+        v.rev = rev + 1
+        v.revFloor = rev + 1
+        return true
+      }
+    }
+    return false
   }
 
   // ── 가리기(7.2 (e)) ─────────────────────────────────────────────────────
@@ -3235,6 +3391,7 @@ export class BotSlot {
     const rows = list.map((m) => this.memberRow(m)).filter(Boolean)
     await this.mergeMembers(v, rows, 'sync')
     v.memberOkAt = this.now()
+    v.memberSeenFrom = t0
     // 숫자만 남긴다(이름·주소는 남기지 않는다). pli·옾링 수로 실제 GETMEM 이 옾링을 주는지도 본다.
     // 수가 같으면 1시간에 한 번만(방이 많으면 10분마다 방마다 한 줄은 너무 많다)
     let links = 0
@@ -3463,6 +3620,8 @@ export class BotSlot {
   }
 
   // 이미지 1장(PNG Buffer, card.mjs). 보내지 못하면 text 를 글로 대신 보낸다(text 가 없으면 조용히 넘어간다).
+  // o.after = {text, mention}: 그림이 나간 바로 뒤에 보내는 한 줄(기록 카드의 멘션 줄). 그림이 실패하면 보내지 않는다(text 가 대신한다).
+  // 그림 + 한 줄은 대기 목록의 한 자리이지만 발송 한도는 2개로 센다(cost).
   sayImage(v, png, opt) {
     const o = opt || {}
     if (!v.chat_id || !v.licensed) return
@@ -3471,7 +3630,12 @@ export class BotSlot {
       return
     }
     const now = this.now()
+    const after = o.after && o.after.text ? { text: String(o.after.text), mention: o.after.mention || null } : null
     const item = { image: png, text: o.text ? String(o.text) : '', mention: o.mention || null, notBefore: now + Math.max(0, Number(o.delayMs) || 0), what: o.what || 'send', chat_id: v.chat_id }
+    if (after) {
+      item.after = after
+      item.cost = 2
+    }
     if (!this.pacer.push(String(v.install_id), item, now)) {
       this.bg(this.roomLog(v.install_id, 'skip', { detail: { what: item.what === 'reply' ? 'reply' : 'send' } }), 'skip log')
       return
@@ -3482,8 +3646,24 @@ export class BotSlot {
   sendAll(v, sends, what) {
     for (const s of sends || []) {
       if (s.image) this.sayImage(v, s.image, { text: s.text, mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+      else if (s.card && this.cardStyle(v, s.kind) === 'image') this.sayCard(v, s, what || 'notice')
       else this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
     }
+  }
+
+  // 입장·퇴장 안내(visit)·프로필 변경 안내(profile)를 그림으로 보낼지(방 설정 visit.style·profile.style, 기본 그림)
+  cardStyle(v, kind) {
+    const c = v.cfg
+    if (kind === 'visit') return c.visit.style
+    if (kind === 'profile') return c.profile.style
+    return 'text'
+  }
+
+  // 기록 카드: 그림 1장 + 바로 뒤 멘션 한 줄(`[입장 안내] @하늘`). 그림을 못 만들거나 못 보내면 지금까지의 글 안내 그대로(멘션 포함).
+  sayCard(v, s, what) {
+    const png = logCardPng(s.card, { room: v.link_name })
+    const line = R.cardMentionLine(s.card, s.mention && s.mention.userId)
+    this.sayImage(v, png, { text: s.text, mention: s.mention, delayMs: s.delayMs, what, after: line })
   }
 
   scheduleSend(at) {
@@ -3531,13 +3711,16 @@ export class BotSlot {
     if (item.image) {
       try {
         const res = await this.client.sendPhoto(v.chat_id, item.image, 'kbot.png')
-        if (res && res.success === true) return
+        if (res && res.success === true) {
+          if (item.after) await this.deliver(v, { text: item.after.text, mention: item.after.mention })
+          return
+        }
         log(this.id, `image send failed install ${v.install_id}`)
       } catch (e) {
         log(this.id, `image send failed install ${v.install_id}: ${errText(e)}`)
       }
       if (!item.text) return
-      item = Object.assign({}, item, { image: null })
+      item = Object.assign({}, item, { image: null, after: null })
     }
     try {
       const extra = item.mention ? visitMentionExtra(item.text, item.mention) : ''
@@ -3553,8 +3736,4 @@ export class BotSlot {
       log(this.id, `send failed install ${v.install_id}: ${errText(e)}`)
     }
   }
-}
-
-function escapeRe(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
 }

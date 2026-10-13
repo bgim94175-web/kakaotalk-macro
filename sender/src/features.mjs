@@ -1860,6 +1860,7 @@ function applyVisit(record, ev, sends) {
     chatId: String(room.chat_id),
     text: notice.text,
     mention: notice.mention,
+    card: notice.card,            // 방 관리봇은 그림 카드로 보낸다(botpool sendAll, 7.2(a))
     delayMs: visitDelay(v, String(room.chat_id), now),
     kind: 'visit',
   })

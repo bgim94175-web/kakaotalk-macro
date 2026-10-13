@@ -640,6 +640,7 @@
     <div class="grp"><h2 class="grp-t">명령어</h2><section class="sec">
       <div class="srow inline" id="row-r-prefix"><div class="srow-l"><span class="lb">명령어 앞글자</span><p>방 관리봇과 미니게임봇 명령어가 같은 앞글자를 씁니다.</p></div>
         <div class="srow-r"><div class="seg" id="r-prefix" role="group" aria-label="명령어 앞글자"><span class="seg-ind"></span><button type="button" data-v="!" aria-pressed="true">!</button><button type="button" data-v="/" aria-pressed="false">/</button><button type="button" data-v="." aria-pressed="false">.</button><button type="button" data-v="#" aria-pressed="false">#</button></div></div></div>
+      <div class="srow stack" id="row-r-cmds" hidden><div class="srow-l"><span class="lb">방 관리 명령어</span><p>방장과 부방장은 방에서 「<span class="mono" data-prefix>!</span>설정」으로 기능별 켜짐·꺼짐을 보고, 「<span class="mono" data-prefix>!</span>입장기록 켜기」처럼 기능을 켜고 끌 수 있습니다. 방에서 바꾼 설정은 이 화면에도 반영됩니다. 전체 목록은 방에서 「<span class="mono" data-prefix>!</span>도움 관리」를 입력하면 나옵니다.</p></div></div>
     </section></div>
    </fieldset>
    <p class="errt" id="room-set-error" role="alert"></p>
@@ -663,8 +664,13 @@
     <div class="srow inline main" id="row-r-visit-on"><div class="srow-l"><span class="lb">입장·퇴장 기록</span><p>켜면 누군가 들어오거나 나갈 때 그 사람을 멘션한 안내를 방에 보내고, 이 화면에 기록합니다.</p></div>
       <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-visit-on" aria-label="입장·퇴장 기록"><span class="sw" aria-hidden="true"></span></span></div></div>
     <div class="dep" data-dep="r-visit-on" data-open="false"><div class="dep-in">
-      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 나갈 때는 [퇴장 안내]와 퇴장 기록으로 같은 모양입니다. 기록은 횟수와 최근 시각 5개이고, 마지막 줄이 이번 시각입니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[입장 안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;입장 기록 : 2회&#10;10.08 오후 8:02&#10;10.09 오후 9:14</div></div></div></div>
+      <div class="srow stack" id="row-r-visit-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>입장 때 예시입니다. 나갈 때는 [퇴장 안내]와 퇴장 기록으로 같은 모양입니다. 기록은 횟수와 최근 시각 5개이고, 마지막이 이번 시각입니다. 봇이 들어오기 전부터 있던 사람도 옾링을 미리 읽어 둡니다.</p></div>
+        <div class="srow-r"><div class="w100 style-pick"><div class="seg" id="r-visit-style" role="group" aria-label="방에 보내는 안내 모양"><span class="seg-ind"></span><button type="button" data-v="image" aria-pressed="true">이미지</button><button type="button" data-v="text" aria-pressed="false">글</button></div>
+          <p class="style-note" data-style-note="r-visit-style"></p>
+          <div class="preview-chat" data-style-of="r-visit-style"><span class="who-l" data-r-who></span>
+            <div class="style-v" data-v="image"><img class="bub-img" src="/img/logcard-join.png?v=1" width="720" height="546" alt="[입장 안내] 이미지 — 하늘 · 옾링 https://open.kakao.com/o/sH7k2Lb · 입장 기록 2회, 10.08 오후 8:02, 10.09 오후 9:14" loading="lazy"><div class="bub notice">[입장 안내] @하늘</div></div>
+            <div class="style-v" data-v="text" hidden><div class="bub notice">[입장 안내]&#10;이름 : @하늘&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;입장 기록 : 2회&#10;10.08 오후 8:02&#10;10.09 오후 9:14</div></div>
+          </div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-visit-on" data-open="true"><div class="dep-in"><div class="off-note"><span>입장·퇴장 기록이 꺼져 있습니다. 켜면 방에 보내는 안내가 표시됩니다. 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-visit-on">켜기</button></div></div></div>
    </section>
@@ -714,7 +720,7 @@
   <div class="grp"><h2 class="grp-t">K bot이 내보낸 사람<span>최근 조치 기록 기준</span></h2>
    <section class="sec clip">
     <div class="tbl-wrap"><table class="tbl stack" id="r-kick-tbl"><thead><tr><th>이름</th><th>시각</th><th>내용</th><th><span class="sr">해제</span></th></tr></thead><tbody></tbody></table></div>
-    <div class="sec-f"><span>내보내기를 해제하면 그 사람이 다시 들어올 수 있습니다. 방장이 직접 내보낸 사람은 여기에서 해제할 수 없습니다.</span></div>
+    <div class="sec-f"><span>내보내기를 해제하면 그 사람이 다시 들어올 수 있습니다. 방장이 직접 내보낸 사람은 여기에서 해제할 수 없습니다. 방장·부방장이 방에서 「<span class="mono" data-prefix>!</span>내보내기 @닉네임」으로 내보낸 사람도 여기에 표시되며, 방에서 「<span class="mono" data-prefix>!</span>차단해제 닉네임」으로도 해제할 수 있습니다.</span></div>
    </section></div>
  </div>
 </section>
@@ -722,7 +728,7 @@
 <!-- ===== 방 · 프로필 로그 (ACCOUNTS_V1 7.4) ===== -->
 <section class="page" data-route="r-profile" id="page-r-profile" aria-labelledby="r-profile-title" hidden>
  <div class="col">
-  <div class="ph"><div><h1 id="r-profile-title" tabindex="-1">프로필 기록</h1><p>닉네임·옾링·상태 메시지를 바꾼 사람을 방에 안내하고 기록합니다. 방에서 명령어로 기록을 조회할 수도 있습니다.</p></div></div>
+  <div class="ph"><div><h1 id="r-profile-title" tabindex="-1">프로필 기록</h1><p>닉네임이나 오픈프로필을 바꾼 사람을 방에 안내하고 기록합니다. 방에서 명령어로 기록을 조회할 수도 있습니다.</p></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <form id="r-profile-form" class="stack" novalidate>
    <fieldset class="rfs" data-rfs>
@@ -735,12 +741,21 @@
       <div class="srow inline" id="row-r-profile-status"><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>이전 상태 메시지와 함께 안내합니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-profile-status" aria-label="상태 메시지 변경"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow" id="row-r-profile-status-na" hidden><div class="srow-l"><span class="lb">상태 메시지 변경</span><p>오픈채팅 프로필에는 상태 메시지가 없어 감지하지 않습니다.</p></div></div>
-      <div class="srow" id="row-r-profile-lookup"><div class="srow-l"><span class="lb">기록 조회 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>프로필 @닉네임」으로 그 사람의 기록을 볼 수 있습니다.</p></div>
+      <div class="srow" id="row-r-profile-lookup"><div class="srow-l"><span class="lb">기록 조회 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>프로필조회 @닉네임」으로 그 사람의 기록을 볼 수 있습니다. 닉네임이나 오픈프로필 주소로도 찾을 수 있습니다.</p></div>
         <div class="srow-r"><div class="seg" id="r-profile-lookup" role="group" aria-label="기록 조회 명령어"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">방장·부방장만</button><button type="button" data-v="all" aria-pressed="false">모두</button><button type="button" data-v="off" aria-pressed="false">끄기</button></div></div></div>
-      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>닉네임이나 옾링(다른 오픈프로필로 바꿈)이 바뀔 때마다 알립니다. 맨 아래는 변경 기록(횟수와 최근 시각 5개)이고, 마지막 줄이 이번에 바뀐 시각입니다.</p></div>
-        <div class="srow-r"><div class="preview-chat"><span class="who-l" data-r-who></span><div class="bub notice">[프로필 변경 감지]&#10;변경전 : ＠하늘&#10;변경후 : @하늘_판매&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;변경 기록 : 1회&#10;10.09 오후 9:14</div></div></div></div>
+      <div class="srow stack" id="row-r-profile-notice"><div class="srow-l"><span class="lb">방에 보내는 안내</span><p>닉네임이나 오픈프로필(다른 오픈프로필로 바꿈)이 바뀔 때마다 알립니다. 맨 아래는 변경 기록(횟수와 최근 시각 5개)이고, 마지막이 이번에 바뀐 시각입니다.</p></div>
+        <div class="srow-r"><div class="w100 style-pick"><div class="seg" id="r-profile-style" role="group" aria-label="방에 보내는 안내 모양"><span class="seg-ind"></span><button type="button" data-v="image" aria-pressed="true">이미지</button><button type="button" data-v="text" aria-pressed="false">글</button></div>
+          <p class="style-note" data-style-note="r-profile-style"></p>
+          <div class="preview-chat" data-style-of="r-profile-style"><span class="who-l" data-r-who></span>
+            <div class="style-v" data-v="image"><img class="bub-img" src="/img/logcard-profile.png?v=1" width="720" height="590" alt="[프로필 변경 감지] 이미지 — 변경전 하늘 · 변경후 하늘_판매 · 옾링 https://open.kakao.com/o/sH7k2Lb · 변경 기록 1회, 10.09 오후 9:14" loading="lazy"><div class="bub notice">[프로필 변경 감지] @하늘_판매</div></div>
+            <div class="style-v" data-v="text" hidden><div class="bub notice">[프로필 변경 감지]&#10;변경전 : ＠하늘&#10;변경후 : @하늘_판매&#10;옾링 : https://open.kakao.com/o/sH7k2Lb&#10;변경 기록 : 1회&#10;10.09 오후 9:14</div></div>
+          </div></div></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-profile-on" data-open="true"><div class="dep-in"><div class="off-note"><span>프로필 기록이 꺼져 있습니다. 꺼져 있는 동안에는 새 기록을 남기지 않으며, 이미 남은 기록은 아래에 그대로 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-profile-on">켜기</button></div></div></div>
+   </section>
+   <section class="sec" aria-label="오픈프로필 조회 명령어">
+    <div class="srow" id="row-r-cmd-link"><div class="srow-l"><span class="lb">오픈프로필 조회 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>옾링 @닉네임」으로 그 사람의 오픈프로필 주소를 볼 수 있습니다. 닉네임이나 오픈프로필 주소로도 찾을 수 있습니다. 프로필 기록이 꺼져 있어도 동작합니다.</p></div>
+      <div class="srow-r"><div class="seg" id="r-cmd-link" role="group" aria-label="오픈프로필 조회 명령어"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">방장·부방장만</button><button type="button" data-v="all" aria-pressed="false">모두</button><button type="button" data-v="off" aria-pressed="false">끄기</button></div></div></div>
    </section>
    </fieldset>
    <p class="errt" id="r-profile-error" role="alert"></p>

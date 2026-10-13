@@ -78,6 +78,11 @@
 .kk-msg.first .kk-bub::before { content: ""; position: absolute; top: 0; left: -6px; width: 9px; height: 11px; background: inherit; clip-path: polygon(0 0, 100% 0, 100% 100%); }
 .kk-msg.me.first .kk-bub::before { left: auto; right: -6px; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .kk-at { font-weight: 600; }
+/* 사진(K bot 기록 카드): 말풍선·꼬리 없이 둥근 그림 한 장 */
+.kk-bub.kk-img { width: 240px; padding: 0; background: none; border-radius: 10px; overflow: hidden; }
+.kk-msg.first .kk-bub.kk-img { border-top-left-radius: 10px; }
+.kk-msg.first .kk-bub.kk-img::before { display: none; }
+.kk-bub.kk-img img { display: block; width: 100%; height: auto; }
 .kk-bub.is-hid { color: var(--kk-hidden); font-size: 14px; font-style: italic; }
 .kk-bub.is-hid.now { animation: hidIn 520ms var(--ease); }
 @keyframes hidIn { from { opacity: .35; } to { opacity: 1; } }

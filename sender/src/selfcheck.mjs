@@ -1318,7 +1318,7 @@ async function withLog(fn) {
     // 기록 없는 사람: 이름으로 물으면 그 이름, 멘션으로 물으면 자리표시 단어 없이(문장 점검 203)
     if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '없는사람', mentions: [] }, host, T) !== '「없는사람」의 프로필 기록이 없어요.') throw new Error('7.7#7 no record by name')
     if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '', mentions: ['999'] }, host, T) !== '이 사람의 프로필 기록이 없어요.') throw new Error('7.7#7 no record by mention')
-    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '', mentions: [] }, host, T) !== '「!프로필 닉네임」처럼 입력해 주세요.') throw new Error('7.7#7 usage')
+    if (RF.profileLookup(rt, '555', cfg, { authorId: '1', arg: '', mentions: [] }, host, T) !== '「!프로필조회 @닉네임」처럼 입력해 주세요.') throw new Error('7.7#7 usage')
     if (!/\n최근 14일 : 입장 \d+회 · 퇴장 \d+회$/.test(ok)) throw new Error('7.7#7 14-day line ' + ok)
   }
   // #8 홍보: 71 위반, 26(인용에만 링크) 아님, 1+https:// 위반, 2 는 media 켰을 때만. 방장·제외 아님. 1/3·2/3 가림, 3/3 강퇴. resetHours 뒤 1부터
@@ -1476,6 +1476,190 @@ async function withLog(fn) {
     if (!F.visitNeedsProfile(rec2, '12345')) throw new Error('7.7#15 legacy grace')
   }
 
+  // #40-1 방 관리 명령어 읽기(roomcmd.parseRoomCommand) · 사람 고르기(findPerson) · 설정 바꾸기(configChange) — 순수 함수
+  {
+    const RC = await import('./roomcmd.mjs')
+    const P = (t) => RC.parseRoomCommand(t, '!')
+    const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('#40-1 ' + what + ' ' + JSON.stringify(a)) }
+    eq(P('!옾링 @하늘'), { cmd: 'link', arg: '@하늘' }, 'link')
+    eq(P('!옾링'), { cmd: 'link', arg: '' }, 'link usage')
+    eq(P('!프로필조회 하늘'), { cmd: 'profile', arg: '하늘' }, 'profile')
+    eq(P('!프로필 하늘'), { cmd: 'profile', arg: '하늘' }, 'profile alias')
+    eq(P('!프로필 조회 하늘'), { cmd: 'profile', arg: '하늘' }, 'profile spaced')
+    eq(P('!내보내기 https://open.kakao.com/o/sAbc'), { cmd: 'kick', arg: 'https://open.kakao.com/o/sAbc' }, 'kick')
+    eq(P('!차단해제 하늘'), { cmd: 'unban', arg: '하늘' }, 'unban')
+    eq(P('!차단 해제 하늘'), { cmd: 'unban', arg: '하늘' }, 'unban spaced')
+    eq(P('!설정'), { cmd: 'status' }, 'status')
+    eq(P('!설정 아무거나'), null, 'status with words is not a command')
+    eq(P('!입장기록 켜기'), { cmd: 'toggle', sec: 'visit', on: true }, 'toggle on')
+    eq(P('!입장 기록 끄기'), { cmd: 'toggle', sec: 'visit', on: false }, 'toggle off spaced')
+    eq(P('!들낙감지'), { cmd: 'toggle', sec: 'churn', on: null }, 'toggle usage')
+    eq(P('!재입장차단 꺼'), { cmd: 'toggle', sec: 'leaveKick', on: false }, 'leaveKick')
+    eq(P('!프로필기록 켜기'), { cmd: 'toggle', sec: 'profile', on: true }, 'profile toggle')
+    eq(P('!프로필 기록 켜기'), { cmd: 'toggle', sec: 'profile', on: true }, 'profile toggle spaced is not a lookup')
+    eq(P('!홍보금지 켜기'), { cmd: 'toggle', sec: 'promo', on: true }, 'promo')
+    eq(P('!올킥감지 끄기'), { cmd: 'toggle', sec: 'guard', on: false }, 'guard')
+    eq(P('!금지어검열 켜기'), { cmd: 'toggle', sec: 'cover', on: true }, 'cover toggle')
+    eq(P('!금지어 추가 토토, 바카라'), { cmd: 'words', op: 'add', words: ['토토', '바카라'] }, 'words add')
+    eq(P('!금지어 삭제 토토'), { cmd: 'words', op: 'del', words: ['토토'] }, 'words del')
+    eq(P('!금지어 목록'), { cmd: 'words', op: 'list', words: [] }, 'words list')
+    eq(P('!금지어 켜기'), { cmd: 'words', op: 'on', words: [] }, 'words on')
+    eq(P('!금지어'), { cmd: 'words', op: '', words: [] }, 'words usage')
+    eq(P('!설정값'), null, 'a longer word is not the command')
+    eq(P('!옾링주소'), null, 'a longer word is not the command 2')
+    eq(P('/옾링 하늘'), null, 'other prefix')
+    eq(RC.parseRoomCommand('/옾링 하늘', '/'), { cmd: 'link', arg: '하늘' }, 'custom prefix')
+    eq(P('!끝말잇기'), null, 'games are not room commands')
+    if (!RC.isStaff(1) || !RC.isStaff(4) || !RC.isStaff(5) || RC.isStaff(2) || RC.isStaff(8) || RC.isStaff(null)) throw new Error('#40-1 isStaff')
+    // 사람 고르기: 멘션 → 옾링 주소 → 닉네임. 같은 닉네임이면 지금 방에 있는 사람이 하나일 때 그 사람
+    const book = [
+      { userId: '11', name: '하늘', link: 'https://open.kakao.com/o/sky11', here: true },
+      { userId: '12', name: '하늘', link: '', here: false },
+      { userId: '13', name: '바다', link: null, here: true },
+      { userId: '14', name: '별', link: 'https://open.kakao.com/o/Star14', here: true },
+      { userId: '15', name: '별', link: '', here: true },
+    ]
+    const F2 = (arg, extra) => RC.findPerson(book, Object.assign({ arg, allowName: true }, extra || {}))
+    eq(F2('', { mentions: ['13'] }), { userId: '13', name: '바다', link: null }, 'mention')
+    eq(F2('아무거나', { mentions: ['99'] }), { userId: '99', name: '', link: null }, 'mention not in the book')
+    eq(F2('https://open.kakao.com/o/sky11'), { userId: '11', name: '하늘', link: 'https://open.kakao.com/o/sky11' }, 'by link')
+    eq(F2('open.kakao.com/o/sky11/'), { userId: '11', name: '하늘', link: 'https://open.kakao.com/o/sky11' }, 'by link without https, trailing slash')
+    eq(F2('https://OPEN.kakao.com/o/Star14?x=1').userId, '14', 'link query ignored, host case-insensitive')
+    eq(F2('https://open.kakao.com/o/star14'), { none: 'link' }, 'link code is case-sensitive')
+    eq(F2('https://open.kakao.com/o/nobody'), { none: 'link' }, 'link not found')
+    eq(F2('하늘').userId, '11', 'same name: the one still here')
+    eq(F2('별'), { many: 2 }, 'same name: two here')
+    eq(F2('@바다').userId, '13', '@name typed without a real mention')
+    eq(F2('구름'), { none: 'name', name: '구름' }, 'name not found')
+    eq(F2(''), { usage: true }, 'usage')
+    eq(RC.findPerson(book, { arg: '바다', allowName: false }), { usage: true }, 'kick does not pick by name')
+    eq(RC.findPerson(book, { arg: 'https://open.kakao.com/o/sky11', allowName: false }).userId, '11', 'kick picks by link')
+    eq(RC.findFailReply({ none: 'name', name: '구름' }), '「구름」을 이 방에서 찾지 못했어요.', 'name fail copy')
+    eq(RC.findFailReply({ none: 'name', name: '하늘' }), '「하늘」을 이 방에서 찾지 못했어요.', 'name fail copy josa')
+    eq(RC.findFailReply({ none: 'name', name: '바다' }), '「바다」를 이 방에서 찾지 못했어요.', 'name fail copy josa 2')
+    eq(RC.findFailReply({ many: 2 }), '같은 이름을 쓰는 사람이 2명 있어요. @멘션으로 골라 주세요.', 'many copy')
+    eq(RC.linkReply({ name: '하늘', link: 'https://open.kakao.com/o/sky11' }), '[옾링]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sky11', 'link reply')
+    eq(RC.linkReply({ name: '바다', link: '' }), '[옾링]\n이름 : 바다\n옾링 : 없음', 'link reply none')
+    eq(RC.linkReply({ name: '별', link: null }), '[옾링]\n이름 : 별\n옾링 : 확인 못 함', 'link reply unknown')
+    eq(RC.kickReply('하늘', { ok: true }), '하늘님을 내보냈어요.', 'kick ok')
+    eq(RC.kickReply('하늘', { ok: false, note: 'wave', waitMin: 7 }), '올킥 감지로 K bot의 내보내기가 멈춰 있어요. 7분쯤 뒤에 다시 입력해 주세요.', 'kick wave')
+    eq(RC.kickReply('하늘', { ok: false, note: 'limit', waitMin: 30 }), 'K bot이 짧은 시간에 내보낼 수 있는 인원을 넘었어요. 30분쯤 뒤에 다시 입력해 주세요.', 'kick limit')
+    eq(RC.kickReply('', { ok: false, status: -500 }), '그 사람을 내보내지 못했어요. 잠시 뒤 다시 입력해 주세요.', 'kick fail')
+    // 설정 바꾸기: 답 · 바꿀 칸 · 기록 한 줄. 이미 그 상태면 저장 없이 답만
+    const cfg0 = RF.normRoomConfig({ visit: { enabled: true }, cover: { words: ['토토'] } })
+    eq(RC.configChange(cfg0, { cmd: 'toggle', sec: 'churn', on: true }), { patch: { churn: { enabled: true } }, reply: '들낙 감지를 켰어요.', log: '들낙 감지 켜기' }, 'toggle change')
+    eq(RC.configChange(cfg0, { cmd: 'toggle', sec: 'visit', on: true }), { reply: '입장·퇴장 기록은 이미 켜져 있어요.' }, 'toggle already')
+    eq(RC.configChange(cfg0, { cmd: 'toggle', sec: 'leaveKick', on: false }), { reply: '나간 사람 재입장 차단은 이미 꺼져 있어요.' }, 'toggle already off')
+    eq(RC.configChange(cfg0, { cmd: 'toggle', sec: 'promo', on: null }).reply, '「!홍보금지 켜기」·「!홍보금지 끄기」로 입력해 주세요. 지금은 꺼져 있어요.', 'toggle usage')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'add', words: ['바카라', '토토', 'TOTO'] }).patch, { cover: { words: ['토토', '바카라', 'TOTO'] } }, 'words add dedupe')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'add', words: ['토토'] }), { reply: '이미 등록된 금지어예요.' }, 'words dupe')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'add', words: ['x'.repeat(31)] }).reply, '금지어는 한 개에 30자까지 입력할 수 있어요.', 'word too long')
+    const many = RF.normRoomConfig({ cover: { words: Array.from({ length: 300 }, (_, i) => 'w' + i) } })
+    eq(RC.configChange(many, { cmd: 'words', op: 'add', words: ['하나더'] }).reply, '금지어는 300개까지 등록할 수 있어요.', 'words max')
+    const addReply = RC.configChange(cfg0, { cmd: 'words', op: 'add', words: ['바카라'] }).reply
+    if (addReply !== '금지어 1개를 추가했어요. 지금 2개예요.\n금지어 검열은 꺼져 있어요. 「!금지어 켜기」로 켤 수 있어요.' || addReply.indexOf('바카라') >= 0) throw new Error('#40-1 the reply does not repeat the word ' + addReply)
+    eq(RC.configChange(RF.normRoomConfig({ cover: { words: ['Spam', '토토'] } }), { cmd: 'words', op: 'del', words: ['spam'] }), { patch: { cover: { words: ['토토'] } }, reply: '금지어 1개를 삭제했어요. 지금 1개예요.', log: '금지어 1개 삭제' }, 'words del (case-insensitive)')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'del', words: ['없는말'] }), { reply: '등록되지 않은 금지어예요.' }, 'words del missing')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'list', words: [] }), { reply: '[금지어]\n토토' }, 'words list')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: 'on', words: [] }).patch, { cover: { enabled: true } }, 'words on = cover toggle')
+    eq(RC.configChange(cfg0, { cmd: 'words', op: '', words: [] }).reply, '「!금지어 추가 단어」·「!금지어 삭제 단어」·「!금지어 목록」으로 입력해 주세요.', 'words usage')
+    const st = RC.statusReply(cfg0)
+    if (st !== '[설정]\n입장·퇴장 기록 : 켜짐\n들낙 감지 : 꺼짐\n나간 사람 재입장 차단 : 꺼짐\n프로필 기록 : 꺼짐\n홍보 금지 : 꺼짐\n금지어 검열 : 꺼짐 (금지어 1개)\n올킥 감지 : 꺼짐\n「!입장기록 켜기」처럼 켜고 끌 수 있어요.') throw new Error('#40-1 status ' + JSON.stringify(st))
+    // 저장본에 합치기: 모르는 칸·다른 절은 그대로, 원본은 바꾸지 않는다
+    const raw = { visit: { enabled: false, style: 'text' }, future: { x: 1 } }
+    const merged = RC.applyPatch(raw, { visit: { enabled: true }, churn: { enabled: true } })
+    eq(merged, { visit: { enabled: true, style: 'text' }, future: { x: 1 }, churn: { enabled: true } }, 'applyPatch')
+    if (raw.visit.enabled !== false) throw new Error('#40-1 applyPatch keeps the original')
+    // 문구 규칙(docs/TONE.md): 방 메시지에 반말·사과·이모지 없음, 명령어는 「」 안
+    const copy = [RC.usageOf('link', '!'), RC.usageOf('kick', '!'), RC.usageOf('unban', '!'), RC.usageOf('profile', '!'), RC.staffOnlyReply('kick'), RC.staffOnlyReply('status'), RC.PROTECTED_REPLY, RC.NOT_HERE_REPLY, RC.SAVE_FAIL_REPLY, RC.notLiveReply('케이봇'), RC.unbanReply('하늘', { ok: true }), RC.unbanReply('', { error: 'not_kicked' })]
+    for (const t of copy) if (/죄송|미안|[\u{1F300}-\u{1FAFF}]|해줘|했어\.|\uD83D/u.test(t) || !/요\.$/.test(t)) throw new Error('#40-1 room copy ' + t)
+    eq(RC.notLiveReply('케이봇'), '방 관리 명령어는 K bot이 부방장이 된 뒤에 쓸 수 있어요. 방장님이 「케이봇」을 부방장으로 지정해 주세요.', 'not live copy')
+  }
+  // #40-2 도움말(!도움 · !도움 관리) — 방 관리 기능이 동작할 때만 방 관리 줄
+  {
+    const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
+    const h = RF.helpLine(v)
+    if (h !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    const ah = RF.adminHelp(v)
+    if (!ah.startsWith('[방 관리 명령어]\n!옾링 @닉네임 : 옾링 보기\n!프로필조회 @닉네임 : 프로필 기록 보기\n!가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n!내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n!금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
+    const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
+    if (RF.helpLine(off) !== '[명령어]\n방 관리 : !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
+    const waiting = view({ state: 'waiting_host' })
+    if (RF.helpLine(waiting) !== '' || RF.adminHelp(waiting) !== '') throw new Error('#40-2 no room commands while waiting for the host')
+    if (!RF.isAdminHelpCommand('!도움 관리', '!') || !RF.isAdminHelpCommand('!도움관리', '!') || RF.isAdminHelpCommand('!도움', '!') || RF.isAdminHelpCommand('!도움 관리자', '!')) throw new Error('#40-2 admin help command')
+  }
+  // #40-3 그림 기록 카드: 글 안내와 같은 내용(제목 · 닉네임 · 옾링 · 기록) + 멘션 한 줄. 카드 PNG 는 폭 720
+  {
+    const LC = await import('./logcard.mjs')
+    const CARD = await import('./card.mjs')
+    const t1 = Date.UTC(2026, 9, 12, 10, 31)
+    const n = RF.visitNoticeText('join', { userId: '555', name: '하늘', link: 'https://open.kakao.com/o/sAbc' }, [t1 - 120000, t1])
+    const c = n.card
+    if (c.kind !== 'join' || c.title !== '입장 안내' || c.name !== '하늘' || c.before !== '' || c.at !== '오후 7:31') throw new Error('#40-3 card head ' + JSON.stringify(c))
+    if (JSON.stringify(c.fields) !== JSON.stringify([{ label: '옾링', value: 'https://open.kakao.com/o/sAbc' }])) throw new Error('#40-3 card link')
+    if (JSON.stringify(c.record) !== JSON.stringify({ label: '입장 기록', count: 2, times: ['10.12 오후 7:29', '10.12 오후 7:31'] })) throw new Error('#40-3 card record ' + JSON.stringify(c.record))
+    // 글 안내의 기록 줄과 같은 값
+    if (n.text !== ['[입장 안내]', '이름 : @하늘', '옾링 : https://open.kakao.com/o/sAbc', '입장 기록 : 2회', ...c.record.times].join('\n')) throw new Error('#40-3 text and card agree')
+    const lv = RF.visitNoticeText('leave', { userId: '555', name: '하@늘', link: null }, [t1]).card
+    if (lv.kind !== 'leave' || lv.title !== '퇴장 안내' || lv.name !== '하늘' || lv.fields[0].value !== '확인 못 함' || lv.record.label !== '퇴장 기록') throw new Error('#40-3 leave card ' + JSON.stringify(lv))
+    if (RF.visitNoticeText('join', { userId: '', name: '', link: '' }, [t1]).card.fields[0].value !== '없음') throw new Error('#40-3 no link → 없음')
+    const pc = RF.profileChangeNotice({ userId: '555', name: '하늘_판매', link: 'https://open.kakao.com/o/sNew' },
+      [{ kind: 'name', from: '하늘', to: '하늘_판매' }, { kind: 'link', from: 'https://open.kakao.com/o/sOld', to: 'https://open.kakao.com/o/sNew' }], [t1]).card
+    if (pc.kind !== 'profile' || pc.title !== '프로필 변경 감지' || pc.before !== '하늘' || pc.name !== '하늘_판매' ||
+      JSON.stringify(pc.fields) !== JSON.stringify([{ label: '옾링 변경전', value: 'https://open.kakao.com/o/sOld' }, { label: '옾링 변경후', value: 'https://open.kakao.com/o/sNew' }]) || pc.record.label !== '변경 기록') throw new Error('#40-3 profile card ' + JSON.stringify(pc))
+    const pc2 = RF.profileChangeNotice({ userId: '555', name: '하늘', link: '' }, [{ kind: 'name', from: '하늘이', to: '하늘' }], [t1]).card
+    if (JSON.stringify(pc2.fields) !== JSON.stringify([{ label: '옾링', value: '없음' }])) throw new Error('#40-3 profile card keeps the link line')
+    // 멘션 한 줄: 그림 안에는 멘션을 넣을 수 없다 → `[입장 안내] @하늘`(visitMentionExtra 가 받는 모양)
+    const line = RF.cardMentionLine(c, '555')
+    if (!line || line.text !== '[입장 안내] @하늘' || F.visitMentionExtra(line.text, line.mention) !== '{"mentions":[{"user_id":555,"at":[1],"len":2}]}') throw new Error('#40-3 mention line ' + JSON.stringify(line))
+    if (RF.cardMentionLine(c, '') !== null || RF.cardMentionLine(pc, '555').text !== '[프로필 변경 감지] @하늘_판매') throw new Error('#40-3 mention line without id / profile')
+    // 카드 그림: 글과 같은 값이 다 들어간다(SVG 글자), 이스케이프, 폭 720 PNG
+    const svg = LC.logCardSvg(Object.assign({}, c, { name: '<하늘&>' }), { room: '동네 "모임"' })
+    for (const want of ['입장 안내', '오후 7:31', '&lt;하늘&amp;&gt;', '옾링', 'https://open.kakao.com/o/sAbc', '입장 기록', '2회', '10.12 오후 7:29', '10.12 오후 7:31', '동네 &quot;모임&quot;']) {
+      if (svg.indexOf(want) < 0) throw new Error('#40-3 card svg has ' + want)
+    }
+    if (svg.indexOf('<하늘') >= 0 || LC.logCardSvg(pc).indexOf('변경전') < 0 || LC.ACCENT.join === LC.ACCENT.leave || LC.ACCENT.leave === LC.ACCENT.profile) throw new Error('#40-3 card svg escape / profile / accents')
+    if (CARD.available()) {
+      const png = LC.logCardPng(c, { room: '동네모임' })
+      if (!png || png.readUInt32BE(16) !== 720 || png.readUInt32BE(20) < 400 || png.readUInt32BE(20) > 1400) throw new Error('#40-3 card png 720 wide')
+      // 패널 미리 보기 그림(public/img/logcard-*.png)은 sender/src/logcard-sample.mjs 가 만든다
+      const { readFileSync } = await import('node:fs')
+      for (const f of ['logcard-join.png', 'logcard-profile.png']) {
+        const b = readFileSync(new URL('../../public/img/' + f, import.meta.url))
+        if (b.readUInt32BE(12) !== 0x49484452 || b.readUInt32BE(16) !== 720) throw new Error('#40-3 panel preview ' + f + ' is a 720-wide PNG')
+      }
+    }
+    if (LC.logCardPng(null) !== null) throw new Error('#40-3 no card → null')
+  }
+  // #40-4 발송 한도: 그림 + 멘션 한 줄(cost 2)은 방 한도(분당 6)에서 2개로 센다. 대기 목록은 한 자리
+  {
+    const pc = new RF.Pacer({ roomMax: 6, botMax: 30 })
+    const t0 = 1_000_000
+    pc.push('a', { text: 'img1', cost: 2 }, t0)
+    pc.push('a', { text: 'img2', cost: 2 }, t0)
+    pc.push('a', { text: 'img3', cost: 2 }, t0)
+    pc.push('a', { text: 'txt' }, t0)
+    const got = []
+    for (let x; (x = pc.next(t0));) got.push(x.item.text)
+    if (got.join() !== 'img1,img2,img3' || pc.pending() !== 1) throw new Error('#40-4 cost counts toward the room limit ' + got.join())
+    if (pc.wakeAt(t0) !== t0 + 60000) throw new Error('#40-4 wake when one slot frees')
+    const pc2 = new RF.Pacer({ roomMax: 6, botMax: 30 })
+    for (let i = 0; i < 5; i++) pc2.push('b', { text: 't' + i }, t0 + i)
+    for (let i = 0; i < 5; i++) pc2.next(t0 + i)
+    pc2.push('b', { text: 'img', cost: 2 }, t0 + 10)
+    if (pc2.next(t0 + 10) !== null) throw new Error('#40-4 a 2-cost item waits for two free slots')
+    if (pc2.wakeAt(t0 + 10) !== t0 + 60000) throw new Error('#40-4 wake when two slots are free ' + (pc2.wakeAt(t0 + 10) - t0))
+    if (!pc2.next(t0 + 60001) || pc2.pending() !== 0) throw new Error('#40-4 sent once two slots are free')
+  }
+  // #40-5 sender 기본값 = 부모 기본값(lib/room-config.js). 한쪽에만 칸을 더하면 여기서 걸린다
+  {
+    const { createRequire } = await import('node:module')
+    const rc = createRequire(import.meta.url)('../../lib/room-config.js')
+    if (JSON.stringify(rc.DEFAULTS) !== JSON.stringify(RF.DEFAULTS)) throw new Error('#40-5 sender DEFAULTS differ from lib/room-config.js DEFAULTS')
+    const messy = { visit: { style: 'gif', enabled: true }, profile: { style: 'text' }, cmd: { link: 'all' }, cover: { words: ['a', 'A'] } }
+    if (JSON.stringify(rc.normalizeRoomConfig(messy)) !== JSON.stringify(RF.normRoomConfig(messy))) throw new Error('#40-5 normalize parity')
+  }
+
   // ── 16~24: 가짜 연결(9.4) + 메모리 저장소 ────────────────────────────────
   const prevSecret = process.env.CONFIG_SECRET
   const prevJoin = process.env.FAKE_JOIN_MS
@@ -1596,7 +1780,7 @@ async function withLog(fn) {
     room0.members['701'] = { mt: 2, nick: '먼저온사람', ptp: 16, pli: '7101', photo: 'https://k.kakaocdn.net/dn/p/701a.jpg', status: null }
     room0.members['702'] = { mt: 2, nick: '둘째', ptp: 16, pli: '7201', photo: 'https://k.kakaocdn.net/dn/p/702a.jpg', status: null }
     room0.members['703'] = { mt: 2, nick: '기본프로필', ptp: 1, pli: null, photo: '', status: null }
-    const iBook = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    const iBook = install(code, { config: { visit: { enabled: true, style: 'text' }, profile: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iBook).state === 'waiting_host', 5000, '#28 join')
     const chat = rowOf(iBook).chat_id
@@ -1646,7 +1830,7 @@ async function withLog(fn) {
     const room0 = fs.room(code)
     fs.setProfiles('711', [{ li: '7111', name: '처음 프로필', url: 'https://open.kakao.com/o/a711' }, { li: '7112', name: '바꾼 프로필', url: 'https://open.kakao.com/o/b711' }])
     room0.members['711'] = { mt: 2, nick: '바꿀사람', ptp: 16, pli: '7111', photo: 'https://k.kakaocdn.net/dn/p/711.jpg', status: null }
-    const iLink = install(code, { config: { profile: { enabled: true } } })
+    const iLink = install(code, { config: { profile: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iLink).state === 'waiting_host', 5000, '#28-2 join')
     const chat = rowOf(iLink).chat_id
@@ -1690,7 +1874,7 @@ async function withLog(fn) {
     fs.setProfiles('732', [{ li: '7321', name: '넷째 프로필', url: 'https://open.kakao.com/o/a732' }])
     room0.members['731'] = { mt: 2, nick: '새로읽기', ptp: 16, pli: '7311', photo: 'https://k.kakaocdn.net/dn/p/731.jpg', status: null }
     room0.members['732'] = { mt: 2, nick: '고쳐읽기', ptp: 16, pli: '7321', photo: 'https://k.kakaocdn.net/dn/p/732.jpg', status: null }
-    const iHeal = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    const iHeal = install(code, { config: { visit: { enabled: true, style: 'text' }, profile: { enabled: true, style: 'text' } } })
     // 예전 코드가 읽기 실패를 '없음'('')으로 저장해 둔 행
     await store.saveMembers(iHeal, room0.chatId, [{ user_id: '732', name: '고쳐읽기', pli: '7321', link: '', photo: 'https://k.kakaocdn.net/dn/p/732.jpg', seen_at: Date.now() }])
     await withLog(async (lines) => {
@@ -1748,7 +1932,7 @@ async function withLog(fn) {
     }
     room0.getmemSkip = ['741', '742', ...many]
     room0.keepLeft = true
-    const iFill = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    const iFill = install(code, { config: { visit: { enabled: true, style: 'text' }, profile: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iFill).state === 'waiting_host', 5000, '#28-4 join')
     const chat = rowOf(iFill).chat_id
@@ -1796,7 +1980,7 @@ async function withLog(fn) {
     room0.getmemSkip = ['771', '772']
     room0.keepLeft = true
     botA.slot.joinH.list = []     // 봇 A 의 시간당 입장 한도(20)를 이 방이 쓰지 않게(뒤 시험의 입장이 밀리지 않게)
-    const iLate = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    const iLate = install(code, { config: { visit: { enabled: true, style: 'text' }, profile: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iLate).state === 'waiting_host', 5000, '#28-7 join')
     const chat = rowOf(iLate).chat_id
@@ -1910,7 +2094,7 @@ async function withLog(fn) {
     room0.members['792'] = { mt: 2, nick: '못읽음', ptp: 16, pli: '7921', photo: '', status: null }
     room0.members['793'] = { mt: 2, nick: '빠질사람', ptp: 16, pli: '7931', photo: '', status: null }
     botA.slot.joinH.list = []
-    const iP = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    const iP = install(code, { config: { visit: { enabled: true, style: 'text' }, profile: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iP).state === 'waiting_host', 5000, '#28-9 join')
     const chat = rowOf(iP).chat_id
@@ -1961,7 +2145,7 @@ async function withLog(fn) {
     const room0 = fs.room(code)
     for (const id of ['751', '752', '753']) room0.members[id] = { mt: 2, nick: '나갈사람' + id, ptp: 1, pli: null, photo: '', status: null }
     room0.getmemSkip = ['751', '752', '753']
-    const iLv = install(code, { config: { visit: { enabled: true } } })
+    const iLv = install(code, { config: { visit: { enabled: true, style: 'text' } } })
     await pool.reconcile(null)
     await waitFor(() => rowOf(iLv).state === 'waiting_host', 5000, '#28-5 join')
     const chat = rowOf(iLv).chat_id
@@ -2156,6 +2340,236 @@ async function withLog(fn) {
       else process.env.FAKE_KICK_LEFT = prevLeft
       vk.actPausedUntil = 0
       vk.failStreak = 0
+      botA.slot.limits.kickH.list.splice(kMark[0])
+      botA.slot.limits.kickD.list.splice(kMark[1])
+    }
+  }
+  // #40 방 관리 명령어(7.3)와 그림 기록(7.2(a)(c))을 실제 botpool 경로로:
+  //   · 부방장 지정 대기: 방장·부방장의 방 관리 명령어에 지정이 먼저라고 답한다(다른 사람은 조용)
+  //   · !도움·!도움 관리 · !옾링(멘션·옾링 주소·닉네임, 권한, 같은 닉네임·못 찾음) · !프로필조회(바뀐 적 없는 사람도) · !내보내기(권한·보호·
+  //     닉네임 거절·옾링 주소로·방에 없음·올킥 감지 멈춤) · !차단해제 · !설정 · 켜고 끄기·금지어(저장본·config_rev·패널과 겹침·모르는 칸 유지·
+  //     부모 검증 통과·재조정이 되돌리지 않음·저장 실패) · 방장·부방장이 아닌 사람의 명령어 글도 홍보 금지 검사
+  //   · 입장 안내 그림(720) + 바로 뒤 멘션 한 줄 · 그림 실패 → 지금의 글 안내(멘션 포함) · 글 모양 설정 · 그림을 못 만들면 글
+  {
+    const RC40 = await import('./roomcmd.mjs')
+    const CARD40 = await import('./card.mjs')
+    const code = 'cmdx40'
+    const room0 = fs.room(code)
+    fs.setProfiles('4011', [{ li: '40111', name: '하늘 프로필', url: 'https://open.kakao.com/o/sky4011' }])
+    fs.setProfiles('4013', [{ li: '40131', name: '하늘2 프로필', url: 'https://open.kakao.com/o/sky4013' }])
+    fs.setProfiles('4014', [{ li: '40141', name: '구름 프로필', url: 'https://open.kakao.com/o/cloud4014' }])
+    fs.setProfiles('4015', [{ li: '40151', name: '별빛 프로필', url: 'https://open.kakao.com/o/star4015' }])
+    const mem = (mt, nick, pli) => ({ mt, nick, ptp: pli ? 16 : 1, pli: pli || null, photo: '', status: null })
+    room0.members['4001'] = mem(1, '방장님')
+    room0.members['4002'] = mem(4, '부방장')
+    room0.members['4011'] = mem(2, '하늘', '40111')
+    room0.members['4012'] = mem(2, '바다')
+    room0.members['4013'] = mem(2, '하늘', '40131')
+    room0.members['4014'] = mem(2, '구름', '40141')
+    const iC = install(code, { config: { visit: { enabled: true }, profile: { enabled: true } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iC).state === 'waiting_host', 5000, '#40 join')
+    const chat = rowOf(iC).chat_id
+    const vc = botA.slot.byInstall.get(iC)
+    const pc = botA.slot.pacer
+    const botMax0 = pc.botWin.max
+    pc.botWin.max = 100000
+    pc.room(String(iC)).win.max = 100000
+    const sent = () => fs.sentIn(chat)
+    const texts = () => sent().map((x) => x.text)
+    const kMark = [botA.slot.limits.kickH.list.length, botA.slot.limits.kickD.list.length]
+    try {
+      await waitFor(() => texts().some((t) => t.startsWith('[K bot]')), 5000, '#40 bot join notice')
+      const post = (uid, name, text, mentionId) => fs.event(chat, botA.uid, {
+        kind: 'message', user_id: uid, name, text,
+        attachment: mentionId ? { mentions: [{ user_id: Number(mentionId), at: [1], len: 2 }] } : undefined,
+      })
+      const ask = async (uid, name, text, mentionId) => {
+        const n = sent().length
+        post(uid, name, text, mentionId)
+        await waitFor(() => sent().length > n, 5000, '#40 reply to ' + text)
+        await sleep(30)
+        return sent()[n].text
+      }
+      const quiet = async (uid, name, text) => {
+        const n = sent().length
+        post(uid, name, text)
+        await sleep(400)
+        if (sent().length !== n) throw new Error('#40 no reply to ' + text + ' ' + JSON.stringify(texts().slice(n)))
+      }
+      const expect = async (got, want, what) => {
+        const t = await got
+        if (t !== want) throw new Error('#40 ' + what + ' ' + JSON.stringify(t))
+      }
+      // 부방장 지정 대기
+      await expect(ask('4001', '방장님', '!설정'), RC40.notLiveReply(botA.slot.nameIn(vc)), 'waiting: host is told to promote the bot')
+      await quiet('4012', '바다', '!설정')
+      fs.setPerm(chat, botA.uid, 4)
+      await waitFor(() => rowOf(iC).state === 'active', 3000, '#40 promotion')
+      await waitFor(() => texts().some((x) => x.indexOf('부방장으로 지정되었어요') >= 0), 3000, '#40 promoted notice')
+      await waitFor(() => vc.members.get('4014') && vc.members.get('4014').link === 'https://open.kakao.com/o/cloud4014' && vc.memberOkAt > 0, 5000, '#40 member book')
+      await sleep(100)
+      // 도움말
+      await expect(ask('4012', '바다', '!도움'), '[명령어]\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
+      if (!(await ask('4012', '바다', '!도움 관리')).startsWith('[방 관리 명령어]\n!옾링 @닉네임 : 옾링 보기')) throw new Error('#40 admin help')
+      // !옾링: 기본은 방장·부방장만
+      await expect(ask('4012', '바다', '!옾링 구름'), '옾링 조회는 방장과 부방장만 할 수 있어요.', 'link staff only')
+      await expect(ask('4002', '부방장', '!옾링'), '「!옾링 @닉네임」처럼 입력해 주세요. 옾링 주소나 닉네임으로도 찾을 수 있어요.', 'link usage')
+      await expect(ask('4002', '부방장', '!옾링 구름'), '[옾링]\n이름 : 구름\n옾링 : https://open.kakao.com/o/cloud4014', 'link by name')
+      await expect(ask('4002', '부방장', '!옾링 @바다', '4012'), '[옾링]\n이름 : 바다\n옾링 : 없음', 'link by mention (default profile)')
+      await expect(ask('4001', '방장님', '!옾링 https://open.kakao.com/o/sky4013'), '[옾링]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sky4013', 'link by link')
+      await expect(ask('4001', '방장님', '!옾링 open.kakao.com/o/cloud4014/'), '[옾링]\n이름 : 구름\n옾링 : https://open.kakao.com/o/cloud4014', 'link by link without https')
+      await expect(ask('4001', '방장님', '!옾링 하늘'), '같은 이름을 쓰는 사람이 2명 있어요. @멘션으로 골라 주세요.', 'link same name')
+      await expect(ask('4001', '방장님', '!옾링 없는사람'), '「없는사람」을 이 방에서 찾지 못했어요.', 'link name not found')
+      await expect(ask('4001', '방장님', '!옾링 https://open.kakao.com/o/nobody40'), '그 옾링을 쓰는 사람을 이 방에서 찾지 못했어요.', 'link not found')
+      // !프로필조회: 바뀐 적이 없는 사람도 명부에서 찾아 답한다(예전에는 「기록이 없어요」) · !프로필 도 같다
+      const prof = '[프로필 기록]\n이름 : 구름\n이전 이름 : 없음\n최근 14일 : 입장 0회 · 퇴장 0회'
+      await expect(ask('4001', '방장님', '!프로필조회 구름'), prof, 'profile lookup by name')
+      await expect(ask('4001', '방장님', '!프로필 https://open.kakao.com/o/cloud4014'), prof, 'profile lookup alias by link')
+      await expect(ask('4012', '바다', '!프로필조회 구름'), '프로필 조회는 방장과 부방장만 할 수 있어요.', 'profile staff only')
+      // !내보내기
+      const kicks = () => packets('KICKMEM', (p) => p.chat === chat)
+      const k0 = kicks().length
+      await expect(ask('4012', '바다', '!내보내기 @구름', '4014'), '내보내기는 방장과 부방장만 할 수 있어요.', 'kick staff only')
+      await expect(ask('4002', '부방장', '!내보내기 구름'), '「!내보내기 @닉네임」처럼 멘션으로 입력해 주세요. 옾링 주소로도 고를 수 있어요.', 'kick does not pick by name')
+      await expect(ask('4002', '부방장', '!내보내기 @방장님', '4001'), '방장·부방장·제외 대상은 내보낼 수 없어요.', 'kick protects the host')
+      await expect(ask('4002', '부방장', '!내보내기 @케이봇', botA.uid), '방장·부방장·제외 대상은 내보낼 수 없어요.', 'kick protects the bot')
+      if (kicks().length !== k0) throw new Error('#40 no KICKMEM for refused kicks')
+      // 올킥 감지로 멈춘 동안: 내보내지 않고 남은 분을 말한다
+      const g0 = vc.runtime.guard
+      vc.runtime.guard = Object.assign({}, g0, { halt: Object.assign({}, g0 && g0.halt, { [chat]: Date.now() + 5 * 60000 - 1000 }) })
+      try {
+        await expect(ask('4002', '부방장', '!내보내기 @바다', '4012'), '올킥 감지로 K bot의 내보내기가 멈춰 있어요. 5분쯤 뒤에 다시 입력해 주세요.', 'kick during a wave halt')
+      } finally {
+        vc.runtime.guard = g0
+      }
+      if (kicks().length !== k0) throw new Error('#40 no KICKMEM during a halt')
+      await expect(ask('4002', '부방장', '!내보내기 https://open.kakao.com/o/cloud4014'), '구름님을 내보냈어요.', 'kick by link')
+      if (kicks().length !== k0 + 1 || !fs.byChat(chat).kicked.includes('4014')) throw new Error('#40 KICKMEM sent')
+      const kl = store.logs.filter((l) => l.install_id === iC && l.kind === 'kick' && l.user_id === '4014')
+      if (kl.length !== 1 || kl[0].detail.why !== 'command' || kl[0].detail.by !== '4002' || kl[0].name !== '구름') throw new Error('#40 kick log ' + JSON.stringify(kl))
+      await expect(ask('4002', '부방장', '!내보내기 https://open.kakao.com/o/cloud4014'), '그 사람은 지금 이 방에 없어요.', 'kick someone who is gone')
+      // !차단해제: K bot이 내보낸 사람(닉네임으로) → 카카오 내보내기 목록에서도 푼다
+      await expect(ask('4001', '방장님', '!차단해제 구름'), '구름님의 내보내기·재입장 차단을 풀었어요. 다시 들어올 수 있어요.', 'unban')
+      if (fs.byChat(chat).kicked.includes('4014')) throw new Error('#40 unban sends KLDELITEM')
+      await expect(ask('4001', '방장님', '!차단해제 바다'), 'K bot이 내보내거나 차단한 사람이 아니에요.', 'unban someone not kicked')
+      await expect(ask('4012', '바다', '!차단해제 구름'), '차단 해제는 방장과 부방장만 할 수 있어요.', 'unban staff only')
+      // !설정 · 켜고 끄기: 패널과 같은 방 설정(room_installs.config)에 저장, config_rev + 1
+      await expect(ask('4012', '바다', '!설정'), '설정은 방장과 부방장만 바꿀 수 있어요.', 'status staff only')
+      await expect(ask('4012', '바다', '!들낙감지 켜기'), '설정은 방장과 부방장만 바꿀 수 있어요.', 'toggle staff only')
+      const st = await ask('4001', '방장님', '!설정')
+      if (!st.startsWith('[설정]\n입장·퇴장 기록 : 켜짐\n들낙 감지 : 꺼짐\n')) throw new Error('#40 status ' + JSON.stringify(st))
+      const rev0 = Number(rowOf(iC).config_rev) || 0
+      rowOf(iC).config = Object.assign({}, rowOf(iC).config, { future: { keep: 1 } })     // 이 버전이 모르는 칸
+      await expect(ask('4001', '방장님', '!들낙감지 켜기'), '들낙 감지를 켰어요.', 'toggle on')
+      if (rowOf(iC).config.churn.enabled !== true || rowOf(iC).config_rev !== rev0 + 1 || !vc.cfg.churn.enabled || vc.rev !== rev0 + 1) throw new Error('#40 toggle is saved ' + JSON.stringify([rowOf(iC).config.churn, rowOf(iC).config_rev, rev0]))
+      if (!rowOf(iC).config.future || rowOf(iC).config.future.keep !== 1 || rowOf(iC).config.visit.enabled !== true) throw new Error('#40 other fields are kept')
+      const cl = store.logs.filter((l) => l.install_id === iC && l.kind === 'config')
+      if (cl.length !== 1 || cl[0].user_id !== '4001' || cl[0].detail.text !== '들낙 감지 켜기' || cl[0].detail.by !== 'room') throw new Error('#40 config log ' + JSON.stringify(cl))
+      await expect(ask('4001', '방장님', '!들낙 감지 켜기'), '들낙 감지는 이미 켜져 있어요.', 'toggle already on')
+      if (rowOf(iC).config_rev !== rev0 + 1) throw new Error('#40 no save when nothing changes')
+      await expect(ask('4001', '방장님', '!입장기록'), '「!입장기록 켜기」·「!입장기록 끄기」로 입력해 주세요. 지금은 켜져 있어요.', 'toggle usage')
+      // 재조정이 예전 행(그 전에 읽은 목록)을 주어도 되돌리지 않는다
+      await botA.slot.upsertView(Object.assign({}, rowOf(iC), { config: {}, config_rev: rev0 }))
+      if (!vc.cfg.churn.enabled) throw new Error('#40 an older reconcile row does not undo a room command')
+      // 패널이 그사이 저장했다(config_rev 가 바뀜) → 다시 읽어 합친다(패널 값 유지)
+      const row = store.installs.get(iC)
+      store.installs.set(iC, Object.assign({}, row, { config: Object.assign({}, row.config, { guard: { enabled: false, secs: 60, count: 5 } }), config_rev: row.config_rev + 1 }))
+      const getInstall0 = store.getInstall
+      let reads = 0
+      store.getInstall = async (id) => {
+        reads++
+        const r = await getInstall0.call(store, id)
+        // 첫 읽기 뒤 패널이 한 번 더 저장한다(겹침)
+        if (reads === 1) { const cur = store.installs.get(iC); store.installs.set(iC, Object.assign({}, cur, { config_rev: cur.config_rev + 1 })) }
+        return r
+      }
+      try {
+        await expect(ask('4002', '부방장', '!올킥감지 켜기'), '올킥 감지를 켰어요.', 'toggle after a panel save')
+      } finally {
+        store.getInstall = getInstall0
+      }
+      if (reads !== 2 || rowOf(iC).config.guard.enabled !== true || rowOf(iC).config.guard.secs !== 60 || !vc.cfg.guard.enabled || vc.cfg.guard.secs !== 60) throw new Error('#40 retried on a stale rev and kept the panel value ' + JSON.stringify([reads, rowOf(iC).config.guard]))
+      // 금지어
+      await expect(ask('4001', '방장님', '!금지어 추가 토토, 바카라'), '금지어 2개를 추가했어요. 지금 2개예요.\n금지어 검열은 꺼져 있어요. 「!금지어 켜기」로 켤 수 있어요.', 'words add')
+      await expect(ask('4001', '방장님', '!금지어 목록'), '[금지어]\n토토, 바카라', 'words list')
+      await expect(ask('4001', '방장님', '!금지어 삭제 토토'), '금지어 1개를 삭제했어요. 지금 1개예요.', 'words del')
+      await expect(ask('4001', '방장님', '!금지어 켜기'), '금지어 검열을 켰어요.', 'cover on')
+      if (JSON.stringify(rowOf(iC).config.cover.words) !== '["바카라"]' || rowOf(iC).config.cover.enabled !== true || !vc.cfg.cover.enabled) throw new Error('#40 words saved ' + JSON.stringify(rowOf(iC).config.cover))
+      // 방에서 바꾼 설정은 부모 검증(lib/room-config.js)을 그대로 통과하고, 양쪽 정리 결과가 같다
+      {
+        const { createRequire } = await import('node:module')
+        const rc = createRequire(import.meta.url)('../../lib/room-config.js')
+        const cfgNow = rowOf(iC).config
+        const chk = rc.sanitizeRoomConfig({}, rc.normalizeRoomConfig(cfgNow), { products: { roombot: true, minigame: true }, display: 'active' })
+        if (!chk.ok || JSON.stringify(rc.normalizeRoomConfig(cfgNow)) !== JSON.stringify(RF.normRoomConfig(cfgNow))) throw new Error('#40 parent accepts the saved config ' + JSON.stringify(chk))
+      }
+      // 저장이 안 되면(계속 겹침) 답으로 알린다
+      const save0 = store.saveRoomConfig
+      store.saveRoomConfig = async () => 0
+      try {
+        await expect(ask('4001', '방장님', '!재입장차단 켜기'), '설정을 저장하지 못했어요. 잠시 뒤 다시 입력해 주세요.', 'save failure')
+      } finally {
+        store.saveRoomConfig = save0
+      }
+      if (vc.cfg.leaveKick.enabled) throw new Error('#40 a failed save changes nothing')
+      // 방장·부방장이 아닌 사람의 명령어 글도 홍보 금지 검사를 받는다(명령어로 링크를 숨겨 올리지 못하게)
+      await expect(ask('4001', '방장님', '!홍보금지 켜기'), '홍보 금지를 켰어요.', 'promo on')
+      const rw0 = packets('REWRITE', (p) => p.chat === chat).length
+      const n0 = sent().length
+      post('4012', '바다', '!옾링 https://spam.example.com/x')
+      await waitFor(() => texts().slice(n0).some((t) => t.startsWith('[홍보 금지]')), 5000, '#40 promo on a command message')
+      if (texts()[n0] !== '옾링 조회는 방장과 부방장만 할 수 있어요.' || packets('REWRITE', (p) => p.chat === chat).length !== rw0 + 1) throw new Error('#40 command message is moderated ' + JSON.stringify(texts().slice(n0)))
+      await expect(ask('4001', '방장님', '!홍보금지 끄기'), '홍보 금지를 껐어요.', 'promo off')
+      // !옾링 끄기 → 조용(다음 처리로) · 모두 → 누구나
+      const setCfg = async (patch) => {
+        const cur = store.installs.get(iC)
+        store.installs.set(iC, Object.assign({}, cur, { config: RC40.applyPatch(cur.config, patch), config_rev: cur.config_rev + 1 }))
+        await pool.reconcile(null)
+      }
+      await setCfg({ cmd: { link: 'off' } })
+      await quiet('4001', '방장님', '!옾링 구름')
+      await setCfg({ cmd: { link: 'all' } })
+      await expect(ask('4012', '바다', '!옾링 https://open.kakao.com/o/sky4011'), '[옾링]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sky4011', 'link for everyone')
+      // 입장 안내 그림: 사진(폭 720) 1장 + 바로 뒤 멘션 한 줄 `[입장 안내] @별빛`
+      const join = async (uid, name, pli) => {
+        room0.members[uid] = mem(2, name, pli)
+        if (vc.runtime.visit && vc.runtime.visit.nextAt) vc.runtime.visit.nextAt = {}
+        const n = sent().length
+        fs.event(chat, botA.uid, { kind: 'join', user_id: uid, name })
+        await waitFor(() => sent().slice(n).some((x) => x.text.indexOf('입장 안내') >= 0), 8000, '#40 join notice ' + uid)
+        await sleep(50)
+        return sent().slice(n)
+      }
+      const j1 = await join('4015', '별빛', '40151')
+      const photo = j1[0] && j1[0].extra ? JSON.parse(j1[0].extra) : null
+      if (CARD40.available()) {
+        if (j1.length !== 2 || j1[0].text !== '(사진)' || !photo || photo.w !== 720 || !(photo.h > 400)) throw new Error('#40 join card photo ' + JSON.stringify(j1))
+        if (j1[1].text !== '[입장 안내] @별빛' || j1[1].extra !== '{"mentions":[{"user_id":4015,"at":[1],"len":2}]}') throw new Error('#40 mention line right after the card ' + JSON.stringify(j1[1]))
+        const buf = fs.photos[fs.photos.length - 1].buf
+        if (buf.readUInt32BE(16) !== 720) throw new Error('#40 photo bytes')
+      } else if (j1.length !== 1 || j1[0].text.indexOf('[입장 안내]\n이름 : @별빛\n') !== 0) throw new Error('#40 without the renderer the text notice goes out ' + JSON.stringify(j1))
+      // 그림 보내기가 실패하면 지금의 글 안내(멘션 포함) 하나만
+      room0.photoFail = true
+      let j2
+      try {
+        j2 = await join('4016', '노을')
+      } finally {
+        room0.photoFail = false
+      }
+      if (j2.length !== 1 || j2[0].text.indexOf('[입장 안내]\n이름 : @노을\n옾링 : 없음\n입장 기록 : 1회\n') !== 0 || j2[0].extra !== '{"mentions":[{"user_id":4016,"at":[1],"len":2}]}') throw new Error('#40 image failure falls back to the text notice ' + JSON.stringify(j2))
+      // 방에 보내는 안내 = 글 → 예전과 같은 글 안내
+      await setCfg({ visit: { style: 'text' } })
+      const j3 = await join('4017', '새벽')
+      if (j3.length !== 1 || j3[0].text.indexOf('[입장 안내]\n이름 : @새벽\n') !== 0) throw new Error('#40 text style ' + JSON.stringify(j3))
+      // 그림을 못 만들면(렌더러 없음 = png null) 글 안내
+      const n4 = sent().length
+      botA.slot.sayImage(vc, null, { text: '[입장 안내]\n이름 : @새벽', mention: { userId: '4017', len: 2, at: 12 }, after: { text: '[입장 안내] @새벽', mention: { userId: '4017', len: 2 } } })
+      await waitFor(() => sent().length > n4, 3000, '#40 null png')
+      await sleep(100)
+      if (sent().length !== n4 + 1 || sent()[n4].text !== '[입장 안내]\n이름 : @새벽') throw new Error('#40 no png → the text notice only ' + JSON.stringify(sent().slice(n4)))
+    } finally {
+      pc.botWin.max = botMax0
       botA.slot.limits.kickH.list.splice(kMark[0])
       botA.slot.limits.kickD.list.splice(kMark[1])
     }

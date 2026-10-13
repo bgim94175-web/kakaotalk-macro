@@ -3512,6 +3512,7 @@
     if (r === 'room') segSet('r-prefix', c.cmdPrefix);
     if (r === 'r-visit') {
       setSw('r-visit-on', c.visit.enabled);
+      segSet('r-visit-style', c.visit.style || 'image');
       setSw('r-churn-on', c.churn.enabled);
       setNum('r-churn-joins', c.churn.joins);
       setNum('r-churn-min', c.churn.windowMin);
@@ -3527,6 +3528,8 @@
       setSw('r-profile-name', c.profile.name);
       setSw('r-profile-status', c.profile.status);
       segSet('r-profile-lookup', c.profile.lookup);
+      segSet('r-profile-style', c.profile.style || 'image');
+      segSet('r-cmd-link', (c.cmd && c.cmd.link) || 'staff');
       var na = c.status_supported === false;
       $('row-r-profile-status').hidden = na;
       $('row-r-profile-status-na').hidden = !na;
@@ -3577,7 +3580,7 @@
     var c = roomSt.cfg || {};
     if (r === 'room') return { cmdPrefix: segVal('r-prefix') };
     if (r === 'r-visit') return {
-      visit: { enabled: $('r-visit-on').checked },
+      visit: { enabled: $('r-visit-on').checked, style: segVal('r-visit-style') || 'image' },
       churn: { enabled: $('r-churn-on').checked, joins: numVal('r-churn-joins'), windowMin: numVal('r-churn-min'), action: segVal('r-churn-action'), notice: $('r-churn-notice').checked },
       leaveKick: { enabled: $('r-leave-on').checked, notice: $('r-leave-notice').checked },
       exempt: exemptList.map(function (x) { return { user_id: x.user_id, name: x.name }; }),
@@ -3587,7 +3590,9 @@
         enabled: $('r-profile-on').checked, name: $('r-profile-name').checked,
         status: c.status_supported === false ? !!(c.profile && c.profile.status) : $('r-profile-status').checked,
         lookup: segVal('r-profile-lookup'),
+        style: segVal('r-profile-style') || 'image',
       },
+      cmd: { link: segVal('r-cmd-link') || 'staff' },
     };
     if (r === 'r-promo') return {
       promo: {
@@ -3719,6 +3724,7 @@
   function roomPreviews(r) {
     var c = roomSt.cfg;
     var pfx = segVal('r-prefix') || (c && c.cmdPrefix) || '!';
+    if (r === 'r-visit' || r === 'r-profile') stylePreview(r === 'r-visit' ? 'r-visit-style' : 'r-profile-style');
     if (r === 'r-visit') {
       var joins = numVal('r-churn-joins') || 3;
       var min = numVal('r-churn-min') || 10;
@@ -3760,11 +3766,26 @@
       var roomCmds = [];
       var v = curRoom();
       if (roombotLiveV(v) && c) {
+        if (!c.cmd || c.cmd.link !== 'off') roomCmds.push(pfx + '옾링');
+        if (c.profile && c.profile.enabled && c.profile.lookup !== 'off') roomCmds.push(pfx + '프로필조회');
         if (c.hide && c.hide.command) roomCmds.push(pfx + '가리기');
-        if (c.profile && c.profile.enabled && c.profile.lookup !== 'off') roomCmds.push(pfx + '프로필');
+        roomCmds.push(pfx + '내보내기', pfx + '설정');
       }
-      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') : '');
+      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') +
+        (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') + '\n「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
+  }
+
+  // 방에 보내는 안내 모양(이미지·글) 미리 보기 — sender/src/roomfeat.mjs card · logcard.mjs 와 같은 모양(그림은 sender/src/logcard-sample.mjs 가 만든다)
+  var STYLE_NOTE = {
+    image: '이미지 1장과 그 사람을 멘션한 한 줄을 보냅니다. 이미지를 보내지 못하면 아래 「글」 모양으로 보냅니다.',
+    text: '글 1개로 보냅니다. 이름에 그 사람을 멘션합니다.'
+  };
+  function stylePreview(id) {
+    var v = segVal(id) || 'image';
+    qsa('[data-style-of="' + id + '"] .style-v').forEach(function (x) { x.hidden = x.dataset.v !== v; });
+    var note = qs('[data-style-note="' + id + '"]');
+    if (note) note.textContent = STYLE_NOTE[v] || '';
   }
 
   // ── 화면 그리기 ───────────────────────────────────────────
@@ -3830,6 +3851,7 @@
     var v = curRoom();
     if (!v) return;
     $('room-title').textContent = roomName(v);
+    $('row-r-cmds').hidden = !v.products.roombot;
     $('room-link').textContent = linkText(v.link_url);
     // 닉네임이 없으면 서버가 'K bot 계정' 을 채워 준다 → 「K bot 계정」 을 겹쳐 쓰지 않는다
     var bn = v.bot && v.bot.nickname && v.bot.nickname !== 'K bot 계정' && v.bot.nickname !== 'K bot' ? v.bot.nickname : '';

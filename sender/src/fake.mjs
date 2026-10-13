@@ -859,8 +859,21 @@ export class FakeKakaoClient {
     return { success: true, status_code: 0, chat_id: str(chatId), log_id: str(r.logId), sent_at: r.sendAt }
   }
 
-  async sendPhoto(chatId) {
-    return this.sendMessage(chatId, '(사진)')
+  // 사진: 방에는 '(사진)' 한 줄로 남기고, 그림 크기(PNG 머리의 폭·높이)를 extra 에 적는다. 그림 자체는 server.photos(메모리)에.
+  // 방 시험 스위치 r.photoFail: 사진 보내기를 실패로 돌려준다(글로 대신 보내는지 본다).
+  async sendPhoto(chatId, buf) {
+    await this.acquireSession()
+    const r = this.server.byChat(chatId)
+    if (r && r.photoFail) return { success: false, status_code: -500 }
+    const b = Buffer.isBuffer(buf) ? buf : null
+    const png = b && b.length > 24 && b.readUInt32BE(12) === 0x49484452 ? { w: b.readUInt32BE(16), h: b.readUInt32BE(20) } : null
+    const w = this.server.write(this.userId, chatId, '(사진)', JSON.stringify({ photo: true, bytes: b ? b.length : 0, w: png ? png.w : 0, h: png ? png.h : 0 }))
+    if (b) {
+      if (!this.server.photos) this.server.photos = []
+      this.server.photos.push({ chatId: str(chatId), buf: b })
+      if (this.server.photos.length > 50) this.server.photos.shift()
+    }
+    return { success: true, status_code: 0, chat_id: str(chatId), log_id: str(w.logId), sent_at: w.sendAt }
   }
 
   async sendMultiPhoto(chatId) {
@@ -1042,6 +1055,13 @@ export class MemStore {
       }
     }
     this.installs.set(next.id, next)
+    return 1
+  }
+
+  async saveRoomConfig(id, botId, config, rev, now) {
+    const r = this.installs.get(Number(id))
+    if (!r || r.phase !== 'installed' || r.bot_device_id !== botId || (Number(r.config_rev) || 0) !== Number(rev)) return 0
+    this.installs.set(r.id, Object.assign({}, r, { config: JSON.parse(JSON.stringify(config || {})), config_rev: (Number(r.config_rev) || 0) + 1, config_at: now }))
     return 1
   }
 

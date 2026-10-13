@@ -20,14 +20,15 @@ export const DEFAULTS = Object.freeze({
   v: 1,
   cmdPrefix: '!',
   exempt: [],
-  visit: { enabled: false },
+  visit: { enabled: false, style: 'image' },
   churn: { enabled: false, joins: 3, windowMin: 10, action: 'warn', notice: true },
   leaveKick: { enabled: false, notice: false },
-  profile: { enabled: false, name: true, status: true, lookup: 'staff' },
+  profile: { enabled: false, name: true, status: true, lookup: 'staff', style: 'image' },
   promo: { enabled: false, links: true, cards: true, media: false, hide: true, kickAt: 3, resetHours: 24, notice: true },
   cover: { enabled: false, words: [], links: true },
   hide: { command: true },
   guard: { enabled: false, secs: 30, count: 5 },
+  cmd: { link: 'staff' },
   games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, cooldownSec: 3, dailyLimit: 0 },
 })
 
@@ -35,14 +36,15 @@ const B = { t: 'bool' }
 const I = (lo, hi) => ({ t: 'int', lo, hi })
 const E = (list) => ({ t: 'enum', list })
 const SPEC = {
-  visit: { enabled: B },
+  visit: { enabled: B, style: E(['image', 'text']) },
   churn: { enabled: B, joins: I(2, 20), windowMin: I(1, 1440), action: E(['warn', 'kick']), notice: B },
   leaveKick: { enabled: B, notice: B },
-  profile: { enabled: B, name: B, status: B, lookup: E(['staff', 'all', 'off']) },
+  profile: { enabled: B, name: B, status: B, lookup: E(['staff', 'all', 'off']), style: E(['image', 'text']) },
   promo: { enabled: B, links: B, cards: B, media: B, hide: B, kickAt: I(0, 10), resetHours: I(1, 720), notice: B },
   cover: { enabled: B, links: B },
   hide: { command: B },
   guard: { enabled: B, secs: I(5, 300), count: I(3, 30) },
+  cmd: { link: E(['staff', 'all', 'off']) },
   games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
 }
 
@@ -299,11 +301,17 @@ export class Win {
     this.list.push(now)
   }
 
-  /** 다음 자리가 나는 시각(지금 자리가 있으면 now). */
-  freeAt(now) {
+  /** n 자리가 남았나 */
+  fits(now, n) {
+    return this.count(now) + Math.max(1, Number(n) || 1) <= this.max
+  }
+
+  /** n 자리(기본 1)가 나는 시각(지금 있으면 now). */
+  freeAt(now, n) {
     this.trim(now)
-    if (this.list.length < this.max) return now
-    return this.list[this.list.length - this.max] + this.ms
+    const need = this.list.length + Math.max(1, Number(n) || 1) - this.max
+    if (need <= 0) return now
+    return this.list[Math.min(need, this.list.length) - 1] + this.ms
   }
 }
 
@@ -557,10 +565,41 @@ const RECORD_N = 5
 
 /** 기록(관리자 지정, 시각만): `입장 기록 : N회` + 최근 시각 5개(옛 → 새, 마지막 줄이 이번). 시각이 없으면 [] */
 export function recordLines(label, times) {
+  const r = recordOf(label, times)
+  return r ? [`${label} : ${r.count}회`, ...r.times] : []
+}
+
+/** 기록 칸(그림 카드용): {label, count, times:[`10.12 오후 7:31`…], last(ms)} — 글 안내의 기록 줄과 같은 값. 시각이 없으면 null */
+export function recordOf(label, times) {
   const ts = (Array.isArray(times) ? times : []).map(Number).filter((t) => t > 0).sort((a, b) => a - b)
-  if (!ts.length) return []
+  if (!ts.length) return null
   const last = ts[ts.length - 1]
-  return [`${label} : ${ts.length}회`, ...ts.slice(-RECORD_N).map((t) => kstWhen(t, last))]
+  return { label, count: ts.length, times: ts.slice(-RECORD_N).map((t) => kstWhen(t, last)), last }
+}
+
+// 그림 카드(logcard.mjs)에 넘기는 값. 글 안내와 같은 내용이다(제목 · 닉네임 · 칸 · 기록 · 이번 시각).
+function cardOf(kind, title, name, before, fields, rec) {
+  return {
+    kind,
+    title,
+    name: oneLine(name, 40).replace(/@/g, '') || '이름 없음',
+    before: before ? oneLine(before, 40).replace(/@/g, '') || '이름 없음' : '',
+    fields,
+    record: rec ? { label: rec.label, count: rec.count, times: rec.times } : null,
+    at: rec ? kstClock(rec.last) : '',
+  }
+}
+
+/**
+ * 그림 카드와 함께 보내는 한 줄(멘션). `[입장 안내] @하늘` — 그림에는 멘션을 넣을 수 없어 이 줄이 그 사람을 부른다.
+ * id 를 모르면 null(멘션할 수 없다 → 그림만 보낸다).
+ */
+export function cardMentionLine(card, userId) {
+  const id = idText(userId)
+  const nm = card ? oneLine(card.name, 40).replace(/@/g, '') : ''
+  if (!card || !id || !nm || nm === '이름 없음') return null
+  const text = `[${card.title}] @${nm}`
+  return { text, mention: { userId: id, len: nm.length, at: text.indexOf('@') + 1 } }
 }
 
 /** 줄들 + 맨 아래(기록 줄들, 기록이 없으면 시각 한 줄 — 모르면 없음) → {text, mention}. 멘션은 글의 첫 @ 다 */
@@ -577,7 +616,10 @@ function noticeOf(lines, mention, at, record) {
 export function visitNoticeText(kind, cur, times) {
   const leave = kind === 'leave'
   const nm = mentionLine('이름', cur.name, idText(cur.userId))
-  return noticeOf([leave ? '[퇴장 안내]' : '[입장 안내]', nm.line, LINK_LINE + linkText(cur.link)], nm.mention, 0, recordLines(leave ? '퇴장 기록' : '입장 기록', times))
+  const label = leave ? '퇴장 기록' : '입장 기록'
+  const note = noticeOf([leave ? '[퇴장 안내]' : '[입장 안내]', nm.line, LINK_LINE + linkText(cur.link)], nm.mention, 0, recordLines(label, times))
+  note.card = cardOf(leave ? 'leave' : 'join', leave ? '퇴장 안내' : '입장 안내', cur.name, '', [{ label: '옾링', value: linkText(cur.link) }], recordOf(label, times))
+  return note
 }
 
 const FIELD_LABEL = { link: '옾링', status: '상태 메시지' }
@@ -606,13 +648,20 @@ export function profileChangeNotice(cur, changes, times) {
   const nm = mentionLine(name ? '변경후' : '이름', cur.name, idText(cur.userId))
   lines.push(nm.line)
   let linkShown = false
+  const fields = []
   for (const c of changes) {
     if (c.kind === 'name' || !FIELD_LABEL[c.kind]) continue
     if (c.kind === 'link') linkShown = true
     lines.push(`${FIELD_LABEL[c.kind]} 변경전 : ${fieldText(c.kind, c.from)}`, `${FIELD_LABEL[c.kind]} 변경후 : ${fieldText(c.kind, c.to)}`)
+    fields.push({ label: `${FIELD_LABEL[c.kind]} 변경전`, value: fieldText(c.kind, c.from) }, { label: `${FIELD_LABEL[c.kind]} 변경후`, value: fieldText(c.kind, c.to) })
   }
-  if (!linkShown) lines.push(LINK_LINE + linkText(cur.link))
-  return noticeOf(lines, nm.mention, 0, recordLines('변경 기록', times))
+  if (!linkShown) {
+    lines.push(LINK_LINE + linkText(cur.link))
+    fields.push({ label: '옾링', value: linkText(cur.link) })
+  }
+  const note = noticeOf(lines, nm.mention, 0, recordLines('변경 기록', times))
+  note.card = cardOf('profile', '프로필 변경 감지', cur.name, name ? name.from : '', fields, recordOf('변경 기록', times))
+  return note
 }
 
 /** 프로필이 바뀐 시각들(한 번에 여러 칸이 바뀌면 한 번) */
@@ -678,7 +727,7 @@ export function profileChange(runtime, chatId, pcfg, ev, now) {
   // 옾링은 지금 것(after)만 쓴다. 모르면(null) '확인 못 함' — 예전 옾링을 지금 것처럼 적지 않는다
   const cur = { userId, name: an || bn, link: a.link === undefined ? b.link : a.link }
   const note = profileChangeNotice(cur, shown, changeTimes(p.people[key].changes))
-  return [{ text: note.text, mention: note.mention, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
+  return [{ text: note.text, mention: note.mention, card: note.card, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
 }
 
 /**
@@ -745,8 +794,9 @@ function pruneProfile(p) {
 }
 
 /**
- * {앞글자}프로필 @닉네임 / {앞글자}프로필 닉네임. 대상: 멘션 user_id → 현재 이름 유일 일치.
- * 권한: staff(방장·부방장만) / all / off. → null(답 없음) | 답 글
+ * {앞글자}프로필조회 @닉네임 / 옾링 주소 / 닉네임({앞글자}프로필 도 같다). 대상: ask.target(봇이 명부에서 찾은 {userId, name})
+ * → 멘션 user_id → 현재 이름 유일 일치. 권한: staff(방장·부방장만) / all / off. → null(답 없음) | 답 글
+ * 바뀐 적이 없는 사람(기록 행이 없음)도 명부에서 찾았으면 지금 이름과 입장·퇴장 횟수로 답한다.
  */
 export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
   const lookup = cfg.profile.lookup
@@ -757,12 +807,12 @@ export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
     if (!(Number.isFinite(n) && ((n & 1) || (n & 4)))) return null
   }
   const p = profileStore(runtime)
-  let target = ''
+  let target = ask.target ? idText(ask.target.userId) : ''
   const mentioned = (ask.mentions || [])[0]
-  if (mentioned) target = String(mentioned)
+  if (!target && mentioned) target = String(mentioned)
   const want = oneLine(String(ask.arg || '').replace(/^@/, ''), 40)
   if (!target) {
-    if (!want) return `「${cfg.cmdPrefix}프로필 닉네임」처럼 입력해 주세요.`
+    if (!want) return `「${cfg.cmdPrefix}프로필조회 @닉네임」처럼 입력해 주세요.`
     const hits = []
     for (const k of Object.keys(p.people)) {
       if (!k.startsWith(chatId + SEP)) continue
@@ -773,8 +823,9 @@ export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
     target = hits[0] || ''
   }
   const row = target ? p.people[`${chatId}${SEP}${target}`] : null
-  if (!row) return want ? `「${want}」의 프로필 기록이 없어요.` : '이 사람의 프로필 기록이 없어요.'
-  const changes = Array.isArray(row.changes) ? row.changes : []
+  const known = ask.target && ask.target.name ? oneLine(ask.target.name, 40) : ''
+  if (!row && !known) return want ? `「${want}」의 프로필 기록이 없어요.` : '이 사람의 프로필 기록이 없어요.'
+  const changes = row && Array.isArray(row.changes) ? row.changes : []
   const olds = nameChanges(changes).slice(-5).map((c) => `${oneLine(c.name, 40) || '이름 없음'} (${kstShort(c.at)})`)
   const visit = runtime.visit && isObj(runtime.visit.people) ? runtime.visit.people[`${chatId}${SEP}${target}`] : null
   const since = now - 14 * DAY
@@ -782,7 +833,7 @@ export function profileLookup(runtime, chatId, cfg, ask, ctx, now) {
   const leaves = visit && Array.isArray(visit.leaves) ? visit.leaves.filter((t) => Number(t) >= since).length : 0
   return [
     '[프로필 기록]',
-    '이름 : ' + (oneLine(row.name, 40) || '이름 없음'),
+    '이름 : ' + (known || oneLine(row && row.name, 40) || '이름 없음'),
     '이전 이름 : ' + (olds.length ? olds.join(', ') : '없음'),
     `최근 14일 : 입장 ${joins}회 · 퇴장 ${leaves}회`,
   ].join('\n')
@@ -926,10 +977,11 @@ export function hideDoneNotice(done, failed) {
 // 방 메시지는 짧은 해요체(docs/TONE.md 「K bot 방 메시지」). 방 사람들은 계정·패널을 모르므로 봇은 이름으로, 설정하는 사람은 방장님·관리자로 쓴다.
 
 /**
- * 켜진 게임과 켜진 방 관리 명령(가리기·프로필)의 목록. 아무것도 없으면 ''.
+ * 켜진 게임과 방 관리 명령어의 목록. 아무것도 없으면 ''.
  * [명령어]
  * 미니게임 : !끝말잇기 … !랭킹
- * 방 관리 : !가리기 !프로필
+ * 방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정
+ * 「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.
  */
 export function helpLine(view) {
   const cfg = view.cfg
@@ -945,21 +997,66 @@ export function helpLine(view) {
     if (g.word || g.baseball || g.quiz) games.push(p + '포기')
     games.push(p + '랭킹')
   }
-  const room = []
-  if (roombotLive(view)) {
-    if (cfg.hide.command) room.push(p + '가리기')
-    if (cfg.profile.enabled && cfg.profile.lookup !== 'off') room.push(p + '프로필')
-  }
+  const room = roomCommandNames(view)
   if (!games.length && !room.length) return ''
   const lines = ['[명령어]']
   if (games.length) lines.push('미니게임 : ' + games.join(' '))
-  if (room.length) lines.push('방 관리 : ' + room.join(' '))
+  if (room.length) lines.push('방 관리 : ' + room.join(' '), `「${p}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.`)
+  return lines.join('\n')
+}
+
+// 방 관리 명령어(방 관리 기능이 동작할 때만). 켜고 끄는 명령어는 「!도움 관리」에만 적는다.
+function roomCommandNames(view) {
+  const cfg = view.cfg
+  const p = cfg.cmdPrefix
+  if (!roombotLive(view)) return []
+  const out = []
+  if (cfg.cmd.link !== 'off') out.push(p + '옾링')
+  if (cfg.profile.enabled && cfg.profile.lookup !== 'off') out.push(p + '프로필조회')
+  if (cfg.hide.command) out.push(p + '가리기')
+  out.push(p + '내보내기', p + '설정')
+  return out
+}
+
+/**
+ * 「!도움 관리」: 방 관리 명령어와 하는 일. 방 관리 기능이 동작하지 않으면 ''.
+ * 대상을 고르는 자리(@닉네임)에는 옾링 주소도 쓸 수 있다(roomcmd.findPerson).
+ */
+export function adminHelp(view) {
+  if (!roombotLive(view)) return ''
+  const cfg = view.cfg
+  const p = cfg.cmdPrefix
+  const lines = ['[방 관리 명령어]']
+  if (cfg.cmd.link !== 'off') lines.push(`${p}옾링 @닉네임 : 옾링 보기`)
+  if (cfg.profile.enabled && cfg.profile.lookup !== 'off') lines.push(`${p}프로필조회 @닉네임 : 프로필 기록 보기`)
+  if (cfg.hide.command) lines.push(`${p}가리기 30 : 최근 글 30개 가리기`, `${p}가리기 @닉네임 : 그 사람의 글 가리기`)
+  lines.push(
+    `${p}내보내기 @닉네임 : 내보내기`,
+    `${p}차단해제 닉네임 : 내보내기·재입장 차단 풀기`,
+    `${p}설정 : 기능별 켜짐·꺼짐 보기`,
+    `${p}입장기록 켜기 · 끄기`,
+    `${p}들낙감지 켜기 · 끄기`,
+    `${p}재입장차단 켜기 · 끄기`,
+    `${p}프로필기록 켜기 · 끄기`,
+    `${p}홍보금지 켜기 · 끄기`,
+    `${p}금지어 켜기 · 끄기`,
+    `${p}금지어 추가 · 삭제 단어`,
+    `${p}금지어 목록`,
+    `${p}올킥감지 켜기 · 끄기`,
+    '@닉네임 자리에는 옾링 주소도 쓸 수 있어요. 내보내기·설정은 방장과 부방장만 할 수 있어요.',
+  )
   return lines.join('\n')
 }
 
 export function isHelpCommand(text, prefix) {
   const t = String(text || '').trim()
   return t === prefix + '도움' || t === prefix + '명령'
+}
+
+/** 「!도움 관리」(띄어 쓰지 않아도 된다) */
+export function isAdminHelpCommand(text, prefix) {
+  const t = String(text || '').trim()
+  return t.startsWith(prefix) && /^(도움|명령)\s*관리$/.test(t.slice(prefix.length))
 }
 
 // 방장에게 부방장 지정을 부탁하는 줄. 방장이 고를 수 있게 방에 보이는 봇 이름을 넣는다(D12).
@@ -1053,6 +1150,11 @@ export function rankingOf(runtime, n) {
 }
 
 // ── 5.5 공정 몫 송신 ──────────────────────────────────────────────────────
+function costOf(item) {
+  const c = Number(item && item.cost)
+  return Number.isInteger(c) && c > 1 ? c : 1
+}
+
 export const SEND_ROOM_PER_MIN = 6
 export const SEND_BOT_PER_MIN = 30
 const QUEUE_MAX = 30
@@ -1111,7 +1213,7 @@ export class Pacer {
     return out
   }
 
-  /** 지금 보낼 항목 하나. → {key, item} | null */
+  /** 지금 보낼 항목 하나. → {key, item} | null. 항목의 cost(기본 1)는 실제로 나가는 글 수(그림 + 멘션 한 줄 = 2)다. */
   next(now) {
     if (!this.botWin.ok(now)) return null
     const n = this.order.length
@@ -1121,10 +1223,13 @@ export class Pacer {
       const r = this.rooms.get(key)
       if (!r || !r.queue.length) continue
       if (r.queue[0].notBefore > now) continue
-      if (!r.win.ok(now)) continue
+      const cost = costOf(r.queue[0])
+      if (!r.win.fits(now, cost) || !this.botWin.fits(now, cost)) continue
       const item = r.queue.shift()
-      r.win.add(now)
-      this.botWin.add(now)
+      for (let k = 0; k < cost; k++) {
+        r.win.add(now)
+        this.botWin.add(now)
+      }
       this.rr = (idx + 1) % n
       return { key, item }
     }
@@ -1136,7 +1241,8 @@ export class Pacer {
     let at = 0
     for (const r of this.rooms.values()) {
       if (!r.queue.length) continue
-      const t = Math.max(r.queue[0].notBefore, r.win.freeAt(now), this.botWin.freeAt(now))
+      const cost = costOf(r.queue[0])
+      const t = Math.max(r.queue[0].notBefore, r.win.freeAt(now, cost), this.botWin.freeAt(now, cost))
       if (!at || t < at) at = t
     }
     return at
