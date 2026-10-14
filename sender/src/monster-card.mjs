@@ -28,11 +28,41 @@ function mix(a, b, t) {
   return toHex(x.map((v, i) => v + (y[i] - v) * t))
 }
 
-// 16×16 글자 그림 → 18×18 색 칸(가운데 맞춤 + 자동 테두리). 결과는 몬스터마다 한 번만 만든다.
+// 빛나는 몬스터(희귀 색): 몸 색의 색상(hue)을 돌리고 조금 더 선명하게. 눈(k)·반짝임(w)은 그대로 둔다.
+export const SHINY_HUE = 150
+const SHINY_GOLD = '#F5B400'
+function rgbToHsl(rgb) {
+  const [r, g, b] = rgb.map((v) => v / 255)
+  const mx = Math.max(r, g, b)
+  const mn = Math.min(r, g, b)
+  const l = (mx + mn) / 2
+  if (mx === mn) return [0, 0, l]
+  const d = mx - mn
+  const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn)
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return [h * 60, s, l]
+}
+function hslToRgb([h, s, l]) {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const hh = (((h % 360) + 360) % 360) / 60
+  const x = c * (1 - Math.abs((hh % 2) - 1))
+  const [r, g, b] = hh < 1 ? [c, x, 0] : hh < 2 ? [x, c, 0] : hh < 3 ? [0, c, x] : hh < 4 ? [0, x, c] : hh < 5 ? [x, 0, c] : [c, 0, x]
+  const m = l - c / 2
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255]
+}
+export function shinyColor(c) {
+  const [h, s, l] = rgbToHsl(hex(c))
+  if (s < 0.08) return toHex(hex(c)) // 회색·흰색은 그대로
+  return toHex(hslToRgb([h + SHINY_HUE, Math.min(1, s * 1.1 + 0.05), l]))
+}
+
+// 16×16 글자 그림 → 18×18 색 칸(가운데 맞춤 + 자동 테두리). 결과는 몬스터(·빛나는 색)마다 한 번만 만든다.
 const cellCache = new Map()
-export function cells(sp) {
-  if (cellCache.has(sp.id)) return cellCache.get(sp.id)
+export function cells(sp, shiny) {
+  const ck = shiny ? 's' + sp.id : sp.id
+  if (cellCache.has(ck)) return cellCache.get(ck)
   const pal = Object.assign({}, COMMON_PAL, sp.pal || {})
+  if (shiny) for (const k of Object.keys(pal)) if (k !== 'k' && k !== 'w') pal[k] = shinyColor(pal[k])
   const rows = (sp.px || []).map((r) => String(r).padEnd(16, '.').slice(0, 16))
   while (rows.length < 16) rows.push('.'.repeat(16))
   let x0 = 16, x1 = -1, y0 = 16, y1 = -1
@@ -64,16 +94,16 @@ export function cells(sp) {
       if (near) out[y][x] = outline
     }
   }
-  cellCache.set(sp.id, out)
+  cellCache.set(ck, out)
   return out
 }
 
 /**
- * 몬스터 그림 SVG 조각. mode: 'color'(기본) · 'shadow'(본 적만 있음, 검은 그림자) · 'hidden'(물음표 칸)
+ * 몬스터 그림 SVG 조각. mode: 'color'(기본) · 'shiny'(빛나는 색) · 'shadow'(본 적만 있음, 검은 그림자)
  * size 는 그림 한 변(px). 칸 크기는 정수로 맞춰 점이 흐려지지 않게 한다.
  */
 export function sprite(sp, x, y, size, mode) {
-  const g = cells(sp)
+  const g = cells(sp, mode === 'shiny')
   const s = Math.max(1, Math.floor(size / GRID))
   const ox = Math.round(x + (size - s * GRID) / 2)
   const oy = Math.round(y + (size - s * GRID) / 2)
@@ -177,24 +207,49 @@ function sparkles(w, h, color, n, seed) {
   return out
 }
 
+// 네 갈래 반짝이 별(가운데 cx, cy · 반지름 r)
+function star4(cx, cy, r, color, op) {
+  const k = r * 0.28
+  const pts = [[cx, cy - r], [cx + k, cy - k], [cx + r, cy], [cx + k, cy + k], [cx, cy + r], [cx - k, cy + k], [cx - r, cy], [cx - k, cy - k]]
+  return `<polygon points="${pts.map((q) => q.map((v) => Math.round(v * 10) / 10).join(',')).join(' ')}" fill="${color}"${op != null ? ` opacity="${op}"` : ''}/>`
+}
+
+// 빛나는 몬스터 둘레: 금빛 후광(방사 그라데이션) + 반짝이 별. 자리는 고정(같은 그림)
+function shineAura(cx, cy, r, id) {
+  const gid = 'shine' + id
+  let out = `<defs><radialGradient id="${gid}" cx="50%" cy="50%" r="50%">` +
+    `<stop offset="0%" stop-color="#FFF8D6" stop-opacity="1"/><stop offset="62%" stop-color="#FFE38A" stop-opacity="0.9"/>` +
+    `<stop offset="100%" stop-color="${SHINY_GOLD}" stop-opacity="0"/></radialGradient></defs>` +
+    `<circle cx="${cx}" cy="${cy}" r="${Math.round(r * 1.22)}" fill="url(#${gid})"/>`
+  const spots = [[-0.86, -0.62, 0.2], [0.9, -0.48, 0.15], [0.72, 0.78, 0.12], [-0.8, 0.66, 0.1], [0.12, -1.04, 0.1], [1.06, 0.14, 0.08]]
+  for (const [dx, dy, k] of spots) out += star4(cx + dx * r, cy + dy * r, Math.max(5, r * k), '#FFFFFF') + star4(cx + dx * r, cy + dy * r, Math.max(3, r * k * 0.6), SHINY_GOLD)
+  return out
+}
+
 /** 몬스터 그림 판(뒤 원 + 그림 + 바닥 그림자) */
 // mode: 'color' · 'shadow'(못 잡은 몬스터) · 'faded'(배틀에서 진 몬스터, 흐리게). 영웅·전설은 등급 색 테두리를 두른다.
-function stage(sp, cx, cy, size, mode) {
+// shiny 면 빛나는 색 그림에 금빛 후광·반짝이 별·금색 테두리.
+function stage(sp, cx, cy, size, mode, shiny) {
   const el = elementOf(sp.el)
   const r = Math.round(size * 0.6)
   const shown = mode !== 'shadow'
-  const ring = shown && sp.r >= 3 ? ` stroke="${rarityOf(sp.r).color}" stroke-width="${Math.max(3, Math.round(size / 42))}"` : ''
-  const body = sprite(sp, cx - size / 2, cy - size / 2, size, mode === 'shadow' ? 'shadow' : 'color')
-  return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${shown ? mix(el.color, '#FFFFFF', 0.8) : '#ECEEF3'}"${ring}/>` +
+  const glow = shown && !!shiny
+  const ringColor = glow ? SHINY_GOLD : sp.r >= 3 ? rarityOf(sp.r).color : ''
+  const ring = shown && ringColor ? ` stroke="${ringColor}" stroke-width="${Math.max(3, Math.round(size / (glow ? 34 : 42)))}"` : ''
+  const body = sprite(sp, cx - size / 2, cy - size / 2, size, mode === 'shadow' ? 'shadow' : glow ? 'shiny' : 'color')
+  const disc = glow ? '#FFF6D8' : shown ? mix(el.color, '#FFFFFF', 0.8) : '#ECEEF3'
+  return (glow ? shineAura(cx, cy, r, `${Math.round(cx)}_${Math.round(cy)}`) : '') +
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${disc}"${ring}/>` +
     `<ellipse cx="${cx}" cy="${cy + size * 0.44}" rx="${size * 0.32}" ry="${size * 0.06}" fill="#000000" opacity="0.10"/>` +
-    (mode === 'faded' ? `<g opacity="0.45">${body}</g>` : body)
+    (mode === 'faded' ? `<g opacity="0.45">${body}</g>` : body) +
+    (glow && mode !== 'faded' ? star4(cx + r * 0.52, cy - r * 0.6, Math.max(6, r * 0.12), '#FFFFFF', 0.95) : '')
 }
 
 export function png(svg) {
   return svgToPng(svg)
 }
 
-export { mix, text, chip, chips, bar, frame, sparkles, stage }
+export { mix, text, chip, chips, bar, frame, sparkles, stage, star4 }
 
 // ── 카드 ──────────────────────────────────────────────────────────────────
 const W = 720
@@ -212,11 +267,12 @@ function shell(h, el, inner, label) {
     inner)
 }
 
-function badges(sp, lv) {
+function badges(sp, lv, shiny) {
   const e = elementOf(sp.el)
   const r = rarityOf(sp.r)
   const list = []
   if (lv) list.push({ label: 'Lv.' + lv, color: '#1F2430', solid: true })
+  if (shiny) list.push({ label: '빛나는', color: '#D99A00', solid: true })
   list.push({ label: e.name, color: e.color })
   list.push({ label: r.name, color: r.color, solid: sp.r >= 3 })
   return list
@@ -229,29 +285,36 @@ function netsLine(nets) {
 function encounterSvg(c) {
   const sp = speciesOf(c.sid)
   const h = 440
-  let s = stage(sp, 196, 252, 252, 'color')
+  let s = stage(sp, 196, 252, 252, 'color', c.shiny)
   const x = 372
-  s += text(x, 128, '야생 몬스터가 나타났어요', 19, { fill: SUB })
+  s += text(x, 128, c.shiny ? '빛나는 몬스터가 나타났어요' : '야생 몬스터가 나타났어요', 19, { fill: c.shiny ? '#B7791F' : SUB, bold: !!c.shiny })
   s += text(x, 178, sp.name, 44, { bold: true, max: W - x - 48 })
-  s += chips(x, 196, badges(sp, c.lv), 16).svg
+  s += chips(x, 196, badges(sp, c.lv, c.shiny), 16).svg
   const status = c.dex === '2' ? '도감에 있는 몬스터예요' : c.dex === '1' ? '전에 본 적 있는 몬스터예요' : '처음 보는 몬스터예요'
   s += text(x, 266, status, 18, { bold: true, fill: c.dex === '2' ? SUB : elementOf(sp.el).color })
   wrap(sp.d, 17, W - x - 52, 2).forEach((ln, i) => { s += text(x, 298 + i * 25, ln, 17, { fill: '#4B5563' }) })
   s += `<rect x="${x - 8}" y="352" width="${W - x - 36}" height="58" rx="16" fill="#F4F5F8"/>`
   s += text(x + 10, 377, `「${c.prefix || '!'}포획」으로 잡아 보세요`, 18, { bold: true })
-  s += text(x + 10, 400, netsLine(c.nets), 15, { fill: SUB })
-  if (c.bonus) s += chip(44, 96, `출석 보상 그물 +${c.bonus}`, '#2FAE8A', { size: 14 }).svg
+  s += text(x + 10, 400, netsLine(c.nets), 15, { fill: SUB, max: W - x - 56 })
+  if (c.pity) s += text(W - 54, 377, `보정 +${c.pity}%`, 15, { bold: true, fill: '#3D8FD9', anchor: 'end' })
+  if (c.bonus) {
+    const label = (c.streak > 1 ? `${c.streak}일 연속 · ` : '출석 보상 ') + `그물 +${c.bonus}` + (c.gold ? ' · 황금그물 +1' : '')
+    s += chip(44, 96, label, c.gold ? '#D99A00' : '#2FAE8A', { size: 14, solid: !!c.gold }).svg
+  }
   return shell(h, sp.el, s, `탐험 · ${c.owner}님`)
 }
 
 function catchSvg(c) {
   const sp = speciesOf(c.sid)
   const h = c.lead && c.lead.evolved ? 500 : 450
-  let s = stage(sp, 196, 256, 252, 'color')
+  let s = stage(sp, 196, 256, 252, 'color', c.shiny)
   const x = 372
-  s += chip(x, 104, '포획 성공', '#22A06B', { size: 16, solid: true }).svg
+  const ok = chip(x, 104, '포획 성공', '#22A06B', { size: 16, solid: true })
+  s += ok.svg
+  if (c.pity) s += chip(x + ok.w + 8, 106, `실패 보정 +${c.pity}%`, '#3D8FD9', { size: 14 }).svg
+  if (c.roomFirst) s += chip(44, 96, '방 최초 발견', '#E5484D', { size: 15, solid: true }).svg
   s += text(x, 186, sp.name, 44, { bold: true, max: W - x - 48 })
-  s += chips(x, 204, badges(sp, c.lv), 16).svg
+  s += chips(x, 204, badges(sp, c.lv, c.shiny), 16).svg
   let y = 274
   s += text(x, y, `보관함 ${c.no}번에 넣었어요`, 18, { bold: true })
   y += 30
@@ -325,8 +388,10 @@ function boxSvg(c) {
     s += `<circle cx="${x + 18}" cy="${y + 18}" r="12" fill="${m.lead ? e.color : '#FFFFFF'}"/>`
     s += text(x + 18, y + 23, String(m.no), 13, { bold: true, fill: m.lead ? '#FFFFFF' : INK, anchor: 'middle' })
     if (m.lead) s += text(x + cw - 20, y + 23, '대표', 12, { bold: true, fill: e.color, anchor: 'end' })
-    s += sprite(sp, x + (cw - 10 - 64) / 2, y + 18, 64, 'color')
-    s += text(x + (cw - 10) / 2, y + 98, sp.name, 14, { bold: true, anchor: 'middle', max: cw - 20 })
+    if (m.shiny) s += `<circle cx="${x + (cw - 10) / 2}" cy="${y + 50}" r="36" fill="#FFF3C4"/>`
+    s += sprite(sp, x + (cw - 10 - 64) / 2, y + 18, 64, m.shiny ? 'shiny' : 'color')
+    if (m.shiny) s += star4(x + cw - 26, y + 42, 8, SHINY_GOLD)
+    s += text(x + (cw - 10) / 2, y + 98, sp.name, 14, { bold: true, anchor: 'middle', max: cw - 20, fill: m.shiny ? '#B7791F' : INK })
     s += text(x + (cw - 10) / 2, y + 114, 'Lv.' + m.lv, 12, { fill: SUB, anchor: 'middle' })
   })
   return shell(h, mons[0] ? speciesOf(mons[0].sid).el : 'sun', s, `내 몬스터 · ${c.owner}님`)
@@ -340,11 +405,12 @@ function infoSvg(c) {
   const e = elementOf(sp.el)
   const m = c.mon
   const h = m ? 520 : 470
-  let s = stage(sp, 196, 262, 252, c.caught ? 'color' : 'shadow')
+  const shiny = !!(m && m.shiny)
+  let s = stage(sp, 196, 262, 252, c.caught ? 'color' : 'shadow', shiny)
   const x = 372
   s += text(x, 128, m ? `${m.no}번 몬스터${m.lead ? ' · 대표' : ''}` : `No.${sp.id}`, 18, { fill: SUB, bold: true })
   s += text(x, 176, sp.name, 42, { bold: true, max: W - x - 48 })
-  s += chips(x, 194, badges(sp, m ? m.lv : 0), 16).svg
+  s += chips(x, 194, badges(sp, m ? m.lv : 0, shiny), 16).svg
   let y = 262
   if (m) {
     for (const [k, label] of STAT_LABELS) {
@@ -384,10 +450,10 @@ function battleSvg(c) {
     const sp = speciesOf(p.sid)
     const cx = i === 0 ? 180 : W - 180
     const won = c.win === i
-    s += stage(sp, cx, 206, 162, won ? 'color' : 'faded')
+    s += stage(sp, cx, 206, 162, won ? 'color' : 'faded', p.shiny)
     if (won) s += chip(cx - 30, 98, '승리', '#E8A317', { size: 16, solid: true }).svg
     s += text(cx, 328, `${p.owner}님`, 15, { fill: SUB, anchor: 'middle', max: 260 })
-    s += text(cx, 352, `${sp.name} Lv.${p.lv}`, 19, { bold: true, anchor: 'middle', max: 260 })
+    s += text(cx, 352, `${p.shiny ? '빛나는 ' : ''}${sp.name} Lv.${p.lv}`, 19, { bold: true, anchor: 'middle', max: 260 })
     const ratio = p.max ? p.hp / p.max : 0
     s += bar(cx - 100, 366, 200, 12, ratio, ratio > 0.5 ? '#22A06B' : ratio > 0.2 ? '#F5A623' : '#E5484D')
     s += text(cx, 398, `체력 ${p.hp}/${p.max}`, 13, { fill: SUB, anchor: 'middle' })

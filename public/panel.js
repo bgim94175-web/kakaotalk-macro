@@ -3774,7 +3774,7 @@
       // 추억의 검 강화 줄(sender/src/sword.mjs helpLine)
       var sword = $('r-games-sword').checked ? '\n검 강화 : ' + pfx + '강화 ' + pfx + '내검 ' + pfx + '사냥 ' + pfx + '출석 ' + pfx + '결투 ' + pfx + '보스 ' + pfx + '강화도움' : '';
       // 몬스터 수집 줄(sender/src/monster.mjs helpCommands)
-      var monCmds = $('r-games-monster').checked ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '몬스터'].map(function (x) { return pfx + x; }) : [];
+      var monCmds = $('r-games-monster').checked ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map(function (x) { return pfx + x; }) : [];
       $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + sword + (monCmds.length ? '\n몬스터 수집 : ' + monCmds.join(' ') : '') +
         (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') + '\n「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
