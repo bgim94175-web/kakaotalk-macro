@@ -1367,6 +1367,28 @@ async function withLog(fn) {
     }
     const who = RF.hidePlan(ring, { userId: '102' }, host)
     if (!who.length || who.some((x) => ring.find((m) => m.logId === x.logId).authorId !== '102')) throw new Error('7.7#10 one person')
+    // 가리기 범위(hide.target): 기본은 부방장 글을 빼고, 「부방장 글까지」면 부방장 글도(sub 표시). 방장·봇 글은 늘 뺀다
+    {
+      const r2 = []
+      const perms = { 1: 1, 4: 4, 8: 8, 2: 2 }
+      for (let i = 1; i <= 8; i++) RF.ringPush(r2, { logId: String(5000 + i), type: 1, authorId: String([1, 4, 8, 2][i % 4]), name: 'n', at: i })
+      const pc = { selfId: '99', permOf: (u) => perms[u] ?? null }
+      const base = RF.normRoomConfig({})
+      const wide = RF.normRoomConfig({ hide: { target: 'staff' } })
+      const authors = (plan) => plan.map((x) => r2.find((m) => m.logId === x.logId).authorId)
+      if (base.hide.target !== 'members' || base.hide.by !== 'staff') throw new Error('#hide-scope defaults')
+      if (authors(RF.hidePlan(r2, { last: 300 }, pc, base)).some((a) => a !== '2')) throw new Error('#hide-scope members only')
+      const wp = RF.hidePlan(r2, { last: 300 }, pc, wide)
+      if (!authors(wp).includes('4') || authors(wp).some((a) => a === '1' || a === '8') || !wp.filter((x) => x.sub).length || wp.some((x) => x.sub && r2.find((m) => m.logId === x.logId).authorId !== '4')) throw new Error('#hide-scope staff too')
+      if (!RF.hidePlan(r2, { userId: '4' }, pc, wide).length || RF.hidePlan(r2, { userId: '4' }, pc, base).length) throw new Error('#hide-scope one sub-host')
+      if (RF.hidePlan(r2, { userId: '1' }, pc, wide).length) throw new Error('#hide-scope host never hidden')
+      if (!RF.hideSkips(base, 4) || RF.hideSkips(wide, 4) || !RF.hideSkips(wide, 1) || !RF.hideSkips(wide, 8) || RF.hideSkips(base, 2) || !RF.hideSkips(wide, null)) throw new Error('#hide-scope hideSkips')
+      if (!RF.subHost(4) || RF.subHost(5) || RF.subHost(2) || RF.subHost(null)) throw new Error('#hide-scope subHost')
+      const hostOnly = RF.normRoomConfig({ hide: { by: 'host' } })
+      if (!RF.canHideCommand(base, 1) || !RF.canHideCommand(base, 4) || RF.canHideCommand(base, 2) || RF.canHideCommand(base, null)) throw new Error('#hide-scope command staff')
+      if (!RF.canHideCommand(hostOnly, 1) || RF.canHideCommand(hostOnly, 4)) throw new Error('#hide-scope command host only')
+      if (RF.normRoomConfig({ hide: { by: 'all', target: 'everyone' } }).hide.by !== 'staff') throw new Error('#hide-scope bad values fall back')
+    }
     const c1 = RF.parseHideCommand('!가리기 5', '!', [])
     const c2 = RF.parseHideCommand('!가리기 @홍', '!', ['7'])
     const c3 = RF.parseHideCommand('!가리기 999', '!', [])

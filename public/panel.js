@@ -3551,6 +3551,8 @@
       say('r-cover-word-err', '');
       setSw('r-cover-links', c.cover.links);
       setSw('r-hide-cmd', c.hide.command);
+      segSet('r-hide-by', c.hide.by || 'staff');
+      segSet('r-hide-target', c.hide.target || 'members');
     }
     if (r === 'r-guard') {
       setSw('r-guard-on', c.guard.enabled);
@@ -3602,7 +3604,7 @@
     };
     if (r === 'r-cover') return {
       cover: { enabled: $('r-cover-on').checked, words: rcWords.slice(), links: $('r-cover-links').checked },
-      hide: { command: $('r-hide-cmd').checked },
+      hide: { command: $('r-hide-cmd').checked, by: segVal('r-hide-by') || 'staff', target: segVal('r-hide-target') || 'members' },
     };
     if (r === 'r-guard') return { guard: { enabled: $('r-guard-on').checked, secs: numVal('r-guard-secs'), count: numVal('r-guard-count') } };
     if (r === 'r-games') {

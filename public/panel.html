@@ -26,7 +26,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/panel.css?v=15">
 <script src="/support.js?v=1" defer></script>
-<script src="/panel.js?v=20" defer></script>
+<script src="/panel.js?v=21" defer></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -826,7 +826,7 @@
         <div class="srow-r"><span class="tag line">항상 적용</span></div></div>
       <div class="srow stack" id="row-r-cover-words"><div class="srow-l"><label class="lb" for="r-cover-word-in">추가 금지어</label><p>Enter 또는 쉼표로 추가합니다. 띄어쓰기, 기호, 대소문자를 바꿔 쓴 글도 가립니다.</p></div>
         <div class="srow-r"><div class="w100"><div class="chips" id="r-cover-words"><input id="r-cover-word-in" type="text" maxlength="30" placeholder="단어 입력" autocomplete="off" aria-describedby="r-cover-word-err r-cover-word-n"></div><div class="chips-meta"><span class="errt" id="r-cover-word-err" role="alert"></span><span class="mono" id="r-cover-word-n">0 / 300</span></div></div></div></div>
-      <div class="srow inline" id="row-r-cover-links"><div class="srow-l"><span class="lb">링크 가리기</span><p>오픈채팅 링크와 외부 주소가 들어간 글을 가립니다. <span id="r-cover-links-note" hidden>홍보 금지에서 링크를 이미 막고 있어, 링크는 홍보 금지 설정을 따릅니다.</span></p></div>
+      <div class="srow inline" id="row-r-cover-links"><div class="srow-l"><span class="lb">링크 가리기</span><p>오픈채팅 링크와 외부 주소가 들어간 글을 가립니다. 누구의 글까지 가릴지는 아래 가리는 범위를 따릅니다. <span id="r-cover-links-note" hidden>홍보 금지에서 링크를 이미 막고 있어, 링크는 홍보 금지 설정을 따릅니다.</span></p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-cover-links" aria-label="링크 가리기"><span class="sw" aria-hidden="true"></span></span></div></div>
     </div></div>
     <div class="dep" data-dep-off="r-cover-on" data-open="true"><div class="dep-in"><div class="off-note"><span>금지어 검열이 꺼져 있습니다. 켜면 가릴 내용이 표시됩니다.</span><button type="button" class="btn sm" data-turn-on="r-cover-on">켜기</button></div></div></div>
@@ -834,9 +834,13 @@
    </section></div>
     <div class="grp"><h2 class="grp-t">글 가리기</h2>
    <section class="sec" aria-label="글 가리기">
-      <div class="srow inline" id="row-r-hide-cmd"><div class="srow-l"><span class="lb">방에서 가리기 명령어</span><p>방장과 부방장이 방에서 「<span class="mono" data-prefix>!</span>가리기 30」 또는 「<span class="mono" data-prefix>!</span>가리기 @닉네임」으로 글을 가릴 수 있습니다.</p></div>
+      <div class="srow inline" id="row-r-hide-cmd"><div class="srow-l"><span class="lb">방에서 가리기 명령어</span><p>방에서 「<span class="mono" data-prefix>!</span>가리기 30」 또는 「<span class="mono" data-prefix>!</span>가리기 @닉네임」으로 글을 가릴 수 있습니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-hide-cmd" aria-label="방에서 가리기 명령어"><span class="sw" aria-hidden="true"></span></span></div></div>
-      <div class="srow" id="row-r-hide-last"><div class="srow-l"><span class="lb">최근 글 가리기</span><p>방장·부방장·K bot의 글과 이미 가린 글은 빼고 최근 글을 가립니다. 1~300개.</p></div>
+      <div class="srow" id="row-r-hide-by"><div class="srow-l"><span class="lb">가리기 명령어를 쓸 수 있는 사람</span><p>방에서 가리기 명령어를 입력할 수 있는 사람입니다.</p></div>
+        <div class="srow-r"><div class="seg" id="r-hide-by" role="group" aria-label="가리기 명령어를 쓸 수 있는 사람"><span class="seg-ind"></span><button type="button" data-v="staff" aria-pressed="true">방장·부방장</button><button type="button" data-v="host" aria-pressed="false">방장만</button></div></div></div>
+      <div class="srow" id="row-r-hide-target"><div class="srow-l"><span class="lb">가리는 범위</span><p>가리기 명령어, 이 화면의 가리기, 금지어 검열, 링크 가리기에 함께 적용됩니다. 방장과 K bot의 글은 가리지 않습니다. 카카오톡이 부방장 글 가리기를 막으면 그 글은 건너뜁니다.</p></div>
+        <div class="srow-r"><div class="seg" id="r-hide-target" role="group" aria-label="가리는 범위"><span class="seg-ind"></span><button type="button" data-v="members" aria-pressed="true">일반 멤버 글</button><button type="button" data-v="staff" aria-pressed="false">부방장 글까지</button></div></div></div>
+      <div class="srow" id="row-r-hide-last"><div class="srow-l"><span class="lb">최근 글 가리기</span><p>가리는 범위 밖의 글과 이미 가린 글은 빼고 최근 글을 가립니다. 1~300개.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="가릴 글 수 줄이기">−</button><input id="r-hide-last" type="text" inputmode="numeric" autocomplete="off" data-min="1" data-max="300" aria-label="가릴 글 수" value="30"><button type="button" data-step="1" aria-label="가릴 글 수 늘리기">+</button><span class="unit">개</span></div><span class="del-wrap" id="r-hide-last-act"><button type="button" class="btn sm" id="r-hide-last-btn">가리기</button></span></div></div>
       <div class="srow" id="row-r-hide-who"><div class="srow-l"><span class="lb">사람별 가리기</span><p>최근 글 300개 중 고른 사람의 글을 모두 가립니다.</p></div>
         <div class="srow-r"><div class="sel"><select id="r-hide-who" aria-label="가릴 사람"><option value="">최근 작성자에서 고르기</option></select><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-down"></use></svg></div><span class="del-wrap" id="r-hide-who-act"><button type="button" class="btn sm" id="r-hide-who-btn">가리기</button></span></div></div>
