@@ -249,6 +249,8 @@
     });
     R.chipsW.hidden = !R.chips.firstChild;
     R.play.hidden = R.actsW.hidden && R.chipsW.hidden;
+    R.chips.scrollLeft = 0;
+    chipsEnd();
 
     /* 구매 링크는 이 사이트 안 주소만 */
     var buy = info.buy || {};
@@ -744,6 +746,13 @@
     });
   }
 
+  /* 바로 입력 줄을 끝까지 밀었으면 오른쪽 흐림을 지운다(demo.css .demo-chips:not(.is-end)) */
+  function chipsEnd() {
+    var c = R && R.chips;
+    if (!c) return;
+    c.classList.toggle('is-end', c.scrollLeft + c.clientWidth >= c.scrollWidth - 2);
+  }
+
   function boot() {
     R = {
       wrap: $('demoWrap'), scenes: $('demoScenes'),
@@ -758,6 +767,8 @@
     };
     if (!R.wrap || !R.log) return;
     bindComposer();
+    R.chips.addEventListener('scroll', chipsEnd, { passive: true });
+    window.addEventListener('resize', chipsEnd);
     window.addEventListener('hashchange', function () {
       var sc = sceneFromHash();
       if (sc && sc !== S.scene) { S.retried = false; start(sc, {}); }

@@ -57,6 +57,9 @@
 
 /* 버튼: 상황 만들기(다른 사람·시간) · 바로 입력(손님이 보내는 글) */
 .demo-play { display: grid; gap: 20px; padding: 20px 0 22px; border-top: 1px solid var(--line); }
+/* 칸이 내용 폭만큼 늘어나지 않게(좁은 화면에서 바로 입력 줄이 옆으로 밀리려면 칸 폭이 화면 폭이어야 한다) */
+.demo-play { grid-template-columns: minmax(0, 1fr); }
+.demo-play > * { min-width: 0; }
 .demo-cap { margin-bottom: 10px; color: var(--fg-3); font-size: var(--t-12); font-weight: 500; }
 .demo-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .demo-act .ic { color: var(--acc); }
@@ -119,9 +122,11 @@
   /* 버튼은 휴대폰 바로 위. 바로 입력은 장면 탭처럼 한 줄로 옆으로 밀어 본다(버튼 묶음이 낮아야 방과 함께 한 화면에 든다) */
   .demo-play { gap: 14px; padding: 0 0 16px; border-top: 0; }
   .demo-cap { margin-bottom: 8px; }
-  .demo-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .demo-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; scroll-snap-type: x proximity; }
+  /* 오른쪽 끝을 흐리게 해 옆으로 더 있다는 것을 보여 준다(끝까지 밀면 demo.js 가 is-end 를 붙여 지운다) */
+  .demo-chips:not(.is-end) { -webkit-mask-image: linear-gradient(90deg, black calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 40px), transparent); }
   .demo-chips::-webkit-scrollbar { display: none; }
-  .demo-chip { flex: none; }
+  .demo-chip { flex: none; scroll-snap-align: start; scroll-margin-left: 16px; }
   .demo-side { margin-top: 20px; }
   .kk-dev { margin-inline: -4px; padding: 0; border: 0; border-radius: 20px; background: transparent; box-shadow: none; }
   .kk { height: min(60vh, 560px); height: min(60svh, 560px); min-height: 400px; border-radius: 18px; }
