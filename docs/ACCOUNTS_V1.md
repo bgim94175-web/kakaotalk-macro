@@ -1376,6 +1376,8 @@ p.nav-cap#navCapRoom  방 설정 · {방 이름}    (방을 고른 뒤에만 보
 | `cover.words` | `[str]` | `[]` | 최대 **300**개, 단어 30자, 중복 제거(지금 `sanitizeWords` 규칙) |
 | `cover.links` | bool | true | 홍보 금지의 링크가 켜져 있으면 링크는 홍보 금지가 맡는다 |
 | `hide.command` | bool | true | 방 안 `{앞글자}가리기` 명령 |
+| `hide.by` | `staff`\|`host` | staff | 가리기 명령을 쓸 수 있는 사람: 방장·부방장 / 방장만(아니면 `글 가리기는 방장만 할 수 있어요.`) |
+| `hide.target` | `members`\|`staff` | members | 가리는 범위: 일반 멤버 글 / 부방장 글까지. 방장·봇 글은 늘 뺀다. 가리기 명령·콘솔 가리기·금지어 검열(금지어·욕설·링크)에 함께 쓴다(`roomfeat.hideSkips`). 홍보 금지는 따르지 않는다 |
 | `guard.enabled` | bool | false | 올킥 방지 |
 | `guard.secs` | int | 30 | 5~300 |
 | `guard.count` | int | 5 | 3~30 |
@@ -1456,9 +1458,9 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 #### (e) 가리기
 
 - 링 버퍼: 방 관리봇이 있는 방마다 최근 300개 글 `{logId, type, authorId, name, at}`(본문 없음, 메모리만, 5.7). 재시작 뒤 첫 가리기 요청 때 `getMessagePage` 로 최대 3쪽 채움.
-- 방 안 명령(방장·부방장만, `hide.command` 켰을 때): `{앞글자}가리기 N`(1~300, 범위 밖이면 `「{앞글자}가리기 30」처럼 가릴 글 수(1~300)를 입력해 주세요. 한 사람의 글은 「{앞글자}가리기 @이름」으로 가릴 수 있어요.`) / `{앞글자}가리기 @닉네임`(그 사람의 버퍼 안 글 전부).
+- 방 안 명령(`hide.by` 가 허락한 사람, `hide.command` 켰을 때): `{앞글자}가리기 N`(1~300, 범위 밖이면 `「{앞글자}가리기 30」처럼 가릴 글 수(1~300)를 입력해 주세요. 한 사람의 글은 「{앞글자}가리기 @이름」으로 가릴 수 있어요.`) / `{앞글자}가리기 @닉네임`(그 사람의 버퍼 안 글 전부).
 - 콘솔: 최근 N개 가리기, 사람별 가리기(`people` 에서 고름). 둘 다 인라인 2단계 확인.
-- `hidePlan`: 방장·부방장·봇·피드·이미 가린 글·명령 글 제외, 300개 상한. 실행은 방별 작업 1개(진행 중이면 `busy`), 콘솔 작업은 방마다 끝난 뒤 10분 간격(`cooldown`), 300ms 간격, 방 300/30분·봇 600/10분(5.5). 방 안 명령도 같은 방 한도를 쓴다.
+- `hidePlan`: 방장·봇·피드·이미 가린 글·명령 글 제외, 부방장 글은 `hide.target: 'staff'` 일 때만(항목에 `sub`), 300개 상한. 부방장 글 가리기를 카카오가 거절해도 봇 권한 실패(연속 3회 멈춤)로 세지 않는다(권한만 다시 읽는다). 실행은 방별 작업 1개(진행 중이면 `busy`), 콘솔 작업은 방마다 끝난 뒤 10분 간격(`cooldown`), 300ms 간격, 방 300/30분·봇 600/10분(5.5). 방 안 명령도 같은 방 한도를 쓴다.
 - 결과 안내: `[글 가리기]\n글 {n}개를 가렸어요.` + 실패가 있으면 `\n({m}개는 가리지 못했어요)`. `room_log 'hide'` 에 개수·실패·누가(`panel`/user_id).
 - 금지어 상한 300(방 설정만. 계정 단위 옛 금지어는 200 그대로).
 
@@ -1545,7 +1547,7 @@ K bot 이 직접 만든 몬스터 35종(`monster-data.mjs`: 16×16 점 그림 ·
 | `r-visit` | `#r-visit-on`(입장·퇴장 로그) · 들낙 감지 `#r-churn-on` `#r-churn-joins`(.num 2~20 회) `#r-churn-min`(.num 1~1,440 분) `#r-churn-action`(.seg `경고만`=warn / `내보내기`=kick) `#r-churn-notice` + 문장 미리 보기 `#r-churn-sent` `<b>10분</b> 안에 <b>3회</b> 이상 들어오면 경고합니다.` · 나갔을 때 내보내기 `#r-leave-on`(설명: `방에서 나간 사람을 내보내기 목록에 올려 다시 들어오지 못하게 합니다. 카카오가 나간 사람의 내보내기를 허용하지 않으면, 30일 안에 다시 들어오는 즉시 내보냅니다.` — 10.1 #5 실측 뒤 한쪽 문장만 남긴다) `#r-leave-notice` · 제외할 사람 `#r-exempt`(.chips) + `#r-exempt-pick`(최근 작성자 select) · 방에 보내는 안내 `#r-visit-style`(.seg `이미지`=image / `글`=text, 미리 보기는 `public/img/logcard-join.png` + 멘션 한 줄 / 글 안내) · 표 `#r-visit-tbl`(기록), `#r-kick-tbl`(K bot 이 내보낸 사람, 행마다 `내보내기 해제`. 방의 `!내보내기`·`!차단해제` 도 여기에 걸린다) |
 | `r-profile` | `#r-profile-on` `#r-profile-name` `#r-profile-status`(`status_supported:false` 라 숨김) `#r-profile-lookup`(.seg `방장·부방장만`=staff / `모두`=all / `끄기`=off, `!프로필조회`) `#r-profile-style`(.seg `이미지`/`글`) · 오픈프로필 조회 명령어 `#r-cmd-link`(.seg 같은 세 값, `!옾링`, 프로필 기록과 따로) · 표 `#r-profile-tbl`(열 `항목` 추가) |
 | `r-promo` | `#r-promo-on` `#r-promo-links` `#r-promo-cards`(`공유 카드·프로필 공유`) `#r-promo-media`(`사진·동영상·파일`) `#r-promo-hide` `#r-promo-kick`(.num 0~10, hint `0이면 내보내지 않습니다`) `#r-promo-reset`(.num 1~720 시간) `#r-promo-notice` · 미리 보기 `#r-promo-preview`(.preview-chat) |
-| `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
+| `r-cover` | 금지어 `#r-cover-on` `#r-cover-links` `#r-cover-words`(.chips) `#r-cover-word-in` `#r-cover-word-n`(`n / 300`) `#r-cover-word-err` · 가리기 `#r-hide-cmd` `#r-hide-by`(.seg `방장·부방장`=staff / `방장만`=host) `#r-hide-target`(.seg `일반 멤버 글`=members / `부방장 글까지`=staff) `#r-hide-last`(.num 1~300) `#r-hide-last-btn` `#r-hide-who`(select) `#r-hide-who-btn` `#r-hide-status` |
 | `r-guard` | `#r-guard-on` `#r-guard-secs` `#r-guard-count` `#r-guard-sent` · 표 `#r-guard-tbl` |
 | `r-games` | `#r-games-on` `#r-games-word` `#r-games-baseball` `#r-games-dice` `#r-games-rps` `#r-games-quiz` `#r-games-sword`(추억의 검 강화) `#r-games-monster`(몬스터 수집) `#r-games-cool`(.num 1~60 초) `#r-games-limit`(.num 0~5,000 회, hint `0이면 제한 없음`) · 랭킹 `#r-rank-tbl`(상위 10) + `#r-rank-reset`(인라인 확인) · 미리 보기 `#r-games-preview` |
 | `room` | `#r-prefix` · `#row-r-cmds`(방 관리봇이 있으면: 방에서 `!설정`·`!입장기록 켜기`·`!도움 관리` 안내) `#r-passcode` `#room-retry` `#room-state` `#room-steps` `#room-wait` `#room-err` `#r-log-tbl` · 옮기기·다시 설치 `#room-move-grp` `#r-reinstall-act` `#r-reinstall-btn` `#r-reinstall-note` `#r-move-form` `#r-move-link` `#r-move-check` `#r-move-note` `#r-move-pv` `#r-move-q` `#r-move-passcode` `#r-move-yes` `#r-move-no` `#r-move-err` `#r-move-rule` `#room-move-go` |

@@ -12,7 +12,6 @@ import { Long } from 'bson'
 import {
   coverNeedsAuthor,
   coverPlan,
-  coverSkipsLink,
   guardFinishHalt,
   guardOnChat,
   logsView,
@@ -2864,7 +2863,8 @@ export class BotSlot {
     return { ok: false, status: r.status }
   }
 
-  async hideOne(v, logId, type) {
+  // opt.noCount: 부방장 글 — 카카오가 거절해도 봇 권한 실패로 세지 않는다(권한만 다시 읽는다)
+  async hideOne(v, logId, type, opt) {
     const now = this.now()
     if (v.actPausedUntil > now) return { ok: false, skipped: true }
     if (!v.limits.hide.ok(now) || !this.limits.hide.ok(now)) return { ok: false, skipped: true, limit: true }
@@ -2877,7 +2877,7 @@ export class BotSlot {
       if (m) m.hidden = true
       return { ok: true }
     }
-    await this.actionFailed(v)
+    await this.actionFailed(v, !!(opt && opt.noCount))
     return { ok: false, status: r.status }
   }
 
@@ -2975,10 +2975,12 @@ export class BotSlot {
         await this.doPromo(v, promo, m)
       } else {
         const coverEv = { chatId: v.chat_id, text, logId: m.logId, messageType: m.type, mine: false, staff: true }
-        if (coverNeedsAuthor(adapter, coverEv)) coverEv.staff = coverSkipsLink(await this.permOf(v, m.authorId))
+        if (coverNeedsAuthor(adapter, coverEv)) coverEv.staff = R.hideSkips(cfg, await this.permOf(v, m.authorId))
         const plan = coverPlan(adapter, coverEv)
-        if (plan) {
-          const r = await this.hideOne(v, plan.logId, plan.type)
+        // 가리기 범위(hide.target): 방장·봇 글은 늘, 부방장 글은 범위가 「부방장 글까지」일 때만 가린다
+        const ap = plan ? await this.permOf(v, m.authorId) : null
+        if (plan && !R.hideSkips(cfg, ap)) {
+          const r = await this.hideOne(v, plan.logId, plan.type, { noCount: R.subHost(ap) })
           if (r.limit) await this.roomLog(v.install_id, 'skip', { user_id: m.authorId, name, detail: { what: 'hide' } })
           else await this.roomLog(v.install_id, 'cover', { user_id: m.authorId, name, ok: !!r.ok })
         }
@@ -3163,9 +3165,8 @@ export class BotSlot {
   // ── 가리기(7.2 (e)) ─────────────────────────────────────────────────────
   async hideCommand(v, m, hc) {
     const p = await this.permOf(v, m.authorId)
-    const n = Number(p)
-    if (!(Number.isFinite(n) && ((n & 1) || (n & 4)))) {
-      this.say(v, '글 가리기는 방장과 부방장만 할 수 있어요.', { what: 'reply' })
+    if (!R.canHideCommand(v.cfg, p)) {
+      this.say(v, v.cfg.hide.by === 'host' ? '글 가리기는 방장만 할 수 있어요.' : '글 가리기는 방장과 부방장만 할 수 있어요.', { what: 'reply' })
       return
     }
     if (hc.usage) {
@@ -3212,7 +3213,7 @@ export class BotSlot {
       return { ok: false, error: 'cooldown', retry_at: Number(v.runtime.hideCooldownUntil) }
     }
     if (!v.ringFilled) await this.fillRing(v)
-    const items = R.hidePlan(v.ring, req, this.ctxFor(v))
+    const items = R.hidePlan(v.ring, req, this.ctxFor(v), v.cfg)
     this.pool.jobSeq += 1
     const job = { id: `${v.install_id}.${this.pool.jobSeq}`, install_id: v.install_id, by, total: items.length, done: 0, failed: 0, state: 'running', at: now }
     this.pool.hideJobs.set(job.id, job)
@@ -3230,7 +3231,7 @@ export class BotSlot {
           job.failed += items.length - i
           break
         }
-        const r = await this.hideOne(v, items[i].logId, items[i].type)
+        const r = await this.hideOne(v, items[i].logId, items[i].type, { noCount: !!items[i].sub })
         if (r.ok) job.done += 1
         else {
           job.failed += 1

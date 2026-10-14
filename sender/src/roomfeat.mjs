@@ -26,7 +26,7 @@ export const DEFAULTS = Object.freeze({
   profile: { enabled: false, name: true, status: true, lookup: 'staff', style: 'image' },
   promo: { enabled: false, links: true, cards: true, media: false, hide: true, kickAt: 3, resetHours: 24, notice: true },
   cover: { enabled: false, words: [], links: true },
-  hide: { command: true },
+  hide: { command: true, by: 'staff', target: 'members' },
   guard: { enabled: false, secs: 30, count: 5 },
   cmd: { link: 'staff' },
   games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, sword: true, monster: true, cooldownSec: 3, dailyLimit: 0 },
@@ -42,7 +42,7 @@ const SPEC = {
   profile: { enabled: B, name: B, status: B, lookup: E(['staff', 'all', 'off']), style: E(['image', 'text']) },
   promo: { enabled: B, links: B, cards: B, media: B, hide: B, kickAt: I(0, 10), resetHours: I(1, 720), notice: B },
   cover: { enabled: B, links: B },
-  hide: { command: B },
+  hide: { command: B, by: E(['staff', 'host']), target: E(['members', 'staff']) },
   guard: { enabled: B, secs: I(5, 300), count: I(3, 30) },
   cmd: { link: E(['staff', 'all', 'off']) },
   games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, sword: B, monster: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
@@ -933,10 +933,38 @@ function cmpId(a, b) {
 }
 
 /**
- * 가릴 글 목록. 방장·부방장·봇·피드·이미 가린 글·명령 글은 뺀다. 300개 상한.
- * req: {last:N} 최근 N개 | {userId} 그 사람의 버퍼 안 글 전부
+ * 가리기 범위(hide.target): 이 권한(open permission)의 글을 가리지 않으면 true.
+ * 방장(1)·봇(8)은 늘 빼고, 부방장(4)은 'staff' 범위일 때만 가린다. 권한을 모르면 가리지 않는다.
  */
-export function hidePlan(ring, req, ctx) {
+export function hideSkips(cfg, p) {
+  if (p == null || p === '') return true
+  const n = Number(p)
+  if (!Number.isFinite(n)) return true
+  if ((n & 1) !== 0 || (n & 8) !== 0) return true
+  if ((n & 4) !== 0) return !(cfg && cfg.hide && cfg.hide.target === 'staff')
+  return false
+}
+
+/** 부방장 권한이면 true(가리기가 거절돼도 봇 권한 실패로 세지 않는다) */
+export function subHost(p) {
+  const n = Number(p)
+  return p != null && p !== '' && Number.isFinite(n) && (n & 1) === 0 && (n & 4) !== 0
+}
+
+/** 「!가리기」를 쓸 수 있는 권한인가(hide.by: 'staff' 방장·부방장 | 'host' 방장만) */
+export function canHideCommand(cfg, p) {
+  const n = Number(p)
+  if (p == null || p === '' || !Number.isFinite(n)) return false
+  if ((n & 1) !== 0) return true
+  return (n & 4) !== 0 && !(cfg && cfg.hide && cfg.hide.by === 'host')
+}
+
+/**
+ * 가릴 글 목록. 방장·봇·피드·이미 가린 글·명령 글은 늘 빼고, 부방장 글은 가리기 범위(cfg.hide.target)를 따른다. 300개 상한.
+ * req: {last:N} 최근 N개 | {userId} 그 사람의 버퍼 안 글 전부. 권한을 모르는 사람(일반 멤버로 본다)은 가린다.
+ * → [{logId, type, sub?}] (sub: 부방장 글)
+ */
+export function hidePlan(ring, req, ctx, cfg) {
   const out = []
   const want = req && req.userId ? String(req.userId) : ''
   const limit = Math.max(0, Math.min(RING_MAX, Number(req && req.last) || RING_MAX))
@@ -947,8 +975,10 @@ export function hidePlan(ring, req, ctx) {
     if (!uid || (ctx && ctx.selfId && uid === String(ctx.selfId))) continue
     if (want && uid !== want) continue
     const p = ctx && ctx.permOf ? ctx.permOf(uid) : null
-    if (staffPerm(p)) continue
-    out.push({ logId: m.logId, type: Number(m.type) || 1 })
+    if (p != null && hideSkips(cfg, p)) continue
+    const item = { logId: m.logId, type: Number(m.type) || 1 }
+    if (subHost(p)) item.sub = true
+    out.push(item)
     if (!want && out.length >= limit) break
     if (out.length >= RING_MAX) break
   }
