@@ -1039,7 +1039,7 @@ export function helpLine(view) {
   // 추억의 검 강화(sword.mjs helpLine 과 같은 줄)
   const sword = gamesLive(view) && cfg.games.sword ? `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}출석 ${p}결투 ${p}보스 ${p}강화도움` : ''
   // 몬스터 수집은 따로 한 줄(monster.mjs helpCommands 와 같은 목록 — monster-check 가 맞춰 본다)
-  const monster = gamesLive(view) && cfg.games.monster ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '몬스터'].map((c) => p + c) : []
+  const monster = gamesLive(view) && cfg.games.monster ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map((c) => p + c) : []
   const room = roomCommandNames(view)
   if (!games.length && !room.length) return ''
   const lines = ['[명령어]']
