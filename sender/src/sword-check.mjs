@@ -1,5 +1,7 @@
 // 「추억의 검 강화」 점검(sword.mjs · sword-art.mjs · features.mjs 연결). 난수·시각을 고정해 늘 같은 결과.
 // npm run check 가 부른다. 마지막 줄 'sword check ok'.
+import { helpCard } from './helpcard.mjs'
+import * as M from './monster.mjs'
 import * as S from './sword.mjs'
 import * as A from './sword-art.mjs'
 import * as Card from './card.mjs'
@@ -252,7 +254,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   const info = g.run('1', '가', '내검')
   eq(info.text, '[내 검] 가님\n+0 녹슨 철검 · 최고 +12\n골드 1,000,000G · 판매가 0G\n아이템 : 마력석 999\n다음 강화 : 100G · 성공 95%', 'info text')
   eq(info.card.kind, 'info', 'info card')
-  assert(g.run('1', '가', '강화도움').text.startsWith('[검 강화]\n!강화 : '), 'help text')
+  assert(g.run('1', '가', '강화도움').text.startsWith('《 검 강화 도움말 》\n━━━━━━━━━━━━\n▸ !강화 : '), 'help text')
 }
 
 // ── 거래: 읽기 ────────────────────────────────────────────────────────────
@@ -736,12 +738,17 @@ function sums(g, keys) {
   const v = mk({ cmdPrefix: '#' })
   eq(R.adapterRecord(v, 'b').config.minigame.sword, true, 'adapter passes games.sword')
   // 몬스터 수집(monster.mjs)도 기본 켜짐 — 검 강화 줄 바로 다음 줄
-  eq(R.helpLine(v), '[명령어]\n미니게임 : #끝말잇기 #숫자야구 #주사위 #가위바위보 #퀴즈 #힌트 #정답 #포기 #랭킹\n' + S.helpLine('#') + '\n몬스터 수집 : #탐험 #포획 #도감 #내몬스터 #배틀 #교환 #레이드 #도전 #몬스터', 'helpLine sword line')
-  eq(R.helpLine(mk({ games: { sword: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !레이드 !도전 !몬스터', 'helpLine without sword')
-  eq(R.helpLine(mk({ games: { sword: false, monster: false } })), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹', 'helpLine without either game')
+  const games = (p) => ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => p + c)
+  const monCmds = (p) => M.HELP_CMDS.map((c) => p + c)
+  eq(R.helpLine(v), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('#') }, { name: '검 강화', cmds: S.helpCommands('#') }, { name: '몬스터 수집', cmds: monCmds('#') }]), 'helpLine sword block')
+  eq(R.helpLine(mk({ games: { sword: false } })), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('!') }, { name: '몬스터 수집', cmds: monCmds('!') }]), 'helpLine without sword')
+  eq(R.helpLine(mk({ games: { sword: false, monster: false } })), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('!') }]), 'helpLine without either game')
   const both = mk({ profile: { enabled: true } }, { roombot: true, minigame: true })
   both.perm = 4
-  eq(R.helpLine(both).split('\n')[2], '검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움', 'sword line sits before the room line')
+  const hb = R.helpLine(both)
+  assert(hb.indexOf('◆ 미니게임') < hb.indexOf('◆ 검 강화') && hb.indexOf('◆ 검 강화') < hb.indexOf('◆ 몬스터 수집') && hb.indexOf('◆ 몬스터 수집') < hb.indexOf('◆ 방 관리'), 'sword block sits before the room block')
+  eq(S.HELP_CMDS.join(' '), '강화 내검 사냥 출석 결투 보스 강화도움', 'roomfeat helpLine lists the same sword commands')
+  assert(hb.includes(' ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움'), 'sword block lines ' + hb)
 
   let now = Date.now()
   const send = (view, text, id, name, opt) => {
@@ -789,7 +796,7 @@ function sums(g, keys) {
   assert(t[0].text.startsWith('[거래 제안] 검사님 → 둘님'), 'mention through onInbound ' + t[0].text)
   assert(send(w, '!수락', '502', '둘')[0].text.startsWith('[거래 완료]'), 'accept through onInbound')
   // 방 설치형 「게임」 목록에도
-  eq(send(w, '!게임', '502', '둘')[0].text, '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움' + '\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !레이드 !도전 !몬스터', 'game list')
+  eq(send(w, '!게임', '502', '둘')[0].text, helpCard('K bot 명령어', [{ name: '미니게임', cmds: ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => '!' + c) }, { name: '검 강화', cmds: S.helpCommands('!') }, { name: '몬스터 수집', cmds: M.HELP_CMDS.map((c) => '!' + c) }]), 'game list')
   // 계정 단위 옛 기능(byId 아님)에는 검 강화가 없다
   const legacy = { config: { minigame: { enabled: true, rooms: ['k'], cmdPrefix: '!', cooldownMs: 0 } }, rooms: [{ key: 'k', chat_id: '88', name: '옛방', kind: 'open', list_kind: 'open_room' }], runtime: {}, features: { macro: false, roombot: false, minigame: true } }
   eq(onInbound(legacy, { chatId: '88', text: '!강화', authorName: '옛', mine: false }).length, 0, 'legacy account path has no sword game')

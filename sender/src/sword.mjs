@@ -10,6 +10,7 @@
 // 방 기록 top = { lv, n } (방에서 나온 가장 높은 검) · 보스 r = { i: 보스 번호, hp, mx, at: 나타난 시각, d: {사람 열쇠: 피해} } | null,
 // rn: 다음 보스가 나타날 수 있는 시각, bk: 쓰러뜨린 보스 수
 import { josa } from './roomfeat.mjs'
+import { helpCard } from './helpcard.mjs'
 
 export const MAX_LV = 20
 export const START_GOLD = 1000
@@ -290,13 +291,19 @@ export function offerAt(runtime, roomKey, key, now) {
 }
 
 /** 「도움」 목록의 한 줄(roomfeat.helpLine · features 「게임」 · 패널 미리 보기가 같은 모양) */
+export const HELP_CMDS = ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움']
+
 export function helpLine(p) {
-  return `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}출석 ${p}결투 ${p}보스 ${p}강화도움`
+  return '검 강화 : ' + HELP_CMDS.map((c) => p + c).join(' ')
+}
+
+/** 「!도움」·「!게임」 목록의 검 강화 묶음 */
+export function helpCommands(p) {
+  return HELP_CMDS.map((c) => p + c)
 }
 
 export function helpText(p) {
-  return [
-    '[검 강화]',
+  return helpCard('검 강화 도움말', [{ lines: [
     `${p}강화 : 골드로 검을 강화해요 (주문서 쓰기 : ${p}강화 보호 축복)`,
     `${p}내검 : 내 검과 골드를 봐요`,
     `${p}사냥 : 골드와 재료를 모아요 (2분에 한 번)`,
@@ -306,9 +313,8 @@ export function helpText(p) {
     `${p}판매 : 검을 팔아 골드로 바꿔요 (아이템 : ${p}판매 마력석 2)`,
     `${p}상점 · ${p}구매 보호 1 · ${p}인벤`,
     `${p}거래 @상대 보호 1 3000 : 아이템이나 검을 팔아요 (상대는 ${p}수락 · ${p}거절)`,
-    `${p}강화랭킹`,
-    `강화에 실패하면 다음 강화 성공 확률이 ${PITY_STEP}%씩 올라요 (최대 +${PITY_MAX}%)`,
-  ].join('\n')
+    `${p}강화랭킹 : 방 강화 순위를 봐요`,
+  ] }], `강화에 실패하면 다음 강화 성공 확률이 ${PITY_STEP}%씩 올라요. (최대 +${PITY_MAX}%)`)
 }
 
 export function shopText(p) {

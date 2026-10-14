@@ -3491,6 +3491,29 @@
   }
 
   // ── 방 설정 폼 (7.1 키) ───────────────────────────────────
+  // sender/src/helpcard.mjs 와 같은 규칙(제목 · ━ 줄 · ◆ 묶음 · ▸ 줄, 폭 16에서 「 · 」로 나눠 넘김)
+  function helpCard(title, blocks, foot) {
+    var RULE = '━━━━━━━━━━━━';
+    function width(t) { var w = 0; for (var i = 0; i < t.length; i++) w += /[\u3131-\u318e\uac00-\ud7a3]/.test(t[i]) ? 1 : 0.6; return w; }
+    var lines = ['《 ' + title + ' 》', RULE];
+    var first = true;
+    blocks.forEach(function (b) {
+      var items = [];
+      var cur = '';
+      (b.cmds || []).forEach(function (c) {
+        var next = cur ? cur + ' · ' + c : c;
+        if (cur && width(next) > 16) { items.push(cur); cur = c; } else cur = next;
+      });
+      if (cur) items.push(cur);
+      if (!items.length) return;
+      if (!first) lines.push('');
+      first = false;
+      lines.push('◆ ' + b.name);
+      items.forEach(function (it) { lines.push(' ▸ ' + it); });
+    });
+    if (foot) lines.push(RULE, foot);
+    return lines.join('\n');
+  }
   function segVal(id) { var b = qs('#' + id + ' button[aria-pressed="true"]'); return b ? b.dataset.v : ''; }
   function segSet(id, v) {
     qsa('#' + id + ' button[data-v]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.v === v ? 'true' : 'false'); });
@@ -3756,7 +3779,7 @@
     }
     if (r === 'r-games') {
       $('r-games-preview-q').textContent = pfx + '도움';
-      // sender/src/roomfeat.mjs helpLine 과 같은 모양: [명령어] / 미니게임 : … / 검 강화 : … / 몬스터 수집 : … / 방 관리 : … / 「!도움 관리」 안내
+      // sender/src/roomfeat.mjs helpLine 과 같은 모양(sender/src/helpcard.mjs): 《 K bot 명령어 》 / ━ / ◆ 묶음마다 ▸ 줄 / ━ / 「!도움 관리」 안내
       var out = [];
       if ($('r-games-word').checked) out.push(pfx + '끝말잇기');
       if ($('r-games-baseball').checked) out.push(pfx + '숫자야구');
@@ -3773,12 +3796,12 @@
         if (c.hide && c.hide.command) roomCmds.push(pfx + '가리기');
         roomCmds.push(pfx + '내보내기', pfx + '설정');
       }
-      // 추억의 검 강화 줄(sender/src/sword.mjs helpLine)
-      var sword = $('r-games-sword').checked ? '\n검 강화 : ' + pfx + '강화 ' + pfx + '내검 ' + pfx + '사냥 ' + pfx + '출석 ' + pfx + '결투 ' + pfx + '보스 ' + pfx + '강화도움' : '';
-      // 몬스터 수집 줄(sender/src/monster.mjs helpCommands)
+      // 추억의 검 강화(sender/src/sword.mjs HELP_CMDS) · 몬스터 수집(sender/src/monster.mjs HELP_CMDS)
+      var swordCmds = $('r-games-sword').checked ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map(function (x) { return pfx + x; }) : [];
       var monCmds = $('r-games-monster').checked ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map(function (x) { return pfx + x; }) : [];
-      $('r-games-preview-t').textContent = '[명령어]\n미니게임 : ' + out.join(' ') + sword + (monCmds.length ? '\n몬스터 수집 : ' + monCmds.join(' ') : '') +
-        (roomCmds.length ? '\n방 관리 : ' + roomCmds.join(' ') + '\n「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
+      $('r-games-preview-t').textContent = helpCard('K bot 명령어', [
+        { name: '미니게임', cmds: out }, { name: '검 강화', cmds: swordCmds }, { name: '몬스터 수집', cmds: monCmds }, { name: '방 관리', cmds: roomCmds }
+      ], roomCmds.length ? '「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
   }
 

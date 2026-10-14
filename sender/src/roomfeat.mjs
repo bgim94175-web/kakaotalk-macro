@@ -1,6 +1,7 @@
 // 방 설치형 봇(K bot 계정)의 방별 기능 — 순수 함수만 둔다(docs/ACCOUNTS_V1.md 5.5·5.7·7장).
 // 네트워크·DB·타이머를 쓰지 않는다. 시각은 늘 인자로 받는다. botpool.mjs 가 이 함수들의 결과를 실행한다.
 // 이 파일은 features.mjs 를 가져오지 않는다(features.mjs 가 이 파일의 profileObserve 를 쓴다).
+import { helpCard } from './helpcard.mjs'
 
 const SEP = '\u0001'
 const MIN = 60 * 1000
@@ -1016,11 +1017,8 @@ export function hideDoneNotice(done, failed) {
 // 방 메시지는 짧은 해요체(docs/TONE.md 「K bot 방 메시지」). 방 사람들은 계정·패널을 모르므로 봇은 이름으로, 설정하는 사람은 방장님·관리자로 쓴다.
 
 /**
- * 켜진 게임과 방 관리 명령어의 목록. 아무것도 없으면 ''.
- * [명령어]
- * 미니게임 : !끝말잇기 … !랭킹
- * 방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정
- * 「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.
+ * 켜진 게임과 방 관리 명령어의 목록(helpcard.mjs 모양). 아무것도 없으면 ''.
+ * 《 K bot 명령어 》 / ━ / ◆ 미니게임 · ◆ 검 강화 · ◆ 몬스터 수집 · ◆ 방 관리 묶음 / ━ / 「!도움 관리」 안내
  */
 export function helpLine(view) {
   const cfg = view.cfg
@@ -1036,18 +1034,18 @@ export function helpLine(view) {
     if (g.word || g.baseball || g.quiz) games.push(p + '포기')
     games.push(p + '랭킹')
   }
-  // 추억의 검 강화(sword.mjs helpLine 과 같은 줄)
-  const sword = gamesLive(view) && cfg.games.sword ? `검 강화 : ${p}강화 ${p}내검 ${p}사냥 ${p}출석 ${p}결투 ${p}보스 ${p}강화도움` : ''
-  // 몬스터 수집은 따로 한 줄(monster.mjs helpCommands 와 같은 목록 — monster-check 가 맞춰 본다)
+  // 추억의 검 강화(sword.mjs HELP_CMDS 와 같은 목록 — sword-check 가 맞춰 본다)
+  const sword = gamesLive(view) && cfg.games.sword ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map((c) => p + c) : []
+  // 몬스터 수집(monster.mjs HELP_CMDS 와 같은 목록 — monster-check 가 맞춰 본다)
   const monster = gamesLive(view) && cfg.games.monster ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map((c) => p + c) : []
   const room = roomCommandNames(view)
   if (!games.length && !room.length) return ''
-  const lines = ['[명령어]']
-  if (games.length) lines.push('미니게임 : ' + games.join(' '))
-  if (sword) lines.push(sword)
-  if (monster.length) lines.push('몬스터 수집 : ' + monster.join(' '))
-  if (room.length) lines.push('방 관리 : ' + room.join(' '), `「${p}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.`)
-  return lines.join('\n')
+  return helpCard('K bot 명령어', [
+    { name: '미니게임', cmds: games },
+    { name: '검 강화', cmds: sword },
+    { name: '몬스터 수집', cmds: monster },
+    { name: '방 관리', cmds: room },
+  ], room.length ? `「${p}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.` : '')
 }
 
 // 방 관리 명령어(방 관리 기능이 동작할 때만). 켜고 끄는 명령어는 「!도움 관리」에만 적는다.
@@ -1071,7 +1069,7 @@ export function adminHelp(view) {
   if (!roombotLive(view)) return ''
   const cfg = view.cfg
   const p = cfg.cmdPrefix
-  const lines = ['[방 관리 명령어]']
+  const lines = []
   if (cfg.cmd.link !== 'off') lines.push(`${p}옾링 @닉네임 : 옾링 보기`)
   if (cfg.profile.enabled && cfg.profile.lookup !== 'off') lines.push(`${p}프로필조회 @닉네임 : 프로필 기록 보기`)
   if (cfg.hide.command) lines.push(`${p}가리기 30 : 최근 글 30개 가리기`, `${p}가리기 @닉네임 : 그 사람의 글 가리기`)
@@ -1088,9 +1086,8 @@ export function adminHelp(view) {
     `${p}금지어 추가 · 삭제 단어`,
     `${p}금지어 목록`,
     `${p}올킥감지 켜기 · 끄기`,
-    '@닉네임 자리에는 옾링 주소도 쓸 수 있어요. 내보내기·설정은 방장과 부방장만 할 수 있어요.',
   )
-  return lines.join('\n')
+  return helpCard('방 관리 명령어', [{ lines }], '@닉네임 자리에는 옾링 주소도 쓸 수 있어요. 내보내기·설정은 방장과 부방장만 할 수 있어요.')
 }
 
 export function isHelpCommand(text, prefix) {
