@@ -11,6 +11,7 @@
 // 답은 한 명령에 하나: { text, card? } — card 는 monster-card.mjs 가 그림으로 바꾸고, 그림을 못 보내면 text 를 보낸다.
 import { ELEMENTS, RARITIES, SPECIES, RAID_BOSSES } from './monster-data.mjs'
 import { josa } from './roomfeat.mjs'
+import { helpCard } from './helpcard.mjs'
 
 export const MAX_USERS = 200
 export const MAX_BOX = 30
@@ -68,8 +69,10 @@ export function offerAt(rt, key, cmd, now) {
 }
 
 /** 도움말 한 줄(roomfeat.helpLine · features 「!게임」 이 쓴다) */
+export const HELP_CMDS = ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터']
+
 export function helpCommands(p) {
-  return ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map((c) => p + c).join(' ')
+  return HELP_CMDS.map((c) => p + c).join(' ')
 }
 
 const SP = new Map(SPECIES.map((s) => [s.id, s]))
@@ -334,11 +337,15 @@ export function handle(rt, req, env) {
 function help(c) {
   const p = c.p
   return {
-    text: '[명령어]\n몬스터 수집 : ' + ['탐험', '포획', '도감', '내몬스터', '대표', '놓아주기', '그물', '배틀', '교환', '수락', '거절', '레이드', '도전', '몬스터랭킹'].map((x) => p + x).join(' ') +
-      `\n상성 : ${CYCLE_TEXT} (왼쪽이 오른쪽에 강해요)` +
-      `\n출석 : 매일 첫 탐험에 그물을 받아요. 연속으로 오면 더 많이, ${STREAK_WEEK}일마다 황금그물도 받아요.` +
-      `\n포획 : 실패할 때마다 다음 포획 확률이 ${PITY_STEP}%씩 올라요. (최대 +${PITY_MAX}%)` +
-      `\n레이드 : 「${p}레이드」로 전설 몬스터를 부르고, 대표 몬스터로 「${p}도전」해서 함께 쓰러뜨려요.`,
+    text: helpCard('몬스터 수집 도움말', [
+      { name: '명령어', cmds: ['탐험', '포획', '도감', '내몬스터', '대표', '놓아주기', '그물', '배틀', '교환', '수락', '거절', '레이드', '도전', '몬스터랭킹'].map((x) => p + x) },
+      { name: '알아 두기', lines: [
+        `상성 : ${CYCLE_TEXT} (왼쪽이 오른쪽에 강해요)`,
+        `출석 : 매일 첫 탐험에 그물을 받아요. 연속으로 오면 더 많이, ${STREAK_WEEK}일마다 황금그물도 받아요.`,
+        `포획 : 실패할 때마다 다음 포획 확률이 ${PITY_STEP}%씩 올라요. (최대 +${PITY_MAX}%)`,
+        `레이드 : 「${p}레이드」로 전설 몬스터를 부르고, 대표 몬스터로 「${p}도전」해서 함께 쓰러뜨려요.`,
+      ] },
+    ]),
   }
 }
 

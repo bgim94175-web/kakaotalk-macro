@@ -1601,11 +1601,11 @@ async function withLog(fn) {
   {
     const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
     const h = RF.helpLine(v)
-    if (h !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !레이드 !도전 !몬스터\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n◆ 검 강화\n ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움\n\n◆ 몬스터 수집\n ▸ !탐험 · !포획 · !도감\n ▸ !내몬스터 · !배틀 · !교환\n ▸ !레이드 · !도전 · !몬스터\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
     const ah = RF.adminHelp(v)
-    if (!ah.startsWith('[방 관리 명령어]\n!옾링 @닉네임 : 옾링 보기\n!프로필조회 @닉네임 : 프로필 기록 보기\n!가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n!내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n!금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
+    if (!ah.startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기\n▸ !프로필조회 @닉네임 : 프로필 기록 보기\n▸ !가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n▸ !내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n▸ !금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
     const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
-    if (RF.helpLine(off) !== '[명령어]\n방 관리 : !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
+    if (RF.helpLine(off) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
     const waiting = view({ state: 'waiting_host' })
     if (RF.helpLine(waiting) !== '' || RF.adminHelp(waiting) !== '') throw new Error('#40-2 no room commands while waiting for the host')
     if (!RF.isAdminHelpCommand('!도움 관리', '!') || !RF.isAdminHelpCommand('!도움관리', '!') || RF.isAdminHelpCommand('!도움', '!') || RF.isAdminHelpCommand('!도움 관리자', '!')) throw new Error('#40-2 admin help command')
@@ -1774,8 +1774,8 @@ async function withLog(fn) {
     await waitFor(() => sentIn(iMini).length >= 2, 5000, '7.7#18 reply')
     const sent = sentIn(iMini)
     if (sent[0] !== '[K bot]\n미니게임봇이 입장했어요.\n「!도움」을 입력하면 명령어를 볼 수 있어요.') throw new Error('7.7#18 join notice first ' + JSON.stringify(sent))
-    if (sent.filter((t) => t.startsWith('[명령어]')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
-    if (sent[1] !== '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !배틀 !교환 !레이드 !도전 !몬스터') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
+    if (sent.filter((t) => t.startsWith('《 K bot 명령어 》')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
+    if (sent[1] !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n◆ 검 강화\n ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움\n\n◆ 몬스터 수집\n ▸ !탐험 · !포획 · !도감\n ▸ !내몬스터 · !배틀 · !교환\n ▸ !레이드 · !도전 · !몬스터') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
     // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
     const before = packets('REWRITE').length
     fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })
@@ -2443,8 +2443,8 @@ async function withLog(fn) {
       await waitFor(() => vc.members.get('4014') && vc.members.get('4014').link === 'https://open.kakao.com/o/cloud4014' && vc.memberOkAt > 0, 5000, '#40 member book')
       await sleep(100)
       // 도움말
-      await expect(ask('4012', '바다', '!도움'), '[명령어]\n방 관리 : !옾링 !프로필조회 !가리기 !내보내기 !설정\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
-      if (!(await ask('4012', '바다', '!도움 관리')).startsWith('[방 관리 명령어]\n!옾링 @닉네임 : 옾링 보기')) throw new Error('#40 admin help')
+      await expect(ask('4012', '바다', '!도움'), '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
+      if (!(await ask('4012', '바다', '!도움 관리')).startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기')) throw new Error('#40 admin help')
       // !옾링: 기본은 방장·부방장만
       await expect(ask('4012', '바다', '!옾링 구름'), '옾링 조회는 방장과 부방장만 할 수 있어요.', 'link staff only')
       await expect(ask('4002', '부방장', '!옾링'), '「!옾링 @닉네임」처럼 입력해 주세요. 옾링 주소나 닉네임으로도 찾을 수 있어요.', 'link usage')

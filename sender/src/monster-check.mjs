@@ -1,5 +1,6 @@
 // 몬스터 수집(monster.mjs · monster-card.mjs · monster-data.mjs)과 미니게임 연결(features·roomfeat) 점검.
 // 난수·시각은 모두 넣어 준 값만 쓴다(같은 입력이면 같은 결과). 마지막 줄에 'monster check ok'.
+import { helpCard } from './helpcard.mjs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import * as M from './monster.mjs'
 import * as C from './monster-card.mjs'
@@ -373,7 +374,7 @@ function allIds(rt) {
     eq(z.say('9', '구', '수락'), null, 'nothing to accept for a newcomer')
     eq(Object.keys(z.rt.mon.u).length, 0, 'help · ranking · accept do not create a player')
   }
-  eq(g.say('1', '가', '몬스터').text, '[명령어]\n몬스터 수집 : !탐험 !포획 !도감 !내몬스터 !대표 !놓아주기 !그물 !배틀 !교환 !수락 !거절 !레이드 !도전 !몬스터랭킹\n상성 : 햇살 → 물결 → 바위 → 바람 → 별빛 → 햇살 (왼쪽이 오른쪽에 강해요)\n출석 : 매일 첫 탐험에 그물을 받아요. 연속으로 오면 더 많이, 7일마다 황금그물도 받아요.\n포획 : 실패할 때마다 다음 포획 확률이 5%씩 올라요. (최대 +20%)\n레이드 : 「!레이드」로 전설 몬스터를 부르고, 대표 몬스터로 「!도전」해서 함께 쓰러뜨려요.', 'help')
+  eq(g.say('1', '가', '몬스터').text, '《 몬스터 수집 도움말 》\n━━━━━━━━━━━━\n◆ 명령어\n ▸ !탐험 · !포획 · !도감\n ▸ !내몬스터 · !대표 · !놓아주기\n ▸ !그물 · !배틀 · !교환 · !수락\n ▸ !거절 · !레이드 · !도전\n ▸ !몬스터랭킹\n\n◆ 알아 두기\n ▸ 상성 : 햇살 → 물결 → 바위 → 바람 → 별빛 → 햇살 (왼쪽이 오른쪽에 강해요)\n ▸ 출석 : 매일 첫 탐험에 그물을 받아요. 연속으로 오면 더 많이, 7일마다 황금그물도 받아요.\n ▸ 포획 : 실패할 때마다 다음 포획 확률이 5%씩 올라요. (최대 +20%)\n ▸ 레이드 : 「!레이드」로 전설 몬스터를 부르고, 대표 몬스터로 「!도전」해서 함께 쓰러뜨려요.', 'help')
   eq(g.say('1', '가', '끝말잇기'), null, 'other commands are not ours')
 }
 
@@ -477,9 +478,10 @@ function allIds(rt) {
     const say = (text, id, name, mentions) => onInbound(rec, { chatId: '555', text, authorName: name || '홍', authorId: id || '101', mentions, mine: false })
     // 도움말
     // 검 강화(sword.mjs)도 기본 켜짐 — 몬스터 수집 줄은 검 강화 줄 다음
-    eq(RF.helpLine(v), '[명령어]\n미니게임 : !끝말잇기 !숫자야구 !주사위 !가위바위보 !퀴즈 !힌트 !정답 !포기 !랭킹\n검 강화 : !강화 !내검 !사냥 !출석 !결투 !보스 !강화도움\n몬스터 수집 : ' + M.helpCommands('!'), 'helpLine has the monster line')
+    const monBlock = (p) => helpCard('x', [{ name: '몬스터 수집', cmds: M.HELP_CMDS.map((c) => p + c) }]).split('\n').slice(2).join('\n')
+    assert(RF.helpLine(v).endsWith('\n' + monBlock('!')) && RF.helpLine(v).includes('◆ 검 강화'), 'helpLine has the monster block last')
     const p2 = view({ cmdPrefix: '#' })
-    assert(RF.helpLine(p2).endsWith('\n몬스터 수집 : ' + M.helpCommands('#')), 'helpLine uses the prefix')
+    assert(RF.helpLine(p2).endsWith('\n' + monBlock('#')), 'helpLine uses the prefix')
     eq(RF.helpLine(view({ games: { monster: false } })).includes('몬스터'), false, 'monster off → not in help')
     // 탐험 → 그림 + 글
     Math.random = seq([0.5, 0, 0, 0, 0.5])
@@ -520,7 +522,7 @@ function allIds(rt) {
     eq(say('!수락', '202', '김')[0].text, '받은 신청이 없어요.', 'nothing to accept')
     // !게임 목록에도 몬스터 수집 줄
     clock += 3000
-    eq(say('!게임')[0].text.split('\n')[3], '몬스터 수집 : ' + M.helpCommands('!'), '!게임 lists monster commands')
+    assert(say('!게임')[0].text.includes('◆ 몬스터 수집\n ▸ !탐험 · !포획 · !도감\n ▸ !내몬스터 · !배틀 · !교환\n ▸ !레이드 · !도전 · !몬스터'), '!게임 lists monster commands')
     eq(M.helpCommands('!'), '!탐험 !포획 !도감 !내몬스터 !배틀 !교환 !레이드 !도전 !몬스터', 'help line has the raid commands')
     // 레이드도 onInbound 를 지난다(글만)
     clock += 3000

@@ -5,6 +5,7 @@ import { cardPng as swordCardPng } from './sword-art.mjs'
 import * as Mon from './monster.mjs'
 import { cardPng as monsterCardPng } from './monster-card.mjs'
 import { josa, profileObserve, visitNoticeText } from './roomfeat.mjs'
+import { helpCard } from './helpcard.mjs'
 
 const SEP = '\u0001'
 const WORD_TURN_MS = 30000
@@ -941,13 +942,14 @@ function gameCommand(record, state, cfg, room, who, line, prefix, now, out, ment
       if (gameOn(cfg, 'quiz')) on.push(prefix + '퀴즈', prefix + '힌트', prefix + '정답')
       on.push(prefix + '포기', prefix + '랭킹')
       // roomfeat.helpLine 과 같은 줄 순서: 미니게임 · 검 강화 · 몬스터 수집
-      const lines = ['[명령어]', '미니게임 : ' + on.join(' ')]
-      if (gameOn(cfg, 'sword')) lines.push(Sword.helpLine(prefix))
-      if (gameOn(cfg, 'monster')) lines.push('몬스터 수집 : ' + Mon.helpCommands(prefix))
-      gameSend(state, cfg, room, lines.join('\n'), now, out)
+      const blocks = [{ name: '미니게임', cmds: on }]
+      if (gameOn(cfg, 'sword')) blocks.push({ name: '검 강화', cmds: Sword.helpCommands(prefix) })
+      if (gameOn(cfg, 'monster')) blocks.push({ name: '몬스터 수집', cmds: Mon.HELP_CMDS.map((c) => prefix + c) })
+      gameSend(state, cfg, room, helpCard('K bot 명령어', blocks), now, out)
       return
     }
-    gameSend(state, cfg, room, `[명령어]\n미니게임 : ${prefix}끝말잇기 ${prefix}숫자야구 ${prefix}주사위 ${prefix}가위바위보 ${prefix}퀴즈 ${prefix}힌트 ${prefix}정답 ${prefix}포기 ${prefix}랭킹`, now, out)
+    const all = ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => prefix + c)
+    gameSend(state, cfg, room, helpCard('K bot 명령어', [{ name: '미니게임', cmds: all }]), now, out)
   }
 }
 
