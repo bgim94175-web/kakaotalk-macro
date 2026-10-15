@@ -315,6 +315,13 @@
       lic.classList.add('warn');
       return;
     }
+    if (m.comp) {
+      left.textContent = '무료 회원 · 기간 제한 없음';
+      left.removeAttribute('title');
+      bar.style.transform = 'scaleX(1)';
+      lic.classList.remove('warn');
+      return;
+    }
     var hours = (until - Date.now()) / 3600000;
     var n = macroDays(m);
     left.textContent = hours < 24 ? '오늘 만료' : '매크로 D-' + n;
@@ -3142,6 +3149,9 @@
       b.innerHTML = '<span class="sans">만료</span>';
       qs('.d', m).textContent = fmtFull(until).slice(0, 10) + ' 만료';
       m.classList.add('crit');
+    } else if (info.comp) {
+      b.innerHTML = '<span class="sans">무료</span>';
+      qs('.d', m).textContent = '무료 회원 · 기간 제한 없음';
     } else {
       var n = macroDays(info);
       b.textContent = (until - Date.now()) < 86400000 ? 'D-0' : 'D-' + n;
@@ -3501,7 +3511,47 @@
       loadRooms().then(scheduleRooms, scheduleRooms);
     }, ms);
   }
+  // 무료 회원(members.comp): [방 추가]로 결제 없이 바로 설치(/panel/api/bot-room/free-add)
+  function syncFreeAdd() {
+    var comp = !!(me && me.member && me.member.comp);
+    var o = $('rooms-free-open');
+    if (o) o.hidden = !comp;
+    var buy = $('rooms-add');
+    if (buy) buy.hidden = comp;
+    if (!comp && $('rooms-free')) $('rooms-free').hidden = true;
+  }
+  if ($('rooms-free')) {
+    $('rooms-free-open').addEventListener('click', function () {
+      $('rooms-free').hidden = false;
+      $('rooms-free-err').textContent = '';
+      $('rooms-free-link').focus();
+    });
+    $('rooms-free-cancel').addEventListener('click', function () { $('rooms-free').hidden = true; });
+    $('rooms-free').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var go = $('rooms-free-go');
+      var err = $('rooms-free-err');
+      err.textContent = '';
+      var link = $('rooms-free-link').value.trim();
+      if (!link) { err.textContent = '오픈채팅방 링크를 입력해 주세요.'; return; }
+      var rb = $('rooms-free-rb').checked, mg = $('rooms-free-mg').checked;
+      if (!rb && !mg) { err.textContent = '넣을 봇을 1개 이상 골라 주세요.'; return; }
+      go.disabled = true;
+      try {
+        await api('/panel/api/bot-room/free-add', { link: link, passcode: $('rooms-free-pc').value.trim(), roombot: rb, minigame: mg });
+        $('rooms-free').hidden = true;
+        $('rooms-free-link').value = '';
+        $('rooms-free-pc').value = '';
+        notify('방을 추가했습니다.', 'K bot이 곧 방에 들어갑니다.');
+        loadRooms();
+      } catch (e) {
+        err.textContent = e.message || '방을 추가하지 못했습니다.';
+      } finally { go.disabled = false; }
+    });
+  }
+
   async function loadRooms() {
+    syncFreeAdd();
     if (!me || roomsSt.busy) return;
     roomsSt.busy = true;
     var seq = ++roomsSt.seq;

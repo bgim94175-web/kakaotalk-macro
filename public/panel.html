@@ -24,9 +24,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/panel.css?v=16">
+<link rel="stylesheet" href="/panel.css?v=17">
 <script src="/support.js?v=1" defer></script>
-<script src="/panel.js?v=25" defer></script>
+<script src="/panel.js?v=26" defer></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -581,7 +581,16 @@
 <section class="page" data-route="rooms" id="page-rooms" aria-labelledby="rooms-title" hidden>
  <div class="col">
   <div class="ph"><div><h1 id="rooms-title" tabindex="-1">내 방</h1><p>방 관리봇과 미니게임봇을 설치한 오픈채팅방입니다. 설정은 방마다 따로 저장됩니다.</p></div>
-    <div class="ph-r"><a class="btn primary" href="/buy?p=roombot" id="rooms-add"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>봇 구매</a></div></div>
+    <div class="ph-r"><button type="button" class="btn primary" id="rooms-free-open" hidden><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>방 추가</button><a class="btn primary" href="/buy?p=roombot" id="rooms-add"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-plus"></use></svg>봇 구매</a></div></div>
+  <form class="sec free-add" id="rooms-free" hidden novalidate>
+    <div class="free-h"><b>방 추가</b><span class="tag-free">무료 회원</span></div>
+    <p class="free-d">결제 없이 방에 K bot을 넣습니다. 오픈채팅방 링크를 넣고 넣을 봇을 고르세요.</p>
+    <input class="inp" id="rooms-free-link" type="url" inputmode="url" placeholder="https://open.kakao.com/o/..." aria-label="오픈채팅방 링크" autocomplete="off" maxlength="2000">
+    <input class="inp" id="rooms-free-pc" type="text" placeholder="참여코드(있을 때만)" aria-label="참여코드" autocomplete="off" maxlength="20">
+    <div class="free-p"><label><input type="checkbox" id="rooms-free-rb" checked> 방 관리봇</label><label><input type="checkbox" id="rooms-free-mg" checked> 미니게임봇</label></div>
+    <p class="errt" id="rooms-free-err" role="alert"></p>
+    <div class="free-f"><button type="button" class="btn ghost" id="rooms-free-cancel">취소</button><button type="submit" class="btn primary" id="rooms-free-go">추가</button></div>
+  </form>
   <div class="grp" id="rooms-attn-grp" hidden><h2 class="grp-t">확인 필요</h2>
     <section class="sec" id="rooms-attn" aria-label="확인이 필요한 방"></section></div>
   <div class="buy-card" id="rooms-empty" hidden><span class="bc-tag">구매 필요</span><h2>방 관리봇이나 미니게임봇을 구매하면 여기서 방을 설정합니다</h2><p>봇을 넣을 오픈채팅방 링크만 있으면 됩니다. 방마다 한 번 결제하면 기간 제한 없이 씁니다.</p><div class="bc-acts"><a class="btn primary" href="/buy?p=roombot">방 관리봇 구매하기</a><a class="btn" href="/buy?p=minigame">미니게임봇 구매하기</a></div></div>

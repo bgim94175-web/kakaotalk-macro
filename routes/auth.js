@@ -389,7 +389,7 @@ router.get('/api/me', wrap(async (req, res) => {
   if (!s) return;
   const id = s.member.id;
   const row = await db.one(
-    'SELECT id, login_id, created_at, macro_until, legacy_room_until, blocked_reason FROM members WHERE id=$1', [id]);
+    'SELECT id, login_id, created_at, macro_until, legacy_room_until, comp, blocked_reason FROM members WHERE id=$1', [id]);
   if (!row) return fail(res, 401, 'login_required', T.login_required);
   const g = await googleRow(id);
   // entitle.summary 가 rooms_list 를 같이 준다(같은 조회를 두 번 하지 않게). 없으면 직접 읽는다.

@@ -683,7 +683,7 @@ router.get('/admin/stats', wrap(async (req, res) => {
   // ── 회원·방·봇 (3.5)
   const mem = await db.one(
     `SELECT COUNT(*)::int AS n,
-            COUNT(*) FILTER (WHERE macro_until > $1)::int AS macro,
+            COUNT(*) FILTER (WHERE macro_until > $1 OR comp IS TRUE)::int AS macro,
             COUNT(*) FILTER (WHERE blocked_reason IS NOT NULL)::int AS blocked
        FROM members`, [now]);
   const rb = await db.q(
@@ -958,7 +958,7 @@ router.post('/admin/deposit-ignore', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 const MEMBER_LIST_SQL = `
   SELECT m.id, m.login_id, m.contact, m.created_at, m.last_login_at, m.macro_until, m.legacy_room_until,
-         m.blocked_reason, m.note,
+         m.comp, m.blocked_reason, m.note,
          (g.member_id IS NOT NULL) AS google_linked,
          (SELECT count(*) FROM panel_accounts pa WHERE pa.member_id = m.id)::int AS accounts_n,
          (SELECT count(*) FROM room_installs r WHERE r.member_id = m.id AND r.phase IN ('installed','pending_payment'))::int AS rooms_n,
@@ -977,6 +977,7 @@ function shapeMemberRow(r) {
     last_login_at: num(r.last_login_at),
     macro_until: Number(r.macro_until) || 0,
     legacy_room_until: Number(r.legacy_room_until) || 0,
+    comp: r.comp === true,
     blocked_reason: r.blocked_reason || null,
     note: r.note || null,
     google_linked: !!r.google_linked,
@@ -1021,7 +1022,7 @@ router.get('/admin/members', wrap(async (req, res) => {
     }
   }
   if (req.query.blocked === '1') where += (where ? ' AND' : ' WHERE') + ' m.blocked_reason IS NOT NULL';
-  if (req.query.macro === '1') where += (where ? ' AND' : ' WHERE') + ' m.macro_until > $1';
+  if (req.query.macro === '1') where += (where ? ' AND' : ' WHERE') + ' (m.macro_until > $1 OR m.comp IS TRUE)';
   params.push(limit);
   const r = await db.q(MEMBER_LIST_SQL.replace('SELECT m.id,', 'SELECT count(*) OVER () AS total_n, m.id,') + where +
     ' ORDER BY m.created_at DESC, m.id DESC LIMIT $' + params.length, params);
@@ -1095,6 +1096,23 @@ router.post('/admin/member-grant', wrap(async (req, res) => {
   if (until === null) return fail(res, 404, 'not_found', TEXT.no_member);
   pushLater(id);
   res.json({ ok: true, id: id, macro_until: Number(until), macro: entitle.macroView({ macro_until: until }) });
+}));
+
+// 무료 회원 켜기·끄기: 결제 없이 매크로(기간 무제한)와 방 봇 무료 설치(패널 [방 추가])를 쓴다
+router.post('/admin/member-comp', wrap(async (req, res) => {
+  const b = req.body || {};
+  const id = toId(b.id);
+  if (!id) return fail(res, 404, 'not_found', TEXT.no_member);
+  if (typeof b.on !== 'boolean') return fail(res, 400, 'bad_value', '켜기·끄기 값이 올바르지 않습니다.');
+  const row = await db.tx(async (client) => {
+    const r = await db.q('UPDATE members SET comp=$2 WHERE id=$1 RETURNING id, macro_until, comp', [id, b.on], client);
+    if (!r.rows[0]) return null;
+    await audit.record(req, 'member', { member_id: id, detail: 'comp ' + (b.on ? '무료 회원 켬' : '무료 회원 끔') }, client);
+    return r.rows[0];
+  });
+  if (!row) return fail(res, 404, 'not_found', TEXT.no_member);
+  pushLater(id);
+  res.json({ ok: true, id: id, comp: row.comp === true, macro: entitle.macroView(row) });
 }));
 
 router.post('/admin/member-block', wrap(async (req, res) => {
