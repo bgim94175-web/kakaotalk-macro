@@ -1,7 +1,6 @@
 // 「추억의 검 강화」 점검(sword.mjs · sword-art.mjs · features.mjs 연결). 난수·시각을 고정해 늘 같은 결과.
 // npm run check 가 부른다. 마지막 줄 'sword check ok'.
 import { helpCard } from './helpcard.mjs'
-import * as M from './monster.mjs'
 import * as S from './sword.mjs'
 import * as A from './sword-art.mjs'
 import * as Card from './card.mjs'
@@ -737,16 +736,14 @@ function sums(g, keys) {
   const mk = (cfg, products) => ({ chat_id: '77', link_name: '검방', products: products || { roombot: false, minigame: true }, perm: 2, state: 'active', cfg: R.normRoomConfig(cfg || {}), runtime: {} })
   const v = mk({ cmdPrefix: '#' })
   eq(R.adapterRecord(v, 'b').config.minigame.sword, true, 'adapter passes games.sword')
-  // 몬스터 수집(monster.mjs)도 기본 켜짐 — 검 강화 줄 바로 다음 줄
   const games = (p) => ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => p + c)
-  const monCmds = (p) => M.HELP_CMDS.map((c) => p + c)
-  eq(R.helpLine(v), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('#') }, { name: '검 강화', cmds: S.helpCommands('#') }, { name: '몬스터 수집', cmds: monCmds('#') }]), 'helpLine sword block')
-  eq(R.helpLine(mk({ games: { sword: false } })), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('!') }, { name: '몬스터 수집', cmds: monCmds('!') }]), 'helpLine without sword')
-  eq(R.helpLine(mk({ games: { sword: false, monster: false } })), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('!') }]), 'helpLine without either game')
+  eq(R.helpLine(v), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('#') }, { name: '검 강화', cmds: S.helpCommands('#') }]), 'helpLine sword block')
+  eq(R.helpLine(mk({ games: { sword: false } })), helpCard('K bot 명령어', [{ name: '미니게임', cmds: games('!') }]), 'helpLine without sword')
+  assert(!R.helpLine(v).includes('몬스터') && R.normRoomConfig({ games: { monster: true } }).games.monster === undefined, 'no monster game')
   const both = mk({ profile: { enabled: true } }, { roombot: true, minigame: true })
   both.perm = 4
   const hb = R.helpLine(both)
-  assert(hb.indexOf('◆ 미니게임') < hb.indexOf('◆ 검 강화') && hb.indexOf('◆ 검 강화') < hb.indexOf('◆ 몬스터 수집') && hb.indexOf('◆ 몬스터 수집') < hb.indexOf('◆ 방 관리'), 'sword block sits before the room block')
+  assert(hb.indexOf('◆ 미니게임') < hb.indexOf('◆ 검 강화') && hb.indexOf('◆ 검 강화') < hb.indexOf('◆ 방 관리'), 'sword block sits before the room block')
   eq(S.HELP_CMDS.join(' '), '강화 내검 사냥 출석 결투 보스 강화도움', 'roomfeat helpLine lists the same sword commands')
   assert(hb.includes(' ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움'), 'sword block lines ' + hb)
 
@@ -784,8 +781,7 @@ function sums(g, keys) {
   const off = mk({ games: { sword: false } })
   eq(send(off, '!강화', '801', '끔')[0].text, '이 방에서는 검 강화가 꺼져 있어요.', 'sword off message')
   eq(send(off, '!사냥', '801', '끔').length, 0, 'sword off → other sword commands silent')
-  eq(send(off, '!수락', '801', '끔')[0].text, '받은 신청이 없어요.', 'sword off, monster on → 수락 answered by the shared fallback')
-  eq(send(mk({ games: { sword: false, monster: false } }), '!수락', '801', '끔').length, 0, 'both games off → 수락 silent')
+  eq(send(off, '!수락', '801', '끔').length, 0, 'sword off → 수락 silent')
   assert(!off.runtime.sword, 'sword off → no state')
   // 받은 제안 없음
   eq(send(w, '!수락', '502', '둘')[0].text, '받은 신청이 없어요.', 'no trade to accept')
@@ -796,7 +792,7 @@ function sums(g, keys) {
   assert(t[0].text.startsWith('[거래 제안] 검사님 → 둘님'), 'mention through onInbound ' + t[0].text)
   assert(send(w, '!수락', '502', '둘')[0].text.startsWith('[거래 완료]'), 'accept through onInbound')
   // 방 설치형 「게임」 목록에도
-  eq(send(w, '!게임', '502', '둘')[0].text, helpCard('K bot 명령어', [{ name: '미니게임', cmds: ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => '!' + c) }, { name: '검 강화', cmds: S.helpCommands('!') }, { name: '몬스터 수집', cmds: M.HELP_CMDS.map((c) => '!' + c) }]), 'game list')
+  eq(send(w, '!게임', '502', '둘')[0].text, helpCard('K bot 명령어', [{ name: '미니게임', cmds: ['끝말잇기', '숫자야구', '주사위', '가위바위보', '퀴즈', '힌트', '정답', '포기', '랭킹'].map((c) => '!' + c) }, { name: '검 강화', cmds: S.helpCommands('!') }]), 'game list')
   // 계정 단위 옛 기능(byId 아님)에는 검 강화가 없다
   const legacy = { config: { minigame: { enabled: true, rooms: ['k'], cmdPrefix: '!', cooldownMs: 0 } }, rooms: [{ key: 'k', chat_id: '88', name: '옛방', kind: 'open', list_kind: 'open_room' }], runtime: {}, features: { macro: false, roombot: false, minigame: true } }
   eq(onInbound(legacy, { chatId: '88', text: '!강화', authorName: '옛', mine: false }).length, 0, 'legacy account path has no sword game')

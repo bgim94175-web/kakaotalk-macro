@@ -26,7 +26,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/panel.css?v=15">
 <script src="/support.js?v=1" defer></script>
-<script src="/panel.js?v=23" defer></script>
+<script src="/panel.js?v=24" defer></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -618,7 +618,7 @@
   <div class="grp"><h2 class="grp-t">봇</h2>
    <section class="sec" id="room-products">
     <div class="srow inline" data-prod="roombot"><div class="srow-l"><span class="lb">방 관리봇</span><p>입장·퇴장 기록 · 들낙 감지 · 나간 사람 재입장 차단 · 프로필 기록 · 홍보 금지 · 글 가리기 · 금지어 검열 · 올킥 감지</p></div><div class="srow-r" data-prod-r="roombot"></div></div>
-    <div class="srow inline" data-prod="minigame"><div class="srow-l"><span class="lb">미니게임봇</span><p>끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 추억의 검 강화 · 몬스터 수집 · 랭킹</p></div><div class="srow-r" data-prod-r="minigame"></div></div>
+    <div class="srow inline" data-prod="minigame"><div class="srow-l"><span class="lb">미니게임봇</span><p>끝말잇기 · 숫자야구 · 주사위 · 가위바위보 · 퀴즈 · 추억의 검 강화 · 랭킹</p></div><div class="srow-r" data-prod-r="minigame"></div></div>
    </section></div>
   <div class="grp" id="room-move-grp"><h2 class="grp-t">봇 옮기기·다시 설치<span>무료</span></h2>
    <section class="sec" id="room-move">
@@ -908,8 +908,6 @@
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-quiz" aria-label="퀴즈"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow inline" id="row-r-games-sword"><div class="srow-l"><span class="lb">추억의 검 강화</span><p>방 사람들이 골드로 검을 강화하고 사냥·거래를 합니다. 강화 결과·내 검·강화 랭킹은 K bot이 그림으로 보냅니다.</p></div>
         <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-sword" aria-label="추억의 검 강화"><span class="sw" aria-hidden="true"></span></span></div></div>
-      <div class="srow inline" id="row-r-games-monster"><div class="srow-l"><span class="lb">몬스터 수집</span><p>방 사람들이 몬스터를 잡아 도감을 채우고 서로 교환·배틀합니다. K bot이 결과를 그림으로 보냅니다.</p></div>
-        <div class="srow-r"><span class="swl"><input type="checkbox" role="switch" class="swi" id="r-games-monster" aria-label="몬스터 수집"><span class="sw" aria-hidden="true"></span></span></div></div>
       <div class="srow" id="row-r-games-cool"><div class="srow-l"><span class="lb">쿨타임</span><p>K bot이 게임 응답을 보낸 뒤 다음 응답을 보내기까지의 최소 간격입니다. 1~60초.</p></div>
         <div class="srow-r"><div class="num"><button type="button" data-step="-1" aria-label="쿨타임 줄이기">−</button><input id="r-games-cool" type="text" inputmode="numeric" autocomplete="off" data-min="1" data-max="60" aria-label="쿨타임"><button type="button" data-step="1" aria-label="쿨타임 늘리기">+</button><span class="unit">초</span></div></div></div>
       <div class="srow" id="row-r-games-limit"><div class="srow-l"><span class="lb">하루 최대 응답 수</span><p>하루에 보내는 게임 응답의 최대 수입니다. 0~5,000회.</p></div>
