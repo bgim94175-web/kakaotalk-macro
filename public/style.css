@@ -34,11 +34,6 @@
   --kk-host: #f5c400; --kk-sub: #e1e7ec;
   --kk-av-0: #e8916f; --kk-av-1: #9fc196; --kk-av-2: #d5ae86; --kk-av-3: #b3a1d6; --kk-av-4: #dc9ea3; --kk-av-5: #8cbfc2; --kk-av-fg: #ffffff;
   --kk-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "IBM Plex Sans KR", sans-serif;
-  /* 받은 갠톡(디스코드풍) — panel.css #inbox 만 쓴다 */
-  --dc-bg: #313338; --dc-side: #2b2d31; --dc-deep: #1e1f22; --dc-row-hover: #35373c; --dc-sel: #404249; --dc-msg-hover: #2e3035;
-  --dc-fg: #dbdee1; --dc-fg-2: #b5bac1; --dc-fg-3: #949ba4; --dc-head: #f2f3f5; --dc-line: #3f4147; --dc-input: #383a40;
-  --dc-blurple: #5865f2; --dc-blurple-2: #4752c4; --dc-red: #f23f43; --dc-green: #23a55a; --dc-btn: #4e5058; --dc-btn-2: #6d6f78;
-  --dc-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(6, 6, 7, 0.05), 0 2px 0 rgba(4, 4, 5, 0.05);
 }
 @media (prefers-reduced-motion: reduce) { :root { --d1: 0ms; --d2: 0ms; --d3: 0ms; } }
 
