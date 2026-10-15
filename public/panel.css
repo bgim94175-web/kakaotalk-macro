@@ -34,11 +34,6 @@
   --kk-host: #f5c400; --kk-sub: #e1e7ec;
   --kk-av-0: #e8916f; --kk-av-1: #9fc196; --kk-av-2: #d5ae86; --kk-av-3: #b3a1d6; --kk-av-4: #dc9ea3; --kk-av-5: #8cbfc2; --kk-av-fg: #ffffff;
   --kk-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "IBM Plex Sans KR", sans-serif;
-  /* 받은 갠톡(디스코드풍) — panel.css #inbox 만 쓴다 */
-  --dc-bg: #313338; --dc-side: #2b2d31; --dc-deep: #1e1f22; --dc-row-hover: #35373c; --dc-sel: #404249; --dc-msg-hover: #2e3035;
-  --dc-fg: #dbdee1; --dc-fg-2: #b5bac1; --dc-fg-3: #949ba4; --dc-head: #f2f3f5; --dc-line: #3f4147; --dc-input: #383a40;
-  --dc-blurple: #5865f2; --dc-blurple-2: #4752c4; --dc-red: #f23f43; --dc-green: #23a55a; --dc-btn: #4e5058; --dc-btn-2: #6d6f78;
-  --dc-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(6, 6, 7, 0.05), 0 2px 0 rgba(4, 4, 5, 0.05);
 }
 @media (prefers-reduced-motion: reduce) { :root { --d1: 0ms; --d2: 0ms; --d3: 0ms; } }
 
@@ -1255,8 +1250,14 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .free-f { display: flex; justify-content: flex-end; gap: 8px; }
 .free-add .errt:empty { display: none; }
 
-/* ===== 받은 갠톡 v3 — 디스코드 모양(색은 --dc-* 토큰) ===== */
-#inbox { --av-ring: var(--dc-side); background: var(--dc-bg); color: var(--dc-fg); }
+/* ===== 받은 갠톡 v3 — 사이트 디자인(검정 바탕 · 얇은 선 · 흰 강조). 아래 --dc-* 는 이 화면 안에서만 쓰는 이름이고 값은 사이트 토큰 ===== */
+#inbox {
+  --dc-bg: var(--bg-1); --dc-side: var(--bg); --dc-deep: var(--bg-2); --dc-row-hover: var(--hl); --dc-sel: var(--hl-2); --dc-msg-hover: var(--hl);
+  --dc-fg: var(--fg); --dc-fg-2: var(--fg-2); --dc-fg-3: var(--fg-3); --dc-head: var(--fg); --dc-line: var(--line-2); --dc-input: var(--bg-2);
+  --dc-blurple: var(--inv); --dc-blurple-2: var(--inv-2); --dc-red: var(--crit); --dc-green: var(--live); --dc-btn: var(--bg-3); --dc-btn-2: var(--bg-4);
+  --dc-shadow: 0 1px 0 var(--line);
+  background: var(--dc-bg); color: var(--dc-fg);
+}
 #inbox .ib { background: var(--dc-bg); }
 /* 왼쪽: DM 목록 */
 #inbox .ib-list { background: var(--dc-side); border-right: 0; }
@@ -1377,3 +1378,38 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 @media (max-width: 760px) {
   #inbox .ib-filter { -webkit-mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); padding-right: 24px; }
 }
+
+/* 사이트 디자인 마무리: 선·둥글기·글자 크기·흰 강조 위 글자색 */
+#inbox .ib-list { border-right: 1px solid var(--line); }
+#inbox .ib-foot { background: var(--bg); border-top: 1px solid var(--line); }
+#inbox .av[class*=" c"] { background: color-mix(in srgb, var(--av) 20%, var(--bg-2)); color: color-mix(in srgb, var(--av) 85%, var(--fg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av) 32%, transparent); }
+#inbox .kkt-row { border-radius: var(--r-2); }
+#inbox .kkt-top .nm { font-size: var(--t-14); }
+#inbox .kkt-top .kkt-time { font: var(--t-11) var(--f-mono); }
+#inbox #chat-search, #inbox #chat-unread, #inbox .fchip { border-radius: var(--r-2); }
+#inbox #chat-search { border: 1px solid var(--line-2); background: var(--bg-1); }
+#inbox #chat-search:focus { border-color: var(--fg-3); }
+#inbox .fchip .n, #inbox .kkt-badge { background: var(--crit); color: var(--fg); }
+#inbox .th-h { background: var(--bg); }
+#inbox .th-h .who b, #inbox .dc-author { font-size: var(--t-14); }
+#inbox .dc-text { font-size: var(--t-14); line-height: 1.6; }
+#inbox .dc-time, #inbox .dc-gut { font-family: var(--f-mono); font-size: var(--t-11); }
+#inbox .dc-day span { font-size: var(--t-11); font-weight: 500; font-family: var(--f-mono); background: var(--dc-bg); }
+#inbox .dc-tag { color: var(--inv-fg); border-radius: 4px; }
+#inbox .kkt-line.dc-msg:hover { background: var(--hl); }
+#inbox .newpill { color: var(--inv-fg); }
+#inbox .comp-box { border: 1px solid var(--line-2); border-radius: var(--r-3); }
+#inbox .comp-box:focus-within { border-color: var(--fg-3); box-shadow: var(--ring); }
+#inbox .comp-box textarea { font-size: var(--t-14); }
+#inbox .kkt-compose.has-text #chat-send { color: var(--inv-fg); }
+#inbox .qr-b { border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-2); color: var(--fg); font-size: var(--t-13); padding: 0 14px; }
+#inbox .qr-b:hover { background: var(--bg-3); border-color: var(--line-3); }
+#inbox .qr-b.sent { background: color-mix(in srgb, var(--live) 18%, transparent); border-color: var(--live); }
+#inbox .qr-edit { border: 1px dashed var(--line-3); border-radius: 999px; }
+#inbox .qr-edit:hover { background: transparent; color: var(--fg); border-color: var(--fg-3); }
+#inbox .qr-ed { background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-4); }
+#inbox .qr-row { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-3); }
+#inbox .qr-ed .inp { background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-2); }
+#inbox .qr-ed .btn.primary { color: var(--inv-fg); }
+#inbox .dc-author, #inbox .dc-author[class*="c"] { color: var(--fg); }
+@media (max-width: 760px) { #inbox .kkt-row.unread::after { display: none; } }
