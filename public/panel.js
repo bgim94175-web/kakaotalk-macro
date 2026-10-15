@@ -1865,7 +1865,11 @@
   }
   function updatePlaceholder() {
     if (!chatText) return;
-    var ph = chat.openName ? '@' + chat.openName + '에게 메시지 보내기' : '메시지 입력';
+    // 이름이 길면 줄여 한 줄에 들게(휴대폰에서 두 줄로 넘어가 잘리지 않게)
+    var nm = String(chat.openName || '');
+    var lim = isPhone() ? 8 : 18;
+    if (Array.from(nm).length > lim) nm = Array.from(nm).slice(0, lim).join('') + '…';
+    var ph = nm ? '@' + nm + '에게 메시지 보내기' : '메시지 입력';
     if (!chat.openId) ph = '선택한 대화 없음';
     else {
       var st = stateOf(chat.deviceId);

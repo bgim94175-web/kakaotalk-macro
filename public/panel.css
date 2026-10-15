@@ -1360,3 +1360,20 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   #inbox .dc-gut { width: 56px; }
   #inbox .th-h .who small { display: none; }
 }
+
+/* 휴대폰 화면 다듬기 */
+#inbox .comp-box textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inbox .qr-list { -webkit-mask-image: linear-gradient(90deg, black calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 24px), transparent); padding-right: 16px; }
+#inbox .kkt-row.unread::after { left: -6px; }
+@media (max-width: 760px) {
+  #inbox .qr-edit span { display: none; }
+  #inbox .qr-edit { width: 32px; padding: 0; justify-content: center; }
+  #inbox .ib-rows { padding: 8px 6px 8px 8px; }
+  /* 개요 숫자 칸: 제목과 보조 글을 위아래로(좁은 칸에서 글자가 섞이지 않게) */
+  .metric { padding: 14px 14px; }
+  .metric .k { flex-direction: column; justify-content: flex-start; gap: 2px; }
+  .metric .k > span { font-size: var(--t-11); color: var(--fg-4); }
+}
+@media (max-width: 760px) {
+  #inbox .ib-filter { -webkit-mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); padding-right: 24px; }
+}
