@@ -2311,7 +2311,9 @@
       var until = ts(mv.until);
       var active = !!mv.active && until > now;
       var left = active ? (num(mv.days_left) || daysLeft(until, now)) : 0;
-      var chip = active
+      var chip = active && mv.comp
+        ? el('span', { cls: 'chip ok', text: '무료 회원 · 기간 제한 없음' })
+        : active
         ? el('span', { cls: 'chip ' + (left <= 7 ? 'warn' : 'ok'), text: (left <= 7 ? '만료 임박 · ' : '사용 중 · ') + 'D-' + left })
         : (until ? el('span', { cls: 'chip bad', text: '만료됨' }) : el('span', { cls: 'chip', text: '미구매' }));
       var pct = active ? clamp(Math.round(left / DAYS_FALLBACK * 100), 3, 100) : 0;

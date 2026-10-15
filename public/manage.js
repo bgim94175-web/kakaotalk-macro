@@ -1693,7 +1693,7 @@
       mb.google_linked ? tag('Google 연결', 'line') : null,
       chip(blocked ? '차단' : '정상', blocked ? 'bad' : 'ok')
     ]));
-    item.appendChild(el('div', { cls: 'mg-line', text: macroText(mb.macro_until, now) + ' · ' + plabel('roombot') + ' ' +
+    item.appendChild(el('div', { cls: 'mg-line', text: (mb.comp ? '무료 회원 · 모든 기능' : macroText(mb.macro_until, now)) + ' · ' + plabel('roombot') + ' ' +
       (num(mb.roombot_n) || 0) + ' · ' + plabel('minigame') + ' ' + (num(mb.minigame_n) || 0) }));
     item.appendChild(el('div', { cls: 'mg-meta', text: '가입 ' + dateKr(mb.created_at) + ' · 최근 로그인 ' +
       (num(mb.last_login_at) ? dateKr(mb.last_login_at, true) : '없음') + ' · 회원 #' + mb.id +
@@ -1711,6 +1711,7 @@
       inDetail ? null : btn('상세', 'sm', function () { openMember(mb.id); }),
       btn('기간 추가', inDetail ? 'primary' : 'sm', function () { openMemberGrant(mb, changed); }),
       inDetail ? btn('봇 무료 설치', '', function () { openRoomGrant(mb.login_id, changed); }) : null,
+      inDetail ? btn(mb.comp ? '무료 회원 끄기' : '무료 회원 켜기', '', function () { openMemberComp(mb, changed); }) : null,
       btn(blocked ? '차단 해제' : '차단', (inDetail ? '' : 'sm') + (blocked ? '' : ' danger'), function () { openMemberBlock(mb, changed); }),
       btn('로그아웃', inDetail ? '' : 'sm', function () { openMemberLogout(mb, changed); }),
       btn('임시 비밀번호', inDetail ? '' : 'sm', function () { openMemberPwReset(mb, changed); })
@@ -1899,6 +1900,27 @@
       failMsg: '기간을 추가하지 못했습니다',
       done: function (r) {
         toast('매크로 기간을 추가했습니다 · 만료 ' + dateKr(r.json.macro_until, true), 'ok');
+        if (changed) changed();
+      }
+    });
+  }
+
+  // 무료 회원: 결제 없이 매크로(기간 무제한)와 패널 [방 추가](봇 무료 설치)를 쓴다
+  function openMemberComp(mb, changed) {
+    var on = !mb.comp;
+    confirmAct({
+      title: on ? '무료 회원 켜기' : '무료 회원 끄기',
+      body: [
+        kv([['회원', mb.login_id]]),
+        para(on
+          ? '결제 없이 모든 기능을 씁니다. ' + plabel('macro') + '는 기간 제한 없이 켜지고, 회원 콘솔 [내 방]에 [방 추가]가 생겨 ' + plabel('roombot') + '·' + plabel('minigame') + '을 무료로 넣을 수 있습니다.'
+          : '무료 회원을 끕니다. ' + plabel('macro') + '는 원래 결제한 기간으로 돌아가고, 이미 넣은 방은 그대로 남습니다.')
+      ],
+      ok: on ? '켜기' : '끄기',
+      run: function () { return api('POST', '/admin/member-comp', { id: mb.id, on: on }); },
+      failMsg: '바꾸지 못했습니다',
+      done: function () {
+        toast(on ? '무료 회원을 켰습니다' : '무료 회원을 껐습니다', 'ok');
         if (changed) changed();
       }
     });

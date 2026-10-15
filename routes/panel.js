@@ -96,7 +96,7 @@ async function session(req, res) {
 
 async function memberRow(memberId) {
   return db.one(
-    'SELECT id, login_id, macro_until, legacy_room_until, blocked_reason FROM members WHERE id=$1', [memberId]);
+    'SELECT id, login_id, macro_until, legacy_room_until, comp, blocked_reason FROM members WHERE id=$1', [memberId]);
 }
 
 function legacyOn(m, now) {
@@ -233,7 +233,7 @@ router.get('/panel/api/me', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
     ok: true,
-    member: { id: Number(m.id), login_id: m.login_id, google_linked: !!g },
+    member: { id: Number(m.id), login_id: m.login_id, google_linked: !!g, comp: m.comp === true },
     macro: entitle.macroView(m),
     legacy_room_until: Number(m.legacy_room_until) || 0,
     max_accounts: entitle.maxAccounts(),
@@ -270,7 +270,7 @@ router.post('/panel/api/register/begin', wrap(async (req, res) => {
   } else {
     const m = await memberRow(memberId);
     const now = Date.now();
-    if (!m || !(Number(m.macro_until) > now || Number(m.legacy_room_until) > now)) {
+    if (!m || !(entitle.macroUntilOf(m) > now || Number(m.legacy_room_until) > now)) {
       return fail(res, 403, 'no_macro', TEXT.no_macro);
     }
     const n = await db.one('SELECT count(*)::int AS n FROM panel_accounts WHERE member_id=$1', [memberId]);
@@ -883,6 +883,33 @@ router.post('/panel/api/bot-room/move', wrap(async (req, res) => {
   nudge(got.id);
   const again = await installs.getForMember(s.member.id, got.id);
   res.json({ ok: true, kind: r.kind, same_room: !!r.same_room, held: !!r.held, room: again ? again.view : got.view });
+}));
+
+// 무료 회원(members.comp)의 방 추가: 결제 없이 바로 설치한다(관리자 [봇 무료 설치]와 같은 installs.grantRoom)
+router.post('/panel/api/bot-room/free-add', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const m = await memberRow(s.member.id);
+  if (!m || m.comp !== true) return fail(res, 403, 'not_comp', '무료 방 추가는 관리자가 허용한 회원만 쓸 수 있습니다.');
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  if (typeof body.link !== 'string' || !body.link.trim() || body.link.length > 2000) {
+    return fail(res, 400, 'bad_link', installs.TEXT.bad_link);
+  }
+  const pc = bodyPasscode(res, body);
+  if (!pc) return;
+  const prods = [];
+  if (body.roombot === true) prods.push('roombot');
+  if (body.minigame === true) prods.push('minigame');
+  if (!prods.length) return fail(res, 400, 'no_products', '설치할 봇을 1개 이상 골라 주세요.');
+  const lim = moveAllowed(Number(s.member.id));
+  if (!lim.ok) {
+    res.set('Retry-After', String(lim.retryAfter));
+    return fail(res, 429, 'rate_limited', '요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.');
+  }
+  const r = await installs.grantRoom(s.member.id, body.link, pc.value || '', prods, { req: req });
+  if (!r || !r.ok) return selfFail(res, r);
+  if (r.install_id) nudge(r.install_id);
+  res.json({ ok: true, install_id: r.install_id || null, added: r.added !== false });
 }));
 
 router.post('/panel/api/bot-room/reinstall', wrap(async (req, res) => {

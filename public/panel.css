@@ -1238,3 +1238,14 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   .qr-ed { left: 8px; right: 8px; bottom: 8px; }
 }
 .ib-filter .rail-accounts { display: flex; gap: 6px; flex: none; }
+
+/* 무료 회원 방 추가 */
+.free-add { display: grid; gap: 10px; padding: 16px; margin-bottom: 16px; }
+.free-h { display: flex; align-items: center; gap: 8px; }
+.free-h b { font-weight: 600; }
+.tag-free { height: 20px; padding: 0 8px; border-radius: 10px; display: inline-flex; align-items: center; font-size: var(--t-11); font-weight: 600; color: var(--live); background: color-mix(in srgb, var(--live) 14%, transparent); border: 1px solid color-mix(in srgb, var(--live) 40%, transparent); }
+.free-d { color: var(--fg-3); font-size: var(--t-12); margin: -4px 0 0; }
+.free-p { display: flex; gap: 16px; font-size: var(--t-13); color: var(--fg-2); }
+.free-p label { display: inline-flex; align-items: center; gap: 6px; }
+.free-f { display: flex; justify-content: flex-end; gap: 8px; }
+.free-add .errt:empty { display: none; }
