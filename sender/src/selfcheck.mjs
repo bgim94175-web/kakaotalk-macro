@@ -1639,7 +1639,7 @@ async function withLog(fn) {
     const pl = RF.cardMentionLine(pc, '555')
     if (pl.text !== '[프로필 변경 감지]\n변경전 : ＠하늘\n변경후 : @하늘_판매\n옾링 변경전 : https://open.kakao.com/o/sOld\n옾링 변경후 : https://open.kakao.com/o/sNew' ||
       F.visitMentionExtra(pl.text, pl.mention) !== '{"mentions":[{"user_id":555,"at":[1],"len":5}]}') throw new Error('#40-3 profile companion text ' + JSON.stringify(pl))
-    // 카드 그림: 글과 같은 값이 다 들어간다(SVG 글자), 이스케이프, 폭 720 PNG
+    // 카드 그림: 글과 같은 값이 다 들어간다(SVG 글자), 이스케이프, 폭 1440(2배) PNG
     const svg = LC.logCardSvg(Object.assign({}, c, { name: '<하늘&>' }), { room: '동네 "모임"' })
     for (const want of ['입장 안내', '오후 7:31', '&lt;하늘&amp;&gt;', '옾링', 'https://open.kakao.com/o/sAbc', '입장 기록', '2회', '10.12 오후 7:29', '10.12 오후 7:31', '동네 &quot;모임&quot;']) {
       if (svg.indexOf(want) < 0) throw new Error('#40-3 card svg has ' + want)
@@ -1647,12 +1647,12 @@ async function withLog(fn) {
     if (svg.indexOf('<하늘') >= 0 || LC.logCardSvg(pc).indexOf('변경전') < 0 || LC.ACCENT.join === LC.ACCENT.leave || LC.ACCENT.leave === LC.ACCENT.profile) throw new Error('#40-3 card svg escape / profile / accents')
     if (CARD.available()) {
       const png = LC.logCardPng(c, { room: '동네모임' })
-      if (!png || png.readUInt32BE(16) !== 720 || png.readUInt32BE(20) < 400 || png.readUInt32BE(20) > 1400) throw new Error('#40-3 card png 720 wide')
+      if (!png || png.readUInt32BE(16) !== 1440 || png.readUInt32BE(20) < 800 || png.readUInt32BE(20) > 2800) throw new Error('#40-3 card png 1440 wide (2x)')
       // 패널 미리 보기 그림(public/img/logcard-*.png)은 sender/src/logcard-sample.mjs 가 만든다
       const { readFileSync } = await import('node:fs')
       for (const f of ['logcard-join.png', 'logcard-profile.png']) {
         const b = readFileSync(new URL('../../public/img/' + f, import.meta.url))
-        if (b.readUInt32BE(12) !== 0x49484452 || b.readUInt32BE(16) !== 720) throw new Error('#40-3 panel preview ' + f + ' is a 720-wide PNG')
+        if (b.readUInt32BE(12) !== 0x49484452 || b.readUInt32BE(16) !== 1440) throw new Error('#40-3 panel preview ' + f + ' is a 1440-wide PNG')
       }
     }
     if (LC.logCardPng(null) !== null) throw new Error('#40-3 no card → null')
@@ -2577,10 +2577,10 @@ async function withLog(fn) {
       const j1 = await join('4015', '별빛', '40151')
       const photo = j1[0] && j1[0].extra ? JSON.parse(j1[0].extra) : null
       if (CARD40.available()) {
-        if (j1.length !== 2 || j1[0].text !== '(사진)' || !photo || photo.w !== 720 || !(photo.h > 400)) throw new Error('#40 join card photo ' + JSON.stringify(j1))
+        if (j1.length !== 2 || j1[0].text !== '(사진)' || !photo || photo.w !== 1440 || !(photo.h > 800)) throw new Error('#40 join card photo ' + JSON.stringify(j1))
         if (j1[1].text !== '[입장 안내]\n이름 : @별빛\n옾링 : https://open.kakao.com/o/star4015' || j1[1].extra !== '{"mentions":[{"user_id":4015,"at":[1],"len":2}]}') throw new Error('#40 mention line right after the card ' + JSON.stringify(j1[1]))
         const buf = fs.photos[fs.photos.length - 1].buf
-        if (buf.readUInt32BE(16) !== 720) throw new Error('#40 photo bytes')
+        if (buf.readUInt32BE(16) !== 1440) throw new Error('#40 photo bytes')
       } else if (j1.length !== 1 || j1[0].text.indexOf('[입장 안내]\n이름 : @별빛\n') !== 0) throw new Error('#40 without the renderer the text notice goes out ' + JSON.stringify(j1))
       // 그림 보내기가 실패하면 지금의 글 안내(멘션 포함) 하나만
       room0.photoFail = true
