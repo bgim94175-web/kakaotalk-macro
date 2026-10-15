@@ -1801,7 +1801,11 @@
   function setHeadSub(email) {
     if (!chatHeadSub) return;
     chatHeadSub.textContent = '';
-    chatHeadSub.appendChild(el('span', 'kkt-acc chip-acct', email));
+    var tag = el('span', 'kkt-acc dc-acc');
+    tag.title = email || '';
+    tag.appendChild(el('i', 'adot c' + accIdx(chat.deviceId)));
+    tag.appendChild(document.createTextNode(accName(email)));
+    chatHeadSub.appendChild(tag);
     chatHeadSub.appendChild(document.createTextNode(' 계정으로 답장'));
   }
   // 이메일 칩: 화면에는 @ 앞만, 화면 낭독기와 textContent 에는 전체 이메일
@@ -1821,6 +1825,17 @@
     var d = new Date(Number(ms) || 0);
     if (!ms || isNaN(d.getTime())) return '';
     return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
+  }
+  // 디스코드식 시각: 오늘 오후 7:29 · 어제 오전 9:02 · 2026.10.13. 오후 3:10
+  function dcTime(ms) {
+    var d = new Date(Number(ms) || 0);
+    if (!ms || isNaN(d.getTime())) return '';
+    var h = d.getHours();
+    var hm = (h < 12 ? '오전 ' : '오후 ') + ((h % 12) || 12) + ':' + pad(d.getMinutes());
+    var now = new Date();
+    if (sameDay(d.getTime(), now.getTime())) return '오늘 ' + hm;
+    if (sameDay(d.getTime(), now.getTime() - 86400000)) return '어제 ' + hm;
+    return d.getFullYear() + '.' + fmtMD(ms) + '. ' + hm;
   }
   // 대화 열의 시각: 오늘은 시각, 올해는 월.일, 다른 해는 연.월.일 (모노 글꼴이라 숫자만)
   function fmtListTime(ms) {
@@ -1850,7 +1865,7 @@
   }
   function updatePlaceholder() {
     if (!chatText) return;
-    var ph = '메시지 입력';
+    var ph = chat.openName ? '@' + chat.openName + '에게 메시지 보내기' : '메시지 입력';
     if (!chat.openId) ph = '선택한 대화 없음';
     else {
       var st = stateOf(chat.deviceId);
@@ -2500,43 +2515,57 @@
       if (chatNewpill) chatNewpill.hidden = true;
       return;
     }
+    // 디스코드처럼: 말풍선 없이 [동그라미 · 이름 · 시각 / 글]. 같은 사람이 7분 안에 이어 보낸 글은 이름 줄 없이 붙인다.
     var owner = accOf(chat.deviceId);
-    var mineTag = owner ? accName(owner.email) : '';
+    var mineName = owner ? accName(owner.email) : '나';
     var lastDay = '';
     var fresh = 0;
     var prevSide = '';
+    var prevAt = 0;
     messages.forEach(function (m, i) {
       var day = fmtDay(m.at);
       if (day && day !== lastDay) {
-        var sep = el('span', 'kkt-day', day);
+        var sep = el('div', 'kkt-day dc-day');
         sep.setAttribute('role', 'separator');
+        sep.appendChild(el('span', '', day));
         chatLog.appendChild(sep);
         lastDay = day;
         prevSide = '';
       }
       var side = m.mine ? 'me' : 'them';
-      var isNew = !initial && m.log_id && !prevIds[m.log_id];
-      // 같은 사람이 이어서 보낸 글은 묶는다(첫 글에만 동그라미, 사이는 좁게)
-      var line = el('div', 'kkt-line ' + side + (side === prevSide ? ' cont' : ''));
-      if (side === 'them' && side !== prevSide) {
-        var fav = el('span', 'av kkt-av');
-        fav.setAttribute('aria-hidden', 'true');
-        setAv(fav, chat.openName, chat.openId + chat.openName);
-        line.appendChild(fav);
-      }
+      var cont = side === prevSide && Math.abs((Number(m.at) || 0) - prevAt) < 7 * 60000;
       prevSide = side;
+      prevAt = Number(m.at) || 0;
+      var isNew = !initial && m.log_id && !prevIds[m.log_id];
+      var line = el('div', 'kkt-line dc-msg ' + side + (cont ? ' cont' : ''));
       if (m.log_id) line.dataset.log = String(m.log_id);
       if (isNew) { line.classList.add('enter'); fresh += 1; }
       else if (firstOpen && initial) { line.classList.add('enter'); line.style.setProperty('--i', String(Math.min(i, 8))); }
-      var bubble = el('div', 'kkt-bubble');
-      if (m.label) bubble.appendChild(el('span', 'kkt-label', m.label));
-      if (m.text) bubble.appendChild(document.createTextNode(m.text));
-      else if (!m.label) bubble.appendChild(document.createTextNode('(첨부)'));
-      line.appendChild(bubble);
-      var at = el('time', 'kkt-at');
-      at.appendChild(el('span', 'mono', fmtHM(m.at)));
-      if (m.mine) at.appendChild(document.createTextNode(' · ' + mineTag + ' · 전송됨'));
-      line.appendChild(at);
+      var who = m.mine ? mineName : chat.openName;
+      var seed = m.mine ? 'me' + chat.deviceId : chat.openId + chat.openName;
+      if (!cont) {
+        var fav = el('span', 'av dc-av');
+        fav.setAttribute('aria-hidden', 'true');
+        setAv(fav, m.mine ? '나' : who, seed);
+        line.appendChild(fav);
+      } else {
+        var gut = el('time', 'dc-gut mono', fmtHM(m.at));
+        line.appendChild(gut);
+      }
+      var body = el('div', 'dc-body');
+      if (!cont) {
+        var head = el('div', 'dc-head');
+        head.appendChild(el('b', 'dc-author c' + hueOf(seed), who));
+        if (m.mine) head.appendChild(el('span', 'dc-tag', '보냄'));
+        head.appendChild(el('time', 'dc-time', dcTime(m.at)));
+        body.appendChild(head);
+      }
+      var txt = el('div', 'dc-text');
+      if (m.label) txt.appendChild(el('span', 'dc-label', m.label));
+      if (m.text) txt.appendChild(document.createTextNode(m.text));
+      else if (!m.label) txt.appendChild(el('span', 'dc-label', '첨부'));
+      body.appendChild(txt);
+      line.appendChild(body);
       chatLog.appendChild(line);
     });
 

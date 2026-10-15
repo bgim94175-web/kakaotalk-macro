@@ -34,6 +34,11 @@
   --kk-host: #f5c400; --kk-sub: #e1e7ec;
   --kk-av-0: #e8916f; --kk-av-1: #9fc196; --kk-av-2: #d5ae86; --kk-av-3: #b3a1d6; --kk-av-4: #dc9ea3; --kk-av-5: #8cbfc2; --kk-av-fg: #ffffff;
   --kk-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "IBM Plex Sans KR", sans-serif;
+  /* 받은 갠톡(디스코드풍) — panel.css #inbox 만 쓴다 */
+  --dc-bg: #313338; --dc-side: #2b2d31; --dc-deep: #1e1f22; --dc-row-hover: #35373c; --dc-sel: #404249; --dc-msg-hover: #2e3035;
+  --dc-fg: #dbdee1; --dc-fg-2: #b5bac1; --dc-fg-3: #949ba4; --dc-head: #f2f3f5; --dc-line: #3f4147; --dc-input: #383a40;
+  --dc-blurple: #5865f2; --dc-blurple-2: #4752c4; --dc-red: #f23f43; --dc-green: #23a55a; --dc-btn: #4e5058; --dc-btn-2: #6d6f78;
+  --dc-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(6, 6, 7, 0.05), 0 2px 0 rgba(4, 4, 5, 0.05);
 }
 @media (prefers-reduced-motion: reduce) { :root { --d1: 0ms; --d2: 0ms; --d3: 0ms; } }
 
@@ -1249,3 +1254,109 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 .free-p label { display: inline-flex; align-items: center; gap: 6px; }
 .free-f { display: flex; justify-content: flex-end; gap: 8px; }
 .free-add .errt:empty { display: none; }
+
+/* ===== 받은 갠톡 v3 — 디스코드 모양(색은 --dc-* 토큰) ===== */
+#inbox { --av-ring: var(--dc-side); background: var(--dc-bg); color: var(--dc-fg); }
+#inbox .ib { background: var(--dc-bg); }
+/* 왼쪽: DM 목록 */
+#inbox .ib-list { background: var(--dc-side); border-right: 0; }
+#inbox .ib-lh { padding: 10px 8px 8px; gap: 8px; border-bottom: 0; box-shadow: var(--dc-shadow); position: relative; z-index: 1; }
+#inbox .ib-lh .row { gap: 6px; }
+#inbox #chat-search { height: 30px; border: 0; border-radius: 4px; background: var(--dc-deep); color: var(--dc-fg); font-size: var(--t-13); padding: 0 10px; }
+#inbox #chat-search::placeholder { color: var(--dc-fg-3); }
+#inbox #chat-search:focus { box-shadow: none; outline: 0; }
+#inbox #chat-unread { height: 30px; min-height: 30px; border: 0; border-radius: 4px; background: transparent; color: var(--dc-fg-3); font-size: var(--t-13); padding: 0 8px; }
+#inbox #chat-unread:hover { background: var(--dc-row-hover); color: var(--dc-fg); }
+#inbox #chat-unread[aria-pressed="true"] { background: var(--dc-sel); color: var(--dc-head); }
+#inbox .ib-filter { margin: 0 -8px; padding: 0 8px; gap: 4px; }
+#inbox .fchip { height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: var(--dc-fg-3); font-size: var(--t-13); font-weight: 500; }
+#inbox .fchip:hover { background: var(--dc-row-hover); color: var(--dc-fg); }
+#inbox .fchip[aria-pressed="true"] { background: var(--dc-sel); color: var(--dc-head); }
+#inbox .fchip .n { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--dc-red); color: var(--dc-head); opacity: 1; font: 700 10px var(--f-mono); display: inline-grid; place-items: center; }
+#inbox .fchip.rail-acct .mono { font-size: var(--t-12); }
+#inbox .ib-rows { padding: 8px; }
+#inbox .kkt-row { grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 6px 8px; margin: 0 0 2px; border-radius: 4px; color: var(--dc-fg-3); }
+#inbox .kkt-row:hover { background: var(--dc-row-hover); color: var(--dc-fg); }
+#inbox .kkt-row[aria-current="true"] { background: var(--dc-sel); color: var(--dc-head); }
+#inbox .kkt-row .av { width: 32px; height: 32px; font-size: 13px; }
+#inbox .kkt-row .meta { gap: 1px; }
+#inbox .kkt-top .nm { font-size: 15px; font-weight: 500; color: inherit; gap: 6px; }
+#inbox .kkt-top .nm b { font-weight: 500; }
+#inbox .kkt-top .kkt-time { color: var(--dc-fg-3); font: 11px var(--f-sans); }
+#inbox .kkt-bot .pv { font-size: 12px; color: var(--dc-fg-3); }
+#inbox .kkt-row.unread { color: var(--dc-head); }
+#inbox .kkt-row.unread .nm b { font-weight: 600; }
+#inbox .kkt-row.unread .pv { color: var(--dc-fg-2); }
+#inbox .kkt-row.unread::after { left: -8px; width: 4px; height: 8px; margin-top: -4px; border-radius: 0 4px 4px 0; background: var(--dc-head); }
+#inbox .kkt-row.unread:hover::after { height: 20px; margin-top: -10px; }
+#inbox .kkt-badge { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--dc-red); color: var(--dc-head); font: 700 11px var(--f-sans); }
+#inbox .kkt-acc2 { height: 16px; padding: 0 6px 0 5px; border-radius: 3px; background: var(--dc-deep); color: var(--dc-fg-3); font: 600 10px var(--f-mono); }
+#inbox .ib-foot { border-top: 0; background: var(--dc-deep); color: var(--dc-fg-3); height: 36px; }
+#inbox .ib-foot .btn { color: var(--dc-fg-3); }
+#inbox .kkt-empty, #inbox .kkt-empty-title { color: var(--dc-fg-3); }
+/* 사람 동그라미: 디스코드처럼 꽉 찬 색 + 흰 글자 */
+#inbox .av[class*=" c"] { background: var(--av); color: var(--dc-head); box-shadow: none; }
+#inbox .av.c4 { color: var(--dc-deep); }
+
+/* 오른쪽: 대화 */
+#inbox .ib-th { background: var(--dc-bg); }
+#inbox .th-h { height: 48px; padding: 0 16px; gap: 10px; background: var(--dc-bg); border-bottom: 0; box-shadow: var(--dc-shadow); position: relative; z-index: 2; }
+#inbox .th-h .av { width: 24px; height: 24px; font-size: 11px; }
+#inbox .th-h .who { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#inbox .th-h .who b { color: var(--dc-head); font-weight: 600; font-size: 15px; flex: none; max-width: 50%; }
+#inbox .th-h .who small { color: var(--dc-fg-3); padding-left: 10px; border-left: 1px solid var(--dc-line); }
+#inbox .dc-acc { display: inline-flex; align-items: center; gap: 5px; color: var(--dc-fg-2); font: 500 12px var(--f-mono); }
+#inbox .th-h .btn.ghost { color: var(--dc-fg-2); }
+#inbox .th-log { padding: 16px 0 20px; gap: 0; background: var(--dc-bg); }
+#inbox .dc-day { align-self: stretch; display: flex; align-items: center; margin: 22px 16px 8px; height: 0; border-top: 1px solid var(--dc-line); padding: 0; border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; justify-content: center; }
+#inbox .dc-day span { background: var(--dc-bg); padding: 0 6px; color: var(--dc-fg-3); font-size: 12px; font-weight: 600; line-height: 1; transform: translateY(-1px); }
+#inbox .kkt-line.dc-msg { max-width: none; align-self: stretch; justify-items: stretch; position: relative; display: block; margin: 17px 0 0; padding: 2px 48px 2px 72px; min-height: 44px; }
+#inbox .kkt-line.dc-msg.cont { margin-top: 0; min-height: 0; padding-top: 1px; padding-bottom: 1px; }
+#inbox .kkt-line.dc-msg:hover { background: var(--dc-msg-hover); }
+#inbox .dc-av { position: absolute; left: 16px; top: 4px; width: 40px; height: 40px; font-size: 16px; }
+#inbox .dc-gut { position: absolute; left: 0; width: 64px; top: 4px; text-align: right; font-size: 11px; color: var(--dc-fg-3); opacity: 0; }
+#inbox .dc-msg:hover .dc-gut { opacity: 1; }
+#inbox .dc-head { display: flex; align-items: baseline; gap: 8px; line-height: 22px; min-width: 0; }
+#inbox .dc-author { font-weight: 600; font-size: 15px; color: var(--dc-head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inbox .dc-author.c0 { color: var(--p-macro); } #inbox .dc-author.c1 { color: var(--p-room); } #inbox .dc-author.c2 { color: var(--p-game); }
+#inbox .dc-author.c3 { color: var(--live); } #inbox .dc-author.c4 { color: var(--warn); } #inbox .dc-author.c5 { color: var(--crit); }
+#inbox .dc-msg.me .dc-author { color: var(--dc-head); }
+#inbox .dc-tag { flex: none; height: 15px; padding: 0 4px; border-radius: 3px; background: var(--dc-blurple); color: var(--dc-head); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; transform: translateY(-1px); }
+#inbox .dc-time { flex: none; color: var(--dc-fg-3); font-size: 12px; }
+#inbox .dc-text { color: var(--dc-fg); font-size: 15px; line-height: 1.375; white-space: pre-wrap; overflow-wrap: anywhere; }
+#inbox .dc-label { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 3px; background: var(--dc-deep); color: var(--dc-fg-2); font-size: 12px; line-height: 20px; }
+#inbox .kkt-line.dc-msg.enter { animation: msgIn 260ms var(--ease) both; }
+#inbox .newpill { background: var(--dc-blurple); color: var(--dc-head); border: 0; }
+#inbox .th-empty { color: var(--dc-fg-3); background: var(--dc-bg); }
+#inbox .th-empty-t { color: var(--dc-head); }
+
+/* 입력: 디스코드 메시지 칸 */
+#inbox .comp { background: var(--dc-bg); border-top: 0; padding: 0 16px calc(20px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
+#inbox .comp-box { background: var(--dc-input); border: 0; border-radius: 8px; padding: 6px 6px 6px 16px; min-height: 44px; align-items: center; }
+#inbox .comp-box:focus-within { box-shadow: none; }
+#inbox .comp-box textarea { color: var(--dc-fg); font-size: 15px; padding: 5px 0; }
+#inbox .comp-box textarea::placeholder { color: var(--dc-fg-3); }
+#inbox #chat-send { background: transparent; border: 0; color: var(--dc-fg-2); min-height: 32px; height: 32px; padding: 0 10px; border-radius: 6px; }
+#inbox #chat-send:not(:disabled):hover { background: var(--dc-btn); color: var(--dc-head); }
+#inbox .kkt-compose.has-text #chat-send { background: var(--dc-blurple); color: var(--dc-head); }
+#inbox .comp-meta { color: var(--dc-fg-3); }
+#inbox .comp-note { border-color: var(--dc-red); background: color-mix(in srgb, var(--dc-red) 12%, transparent); color: var(--dc-fg); }
+/* 빠른 답장: 디스코드 버튼 */
+#inbox .qr-b { height: 32px; padding: 0 16px; border: 0; border-radius: 3px; background: var(--dc-btn); color: var(--dc-head); font-size: 14px; font-weight: 500; }
+#inbox .qr-b:hover { background: var(--dc-btn-2); }
+#inbox .qr-b.sent { background: var(--dc-green); }
+#inbox .qr-edit { height: 32px; border: 0; border-radius: 3px; color: var(--dc-fg-2); background: transparent; }
+#inbox .qr-edit:hover { background: var(--dc-btn); color: var(--dc-head); }
+#inbox .qr-empty { color: var(--dc-fg-3); }
+#inbox .qr-ed { background: var(--dc-side); border: 0; border-radius: 8px; }
+#inbox .qr-ed-h b { color: var(--dc-head); }
+#inbox .qr-row { background: var(--dc-bg); border: 0; border-radius: 6px; }
+#inbox .qr-ed .inp { background: var(--dc-deep); border: 0; border-radius: 4px; color: var(--dc-fg); }
+#inbox .qr-ed .btn.primary { background: var(--dc-blurple); border-color: var(--dc-blurple); color: var(--dc-head); }
+#inbox .qr-ed .btn.primary:hover { background: var(--dc-blurple-2); }
+@media (max-width: 760px) {
+  #inbox .kkt-line.dc-msg { padding-left: 64px; padding-right: 12px; }
+  #inbox .dc-av { left: 12px; }
+  #inbox .dc-gut { width: 56px; }
+  #inbox .th-h .who small { display: none; }
+}
