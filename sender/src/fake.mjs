@@ -250,6 +250,8 @@ class FakeServer {
     if (body && body.pli) row.pli = str(body.pli)
     if (body && body.mid) row.mid = str(body.mid)
     if (body && body.kid) row.kid = str(body.kid)
+    if (body && body.type != null) row.type = Number(body.type)
+    if (body && typeof body.content === 'string') row.content = body.content
     this.packets.push(row)
     if (this.packets.length > 2000) this.packets.splice(0, this.packets.length - 2000)
   }

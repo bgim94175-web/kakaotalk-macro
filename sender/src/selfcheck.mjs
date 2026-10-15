@@ -16,6 +16,22 @@ const hasRec = (t) => REC_RE.test(t)
 const noRec = (t) => t.replace(REC_RE, '')
 import * as passbox from './secretbox.mjs'
 import { linkable, has } from './word.mjs'
+import {
+  blankVoiceKeep,
+  normVoiceKeep,
+  voiceCallId,
+  voiceKeepDone,
+  voiceKeepOn,
+  voiceKeepPlan,
+  voiceKeepReconnect,
+  voiceKeepSaw,
+  voiceKeepSpan,
+  voiceKeepStart,
+  voiceKeepStop,
+  voiceKeepText,
+  voiceMetaContent,
+  voiceMetaRead,
+} from './voice-keep.mjs'
 import { correct } from './quiz.mjs'
 import {
   guardCanStopKicks,
@@ -164,6 +180,113 @@ record.config.macro.notifyReply = false
 if (macroNotifyReply(record)) throw new Error('notify reply off')
 delete record.config.macro.notifyReply
 if (macroNotifyReply(record)) throw new Error('notify reply absent')
+
+// 보이스룸 유지(B층, voice-keep.mjs): 켜기 → 다시 알리기 → 떨어짐 → 복구 → 따라가기 → 사람이 끔
+// → 실패 물러서기 → 포기 → 48시간 끝. 시계·네트워크 없이 상태와 시각만으로 돈다.
+{
+  const HOUR0 = 3600000
+  const o = normVoiceKeep({ keepMs: 48 * HOUR0, maxMs: 48 * HOUR0, refreshMs: 4 * 60000, recoverMs: 3000, graceMs: 20000, backoffs: [10000, 30000], failMax: 3, rateWaitMs: 600000 })
+  let t = 1700000000000
+
+  // 유지 시간 읽기: 기본 48시간, 「30분」·「12」(시간), 넘치면 48시간으로 깎고, 못 읽으면 0(기본값)
+  if (voiceKeepSpan('30분', o) !== 1800000) throw new Error('voice keep: 30분')
+  if (voiceKeepSpan('12', o) !== 12 * HOUR0 || voiceKeepSpan('12시간', o) !== 12 * HOUR0) throw new Error('voice keep: 12시간')
+  if (voiceKeepSpan('99', o) !== 48 * HOUR0) throw new Error('voice keep: 48시간을 넘기지 못한다')
+  if (voiceKeepSpan('내일까지', o) !== 0 || voiceKeepSpan('', o) !== 0) throw new Error('voice keep: 모르는 시간은 0')
+
+  let st = voiceKeepStart(blankVoiceKeep(), t, o, 0, '7')
+  if (!voiceKeepOn(st) || st.until !== t + 48 * HOUR0 || st.by !== '7') throw new Error('voice keep: 기본 48시간')
+
+  // 켜기: 바로 open → 성공하면 주기 뒤에 다시 알린다
+  let p = voiceKeepPlan(st, t, o)
+  if (p.do !== 'open' || p.why !== 'start') throw new Error('voice keep: 첫 계획 ' + JSON.stringify(p))
+  if (voiceKeepDone(st, p, { ok: true, status: 0, callId: '17000000001234' }, t, o) !== 'opened') throw new Error('voice keep: opened')
+  if (st.callId !== '17000000001234' || st.nextAt !== t + o.refreshMs || st.opens !== 1) throw new Error('voice keep: 켠 뒤 상태')
+  if (voiceKeepPlan(st, t + 1000, o).do !== 'wait') throw new Error('voice keep: 주기 안에는 쉰다')
+  if (voiceKeepText(st, t).indexOf('남은 시간 48시간') < 0) throw new Error('voice keep: 상태 줄 ' + voiceKeepText(st, t))
+
+  // 주기: 같은 callId·startTime 으로 다시 알린다(updateTime 만 올라간다)
+  t += o.refreshMs
+  p = voiceKeepPlan(st, t, o)
+  if (p.do !== 'refresh') throw new Error('voice keep: 다시 알리기 계획')
+  if (voiceKeepDone(st, p, { ok: true, status: 0 }, t, o) !== 'kept' || st.refreshes !== 1 || st.callId !== '17000000001234') throw new Error('voice keep: kept')
+
+  // 서버가 내렸다(글쓴이 없는 liveon:false) → 곧 새 callId 로 다시 켠다
+  if (voiceKeepSaw(st, voiceMetaRead('{"liveon":false}'), t, o) !== 'dropped') throw new Error('voice keep: dropped')
+  p = voiceKeepPlan(st, t + o.recoverMs, o)
+  if (p.do !== 'open' || p.why !== 'dropped') throw new Error('voice keep: 다시 켜기 계획 ' + JSON.stringify(p))
+  t += o.recoverMs
+  if (voiceKeepDone(st, p, { ok: true, status: 0, callId: '17000000009999' }, t, o) !== 'recovered') throw new Error('voice keep: recovered')
+  if (st.callId !== '17000000009999' || st.opens !== 2 || st.offAt) throw new Error('voice keep: 복구 뒤 상태')
+
+  // 남(또는 카카오)이 연 보이스룸은 싸우지 않고 그 callId 를 들고 유지한다
+  if (voiceKeepSaw(st, Object.assign({ authorId: '8', mine: false }, voiceMetaRead('{"liveon":true,"callId":17000000001111}')), t, o) !== 'adopted') throw new Error('voice keep: adopted')
+  if (st.callId !== '17000000001111') throw new Error('voice keep: 남이 연 callId 를 들고 간다')
+
+  // 실패는 물러서며 다시(10초 → 30초), failMax 에서 포기하고 스스로 끈다
+  t += o.refreshMs
+  p = voiceKeepPlan(st, t, o)
+  if (voiceKeepDone(st, p, { ok: false, status: -500 }, t, o) !== 'retry' || st.fails !== 1 || st.nextAt !== t + 10000) throw new Error('voice keep: 첫 실패')
+  t += 10000
+  p = voiceKeepPlan(st, t, o)
+  if (p.do !== 'open') throw new Error('voice keep: 실패 뒤에는 켜져 있는지부터 세운다')
+  if (voiceKeepDone(st, p, { ok: false, status: -500 }, t, o) !== 'retry' || st.nextAt !== t + 30000 || st.callId) throw new Error('voice keep: 둘째 실패')
+  t += 30000
+  p = voiceKeepPlan(st, t, o)
+  if (voiceKeepDone(st, p, { ok: false, status: -500 }, t, o) !== 'gave_up' || st.fails !== 3) throw new Error('voice keep: 셋째 실패')
+  p = voiceKeepPlan(st, t, o)
+  if (p.do !== 'close' || p.why !== 'gave_up') throw new Error('voice keep: 포기 계획')
+  if (voiceKeepDone(st, p, { ok: true, status: 0 }, t, o) !== 'gave_up' || voiceKeepOn(st)) throw new Error('voice keep: 포기')
+  if (voiceKeepText(st, t).indexOf('포기') < 0) throw new Error('voice keep: 포기 상태 줄')
+
+  // 속도 제한(-312)은 짧게 되풀이하지 않고 길게 쉰다
+  st = voiceKeepStart(blankVoiceKeep(), t, o, 0, '')
+  p = voiceKeepPlan(st, t, o)
+  voiceKeepDone(st, p, { ok: false, status: -312 }, t, o)
+  if (st.nextAt !== t + o.rateWaitMs) throw new Error('voice keep: 속도 제한 쉼')
+
+  // 방이 없어졌다(-324) → 유지를 끝낸다
+  st = voiceKeepStart(blankVoiceKeep(), t, o, 0, '')
+  if (voiceKeepDone(st, voiceKeepPlan(st, t, o), { ok: false, status: -324 }, t, o) !== 'gone' || voiceKeepOn(st)) throw new Error('voice keep: gone')
+
+  // 사람(방장)이 보이스룸을 닫으면 따라 끈다 — 다시 여는 싸움을 하지 않는다
+  st = voiceKeepStart(blankVoiceKeep(), t, o, 0, '')
+  voiceKeepDone(st, voiceKeepPlan(st, t, o), { ok: true, status: 0, callId: '17000000002222' }, t, o)
+  if (voiceKeepSaw(st, Object.assign({ authorId: '9', mine: false }, voiceMetaRead('{"liveon":false}')), t, o) !== 'closed' || voiceKeepOn(st)) throw new Error('voice keep: 사람이 끔')
+  if (voiceKeepText(st, t).indexOf('닫음') < 0) throw new Error('voice keep: 닫음 상태 줄')
+
+  // 봇이 다시 접속하면 지난 통화는 죽은 것으로 보고 조금 뒤 새로 켠다
+  st = voiceKeepStart(blankVoiceKeep(), t, o, 0, '')
+  voiceKeepDone(st, voiceKeepPlan(st, t, o), { ok: true, status: 0, callId: '17000000003333' }, t, o)
+  if (!voiceKeepReconnect(st, t, o) || st.callId || st.nextAt !== t + o.graceMs) throw new Error('voice keep: 재접속')
+  if (voiceKeepPlan(st, t + o.graceMs, o).why !== 'dropped') throw new Error('voice keep: 재접속 뒤 다시 켜기')
+
+  // 유지 시간이 다 되면 스스로 끄는 신호를 보내고 끝낸다
+  st = voiceKeepStart(blankVoiceKeep(), t, o, 60000, '')
+  voiceKeepDone(st, voiceKeepPlan(st, t, o), { ok: true, status: 0, callId: '17000000004444' }, t, o)
+  if (voiceKeepPlan(st, t + 30000, o).at !== t + 60000) throw new Error('voice keep: 끝나는 때에 깨어난다')
+  p = voiceKeepPlan(st, t + 60000, o)
+  if (p.do !== 'close' || p.why !== 'expired') throw new Error('voice keep: 끝 계획')
+  if (voiceKeepDone(st, p, { ok: true, status: 0 }, t + 60000, o) !== 'expired' || voiceKeepOn(st) || st.callId) throw new Error('voice keep: 끝')
+
+  // 사람이 끈 것은 유지도 끈다(상태만, 신호는 botpool 이 보낸다)
+  st = voiceKeepStop(voiceKeepStart(blankVoiceKeep(), t, o, 0, ''), t, 'user')
+  if (voiceKeepOn(st) || voiceKeepPlan(st, t, o).do !== 'none') throw new Error('voice keep: 사람이 끄기')
+
+  // callId 는 2^53 을 넘는다 — content 에 글자로 그대로 들어가야 한다(JSON.stringify 금지)
+  const cid = voiceCallId(t, () => 0.5)
+  if (!/^1[0-9]{16}$/.test(cid)) throw new Error('voice keep: callId 모양 ' + cid)
+  const big = '17000000001234567'
+  const content = voiceMetaContent({ on: true, now: t, startAt: t - 60000, callId: big, title: '노래방', csIP: '1.2.3.4', csIP6: '::1', csPort: 9000 })
+  if (content.indexOf('"callId":' + big) < 0) throw new Error('voice keep: callId 정밀도 ' + content)
+  if (content.indexOf('"startTime":' + Math.floor((t - 60000) / 1000)) < 0 || content.indexOf('"updateTime":' + Math.floor(t / 1000)) < 0) throw new Error('voice keep: 시각 ' + content)
+  if (content.indexOf('"title":"노래방"') < 0 || content.indexOf('"liveon":true') < 0) throw new Error('voice keep: content ' + content)
+  if (voiceMetaContent({ on: false }) !== '{"liveon":false}') throw new Error('voice keep: 끄는 content')
+  const read = voiceMetaRead(content)
+  if (!read || read.callId !== big || read.liveon !== true || read.title !== '노래방') throw new Error('voice keep: content 읽기 ' + JSON.stringify(read))
+  if (voiceMetaRead('{"liveon":true,"callId":17000000001234567}').callId !== big) throw new Error('voice keep: 숫자 callId 도 글자로 읽는다')
+  if (voiceMetaRead('그냥 글') !== null) throw new Error('voice keep: 보이스룸 메타가 아니면 null')
+}
 
 // 갠톡 응답: 오픈프로필 1:1(list_kind open_dm)은 라이브러리 분류(kind)가 'open' 이어도 답한다.
 // 오픈 단체방·일반 단톡방에는 답하지 않고, 목록 종류가 없는 예전 줄과 일반 1:1 은 예전처럼 kind 로 본다.
@@ -3008,6 +3131,104 @@ async function withLog(fn) {
 
     for (const id of [i1, i2, i4a, i4b, i4c, i5, i5b, i6, i6r, i8]) store.installs.get(id).phase = 'removed'
     for (const b of [G, H, I, J]) await pool.detach(b.id)
+  }
+
+  // #41 보이스룸 유지(B층): 방장이 「!보룸유지 2」로 켜면 봇이 SETMETA(16) liveon 을 보내고, 주기마다 같은
+  //   callId 로 다시 알리고, liveon:false 를 보면 새 callId 로 다시 켠다. 방장이 닫으면 따라 끄고(싸우지 않는다),
+  //   「!보룸유지끄기」는 끄는 신호를 보내고, 유지 시간이 끝나면 스스로 끈다. 상태는 room_state 에 남는다.
+  {
+    const prevKeep = process.env.SENDER_VOICE_KEEP
+    const prevVoice = pool.opts.voice
+    process.env.SENDER_VOICE_KEEP = '1'
+    pool.opts.voice = normVoiceKeep({ keepMs: 2 * 3600000, maxMs: 48 * 3600000, refreshMs: 10000, recoverMs: 0, graceMs: 0, backoffs: [50], failMax: 5 })
+    try {
+      const code = 'voicex41'
+      const room41 = fs.room(code)
+      const mem41 = (mt, nick) => ({ mt, nick, ptp: 1, pli: null, photo: '', status: null })
+      room41.members['4101'] = mem41(1, '방장님')
+      room41.members['4102'] = mem41(2, '손님')
+      const iV = install(code)
+      await pool.reconcile(null)
+      await waitFor(() => rowOf(iV).state === 'waiting_host', 5000, '#41 join')
+      const chat = rowOf(iV).chat_id
+      fs.setPerm(chat, botA.uid, 4)
+      await waitFor(() => rowOf(iV).state === 'active', 5000, '#41 promotion')
+      const vv = botA.slot.byInstall.get(iV)
+      const metas = () => fs.packets.filter((x) => x.method === 'SETMETA' && x.chat === String(chat))
+      const liveOn = () => metas().filter((x) => /"liveon":true/.test(x.content || ''))
+      const liveOff = () => metas().filter((x) => /"liveon":false/.test(x.content || ''))
+      const cidOf = (row) => (/"callId":([0-9]+)/.exec((row && row.content) || '') || [])[1] || ''
+      const post41 = (uid, name, text) => fs.event(chat, botA.uid, { kind: 'message', user_id: uid, name, text })
+      const texts41 = () => fs.sentIn(chat).map((x) => x.text)
+      const meta41 = (content, authorId) => botA.slot.client._dispatch({ method: 'CHGMETA', body: { chatId: String(chat), meta: Object.assign({ type: 16, content }, authorId ? { authorId } : {}) } })
+
+      // 방장·부방장이 아니면 켤 수 없다
+      post41('4102', '손님', '!보룸유지')
+      await waitFor(() => texts41().some((t) => t.indexOf('방장·부방장만') >= 0), 5000, '#41 a member cannot keep')
+      if (liveOn().length) throw new Error('#41 a member must not open a voice room')
+
+      // 방장이 2시간 켜기 → 바로 liveon, 상태는 유지 켜짐
+      post41('4101', '방장님', '!보룸유지 2')
+      await waitFor(() => liveOn().length === 1, 5000, '#41 keep on opens the room')
+      const first = cidOf(liveOn()[0])
+      if (!/^1[0-9]{16}$/.test(first)) throw new Error('#41 callId ' + first)
+      if (!vv.runtime.voice || !vv.runtime.voice.on || vv.runtime.voice.callId !== first) throw new Error('#41 state after on ' + JSON.stringify(vv.runtime.voice))
+      if (vv.runtime.voice.until - vv.runtime.voice.startAt !== 2 * 3600000) throw new Error('#41 two hours')
+      await waitFor(() => texts41().some((t) => t.indexOf('보룸 유지: 켜짐') >= 0), 5000, '#41 reply')
+
+      // 주기: 같은 통화(callId)로 다시 알린다
+      vv.runtime.voice.nextAt = 0
+      await waitFor(() => liveOn().length === 2, 5000, '#41 refresh')
+      if (cidOf(liveOn()[1]) !== first) throw new Error('#41 a refresh keeps the same call')
+      if (vv.runtime.voice.refreshes !== 1) throw new Error('#41 refresh count ' + vv.runtime.voice.refreshes)
+
+      // 서버가 내렸다(글쓴이 없는 liveon:false) → 새 통화로 다시 켠다
+      meta41('{"liveon":false}')
+      await waitFor(() => liveOn().length === 3, 5000, '#41 recover')
+      if (cidOf(liveOn()[2]) === first) throw new Error('#41 a reopened room gets a new call')
+      if (vv.runtime.voice.opens !== 2) throw new Error('#41 opens ' + vv.runtime.voice.opens)
+
+      // 방장이 닫은 보이스룸은 다시 열지 않는다
+      const n3 = liveOn().length
+      meta41('{"liveon":false}', '4101')
+      await waitFor(() => !vv.runtime.voice.on, 5000, '#41 yields to the host')
+      await sleep(300)
+      if (liveOn().length !== n3) throw new Error('#41 must not fight the host')
+      if (vv.runtime.voice.stop !== 'closed') throw new Error('#41 stop reason ' + vv.runtime.voice.stop)
+
+      // 끄기 명령: 끄는 신호(liveon:false)를 보내고 유지를 끈다
+      const off0 = liveOff().length
+      post41('4101', '방장님', '!보룸유지')
+      await waitFor(() => vv.runtime.voice.on && liveOn().length > n3, 5000, '#41 keep on again')
+      post41('4101', '방장님', '!보룸유지끄기')
+      await waitFor(() => !vv.runtime.voice.on && liveOff().length > off0, 5000, '#41 keep off sends liveon false')
+      if (vv.runtime.voice.stop !== 'user') throw new Error('#41 off by the host')
+
+      // 유지 시간이 끝나면 스스로 끈다
+      const off1 = liveOff().length
+      const on1 = liveOn().length
+      post41('4101', '방장님', '!보룸유지 30분')
+      await waitFor(() => vv.runtime.voice.on && liveOn().length > on1, 5000, '#41 keep on for 30 minutes')
+      if (vv.runtime.voice.until - vv.runtime.voice.startAt !== 1800000) throw new Error('#41 thirty minutes')
+      vv.runtime.voice.until = Date.now() - 1
+      await waitFor(() => !vv.runtime.voice.on && liveOff().length > off1, 5000, '#41 expires on its own')
+      if (vv.runtime.voice.stop !== 'expired' || vv.runtime.voice.callId) throw new Error('#41 expired ' + JSON.stringify(vv.runtime.voice))
+
+      // 상태는 room_state 에 남는다(sender 가 다시 켜져도 이어서 지킨다)
+      await botA.slot.flushView(vv)
+      const saved41 = await store.loadRoomState(iV)
+      if (!saved41 || !saved41.voice || saved41.voice.stop !== 'expired') throw new Error('#41 room_state keeps the voice state')
+
+      // 방을 잃으면(내보내짐) 유지도 끝난다
+      post41('4101', '방장님', '!보룸유지')
+      await waitFor(() => vv.runtime.voice.on, 5000, '#41 keep on before the kick')
+      await botA.slot.roomGone(vv, 'kicked')
+      if (vv.runtime.voice.on || vv.runtime.voice.stop !== 'gone') throw new Error('#41 a lost room stops keeping')
+    } finally {
+      if (prevKeep === undefined) delete process.env.SENDER_VOICE_KEEP
+      else process.env.SENDER_VOICE_KEEP = prevKeep
+      pool.opts.voice = prevVoice
+    }
   }
 
   // #21 나가기 대기열

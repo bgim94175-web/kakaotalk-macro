@@ -24,6 +24,22 @@ import { Owner } from './owner.mjs'
 import * as C from './roomcmd.mjs'
 import * as R from './roomfeat.mjs'
 import { open as openPasscode } from './secretbox.mjs'
+import {
+  blankVoiceKeep,
+  normVoiceKeep,
+  voiceCallId,
+  voiceKeepDone,
+  voiceKeepOn,
+  voiceKeepPlan,
+  voiceKeepReconnect,
+  voiceKeepSaw,
+  voiceKeepSpan,
+  voiceKeepStart,
+  voiceKeepStop,
+  voiceKeepText,
+  voiceMetaContent,
+  voiceMetaRead,
+} from './voice-keep.mjs'
 
 const MIN = 60 * 1000
 const HOUR = 60 * MIN
@@ -116,6 +132,8 @@ export function poolOptions(over) {
     memberJobMs: envNum('BOT_MEMBER_JOB_MS', 2 * MIN),
     flushMs: 5000,
     tickMs: 1000,
+    // 보이스룸 유지(B층): 주기·유지 시간·포기 횟수는 voice-keep.mjs 가 SENDER_VOICE_KEEP_* 로 읽는다
+    voice: normVoiceKeep(),
     reconnectGapMs: 2000,
     trace: process.env.SENDER_TRACE_PUSH === '1',
   }, over || {})
@@ -389,6 +407,18 @@ export class BotPool {
     const got = this.voiceFind(sel)
     if (!got || !got.slot) return { ok: false, error: 'not_joined' }
     return got.slot.voiceSetMeta(got.view, on)
+  }
+
+  // 보이스룸 유지(B층) 켜기·끄기·보기. body = { on?, hours?|span?, status? }
+  async voiceKeep(sel, body) {
+    const got = this.voiceFind(sel)
+    if (!got || !got.slot) return { ok: false, error: 'not_joined' }
+    const b = body || {}
+    const slot = got.slot
+    if (b.status) return { ok: true, state: slot.voiceView(got.view) }
+    if (b.on === false) return slot.enqueue(() => slot.voiceKeepSet(got.view, false, 0, ''))
+    const span = voiceKeepSpan(b.hours != null ? b.hours : b.span, slot.opts.voice)
+    return slot.enqueue(() => slot.voiceKeepSet(got.view, true, span, ''))
   }
 
   // 서버 IP 차단(-444): 봇을 내리지 않고 모든 봇의 입장·조회를 멈춘다(5.3 6).
@@ -749,6 +779,7 @@ export class BotSlot {
     this.switchQ = new Map()      // install_id → {notBefore, how:'switch'|'rejoin', manual}
     this.switchH = new R.Win(HOUR, Math.max(1, Number(this.opts.switchPerHour) || 0))
     this.rejoinIds = new Set()    // 다시 입장(나간 직후): 사전 확인 없이 JOINLINK
+    this.voiceTicking = false     // 보이스룸 유지 한 바퀴가 돌고 있다(겹쳐 돌지 않게)
     this.traceN = new Map()
   }
 
@@ -920,6 +951,14 @@ export class BotSlot {
       v.checkFull = true
     }
     if (fresh || this.connects > 1) this.bg(this.pool.reconcile(null), 'reconcile')
+    // 보이스룸 유지(B층): 끊겼던 동안 통화는 죽었다. 유지를 켜 둔 방은 조금 뒤 새 callId 로 다시 켠다.
+    for (const v of this.byInstall.values()) {
+      const vs = this.voiceState(v, false)
+      if (voiceKeepReconnect(vs, now, this.opts.voice)) {
+        v.dirty = true
+        log(this.id, `install ${v.install_id} voice keep will reopen after reconnect`)
+      }
+    }
     this.schedulePump(now)
     this.scheduleSend(now)
   }
@@ -1194,31 +1233,30 @@ export class BotSlot {
     log(this.id, `raw ${method} req ${traceText(req)} → statusCode ${res ? res.statusCode : '?'} body ${traceText(shown)}`)
   }
 
-  // ── 보이스룸 실험(A층) ───────────────────────────────────────────────────
+  // ── 보이스룸 신호(A층) ──────────────────────────────────────────────────
   // SETMETA(type 16) 로 LIVE_TALK_INFO 를 보낸다. 서버 할당(csIP/csPort/callId)과
   // 음성 미디어 세션은 아직 없다 — csIP/callId 를 임의값으로 채워, 카카오가
   //   (a) 필드 존재만 확인하는지(→ status 0, 가짜 값으로도 배너 가능) 아니면
   //   (b) callId 를 실제 할당과 대조하는지(→ 거부)
-  // 를 응답 status 로 가린다. callId 는 2^53 을 넘으므로 숫자 정밀도를 잃지 않게
-  // content 문자열을 직접 조립한다(JSON.stringify 금지). off 는 liveon:false 만 보낸다.
-  async voiceSetMeta(view, on) {
+  // 를 응답 status 로 가린다. content 조립(callId 정밀도)은 voice-keep.mjs 가 한다.
+  // opt.callId 를 주면 그 통화를 이어서 알린다(유지의 '다시 알리기'). opt.quiet 은 로그만 줄인다.
+  async voiceSetMeta(view, on, opt) {
     const chatId = view && view.chat_id ? String(view.chat_id) : ''
-    if (!chatId) return { ok: false, error: 'no_chat' }
-    const nowSec = Math.floor(Date.now() / 1000)
-    const title = cleanName(view.link_name) || '보이스룸'
-    let content
-    if (on) {
-      // 17자리 callId 를 문자열로 만든다(정밀도 유지). csIP 는 과거 캡처에서 본 음성서버.
-      const callId = '1' + String(nowSec) + String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
-      const csIP = '211.242.15.98'
-      const csIP6 = '2404:4600:2:d5:211:242:15:98'
-      content = '{"liveon":true,"title":' + JSON.stringify(title) +
-        ',"updateTime":' + nowSec + ',"startTime":' + nowSec +
-        ',"csIP":"' + csIP + '","csIP6":"' + csIP6 + '","csPort":9000' +
-        ',"callId":' + callId + ',"url":"","blind":false}'
-    } else {
-      content = '{"liveon":false}'
-    }
+    if (!chatId) return { ok: false, error: 'no_chat', status: -1 }
+    const o = opt || {}
+    const now = this.now()
+    const vo = this.opts.voice
+    const callId = on ? (String(o.callId || '').replace(/[^0-9]/g, '') || voiceCallId(now)) : String(o.callId || '')
+    const content = voiceMetaContent({
+      on,
+      now,
+      callId,
+      startAt: Number(o.startAt) || now,
+      title: cleanName(view.link_name) || '보이스룸',
+      csIP: vo.csIP,
+      csIP6: vo.csIP6,
+      csPort: vo.csPort,
+    })
     // 오픈채팅은 요청에 li(오픈링크 id)가 더 필요할 수 있다. li 포함본과 미포함본을 둘 다 시도해 로그로 가른다.
     const li = view && view.link_id ? String(view.link_id) : ''
     const attempts = []
@@ -1228,11 +1266,146 @@ export class BotSlot {
     for (const a of attempts) {
       const r = await this.raw('SETMETA', a.body)
       const st = R.locoStatus(r)
-      log(this.id, `voice experiment SETMETA(16) ${a.tag} liveon=${on} chat ${chatId} li ${li || '-'} content ${content} → status ${st} body ${traceText((r && r.body) || {})}`)
+      if (!o.quiet) log(this.id, `voice SETMETA(16) ${a.tag} liveon=${on} chat ${chatId} li ${li || '-'} content ${content} → status ${st} body ${traceText((r && r.body) || {})}`)
       last = { ok: R.locoOk(r), status: st }
       if (last.ok) break
     }
-    return { ok: last.ok, status: last.status, sent: content }
+    return { ok: last.ok, status: last.status, callId, sent: content }
+  }
+
+  // ── 보이스룸 유지(B층) ──────────────────────────────────────────────────
+  // 켜 둔 방은 1초 tick 이 voiceKeepDue 로 때를 보고, 때가 되면 방마다 한 번씩 손 본다
+  // (다시 알리기 → 꺼져 있으면 다시 켜기 → 48시간이 지나면 스스로 끄기). 계산은 voice-keep.mjs.
+  // 상태는 runtime.voice 에 그대로 있어 sender 가 다시 켜져도 이어서 지킨다.
+  voiceKeepEnabled() {
+    return process.env.SENDER_VOICE_KEEP === '1' || process.env.SENDER_VOICE_EXPERIMENT === '1'
+  }
+
+  voiceState(v, make) {
+    if (!v || !v.runtime) return null
+    if (!v.runtime.voice || typeof v.runtime.voice !== 'object') {
+      if (!make) return null
+      v.runtime.voice = blankVoiceKeep()
+      v.dirty = true
+    }
+    return v.runtime.voice
+  }
+
+  voiceView(v) {
+    const st = this.voiceState(v, false)
+    return {
+      on: voiceKeepOn(st),
+      text: voiceKeepText(st, this.now()),
+      until: st ? Number(st.until) || 0 : 0,
+      call_id: st ? String(st.callId || '') : '',
+      opens: st ? Number(st.opens) || 0 : 0,
+      refreshes: st ? Number(st.refreshes) || 0 : 0,
+      fails: st ? Number(st.fails) || 0 : 0,
+      stop: st ? String(st.stop || '') : '',
+    }
+  }
+
+  // 유지 켜기·끄기. span = ms(0 이면 기본 48시간), by = 켠 사람 user_id('' = 관리자 API)
+  async voiceKeepSet(v, on, span, by) {
+    if (!v || !v.chat_id) return { ok: false, error: 'no_chat' }
+    const now = this.now()
+    const o = this.opts.voice
+    const st = this.voiceState(v, true)
+    if (on) {
+      v.runtime.voice = voiceKeepStart(st, now, o, span, by)
+      v.dirty = true
+      const until = v.runtime.voice.until
+      log(this.id, `install ${v.install_id} voice keep on until ${new Date(until).toISOString()}`)
+      await this.roomLog(v.install_id, 'voice_keep', { user_id: by || null, detail: { on: true, until } })
+      // 켜는 신호는 여기서 바로 보낸다(1초 tick 을 기다리지 않는다). 그 동안 tick 은 끼어들지 않는다.
+      const was = this.voiceTicking
+      this.voiceTicking = true
+      let got = null
+      try {
+        got = await this.voiceKeepOne(v)
+      } finally {
+        this.voiceTicking = was
+      }
+      return { ok: !!(got && got.ok), status: got ? got.status : -1, state: this.voiceView(v) }
+    }
+    const was = voiceKeepOn(st)
+    const callId = st ? String(st.callId || '') : ''
+    v.runtime.voice = voiceKeepStop(st, now, 'user')
+    v.runtime.voice.callId = ''
+    v.dirty = true
+    const r = was || callId ? await this.voiceSetMeta(v, false, { callId }) : { ok: true, status: 0 }
+    if (was) {
+      log(this.id, `install ${v.install_id} voice keep off → status ${r.status}`)
+      await this.roomLog(v.install_id, 'voice_keep', { user_id: by || null, ok: r.ok, detail: { on: false, why: 'user', status: r.status } })
+    }
+    return { ok: true, status: r.status, state: this.voiceView(v) }
+  }
+
+  // 유지를 켜 둔 방 하나를 한 번 손 본다. { ok, status, at(다음 차례), ev } 또는 null(유지 안 함).
+  async voiceKeepOne(v) {
+    const st = this.voiceState(v, false)
+    if (!voiceKeepOn(st)) return null
+    const o = this.opts.voice
+    const plan = voiceKeepPlan(st, this.now(), o)
+    if (plan.do === 'none') return null
+    if (plan.do === 'wait') return { ok: true, status: 0, at: plan.at, ev: '' }
+    // 방을 잃었다(나감·내보내짐·해지·아직 입장 전): 더 지킬 것이 없다.
+    if (!v.chat_id || v.state === 'error' || !v.licensed) {
+      v.runtime.voice = voiceKeepStop(st, this.now(), 'gone')
+      v.runtime.voice.callId = ''
+      v.dirty = true
+      log(this.id, `install ${v.install_id} voice keep gone (room ${v.state || 'no_chat'})`)
+      return null
+    }
+    const refresh = plan.do === 'refresh'
+    const res = plan.do === 'close'
+      ? await this.voiceSetMeta(v, false, { callId: st.callId, quiet: true })
+      : await this.voiceSetMeta(v, true, {
+        callId: refresh ? st.callId : '',
+        startAt: refresh ? (Number(st.startAt) || this.now()) : this.now(),
+        quiet: refresh,
+      })
+    const now = this.now()
+    const ev = voiceKeepDone(st, plan, res, now, o)
+    v.dirty = true
+    if (ev && ev !== 'kept') {
+      log(this.id, `install ${v.install_id} voice keep ${ev} (${plan.do}/${plan.why}) status ${res.status} — ${voiceKeepText(st, now)}`)
+      if (ev !== 'retry') {
+        await this.roomLog(v.install_id, 'voice_keep', { ok: ev !== 'gave_up' && ev !== 'gone', detail: { ev, why: plan.why, status: res.status, opens: st.opens, refreshes: st.refreshes } })
+      }
+    }
+    return { ok: !!res.ok, status: res.status, at: voiceKeepOn(st) ? Number(st.nextAt) || 0 : 0, ev }
+  }
+
+  // 1초 tick: 손 볼 때가 된 방이 하나라도 있으면 한 바퀴 돈다(겹쳐 돌지 않는다).
+  voiceKeepDue(now) {
+    if (this.voiceTicking) return
+    for (const v of this.byInstall.values()) {
+      const st = this.voiceState(v, false)
+      if (!voiceKeepOn(st)) continue
+      if ((Number(st.nextAt) || 0) <= now || now >= Number(st.until || 0)) {
+        this.bg(this.voiceKeepTick(), 'voice keep')
+        return
+      }
+    }
+  }
+
+  async voiceKeepTick() {
+    if (this.stopped || this.voiceTicking || !this.live()) return
+    this.voiceTicking = true
+    try {
+      for (const v of [...this.byInstall.values()]) {
+        if (this.stopped || !this.live()) return
+        if (!voiceKeepOn(this.voiceState(v, false))) continue
+        try {
+          await this.voiceKeepOne(v)
+        } catch (e) {
+          log(this.id, `voice keep ${v.install_id} failed: ${errText(e)}`)
+        }
+      }
+    } finally {
+      this.voiceTicking = false
+    }
   }
 
   // 보이스룸 생성 명령어 탐색: 후보 LOCO 명령어를 빈 바디로 던져 본다.
@@ -2196,6 +2369,8 @@ export class BotSlot {
       this.memberFill(v, now)
     }
     for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
+    // 보이스룸 유지(B층): 손 볼 때가 된 방이 있으면 한 바퀴 돈다
+    if (this.voiceKeepEnabled()) this.voiceKeepDue(now)
     // 오픈프로필 목록을 주기적으로 다시 읽는다(모르는 상태면 5분마다)
     const every = this.profileState === 'unknown' ? 5 * MIN : this.opts.profileReadMs
     if (every && !this.profileReading && now - Math.max(this.profileReadAt, this.profileTryAt) > every) {
@@ -2310,6 +2485,12 @@ export class BotSlot {
     v.nextCheckAt = 0
     if (n) await this.roomLog(v.install_id, 'state', { ok: false, detail: { state: 'error', code } })
     this.pacer.drop(String(v.install_id))
+    const vs = this.voiceState(v, false)
+    if (voiceKeepOn(vs)) {
+      v.runtime.voice = voiceKeepStop(vs, now, 'gone')
+      v.runtime.voice.callId = ''
+      v.dirty = true
+    }
     if (code === 'kicked' && v.link_id) {
       await this.raw('KICKLEAVE', { c: L(v.chat_id), li: L(v.link_id) })
     } else if (code === 'room_deleted') {
@@ -2344,6 +2525,22 @@ export class BotSlot {
       const log0 = b.chatLog || {}
       const chatId = R.idText(b.chatId) || R.idText(log0.chatId) || R.idText(b.c)
       if (chatId) await this.onChatLog(chatId, log0, typeof b.authorNickname === 'string' ? b.authorNickname : '', m)
+      return
+    }
+    // 방 메타 바뀜: 보이스룸 메타(liveon·callId)만 본다. 유지를 켜 둔 방이면 상태를 맞춘다(B층).
+    if (m === 'CHGMETA' && isVoiceMeta(b.meta)) {
+      const v = this.views.get(R.idText(b.chatId) || R.idText(b.c)) || this.viewByLink(b.li)
+      const vs = v ? this.voiceState(v, false) : null
+      if (!voiceKeepOn(vs)) return
+      const info = voiceMetaRead(b.meta.content)
+      if (!info) return
+      const authorId = R.idText(b.meta.authorId)
+      const now = this.now()
+      const ev = voiceKeepSaw(vs, Object.assign({ authorId, mine: !!authorId && authorId === this.userId }, info), now, this.opts.voice)
+      if (!ev) return
+      v.dirty = true
+      if (ev !== 'seen') log(this.id, `install ${v.install_id} voice meta ${ev} by ${authorId || '-'} — ${voiceKeepText(vs, now)}`)
+      if (ev === 'closed') await this.roomLog(v.install_id, 'voice_keep', { user_id: authorId || null, detail: { ev, by: authorId } })
       return
     }
     if (m === 'SYNCMEMT') {
@@ -2930,6 +3127,40 @@ export class BotSlot {
         this.say(v, '보룸 명령어 후보를 찾는 중… 잠시만요(약 20초).', { what: 'reply' })
         const r = await this.voiceProbe(v)
         this.say(v, `REAL[${r.real}]\nFAKE[${r.fake}]\n튀는 후보: ${r.standout && r.standout.length ? r.standout.join(', ') : '없음'}`, { what: 'reply' })
+        return
+      }
+    }
+    // 보이스룸 유지(B층): 방장·부방장이 「접두사+보룸유지 [48]」로 켜고 「보룸유지끄기」로 끈다.
+    // 켜 두면 48시간(기본)까지 봇이 알아서 다시 알리고, 꺼지면 다시 켠다. 「보룸유지?」로 상태를 본다.
+    if (this.voiceKeepEnabled() && isCmd) {
+      const t = text.trim().slice(prefix.length).trim()
+      const mk = /^보룸유지(?:\s+(.+))?$/.exec(t)
+      const arg = mk && mk[1] ? mk[1].trim() : ''
+      const asked = t === '보룸유지?' || t === '보룸유지상태' || arg === '?' || arg === '상태'
+      const off = t === '보룸유지끄기' || t === '보룸유지끝' || arg === '끄기' || arg === '끝'
+      if (mk || off || asked) {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 유지는 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        if (asked) {
+          this.say(v, this.voiceView(v).text, { what: 'reply' })
+          return
+        }
+        if (off) {
+          const r = await this.voiceKeepSet(v, false, 0, m.authorId)
+          this.say(v, `보룸 유지를 껐어요. (status ${r.status})`, { what: 'reply' })
+          return
+        }
+        const span = voiceKeepSpan(arg, this.opts.voice)
+        if (arg && !span) {
+          this.say(v, '유지 시간을 「보룸유지 48」(시간) 이나 「보룸유지 30분」 처럼 적어 주세요.', { what: 'reply' })
+          return
+        }
+        const r = await this.voiceKeepSet(v, true, span, m.authorId)
+        const st = this.voiceView(v)
+        this.say(v, r.ok ? `${st.text}\n꺼지면 알아서 다시 켜요.` : `보룸을 켜지 못했어요 (status ${r.status}). 유지는 켜 두었으니 계속 다시 해 볼게요.`, { what: 'reply' })
         return
       }
     }

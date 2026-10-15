@@ -439,6 +439,23 @@ if (process.env.SENDER_VOICE_EXPERIMENT === '1') {
   }))
 }
 
+// ── 보이스룸 유지(B층). SENDER_VOICE_KEEP=1 또는 SENDER_VOICE_EXPERIMENT=1 일 때 ──
+// POST /v1/bot/voice-keep { install_id | chat_id | li, on?, hours?, status? }
+//   on 기본 true(켜기, hours 기본 48 · 최대 48). on:false 면 끄기, status:true 면 지금 상태만 본다.
+// 켜 두면 봇이 주기마다 보이스룸 신호를 다시 보내고, 꺼진 것을 보면 다시 켠다(최대 48시간).
+if (process.env.SENDER_VOICE_KEEP === '1' || process.env.SENDER_VOICE_EXPERIMENT === '1') {
+  process.stderr.write('[sender] voice room keep-alive enabled\n')
+  app.post('/v1/bot/voice-keep', botRoute(async (req, res) => {
+    const b = req.body || {}
+    const sel = { install_id: b.install_id, chat_id: b.chat_id, li: b.li }
+    if ((sel.install_id == null || sel.install_id === '') && !sel.chat_id && !sel.li) {
+      res.status(400).json({ ok: false, error: 'need_room' })
+      return null
+    }
+    return hub.pool.voiceKeep(sel, b)
+  }))
+}
+
 // ── 가짜 모드 전용(9.4). SENDER_FAKE=1 일 때만 등록한다(8.5) ───────────────────
 if (fakeOn()) {
   process.stderr.write('[sender] SENDER_FAKE=1 — fake Kakao connection, never use in production\n')

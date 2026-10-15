@@ -47,6 +47,19 @@
 
 `SENDER_FAKE=1` 이면 카카오에 붙지 않고 `src/fake.mjs` 의 가짜 연결을 씁니다. 패킷을 만들고 판정하는 코드는 진짜와 같습니다. 링크 코드에 든 낱말(`gone`·`dm`·`pass`·`noprof`·`noanon`·`full`·`rate`·`ipblock`·`weird`·`lost`)로 방의 반응을 정하고, `/v1/fake/perm`·`/v1/fake/event` 로 부방장 지정·내보내짐·입장·메시지 같은 푸시를 넣습니다. **운영에서 켜지 않습니다.**
 
+## 보이스룸 유지(B층)
+
+`SENDER_VOICE_KEEP=1` 이면 한 번 켠 보이스룸을 봇이 꺼지지 않게 지킵니다. 계산은 `src/voice-keep.mjs`(순수 함수, 시계·네트워크를 모릅니다), 신호는 `botpool.mjs` 의 `voiceSetMeta`(SETMETA type 16)가 보냅니다.
+
+* **켜기** 방장·부방장이 방에서 「`!보룸유지`」(기본 48시간) 또는 「`!보룸유지 2`」(2시간)·「`!보룸유지 30분`」. 관리 쪽에서는 `POST /v1/bot/voice-keep { install_id | chat_id | li, hours? }`.
+* **유지** 켜 둔 동안 `SENDER_VOICE_KEEP_REFRESH_MS`(기본 4분)마다 같은 `callId`·`startTime` 으로 `updateTime` 만 올려 다시 알립니다.
+* **복구** 방 메타 푸시(`CHGMETA`)로 `liveon:false` 를 보거나 봇이 다시 접속하면 새 `callId` 로 다시 켭니다. 다시 켠 횟수는 상태 줄에 남습니다.
+* **물러남** 사람(방장·부방장)이 보이스룸을 닫은 것은 따라 끕니다 — 다시 여는 싸움을 하지 않습니다(`SENDER_VOICE_KEEP_YIELD=0` 이면 다시 켭니다). 남이 연 보이스룸은 그 `callId` 를 들고 함께 지킵니다.
+* **끝** 유지 시간이 다 되면 끄는 신호를 보내고 스스로 끝냅니다. 연속 실패가 `SENDER_VOICE_KEEP_FAILS`(기본 8)를 넘으면 포기하고, 방을 잃으면(내보내짐·나감·해지) 바로 끝냅니다. 속도 제한(-312·-805·-819)에는 길게 쉽니다.
+* **끄기·보기** 「`!보룸유지끄기`」, 「`!보룸유지?`」(상태 줄). 관리 쪽에서는 같은 주소에 `{ on: false }`·`{ status: true }`.
+
+상태는 방마다 `room_state.runtime.voice` 에 저장돼 sender 가 다시 켜져도 이어서 지키고, 켜기·복구·포기·끝은 `room_log` 의 `voice_keep` 줄로 남습니다. 음성 미디어 세션(VCS)과 서버 할당은 아직 없어, 지금은 보이스룸 **신호**(배너)를 지키는 층까지입니다.
+
 ## 환경 변수
 
 라이선스 서비스 하나에 넣습니다. 값은 저장소에 적지 않습니다.
@@ -63,5 +76,13 @@
 | `BOT_JOIN_PER_HOUR`·`BOT_JOIN_PER_DAY` | 아니오 | 봇마다 입장 예산. 기본 20·80 |
 | `BOT_RESOLVE_PER_MIN`·`BOT_RESOLVE_PER_DAY` | 아니오 | 봇마다 링크 조회 예산. 기본 10·300 |
 | `SENDER_TRACE_PUSH` | 아니오 | `1` 이면 처음 보는 푸시마다 본문 키를 한 번 로그로 남깁니다(실측용) |
+| `SENDER_VOICE_KEEP` | 아니오 | `1` 이면 보이스룸 유지(아래 절)를 켭니다. `SENDER_VOICE_EXPERIMENT=1` 도 같이 켭니다 |
+| `SENDER_VOICE_KEEP_MS`·`SENDER_VOICE_KEEP_MAX_MS` | 아니오 | 유지 시간 기본값·최대값. 기본 48시간 |
+| `SENDER_VOICE_KEEP_REFRESH_MS` | 아니오 | 다시 알리는 주기. 기본 240000(4분) |
+| `SENDER_VOICE_KEEP_RECOVER_MS`·`SENDER_VOICE_KEEP_GRACE_MS` | 아니오 | 꺼진 것을 본 뒤·다시 접속한 뒤 다시 켜기까지. 기본 3000·20000 |
+| `SENDER_VOICE_KEEP_FAILS`·`SENDER_VOICE_KEEP_RATE_MS` | 아니오 | 연속 실패 포기 횟수·속도 제한 뒤 쉼. 기본 8·600000 |
+| `SENDER_VOICE_KEEP_YIELD` | 아니오 | `0` 이면 사람이 보이스룸을 닫아도 다시 켭니다(기본은 따라 끕니다) |
+| `SENDER_VOICE_CS_IP`·`SENDER_VOICE_CS_IP6`·`SENDER_VOICE_CS_PORT` | 아니오 | 보이스룸 메타에 넣는 음성 서버 값(실측 캡처가 기본) |
+| `SENDER_VOICE_EXPERIMENT`·`SENDER_TRACE_VOICE` | 아니오 | 보이스룸 실험(신호·명령어 찾기)과 보이스룸 신호만 남기는 로그 |
 | `SENDER_FAKE`·`FAKE_JOIN_MS`·`FAKE_KICK_LEFT`·`FAKE_STATE_FILE`·`FAKE_CONFIRM_MS` | 아니오 | 시험 전용 가짜 모드 |
 | `BOT_RATE_WAIT_MS`·`BOT_IP_WAIT_MS`·`BOT_RECONCILE_MS`·`BOT_PERM_PUSH_DELAY_MS`·`BOT_HIDE_GAP_MS` | 아니오 | 시험 전용 간격 조정(쉼표 목록 또는 ms). 운영에서는 비워 둡니다 |
