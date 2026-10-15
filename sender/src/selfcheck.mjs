@@ -1158,6 +1158,10 @@ async function withLog(fn) {
   const RF = await import('./roomfeat.mjs')
   const F = await import('./features.mjs')
   const Q = await import('./quiz.mjs')
+  const SW = await import('./sword.mjs')
+  const HC = await import('./helpcard.mjs')
+  // 도움말의 검 강화 묶음 줄(sword.mjs HELP_CMDS 하나만 쓴다 — 목록이 바뀌어도 여기는 같은 곳을 본다)
+  const swordHelp = (p) => '◆ 검 강화\n' + HC.packCommands(SW.helpCommands(p)).map((l) => ' ▸ ' + l).join('\n')
   const { BotPool } = await import('./botpool.mjs')
   const { Long } = await import('bson')
   const FK = await import('./fake.mjs')
@@ -1453,7 +1457,7 @@ async function withLog(fn) {
       const secret = W.v.runtime.games.r.secret
       if (one('112') !== '숫자 3개는 서로 달라야 해요.') throw new Error('7.7#13 baseball repeat digits')
       if (!new RegExp('^정답이에요\\. ' + secret + ' \\(1번 만에\\) · 홍님 \\+5점 \\(누적 \\d+점\\)$').test(one(secret))) throw new Error('7.7#13 baseball win')
-      if (!/^\[랭킹\]\n1\. 홍 \d+점$/.test(one('!랭킹'))) throw new Error('7.7#13 ranking header')
+      if (!/^\[랭킹\]\n1\. 홍 \d+점\n검 강화 순위는 「!강화랭킹」으로 볼 수 있어요\.$/.test(one('!랭킹'))) throw new Error('7.7#13 ranking header (+ where the sword ranking is)')
       if (!/^홍님의 누적 점수는 \d+점이에요\.$/.test(one('!점수'))) throw new Error('7.7#13 score')
       if (one('!주사위', '8', '') .indexOf('참가자님 ') !== 0) throw new Error('7.7#13 nameless player is 참가자')
     }
@@ -1466,6 +1470,94 @@ async function withLog(fn) {
     const board = S.v.runtime.scores.r
     if (board['301'] !== 2 || board['302'] !== 2 || Object.keys(board).length !== 2) throw new Error('7.7#13 scores by author id ' + JSON.stringify(board))
     if (RF.rankingOf(S.v.runtime).length !== 2) throw new Error('7.7#13 ranking keeps two nameless people')
+  }
+  // #13-2 검 강화 결과 전달(features): 게임 쿨타임(3초)은 사람마다 센다 — 다른 사람의 명령어(「!보스」 바로 뒤 「!공격」)는
+  // 묻히지 않고, 같은 사람은 3초 안에 다시 못 한다. 방 발송이 밀리면(sendBusy) 검 강화는 답도 상태 변화도 없다.
+  // 카드는 render(열거되지 않는 그리기 함수)로 넘겨 보낼 차례에 그린다. 점수가 없는 「!랭킹」은 「!강화랭킹」을 알린다
+  {
+    const v = view({ products: { roombot: false, minigame: true } })
+    const rec = RF.adapterRecord(v)
+    if (rec.config.minigame.cooldownMs !== 3000) throw new Error('#13-2 default game cooldown is 3s')
+    const say = (text, id, name, busy) => {
+      rec.config.minigame.sendBusy = !!busy
+      return F.onInbound(rec, { chatId: '555', text, authorName: name, authorId: id, mine: false })
+    }
+    if (say('!내검', '901', '가').length !== 1) throw new Error('#13-2 first player')
+    if (say('!내검', '902', '나').length !== 1) throw new Error('#13-2 another player within 3s is answered')
+    if (say('!보스', '903', '다').length !== 1) throw new Error('#13-2 boss')
+    const atk = say('!공격', '904', '라')
+    if (atk.length !== 1 || !v.runtime.sword.r.u['904']) throw new Error('#13-2 co-op attack right after 「!보스」 is processed ' + JSON.stringify(atk))
+    if (say('!내검', '901', '가').length !== 0) throw new Error('#13-2 the same player within 3s is still quiet')
+    if (say('!주사위', '905', '마').length !== 0) throw new Error('#13-2 other games keep the room-wide cooldown')
+    // 사람 몫 쿨타임 기록은 1분이 지나면 지운다(runtime 에 쌓이지 않게)
+    const by = v.runtime.gameLastBy.r
+    if (!by['901'] || !by['904']) throw new Error('#13-2 per-player cooldown marks ' + JSON.stringify(by))
+    by['901'] -= 61000
+    by['902'] -= 61000
+    rec.config.minigame.cooldownMs = 0
+    say('!내검', '903', '다')
+    if ('901' in by || '902' in by || !by['903']) throw new Error('#13-2 old per-player marks are dropped ' + JSON.stringify(by))
+    // 방 발송이 밀림 → 「!강화」·「!수락」·「!사냥」은 답이 없고 상태도 그대로(새 사람도 생기지 않는다)
+    const before = JSON.stringify(v.runtime.sword)
+    for (const t of ['!강화', '!수락', '!사냥', '!출석']) {
+      if (say(t, '902', '나', true).length !== 0) throw new Error('#13-2 busy room: no reply to ' + t)
+    }
+    if (say('!강화', '906', '바', true).length !== 0 || JSON.stringify(v.runtime.sword) !== before) throw new Error('#13-2 busy room: nothing changes')
+    if (say('!주사위', '906', '바', true).length !== 1) throw new Error('#13-2 sendBusy only holds the sword game (others queue as before)')
+    const r = say('!강화', '902', '나')
+    if (r.length !== 1 || !/^\[강화 /.test(r[0].text) ||JSON.stringify(v.runtime.sword) === before) throw new Error('#13-2 enhance after the queue drained ' + JSON.stringify(r))
+    // 카드: render 는 열거되지 않는다(JSON·Object.assign 에 안 보임). image 를 읽지 않아도 넘길 수 있다
+    if (typeof r[0].render !== 'function' || Object.keys(r[0]).includes('render')) throw new Error('#13-2 card render hook')
+    if (r[0].render() !== r[0].image) throw new Error('#13-2 render draws once (same as image)')
+    // 사진이 나가면 글은 나가지 않는다: 강화 카드에는 네 결과 모두 결과 제목 · 이름 · 단계 · 검 이름이 그려져 있어야 한다.
+    // 카드 제목은 글 머리와 같거나(성공·실패) 더 자세하다(보호로 지킨 실패 = 「파괴 방어」, 파괴 = 「검 파괴」) — 이 짝을 여기서 고정한다
+    {
+      const A = await import('./sword-art.mjs')
+      const srt = {}
+      let st = Date.now()
+      SW.run(srt, 'r', { cmd: '내검', arg: '', key: '1', name: '카드', prefix: '!', now: st })
+      const ch8 = SW.chance(8)
+      const mid = (ch8.up + ch8.broke / 2) / 100
+      for (const [rand, head, title, arg] of [[0, '강화 성공', '강화 성공', ''], [0.9999, '강화 실패', '강화 실패', ''], [mid, '강화 실패', '파괴 방어', '보호'], [mid, '강화 파괴', '검 파괴', '']]) {
+        Object.assign(srt.sword.r.u['1'], { lv: 8, b: 8, g: 1e6, f: 0, it: { guard: 1 } })
+        const out = SW.run(srt, 'r', { cmd: '강화', arg, key: '1', name: '카드', prefix: '!', now: (st += 20000), rand: () => rand })
+        const svg = out && out.card ? A.cardSvg(out.card) : ''
+        if (!out.text.startsWith('[' + head + ']') || !svg.includes(title) || !svg.includes('카드님의 검') || !svg.includes(SW.swordName(out.card.lv)) || !svg.includes('+' + out.card.lv)) throw new Error('#13-2 the card carries the result line ' + title)
+      }
+    }
+    const plain = F.onInbound(Object.assign({}, rec,{ config: Object.assign({}, rec.config, { minigame: Object.assign({}, rec.config.minigame, { images: false }) }) }), { chatId: '555', text: '!내검', authorName: '나', authorId: '902', mine: false })
+    if (plain.length !== 1 || plain[0].render || plain[0].image) throw new Error('#13-2 images:false → no render hook')
+    // 「!랭킹」: 검 강화가 켜져 있으면 점수가 있든 없든 「!강화랭킹」을 알린다, 꺼져 있으면 그대로
+    const rk = say('!랭킹', '907', '사')
+    if (rk.length !== 1 || rk[0].text !== '아직 점수가 없어요.\n검 강화 순위는 「!강화랭킹」으로 볼 수 있어요.') throw new Error('#13-2 ranking points at the sword ranking ' + JSON.stringify(rk))
+    v.runtime.scores.r = { 907: 2 }
+    const rk1 = say('!랭킹', '908', '아')
+    if (rk1.length !== 1 || !rk1[0].text.startsWith('[랭킹]\n1. ') || !rk1[0].text.endsWith('점\n검 강화 순위는 「!강화랭킹」으로 볼 수 있어요.')) throw new Error('#13-2 ranking with scores still points at the sword ranking ' + JSON.stringify(rk1))
+    const offRec = RF.adapterRecord(view({ products: { roombot: false, minigame: true }, config: { games: { sword: false } } }))
+    const rk2 = F.onInbound(offRec, { chatId: '555', text: '!랭킹', authorName: '사', authorId: '907', mine: false })
+    if (rk2.length !== 1 || rk2[0].text !== '아직 점수가 없어요.') throw new Error('#13-2 sword off → plain ranking ' + JSON.stringify(rk2))
+    // 도움말: 검 강화만 켠 방도 목록이 나온다
+    const only = view({ products: { roombot: false, minigame: true }, config: { games: { word: false, baseball: false, dice: false, rps: false, quiz: false } } })
+    if (RF.helpLine(only) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !랭킹\n\n' + swordHelp('!')) throw new Error('#13-2 sword-only help ' + JSON.stringify(RF.helpLine(only)))
+  }
+  // #13-3 발송 밀림(Pacer.backlog): 대기열 길이 + 방 한도(분당 6)가 찼으면 1. 사진을 올리는 방은 건너뛴다(skip)
+  {
+    const pc = new RF.Pacer({ roomMax: 6, botMax: 30 })
+    const t0 = 2_000_000
+    if (pc.backlog('a', t0) !== 0) throw new Error('#13-3 unknown room')
+    for (let i = 0; i < 6; i++) pc.push('a', { text: 'a' + i }, t0)
+    if (pc.backlog('a', t0) !== 6) throw new Error('#13-3 queue length')
+    for (let i = 0; i < 6; i++) pc.next(t0)
+    if (pc.backlog('a', t0) !== 1) throw new Error('#13-3 a full room window counts as one more')
+    if (pc.backlog('a', t0 + 60000) !== 0) throw new Error('#13-3 window frees after a minute')
+    pc.push('b', { text: 'photo', image: Buffer.from('x') }, t0)
+    pc.push('b', { text: 'after' }, t0)
+    pc.push('c', { text: 'c' }, t0)
+    const skipB = (key) => key === 'b'
+    const n = pc.next(t0, skipB)
+    if (!n || n.key !== 'c' || pc.next(t0, skipB) !== null) throw new Error('#13-3 skip keeps the room (and its order) waiting')
+    if (pc.wakeAt(t0, skipB) !== 0 || pc.wakeAt(t0) !== t0) throw new Error('#13-3 wakeAt skips the same rooms')
+    if (pc.next(t0).item.text !== 'photo' || pc.next(t0).item.text !== 'after') throw new Error('#13-3 order inside the room')
   }
   // #14 격리: 방 A 어댑터의 logsView 에 방 B 기록 없음
   {
@@ -1601,7 +1693,7 @@ async function withLog(fn) {
   {
     const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
     const h = RF.helpLine(v)
-    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n◆ 검 강화\n ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!') + '\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
     const ah = RF.adminHelp(v)
     if (!ah.startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기\n▸ !프로필조회 @닉네임 : 프로필 기록 보기\n▸ !가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n▸ !내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n▸ !금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
     const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
@@ -1775,7 +1867,7 @@ async function withLog(fn) {
     const sent = sentIn(iMini)
     if (sent[0] !== '[K bot]\n미니게임봇이 입장했어요.\n「!도움」을 입력하면 명령어를 볼 수 있어요.') throw new Error('7.7#18 join notice first ' + JSON.stringify(sent))
     if (sent.filter((t) => t.startsWith('《 K bot 명령어 》')).length !== 1) throw new Error('7.7#18 one game list ' + JSON.stringify(sent))
-    if (sent[1] !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n◆ 검 강화\n ▸ !강화 · !내검 · !사냥 · !출석\n ▸ !결투 · !보스 · !강화도움') throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
+    if (sent[1] !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!')) throw new Error('7.7#18 game list text ' + JSON.stringify(sent))
     // 미니게임만 있는 방: !주사위 답, 입장 안내·홍보·가리기 조용
     const before = packets('REWRITE').length
     fs.event(chat, botA.uid, { kind: 'join', user_id: '502', name: '새손님' })
@@ -2607,6 +2699,302 @@ async function withLog(fn) {
       botA.slot.limits.kickD.list.splice(kMark[1])
     }
   }
+  // #41 결과 전달·저장 안전장치(botpool, 가짜 연결)
+  // (a) room_state 읽기 실패: 그 방은 저장·미니게임을 하지 않는다(빈 runtime 이 저장본을 덮지 않음). 늦춰 가며 다시 읽고, 읽으면 저장본으로 이어 간다
+  // (b) 방 발송이 밀리면(대기 3개 이상) 검 강화는 답도 상태 변화도 없다
+  // (c) 한 방의 사진 올리기가 멈춰도 다른 방의 글은 나가고, 멈춘 방은 photoTimeoutMs 뒤 글로 대신 보낸다. 기다림을 넘긴 올리기는
+  //     끝날 때까지 PHOTO_MAX 에 세고 그 방의 다음 글을 붙잡는다(늦은 사진이 새 결과보다 뒤에 올라가지 않게). 업로드 자체의 끝(patch-kakao)
+  // (d) 카드는 대기열에 들어간 뒤 보낼 차례에 그린다(대기열이 차서 건너뛴 답은 그리지 않는다, image 를 미리 읽지 않는다)
+  // (e) 저장 중인 방: 뒤의 저장(멈출 때의 마지막 저장)은 앞선 저장이 끝나기를 기다린다. 게임 답이 나가면 곧(0.3초) 저장한다
+  // (f) 저장본을 못 읽은 방의 메시지는 다시 읽기를 기다리지 않는다(다른 방이 막히지 않게). 멈춘 읽기는 loadTimeoutMs 뒤 실패로 본다
+  // (g) 다시 읽기: 실패한 동안 이 봇이 남긴 프로필 기록은 저장본의 다른 봇 기록보다 앞서고, 재입장 차단은 합친다.
+  //     입장 안내는 읽은 뒤로 미룬다(같은 봇이 이미 안내한 방이면 보내지 않는다)
+  // (h) 방 관리봇 추가 안내: 저장본을 못 읽은 동안 상태가 바뀌어도 잃지 않고, 읽은 뒤의 점검에서 한 번 보낸다
+  {
+    const s = botA.slot
+    const pc = s.pacer
+    const botMax0 = pc.botWin.max
+    const photoMs0 = s.opts.photoTimeoutMs
+    const load0 = store.loadRoomState
+    pc.botWin.max = 100000
+    const iS1 = install('swordx41', { roombot: false, minigame: true, config: {} })
+    const iS2 = install('swordx42', { roombot: false, minigame: true, config: {} })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iS1).state === 'active' && rowOf(iS2).state === 'active', 8000, '#41 rooms join')
+    const c1 = rowOf(iS1).chat_id
+    const c2 = rowOf(iS2).chat_id
+    const roomWide = () => { pc.room(String(iS1)).win.max = 100000; pc.room(String(iS2)).win.max = 100000 }
+    roomWide()
+    const post = (chat, uid, name, text) => fs.event(chat, botA.uid, { kind: 'message', user_id: uid, name, text })
+    const said = (chat) => fs.sentIn(chat).map((x) => x.text)
+    try {
+      await waitFor(() => said(c1).length >= 1 && said(c2).length >= 1, 5000, '#41 join notices')
+      // (a)
+      let v1 = s.byInstall.get(iS1)
+      post(c1, '4101', '보관', '!내검')
+      await waitFor(() => v1.runtime.sword && v1.runtime.sword.r && v1.runtime.sword.r.u['4101'], 5000, '#41 sword player')
+      v1.runtime.sword.r.u['4101'].g = 500000
+      v1.dirty = true
+      await s.flushView(v1)
+      if (store.states.get(iS1).sword.r.u['4101'].g !== 500000) throw new Error('#41 saved before the restart')
+      let failing = true
+      store.loadRoomState = async function (id) {
+        if (failing && Number(id) === iS1) throw new Error('connection terminated unexpectedly')
+        return load0.call(this, id)
+      }
+      await s.dropView(iS1)
+      await pool.reconcile(null)
+      v1 = s.byInstall.get(iS1)
+      if (!v1 || !v1.loadFailed || v1.runtime.sword || !(v1.loadRetryAt > Date.now() + 3000)) throw new Error('#41 a failed read marks the room ' + JSON.stringify(v1 && { f: v1.loadFailed, at: v1.loadRetryAt - Date.now() }))
+      if (s.views.get(c1) !== v1) throw new Error('#41 the room stays routed (moderation keeps working)')
+      roomWide()
+      const n1 = said(c1).length
+      post(c1, '4102', '새사람', '!내검')
+      post(c1, '4102', '새사람', '!도움')
+      await waitFor(() => said(c1).length > n1, 5000, '#41 help still answers')
+      await sleep(300)
+      if (said(c1).length !== n1 + 1 || !said(c1)[n1].startsWith('《 K bot 명령어 》') || v1.runtime.sword) throw new Error('#41 no game while the saved state is unread ' + JSON.stringify(said(c1).slice(n1)))
+      v1.dirty = true
+      await pool.flush()
+      const kept = store.states.get(iS1)
+      if (!kept.sword || kept.sword.r.u['4101'].g !== 500000 || kept.sword.r.u['4102']) throw new Error('#41 a failed read never overwrites the saved row ' + JSON.stringify(kept.sword && Object.keys(kept.sword.r.u)))
+      // 다시 읽기도 실패 → 기다림이 두 배
+      v1.loadRetryAt = 0
+      await waitFor(() => v1.loadFails >= 2, 3000, '#41 retry from tick')
+      if (!v1.loadFailed || !(v1.loadRetryAt > Date.now() + 8000)) throw new Error('#41 backoff doubles ' + (v1.loadRetryAt - Date.now()))
+      // 패널의 랭킹 초기화도 저장본을 읽기 전에는 받지 않는다(임시본을 지우면 저장본이 그대로 남는다)
+      if ((await pool.gamesReset(iS1)).error !== 'busy') throw new Error('#41 games-reset waits for the saved state')
+      // 읽기가 되살아나면: 저장본 그대로, 미니게임도 다시
+      failing = false
+      v1.loadRetryAt = 0
+      await waitFor(() => !v1.loadFailed, 3000, '#41 reload after a failure')
+      if (v1.runtime.sword.r.u['4101'].g !== 500000 || v1.loadFails !== 0) throw new Error('#41 reload keeps the saved row')
+      const n2 = said(c1).length
+      post(c1, '4102', '새사람', '!내검')
+      await waitFor(() => said(c1).length > n2, 5000, '#41 games resume after the reload')
+      await waitFor(() => v1.runtime.sword.r.u['4102'], 3000, '#41 new player after the reload')
+      await pool.flush()
+      const after = store.states.get(iS1).sword.r.u
+      if (after['4101'].g !== 500000 || !after['4102']) throw new Error('#41 saved row after the reload')
+      store.loadRoomState = load0
+
+      // (b) 방 2 대기열에 보내지 않을 글 3개(10분 뒤) → 밀림. 「!강화」는 답도 상태 변화도 없다
+      const v2 = s.byInstall.get(iS2)
+      const key2 = String(iS2)
+      const hold = (n) => { for (let i = 0; i < n; i++) pc.push(key2, { text: 'hold' + i, notBefore: Date.now() + 10 * 60000, chat_id: c2 }, Date.now()) }
+      const unhold = () => { pc.room(key2).queue = pc.room(key2).queue.filter((x) => !String(x.text).startsWith('hold')) }
+      hold(3)
+      if (pc.backlog(key2, Date.now()) < 3) throw new Error('#41 backlog')
+      const m2 = said(c2).length
+      post(c2, '4201', '밀림', '!강화')
+      await sleep(400)
+      if (said(c2).length !== m2 || (v2.runtime.sword && v2.runtime.sword.r && v2.runtime.sword.r.u['4201'])) throw new Error('#41 busy room: enhance is not taken')
+      unhold()
+      post(c2, '4201', '밀림', '!강화')
+      await waitFor(() => said(c2).length > m2, 5000, '#41 enhance once the queue drains')
+      if (!v2.runtime.sword.r.u['4201'] || !(v2.runtime.sword.r.u['4201'].e > 0)) throw new Error('#41 enhance ran')
+
+      // (c) 방 1 사진이 멈춤 → 방 2 글은 바로, 방 1 은 시간이 지나면 글로 대신. 멈춘 올리기가 끝나기 전에는 방 1 의 다음 글을 붙잡는다
+      s.opts.photoTimeoutMs = 600
+      fs.byChat(c1).photoHang = true
+      const p1 = said(c1).length
+      const p2 = said(c2).length
+      const t0 = Date.now()
+      s.sayImage(v1, Buffer.from('not-a-real-png'), { text: '[카드 대신] 방1 결과', what: 'reply' })
+      s.say(v1, '방1 다음 글', { what: 'reply' })
+      s.say(v2, '방2 글', { what: 'reply' })
+      await waitFor(() => said(c2).length > p2, 3000, '#41 other room is not blocked')
+      if (Date.now() - t0 > 500 || said(c1).length !== p1) throw new Error('#41 room 2 went out before room 1 gave up on its photo')
+      await waitFor(() => said(c1).length >= p1 + 1, 5000, '#41 text fallback after the photo timeout')
+      await sleep(300)
+      if (said(c1).length !== p1 + 1 || said(c1)[p1] !== '[카드 대신] 방1 결과') throw new Error('#41 the next text waits for the late upload ' + JSON.stringify(said(c1).slice(p1)))
+      if (s.photoLate.get(String(iS1)) !== 1 || s.photoLateN !== 1 || s.photoBusy.size) throw new Error('#41 the late upload is counted')
+      s.photoBusy.add('x41')
+      const fullNow = s.photoWait('y41', { image: Buffer.from('x') })
+      s.photoBusy.delete('x41')
+      if (!fullNow || s.photoWait('y41', { text: '글' })) throw new Error('#41 a late upload counts toward PHOTO_MAX (text still goes)')
+      // 늦게 올라감 → 그 사진, 그다음에 방 1 의 다음 글
+      fs.byChat(c1).photoHang = false
+      fs.byChat(c1).hung.splice(0).forEach((f) => f(true))
+      await waitFor(() => said(c1).length >= p1 + 3, 3000, '#41 next text after the late upload')
+      if (said(c1)[p1 + 1] !== '(사진)' || said(c1)[p1 + 2] !== '방1 다음 글') throw new Error('#41 late photo, then the next text ' + JSON.stringify(said(c1).slice(p1)))
+      if (s.photoBusy.size || s.photoLate.size || s.photoLateN) throw new Error('#41 photo slots released')
+      // 업로드 자체의 끝(patch-kakao): COMPLETE 기다림 20초, 업로드 서버 연결 10초, 파일 보내기가 멈춰도 COMPLETE 기다림과 함께 끝
+      {
+        const { readFileSync } = await import('node:fs')
+        const { createRequire } = await import('node:module')
+        const am = createRequire(import.meta.url).resolve('agent-messenger/package.json')
+        const mu = readFileSync(new URL('dist/src/platforms/kakaotalk/protocol/media-uploader.js', 'file://' + am), 'utf8')
+        if (!mu.includes('const DEFAULT_COMPLETE_TIMEOUT_MS = 20_000;') || !mu.includes("new Error('media connect timeout (10000ms)')), 10_000)") ||
+          !mu.includes('await Promise.race([conn.writeRaw(Buffer.from(bytesToSend)), completePromise]);')) throw new Error('#41 the media upload is bounded (patch-kakao)')
+      }
+
+      // (d) 그림은 보낼 차례에: 대기열이 차서 건너뛴 카드는 그리지 않는다
+      let drew = 0
+      const draw = () => { drew++; return null }
+      hold(30)
+      s.sayImage(v2, draw, { text: '건너뛴 카드', what: 'reply' })
+      await sleep(100)
+      if (drew !== 0) throw new Error('#41 a refused card is never drawn')
+      unhold()
+      const q2 = said(c2).length
+      s.sayImage(v2, draw, { text: '[그림 없음] 글로', what: 'reply' })
+      if (drew !== 0) throw new Error('#41 not drawn when queued')
+      await waitFor(() => said(c2).length > q2, 3000, '#41 lazy card sent')
+      if (drew !== 1 || said(c2)[q2] !== '[그림 없음] 글로') throw new Error('#41 drawn once at send time, text when there is no picture')
+      // sendAll 은 features 의 카드(image 게터)를 읽지 않고 render 를 넘긴다
+      const probe = { text: '미리 읽지 않음' }
+      Object.defineProperty(probe, 'image', { enumerable: true, get() { throw new Error('image read before the send') } })
+      Object.defineProperty(probe, 'render', { value: () => null })
+      s.sendAll(v2, [probe], 'reply')
+      await waitFor(() => said(c2).includes('미리 읽지 않음'), 3000, '#41 sendAll keeps the card lazy')
+
+      // (e) 주기 저장이 DB 대기열에 묶인 동안(dirty 는 이미 내려감) 뒤의 저장은 바로 끝나지 않고 그 저장을 기다린다
+      {
+        const save0 = store.saveRoomState
+        let gate
+        const gated = new Promise((ok) => { gate = ok })
+        store.saveRoomState = async function (id, rt) {
+          if (Number(id) === iS2) await gated
+          return save0.call(this, id, rt)
+        }
+        v2.runtime.sword.r.u['4201'].g = 4141
+        v2.dirty = true
+        const periodic = s.flushView(v2)
+        let finalDone = false
+        const fin = s.flushView(v2).then(() => { finalDone = true })
+        await sleep(60)
+        if (finalDone || store.states.get(iS2).sword.r.u['4201'].g === 4141) throw new Error('#41 a later flush does not treat a queued save as saved')
+        gate()
+        await Promise.all([periodic, fin])
+        store.saveRoomState = save0
+        if (store.states.get(iS2).sword.r.u['4201'].g !== 4141 || v2.saving) throw new Error('#41 the queued save landed before the later flush returned')
+        // 게임 답이 나가면 주기 저장(5초)을 기다리지 않고 곧 저장한다
+        const n0 = said(c2).length
+        post(c2, '4202', '곧저장', '!내검')
+        await waitFor(() => said(c2).length > n0, 3000, '#41 reply before the soon save')
+        await waitFor(() => store.states.get(iS2).sword.r.u['4202'], 1500, '#41 saved soon after a game reply')
+      }
+
+      // (f) 끝나지 않는 읽기 → loadTimeoutMs 뒤 실패. 다시 읽기가 느려도 그 방의 메시지가 이 봇의 다른 방 답을 붙잡지 않는다
+      const lt0 = s.opts.loadTimeoutMs
+      try {
+        s.opts.loadTimeoutMs = 300
+        store.loadRoomState = async function (id) {
+          if (Number(id) === iS1) return new Promise(() => {})
+          return load0.call(this, id)
+        }
+        await s.dropView(iS1)
+        const keep = setInterval(() => {}, 50) // withTimeout 의 타이머는 unref — 시험 프로세스가 기다리는 동안 살아 있게
+        try {
+          await pool.reconcile(null)
+        } finally {
+          clearInterval(keep)
+        }
+        v1 = s.byInstall.get(iS1)
+        if (!v1 || !v1.loadFailed || v1.loading) throw new Error('#41 a hung read times out into a failed read')
+        store.loadRoomState = async function (id) {
+          if (Number(id) === iS1) {
+            await sleep(1500)
+            throw new Error('slow failure')
+          }
+          return load0.call(this, id)
+        }
+        v1.loadRetryAt = 0
+        const h2 = said(c2).length
+        post(c1, '4103', '실패방', '안녕하세요')
+        await sleep(50)
+        const t1 = Date.now()
+        post(c2, '4203', '다른방', '!도움')
+        await waitFor(() => said(c2).length > h2, 3000, '#41 other room answers while the reload runs')
+        if (Date.now() - t1 > 900) throw new Error('#41 a message in a failed room does not hold the queue ' + (Date.now() - t1))
+        await waitFor(() => !v1.loading, 3000, '#41 slow retry ends')
+      } finally {
+        s.opts.loadTimeoutMs = lt0
+      }
+
+      // (g) 다시 읽기 합치기 · 미룬 입장 안내
+      store.loadRoomState = async function (id) {
+        if (Number(id) === iS1) throw new Error('read failed')
+        return load0.call(this, id)
+      }
+      await s.dropView(iS1)
+      const old = store.states.get(iS1)
+      old.prof = { open: false, pli: '', nn: '옛봇', chat: c1, by: 'bot.old', at: 1 }
+      old.welcomed = { chat: c1, by: 'bot.old', roombot: false }
+      old.bans = { 111: { at: Date.now(), name: '옛차단' } }
+      await pool.reconcile(null)
+      v1 = s.byInstall.get(iS1)
+      if (!v1.loadFailed) throw new Error('#41 (g) failed read')
+      v1.loadRetryAt = Date.now() + 60000
+      s.noteSelf(v1, { open: false, pli: '', nn: '새봇' }, { noQueue: true })
+      RF.noteBan(v1.runtime, '222', '나간사람', Date.now())
+      const j1 = said(c1).length
+      await s.joinNotices(v1)
+      if (said(c1).length !== j1 || !v1.joinPending) throw new Error('#41 (g) no join notice while the saved state is unread')
+      store.loadRoomState = load0
+      v1.loadRetryAt = 0
+      await waitFor(() => !v1.loadFailed, 3000, '#41 (g) reload')
+      const pf = s.profOf(v1)
+      if (!pf || pf.nn !== '새봇' || !RF.bannedNow(v1.runtime, '111', Date.now()) || !RF.bannedNow(v1.runtime, '222', Date.now()) || !v1.dirty) {
+        throw new Error('#41 (g) this bot\'s profile record and the new ban survive the reload ' + JSON.stringify({ prof: v1.runtime.prof, bans: v1.runtime.bans }))
+      }
+      await waitFor(() => said(c1).length > j1, 3000, '#41 (g) join notice after the reload')
+      await sleep(100)
+      if (said(c1).length !== j1 + 1 || !said(c1)[j1].startsWith('[K bot]\n') || !s.noticed(v1, 'welcomed') || v1.joinPending) throw new Error('#41 (g) one join notice after the reload ' + JSON.stringify(said(c1).slice(j1)))
+      // 같은 봇이 같은 방에 다시 들어왔는데 읽기가 실패 → 읽은 뒤 저장본의 표시가 막는다(다시 안내하지 않는다)
+      await s.flushView(v1)
+      store.loadRoomState = async function (id) {
+        if (Number(id) === iS1) throw new Error('read failed')
+        return load0.call(this, id)
+      }
+      await s.dropView(iS1)
+      await pool.reconcile(null)
+      v1 = s.byInstall.get(iS1)
+      v1.loadRetryAt = Date.now() + 60000
+      await s.joinNotices(v1)
+      store.loadRoomState = load0
+      v1.loadRetryAt = 0
+      await waitFor(() => !v1.loadFailed, 3000, '#41 (g) reload 2')
+      await sleep(150)
+      if (said(c1).length !== j1 + 1 || v1.joinPending) throw new Error('#41 (g) the saved notice mark stops a second join notice')
+
+      // (h) 미니게임 방에 방 관리봇이 붙었는데(부방장 아님) 저장본을 못 읽음 → 상태는 바뀌고 안내는 미룸 → 읽은 뒤 점검에서 한 번
+      {
+        const prod0 = v2.products
+        v2.products = { roombot: true, minigame: true }
+        v2.perm = 2
+        v2.loadFailed = true
+        v2.loadRetryAt = Date.now() + 60000
+        const a0 = said(c2).length
+        try {
+          await s.applyPerm(v2, 2)
+          if (v2.state !== 'waiting_host' || !v2.addedPending || said(c2).length !== a0) throw new Error('#41 (h) deferred while unread')
+          await s.applyPerm(v2, 2)
+          v2.loadFailed = false
+          v2.loadRetryAt = 0
+          await s.applyPerm(v2, 2)
+          await waitFor(() => said(c2).length > a0, 3000, '#41 (h) added notice after the reload')
+          await s.applyPerm(v2, 2)
+          await sleep(100)
+          if (said(c2).length !== a0 + 1 || said(c2)[a0] !== RF.roombotAddedNotice(v2, s.nameIn(v2)) || v2.addedPending) throw new Error('#41 (h) one added notice ' + JSON.stringify(said(c2).slice(a0)))
+        } finally {
+          v2.loadFailed = false
+          v2.products = prod0
+          await s.applyPerm(v2, 2)
+        }
+        if (v2.state !== 'active') throw new Error('#41 (h) back to a minigame room')
+      }
+    } finally {
+      store.loadRoomState = load0
+      s.opts.photoTimeoutMs = photoMs0
+      pc.botWin.max = botMax0
+      if (fs.byChat(c1)) {
+        fs.byChat(c1).photoHang = false
+        for (const f of (fs.byChat(c1).hung || []).splice(0)) f(false)
+      }
+    }
+  }
   botA.slot.joinH.list.splice(joinMark[0])
   botA.slot.joinD.list.splice(joinMark[1])
 
@@ -3199,6 +3587,37 @@ async function withLog(fn) {
     if ((await newOwner.tick()) !== 'mine') throw new Error('owner: a live owner beats again')
     await newHub.pool.stop()
     store.senderOwner = null
+  }
+
+  // #41(i) 멈출 때의 마지막 저장(BotPool.finalFlush, index.mjs): 새 메시지는 받지 않고, DB 대기열에 묶인 저장을 기다린 뒤
+  // 남은 것까지 저장한다(저장을 시작한 뒤 처리한 결과가 방에만 보이고 되돌아가지 않게)
+  {
+    const s = botA.slot
+    const v = [...s.byInstall.values()].find((x) => x.chat_id && x.state === 'active' && x.runtime.sword && x.runtime.sword.r)
+    if (!v) throw new Error('#41(i) a sword room')
+    const uid = Object.keys(v.runtime.sword.r.u)[0]
+    const save0 = store.saveRoomState
+    let gate
+    const gated = new Promise((ok) => { gate = ok })
+    store.saveRoomState = async function (id, rt) {
+      await gated
+      return save0.call(this, id, rt)
+    }
+    v.runtime.sword.r.u[uid].g = 4242
+    v.dirty = true
+    const periodic = pool.flush()
+    let done = false
+    const fin = pool.finalFlush().then(() => { done = true })
+    await sleep(60)
+    if (done) throw new Error('#41(i) the final save waits for the save in flight')
+    const before = JSON.stringify(v.runtime.sword)
+    fs.event(v.chat_id, botA.uid, { kind: 'message', user_id: '4199', name: '늦은사람', text: '!사냥' })
+    await sleep(200)
+    if (JSON.stringify(v.runtime.sword) !== before || !s.closing) throw new Error('#41(i) no new message is handled while closing')
+    gate()
+    await Promise.all([periodic, fin])
+    store.saveRoomState = save0
+    if (store.states.get(v.install_id).sword.r.u[uid].g !== 4242) throw new Error('#41(i) the room is saved')
   }
 
   await pool.stop()

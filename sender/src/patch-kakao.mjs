@@ -126,6 +126,29 @@ export function patchKakaoLibrary() {
   const mediaPath = join(base, 'protocol/media-uploader.js')
   let media = readFileSync(mediaPath, 'utf8')
   media = replaceOnce('post size', media, 's: totalSize,', 's: Long.fromNumber(totalSize),')
+  // 사진 올리기에 끝을 둔다(멈춘 업로드가 그 방의 답을 오래 붙잡지 않게, botpool sendPhoto): COMPLETE 기다림 60초 → 20초,
+  // 업로드 서버 연결 10초. 파일을 보내다 멈춰도(쓰기가 끝나지 않음) COMPLETE 기다림이 끝나면 함께 끝낸다.
+  media = replaceOnce('complete timeout', media, 'const DEFAULT_COMPLETE_TIMEOUT_MS = 60_000;', 'const DEFAULT_COMPLETE_TIMEOUT_MS = 20_000;')
+  media = replaceOnce(
+    'media connect timeout',
+    media,
+    `    await conn.connectSecure(opts.shipHost, opts.shipPort);
+`,
+    `    const connectTimer = setTimeout(() => conn.socket?.destroy(new Error('media connect timeout (10000ms)')), 10_000);
+    try {
+        await conn.connectSecure(opts.shipHost, opts.shipPort);
+    }
+    finally {
+        clearTimeout(connectTimer);
+    }
+`,
+  )
+  media = replaceOnce(
+    'media stream bound',
+    media,
+    '            await conn.writeRaw(Buffer.from(bytesToSend));',
+    '            await Promise.race([conn.writeRaw(Buffer.from(bytesToSend)), completePromise]);',
+  )
   writeFileSync(mediaPath, media)
 
   const clientPath = join(base, 'client.js')

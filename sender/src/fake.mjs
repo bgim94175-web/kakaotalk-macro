@@ -861,10 +861,13 @@ export class FakeKakaoClient {
 
   // 사진: 방에는 '(사진)' 한 줄로 남기고, 그림 크기(PNG 머리의 폭·높이)를 extra 에 적는다. 그림 자체는 server.photos(메모리)에.
   // 방 시험 스위치 r.photoFail: 사진 보내기를 실패로 돌려준다(글로 대신 보내는지 본다).
+  // r.photoHang: 올리기가 멈춘다(봇이 기다리다 글로 대신 보내는지, 다른 방이 막히지 않는지 본다). 멈춘 올리기는 r.hung 의 함수로
+  // 끝낸다: f(true) 면 그때 방에 사진이 올라가고(늦은 사진), f(false) 면 실패로 끝난다.
   async sendPhoto(chatId, buf) {
     await this.acquireSession()
     const r = this.server.byChat(chatId)
     if (r && r.photoFail) return { success: false, status_code: -500 }
+    if (r && r.photoHang && !(await new Promise((ok) => (r.hung || (r.hung = [])).push(ok)))) return { success: false, status_code: -500 }
     const b = Buffer.isBuffer(buf) ? buf : null
     const png = b && b.length > 24 && b.readUInt32BE(12) === 0x49484452 ? { w: b.readUInt32BE(16), h: b.readUInt32BE(20) } : null
     const w = this.server.write(this.userId, chatId, '(사진)', JSON.stringify({ photo: true, bytes: b ? b.length : 0, w: png ? png.w : 0, h: png ? png.h : 0 }))
