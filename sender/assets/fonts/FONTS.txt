@@ -1,0 +1,14 @@
+카드 그림(card.mjs)에 쓰는 글꼴. 모두 assets/fonts 에 있고, 바깥 글꼴은 읽지 않는다.
+
+Pretendard-Regular.otf, Pretendard-Bold.otf
+  기본 글꼴. Copyright (c) 2021, Kil Hyung-jin. SIL Open Font License 1.1 (OFL.txt).
+
+대체 글꼴 — Pretendard 에 없는 글자만 이 순서로 찾아 쓴다(glyphs.mjs FALLBACK).
+  NotoSans.ttf, NotoSansMath.ttf, NotoSansSymbols.ttf, NotoSansSymbols2.ttf, NotoEmoji.ttf, NotoSansJP.ttf,
+  NotoSansJavanese.ttf, NotoSansOriya.ttf, NotoSansCanadianAboriginal.ttf, NotoSansEgyptianHieroglyphs.ttf
+    Copyright 2012-2024 The Noto Project Authors (https://github.com/notofonts). SIL Open Font License 1.1
+    (OFL.txt 의 허가 본문과 같다). 원본: https://github.com/google/fonts (ofl/noto*).
+  Unifont.otf, UnifontUpper.otf (GNU Unifont 16.0.01)
+    Copyright (C) 1998-2024 Roman Czyborra, Paul Hardy, Qianqian Fang, Andrew Miller, Johnnie Weaver, David Corbett,
+    Nils Moskopp, Rebecca Bettencourt, et al. SIL Open Font License 1.1 / GNU GPL 2+ with the GNU font embedding
+    exception 이중 허가 — 여기서는 OFL 1.1 로 쓴다. 원본: https://unifoundry.com/unifont/
