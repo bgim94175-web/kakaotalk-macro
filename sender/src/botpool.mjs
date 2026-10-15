@@ -677,7 +677,7 @@ export class BotPool {
     if (rt.scores) rt.scores.r = {}
     if (rt.names) rt.names.r = {}
     if (rt.games) delete rt.games.r
-    // 검 강화(sword.mjs, 방 열쇠 r)·몬스터 수집(monster.mjs) 기록도 지운다(docs/ACCOUNTS_V1.md 7.3.3)
+    // 검 강화(sword.mjs, 방 열쇠 r) 기록도 지운다(docs/ACCOUNTS_V1.md 7.3.3). mon 은 없앤 몬스터 수집의 예전 기록
     if (rt.sword) delete rt.sword.r
     delete rt.mon
     if (got.slot) got.view.dirty = true

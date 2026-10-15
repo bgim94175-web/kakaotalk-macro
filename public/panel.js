@@ -3584,7 +3584,7 @@
     }
     if (r === 'r-games') {
       setSw('r-games-on', c.games.enabled);
-      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword', 'monster'].forEach(function (g) { setSw('r-games-' + g, c.games[g] !== false); });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (g) { setSw('r-games-' + g, c.games[g] !== false); });
       setNum('r-games-cool', c.games.cooldownSec);
       setNum('r-games-limit', c.games.dailyLimit);
     }
@@ -3632,7 +3632,7 @@
     if (r === 'r-guard') return { guard: { enabled: $('r-guard-on').checked, secs: numVal('r-guard-secs'), count: numVal('r-guard-count') } };
     if (r === 'r-games') {
       var g = { enabled: $('r-games-on').checked };
-      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword', 'monster'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
+      ['word', 'baseball', 'dice', 'rps', 'quiz', 'sword'].forEach(function (k) { g[k] = $('r-games-' + k).checked; });
       g.cooldownSec = numVal('r-games-cool');
       g.dailyLimit = numVal('r-games-limit');
       return { games: g };
@@ -3796,11 +3796,10 @@
         if (c.hide && c.hide.command) roomCmds.push(pfx + '가리기');
         roomCmds.push(pfx + '내보내기', pfx + '설정');
       }
-      // 추억의 검 강화(sender/src/sword.mjs HELP_CMDS) · 몬스터 수집(sender/src/monster.mjs HELP_CMDS)
+      // 추억의 검 강화(sender/src/sword.mjs HELP_CMDS)
       var swordCmds = $('r-games-sword').checked ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map(function (x) { return pfx + x; }) : [];
-      var monCmds = $('r-games-monster').checked ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map(function (x) { return pfx + x; }) : [];
       $('r-games-preview-t').textContent = helpCard('K bot 명령어', [
-        { name: '미니게임', cmds: out }, { name: '검 강화', cmds: swordCmds }, { name: '몬스터 수집', cmds: monCmds }, { name: '방 관리', cmds: roomCmds }
+        { name: '미니게임', cmds: out }, { name: '검 강화', cmds: swordCmds }, { name: '방 관리', cmds: roomCmds }
       ], roomCmds.length ? '「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');
     }
   }
@@ -4250,7 +4249,7 @@
     }
   }
   function rankAsk() {
-    $('r-rank-act').innerHTML = '<span class="q">랭킹과 검 강화·몬스터 수집 기록을 초기화합니다.</span><button type="button" class="btn sm" data-rank-no>취소</button>' +
+    $('r-rank-act').innerHTML = '<span class="q">랭킹과 검 강화 기록을 초기화합니다.</span><button type="button" class="btn sm" data-rank-no>취소</button>' +
       '<button type="button" class="btn sm danger solid" data-rank-yes><span class="spin"></span><span class="lbl-idle">초기화</span></button>';
     qs('[data-rank-no]', $('r-rank-act')).focus();
   }

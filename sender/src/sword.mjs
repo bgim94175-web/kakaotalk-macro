@@ -276,7 +276,7 @@ export function run(runtime, roomKey, req) {
 
 /**
  * 이 사람(key)이 받은, 아직 살아 있는 거래 제안 중 가장 최근 것의 시각(ms). 없으면 0. 상태를 바꾸지 않는다.
- * features 가 「수락」·「거절」을 검 강화와 몬스터 수집 중 어느 쪽에 넘길지 고를 때 쓴다.
+ * features 가 「수락」·「거절」을 검 강화에 넘길지 고를 때 쓴다.
  */
 export function offerAt(runtime, roomKey, key, now) {
   const s = isObj(runtime && runtime.sword) ? runtime.sword[roomKey] : null

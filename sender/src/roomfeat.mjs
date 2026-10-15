@@ -30,7 +30,7 @@ export const DEFAULTS = Object.freeze({
   hide: { command: true, by: 'staff', target: 'members' },
   guard: { enabled: false, secs: 30, count: 5 },
   cmd: { link: 'staff' },
-  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, sword: true, monster: true, cooldownSec: 3, dailyLimit: 0 },
+  games: { enabled: true, word: true, baseball: true, dice: true, rps: true, quiz: true, sword: true, cooldownSec: 3, dailyLimit: 0 },
 })
 
 const B = { t: 'bool' }
@@ -46,7 +46,7 @@ const SPEC = {
   hide: { command: B, by: E(['staff', 'host']), target: E(['members', 'staff']) },
   guard: { enabled: B, secs: I(5, 300), count: I(3, 30) },
   cmd: { link: E(['staff', 'all', 'off']) },
-  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, sword: B, monster: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
+  games: { enabled: B, word: B, baseball: B, dice: B, rps: B, quiz: B, sword: B, cooldownSec: I(1, 60), dailyLimit: I(0, 5000) },
 }
 
 function isObj(v) {
@@ -225,7 +225,6 @@ export function adapterRecord(view, botId) {
         rps: g.rps,
         quiz: g.quiz,
         sword: g.sword,
-        monster: g.monster,
         cooldownMs: g.cooldownSec * 1000,
         dailyLimit: g.dailyLimit,
         byId: true,
@@ -1018,7 +1017,7 @@ export function hideDoneNotice(done, failed) {
 
 /**
  * 켜진 게임과 방 관리 명령어의 목록(helpcard.mjs 모양). 아무것도 없으면 ''.
- * 《 K bot 명령어 》 / ━ / ◆ 미니게임 · ◆ 검 강화 · ◆ 몬스터 수집 · ◆ 방 관리 묶음 / ━ / 「!도움 관리」 안내
+ * 《 K bot 명령어 》 / ━ / ◆ 미니게임 · ◆ 검 강화 · ◆ 방 관리 묶음 / ━ / 「!도움 관리」 안내
  */
 export function helpLine(view) {
   const cfg = view.cfg
@@ -1036,14 +1035,11 @@ export function helpLine(view) {
   }
   // 추억의 검 강화(sword.mjs HELP_CMDS 와 같은 목록 — sword-check 가 맞춰 본다)
   const sword = gamesLive(view) && cfg.games.sword ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map((c) => p + c) : []
-  // 몬스터 수집(monster.mjs HELP_CMDS 와 같은 목록 — monster-check 가 맞춰 본다)
-  const monster = gamesLive(view) && cfg.games.monster ? ['탐험', '포획', '도감', '내몬스터', '배틀', '교환', '레이드', '도전', '몬스터'].map((c) => p + c) : []
   const room = roomCommandNames(view)
   if (!games.length && !room.length) return ''
   return helpCard('K bot 명령어', [
     { name: '미니게임', cmds: games },
     { name: '검 강화', cmds: sword },
-    { name: '몬스터 수집', cmds: monster },
     { name: '방 관리', cmds: room },
   ], room.length ? `「${p}도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.` : '')
 }
