@@ -58,9 +58,11 @@ function spark(x, y, s, color, op) {
   return `<path d="M${x} ${r1(y - s)} Q${x} ${y} ${r1(x + s)} ${y} Q${x} ${y} ${x} ${r1(y + s)} Q${x} ${y} ${r1(x - s)} ${y} Q${x} ${y} ${x} ${r1(y - s)} Z" fill="${color}" fill-opacity="${op}"/>`
 }
 
-// 이름의 첫 글자(동그라미). 한글·영문 첫 글자, 없으면 ?
+// 이름의 첫 글자(동그라미). 꾸밈 기호(꧁ ୨ ✿ …)는 건너뛰고 첫 한글 → 영문·숫자 → 다른 글자, 없으면 첫 글자(그것도 없으면 ?)
 function initialOf(name) {
-  const ch = [...String(name || '').trim()][0] || '?'
+  const chars = [...String(name || '').trim()]
+  const ch = chars.find((x) => /[가-힣]/.test(x)) || chars.find((x) => /[A-Za-z0-9]/.test(x)) ||
+    chars.find((x) => /[\p{L}\p{N}]/u.test(x) && !/[\u0b00-\u0b7f\ua980-\ua9df]/.test(x)) || chars[0] || '?'
   return /[a-z]/.test(ch) ? ch.toUpperCase() : ch
 }
 

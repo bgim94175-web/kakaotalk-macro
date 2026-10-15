@@ -1,14 +1,16 @@
 // 봇이 방에 보내는 이미지(로그 카드 · 게임 그림). SVG 를 그려 PNG 로 바꾼다(@resvg/resvg-js, 글꼴은 assets/fonts 의 Pretendard).
+// Pretendard 에 없는 글자(꾸민 닉네임의 특수문자·이모지 등)는 glyphs.mjs 가 고른 대체 글꼴로 그린다.
 // 카카오톡·LOCO 와 상관없는 순수 모듈 — 같은 입력이면 같은 그림. 렌더러를 못 불러오면 available() 이 false 이고,
 // 부르는 쪽은 글로 대신 보낸다(이미지가 안 돼도 안내는 빠지지 않는다).
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { glyphPlanner, isDropped } from './glyphs.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FONT_DIR = join(HERE, '..', 'assets', 'fonts')
 export const FONT = 'Pretendard'
-const FONT_FILES = [join(FONT_DIR, 'Pretendard-Regular.otf'), join(FONT_DIR, 'Pretendard-Bold.otf')]
+const planGlyphs = glyphPlanner(FONT_DIR, ['Pretendard-Regular.otf', 'Pretendard-Bold.otf'])
 
 let Resvg = null
 let loadError = ''
@@ -31,9 +33,10 @@ export function unavailableReason() {
 export function svgToPng(svg, width) {
   if (!Resvg) return null
   try {
-    const opts = { font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: FONT } }
+    const p = planGlyphs(svg)
+    const opts = { font: { fontFiles: p.files, loadSystemFonts: false, defaultFontFamily: FONT } }
     if (width) opts.fitTo = { mode: 'width', value: width }
-    return new Resvg(String(svg), opts).render().asPng()
+    return new Resvg(p.svg, opts).render().asPng()
   } catch {
     return null
   }
@@ -56,6 +59,10 @@ function charEm(ch, bold) {
   else if (/[mwMW@]/.test(ch)) w = 0.86
   else if (/[A-Z0-9]/.test(ch)) w = 0.64
   else if (c < 0x80) w = 0.54
+  else if (isDropped(c)) w = 0
+  else if (c >= 0xa980 && c <= 0xa9df) w = 1.9 // 자바 문자(꧁ ꧂)는 넓다
+  else if (c >= 0x1d400 && c <= 0x1d7ff) w = 0.8 // 수학 문자(𝓚 𝐀)
+  else if ((c >= 0x1f000 && c <= 0x1faff) || (c >= 0x13000 && c <= 0x1342f)) w = 1.15 // 이모지 · 상형 문자
   else w = 1.0
   return bold ? w * 1.04 : w
 }
