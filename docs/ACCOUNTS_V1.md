@@ -1996,3 +1996,8 @@ function loadChannelIO() {
 ```
 
 부팅 옵션(`ChannelIO('boot', opts, cb)`): `pluginKey`(필수), `memberId`·`memberHash`(서버가 준 경우만), `profile: {name: login_id}`(로그인한 경우만), `language: 'ko'`, `appearance: 'dark'`, `hideChannelButtonOnBoot: true`. 상담 창 열기: `ChannelIO('openChat', undefined, 미리 채울 글)`. 끄기: `ChannelIO('shutdown')`.
+
+### 부록 · 받은 갠톡 화면과 빠른 답장
+
+- 목록: 사람마다 정해진 색의 동그라미(이름의 첫 한글·영문·숫자·한자, 없으면 사람 아이콘 — 이모지로 시작하는 이름도 글자를 찾는다), 이름 · 받은 계정 꼬리표(계정 색 점 + 전화번호 끝 4자리 또는 아이디) · 시각 / 미리 보기 · 안 읽음 배지 두 줄. 계정 칩은 `010-1234-5678` 모양. 대화는 같은 사람의 이어진 글을 묶고(첫 글에만 동그라미), 내가 보낸 글은 파란 말풍선.
+- 빠른 답장: 입력창 위 버튼 줄. 누르면 적어 둔 글을 열린 대화에 바로 보낸다(`/panel/api/chat/send`, 입력창에 쓰던 글은 그대로). `편집`에서 버튼 이름(16자)·메시지(1,000자)를 추가·수정·삭제·순서 바꾸기, 최대 12개. 회원마다 `members.quick_replies`(JSONB, NULL = 저장한 적 없음 → 예시 3개) 에 저장(`GET`·`POST /panel/api/quick-replies`, 검사 `lib/quick-replies.js`, 점검 `lib/quick-replies-check.js`). 모든 계정의 갠톡에서 같이 쓴다.

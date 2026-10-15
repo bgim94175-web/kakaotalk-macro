@@ -1743,9 +1743,44 @@
   function stateLabel(st) { return STATE_LABEL[st] || ''; }
   function canSend(id) { var st = stateOf(id); return st !== 'needs_register' && st !== 'sender_down'; }
 
+  // 동그라미 글자: 이름에서 처음 나오는 한글·영문·숫자·한자(이모지·기호로 시작하는 이름도 글자를 찾는다). 없으면 ''(사람 아이콘)
   function initialOf(name) {
-    var s = String(name || '').trim();
-    return s ? s.slice(0, 1).toUpperCase() : '?';
+    var m = String(name || '').match(/[\uac00-\ud7a3\u3131-\u318ea-zA-Z0-9\u3040-\u30ff\u4e00-\u9fff]/);
+    return m ? m[0].toUpperCase() : '';
+  }
+  // 이름마다 같은 색(6가지, 디스코드처럼 사람마다 색이 정해진다)
+  function hueOf(seed) {
+    var s = String(seed || ''), h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 6;
+  }
+  function setAv(node, name, seed) {
+    if (!node) return;
+    node.classList.remove('c0', 'c1', 'c2', 'c3', 'c4', 'c5');
+    node.classList.add('c' + hueOf(seed || name));
+    var ch = initialOf(name);
+    if (ch) node.textContent = ch;
+    else node.innerHTML = ic('user', 16);
+  }
+  // 계정 표시: 전화번호 계정은 010-1234-5678, 이메일은 @ 앞
+  function accName(email) {
+    var s = short(email);
+    var d = s.replace(/[^0-9]/g, '');
+    if (/^0\d{9,10}$/.test(s)) return d.length === 11 ? d.slice(0, 3) + '-' + d.slice(3, 7) + '-' + d.slice(7) : d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6);
+    return s;
+  }
+  function accIdx(deviceId) {
+    for (var i = 0; i < inboxSt.accounts.length; i++) if (inboxSt.accounts[i].device_id === deviceId) return i % 6;
+    return 0;
+  }
+  // 대화 줄의 계정 꼬리표: 계정 색 점 + 끝 4자리(전화번호) 또는 아이디
+  function accTag(deviceId, email) {
+    var s = short(email);
+    var tag = el('span', 'kkt-acc2');
+    tag.title = email || '';
+    tag.appendChild(el('i', 'adot c' + accIdx(deviceId)));
+    tag.appendChild(document.createTextNode(/^[+0-9]{8,}$/.test(s) ? s.slice(-4) : s));
+    return tag;
   }
   function updateComposeState() {
     if (!chatForm || !chatText) return;
@@ -1792,6 +1827,8 @@
   function setComposeEnabled(on) {
     if (chatText) chatText.disabled = !on;
     if (chatSend) chatSend.disabled = !on;
+    var qb = document.getElementById('qr-bar');
+    if (qb) qb.classList.toggle('off', !on);
   }
   function autoGrow() {
     if (!chatText) return;
@@ -1922,7 +1959,8 @@
       b.dataset.state = st;
       b.setAttribute('aria-pressed', ui.filter === a.device_id ? 'true' : 'false');
       b.setAttribute('aria-label', a.email + ' · ' + stateLabel(st) + (n ? ' · 안 읽음 ' + n : ''));
-      var name = el('span', 'mono', short(a.email));
+      b.appendChild(el('i', 'adot c' + accIdx(a.device_id)));
+      var name = el('span', 'mono', accName(a.email));
       name.title = a.email;
       b.appendChild(name);
       var badge = el('span', 'n rail-badge', n ? badgeText(n) : '');
@@ -2020,29 +2058,34 @@
       row.dataset.device = c.device_id;
       row.dataset.key = key;
       row.setAttribute('aria-current', isOpen ? 'true' : 'false');
-      var ava = el('span', 'av', initialOf(name));
+      var ava = el('span', 'av');
+      setAv(ava, name, c.chat_id + name);
       ava.setAttribute('aria-hidden', 'true');
       var meta = el('span', 'meta');
+      var top = el('span', 'kkt-top');
       var nm = el('span', 'nm kkt-name');
       nm.appendChild(el('b', '', name));
       if (chip) {
         var owner = accOf(c.device_id);
-        nm.appendChild(accChip(c.email || (owner ? owner.email : '')));
+        nm.appendChild(accTag(c.device_id, c.email || (owner ? owner.email : '')));
       }
-      meta.appendChild(nm);
-      meta.appendChild(el('span', 'pv', c.preview || ''));
-      var tm = el('span', 'tm');
+      top.appendChild(nm);
       var t = el('time', 'kkt-time', fmtListTime(c.last_at));
       if (c.last_at) { try { t.setAttribute('datetime', new Date(Number(c.last_at)).toISOString()); } catch (e) { /* 시각이 없으면 비워 둔다 */ } }
-      tm.appendChild(t);
+      top.appendChild(t);
+      var bot = el('span', 'kkt-bot');
+      bot.appendChild(el('span', 'pv', c.preview || '새 대화'));
       // 열어 둔 방은 읽는 중이다. 서버가 0 으로 돌리기 전까지 잠깐 뜨는 배지를 숨긴다.
+      var tm = el('span', 'tm');
       if (showBadge) {
         tm.appendChild(el('span', 'sr', '안 읽음 '));
         tm.appendChild(el('b', 'kkt-badge badge-n', badgeText(c.unread)));
       }
+      bot.appendChild(tm);
+      meta.appendChild(top);
+      meta.appendChild(bot);
       row.appendChild(ava);
       row.appendChild(meta);
-      row.appendChild(tm);
       if (Object.prototype.hasOwnProperty.call(inboxSt.prevUnread, key) && inboxSt.prevUnread[key] < (c.unread || 0) && !reducedMotion()) {
         row.classList.add('bump');
         setTimeout(function () { row.classList.remove('bump'); }, 950);
@@ -2250,7 +2293,7 @@
     chat.roomAgain = false;
     var a = accOf(deviceId);
     chatPeer.textContent = name;
-    if (chatHeadAva) { chatHeadAva.textContent = initialOf(name); chatHeadAva.hidden = false; }
+    if (chatHeadAva) { setAv(chatHeadAva, name, chatId + name); chatHeadAva.hidden = false; }
     setHeadSub(a ? a.email : '');
     setThreadState(stateOf(deviceId));
     if (threadSettings) threadSettings.hidden = false;
@@ -2274,6 +2317,7 @@
     chatLog.appendChild(logEmpty('불러오는 중'));
     if (chatNewpill) chatNewpill.hidden = true;
     loadThread(true);
+    loadQuick();
     if (chat.roomTimer) clearInterval(chat.roomTimer);
     chat.roomTimer = setInterval(function () {
       if (document.hidden || !chat.openId) return;
@@ -2450,9 +2494,10 @@
       return;
     }
     var owner = accOf(chat.deviceId);
-    var mineTag = owner ? short(owner.email) : '';
+    var mineTag = owner ? accName(owner.email) : '';
     var lastDay = '';
     var fresh = 0;
+    var prevSide = '';
     messages.forEach(function (m, i) {
       var day = fmtDay(m.at);
       if (day && day !== lastDay) {
@@ -2460,9 +2505,19 @@
         sep.setAttribute('role', 'separator');
         chatLog.appendChild(sep);
         lastDay = day;
+        prevSide = '';
       }
+      var side = m.mine ? 'me' : 'them';
       var isNew = !initial && m.log_id && !prevIds[m.log_id];
-      var line = el('div', 'kkt-line ' + (m.mine ? 'me' : 'them'));
+      // 같은 사람이 이어서 보낸 글은 묶는다(첫 글에만 동그라미, 사이는 좁게)
+      var line = el('div', 'kkt-line ' + side + (side === prevSide ? ' cont' : ''));
+      if (side === 'them' && side !== prevSide) {
+        var fav = el('span', 'av kkt-av');
+        fav.setAttribute('aria-hidden', 'true');
+        setAv(fav, chat.openName, chat.openId + chat.openName);
+        line.appendChild(fav);
+      }
+      prevSide = side;
       if (m.log_id) line.dataset.log = String(m.log_id);
       if (isNew) { line.classList.add('enter'); fresh += 1; }
       else if (firstOpen && initial) { line.classList.add('enter'); line.style.setProperty('--i', String(Math.min(i, 8))); }
@@ -2491,35 +2546,174 @@
     if (!initial && fresh && chatLive) chatLive.textContent = '새 메시지 ' + fresh + '건 · ' + chat.openName;
   }
 
-  async function sendChat() {
-    if (!chat.openId || chat.sending) return;
-    var text = chatText.value;
-    if (!text.trim()) return;
+  // preset: 빠른 답장 버튼의 글(입력창에 쓰던 글은 그대로 둔다)
+  async function sendChat(preset) {
+    if (!chat.openId || chat.sending) return false;
+    var usePreset = typeof preset === 'string';
+    var text = usePreset ? preset : chatText.value;
+    if (!text.trim()) return false;
     var dev = chat.deviceId;
     var room = chat.openId;
     chat.sending = true;
     chatSend.disabled = true;
     try {
       await api('/panel/api/chat/send', { device_id: chat.deviceId, chat_id: chat.openId, text: text });
-      if (chat.deviceId !== dev || chat.openId !== room) return;
-      chatText.value = '';
-      autoGrow();
-      updateComposeState();
-      updateCount();
+      if (chat.deviceId !== dev || chat.openId !== room) return true;
+      if (!usePreset) {
+        chatText.value = '';
+        autoGrow();
+        updateComposeState();
+        updateCount();
+      }
       setNote('', '');
       await loadThread(true);          // 읽는 중이면 roomAgain 으로 한 번 더 → 보낸 글이 바로 보인다
       loadInbox(false);
+      return true;
     } catch (e) {
-      if (chat.deviceId !== dev || chat.openId !== room) return;
+      if (chat.deviceId !== dev || chat.openId !== room) return false;
       if (e && e.status === 409) setNote('reg', '카카오 로그인이 끊겼습니다. 계정 화면에서 다시 등록해 주세요.');
       else if (e && e.status === 503) setNote('', (e.body && e.body.error) || '발송 서버가 멈춰 있습니다.');
       else setNote('', '메시지를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+      return false;
     } finally {
       chat.sending = false;
       // 보내는 사이에 방을 닫았을 수 있다. 그때는 입력창을 다시 켜지 않는다.
       setComposeEnabled(!!chat.openId && canSend(chat.deviceId));
-      if (chat.openId) chatText.focus();
+      if (chat.openId && !usePreset && !isPhone()) chatText.focus();
     }
+  }
+
+  // ── 빠른 답장(받은 갠톡) ──────────────────────────────────────
+  // 버튼을 누르면 적어 둔 글을 열린 대화에 바로 보낸다. 목록은 회원마다 서버에 저장(/panel/api/quick-replies).
+  var qr = { items: [], loaded: false, busy: false, max: 12, maxLabel: 16, maxText: 1000, draft: null };
+  var qrBar = $('qr-bar');
+  var qrList = $('qr-list');
+  var qrEd = $('qr-ed');
+  var qrEdList = $('qr-ed-list');
+  var qrEdErr = $('qr-ed-err');
+  async function loadQuick() {
+    if (qr.loaded || qr.busy) return;
+    qr.busy = true;
+    try {
+      var r = await api('/panel/api/quick-replies');
+      qr.items = r.items || [];
+      qr.max = r.max || 12; qr.maxLabel = r.max_label || 16; qr.maxText = r.max_text || 1000;
+      qr.loaded = true;
+      renderQuick();
+    } catch (e) { /* 다음에 대화를 열 때 다시 */ } finally { qr.busy = false; }
+  }
+  function renderQuick() {
+    if (!qrBar || !qrList) return;
+    qrList.textContent = '';
+    qr.items.forEach(function (it) {
+      var b = el('button', 'qr-b');
+      b.type = 'button';
+      b.title = it.text;
+      b.setAttribute('aria-label', it.label + ' 보내기: ' + it.text);
+      b.appendChild(el('span', '', it.label));
+      b.addEventListener('click', async function () {
+        if (b.disabled || !chat.openId || !canSend(chat.deviceId)) return;
+        b.disabled = true;
+        b.classList.add('busy');
+        var ok = await sendChat(it.text);
+        b.classList.remove('busy');
+        if (ok) { b.classList.add('sent'); setTimeout(function () { b.classList.remove('sent'); }, 1200); }
+        b.disabled = false;
+      });
+      qrList.appendChild(b);
+    });
+    if (!qr.items.length) qrList.appendChild(el('span', 'qr-empty', '자주 쓰는 답장을 버튼으로 만들어 두세요'));
+    qrBar.hidden = !qr.loaded;
+  }
+  function qrRow(it) {
+    var row = el('div', 'qr-row');
+    var top = el('div', 'qr-row-h');
+    var lab = el('input', 'inp qr-in-label');
+    lab.type = 'text';
+    lab.maxLength = qr.maxLabel;
+    lab.placeholder = '버튼 이름';
+    lab.setAttribute('aria-label', '버튼 이름');
+    lab.value = it.label || '';
+    top.appendChild(lab);
+    [['up', 'down', '위로'], ['down', 'down', '아래로'], ['del', 'trash', '삭제']].forEach(function (a) {
+      var b = el('button', 'btn sm ghost qr-act');
+      b.type = 'button';
+      b.dataset.act = a[0];
+      b.setAttribute('aria-label', a[2]);
+      b.innerHTML = ic(a[1], 13);
+      top.appendChild(b);
+    });
+    var txt = el('textarea', 'inp qr-in-text');
+    txt.rows = 2;
+    txt.maxLength = qr.maxText;
+    txt.placeholder = '보낼 메시지';
+    txt.setAttribute('aria-label', '보낼 메시지');
+    txt.value = it.text || '';
+    row.appendChild(top);
+    row.appendChild(txt);
+    return row;
+  }
+  function qrRead() {
+    return qsa('#qr-ed-list .qr-row').map(function (r) {
+      return { label: r.querySelector('.qr-in-label').value, text: r.querySelector('.qr-in-text').value };
+    });
+  }
+  function qrRenderEd(list) {
+    qrEdList.textContent = '';
+    list.forEach(function (it) { qrEdList.appendChild(qrRow(it)); });
+    $('qr-ed-n').textContent = list.length + ' / ' + qr.max;
+    $('qr-ed-add').disabled = list.length >= qr.max;
+  }
+  function openQuickEditor() {
+    if (!qrEd) return;
+    qrEdErr.textContent = '';
+    qrRenderEd(qr.items.length ? qr.items : [{ label: '', text: '' }]);
+    qrEd.hidden = false;
+    var first = qrEd.querySelector('.qr-in-label');
+    if (first) first.focus();
+  }
+  function closeQuickEditor() { if (qrEd) qrEd.hidden = true; }
+  if (qrEd) {
+    $('qr-edit').addEventListener('click', openQuickEditor);
+    $('qr-ed-x').addEventListener('click', closeQuickEditor);
+    $('qr-ed-cancel').addEventListener('click', closeQuickEditor);
+    $('qr-ed-add').addEventListener('click', function () {
+      var list = qrRead();
+      if (list.length >= qr.max) return;
+      list.push({ label: '', text: '' });
+      qrRenderEd(list);
+      var rows = qsa('#qr-ed-list .qr-in-label');
+      rows[rows.length - 1].focus();
+    });
+    qrEdList.addEventListener('click', function (ev) {
+      var b = ev.target.closest('.qr-act');
+      if (!b) return;
+      var rows = qsa('#qr-ed-list .qr-row');
+      var i = rows.indexOf(b.closest('.qr-row'));
+      var list = qrRead();
+      if (b.dataset.act === 'del') list.splice(i, 1);
+      else if (b.dataset.act === 'up' && i > 0) list.splice(i - 1, 0, list.splice(i, 1)[0]);
+      else if (b.dataset.act === 'down' && i < list.length - 1) list.splice(i + 1, 0, list.splice(i, 1)[0]);
+      qrRenderEd(list);
+    });
+    qrEd.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { ev.stopPropagation(); closeQuickEditor(); } });
+    $('qr-ed-save').addEventListener('click', async function () {
+      var save = this;
+      // 이름·메시지 둘 다 빈 줄은 지운 것으로 본다
+      var list = qrRead().filter(function (x) { return x.label.trim() || x.text.trim(); });
+      save.disabled = true;
+      qrEdErr.textContent = '';
+      try {
+        var r = await api('/panel/api/quick-replies', { items: list });
+        qr.items = r.items || [];
+        qr.loaded = true;
+        renderQuick();
+        closeQuickEditor();
+        notify('빠른 답장을 저장했습니다.', qr.items.length + '개 버튼');
+      } catch (e) {
+        qrEdErr.textContent = e.message || '저장하지 못했습니다.';
+      } finally { save.disabled = false; }
+    });
   }
 
   // ── 기록 폴링 (4.8) ───────────────────────────────────────

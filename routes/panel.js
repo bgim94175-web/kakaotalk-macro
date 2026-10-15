@@ -18,6 +18,7 @@ const entitle = require('../lib/entitle');
 const installs = require('../lib/installs');
 const sender = require('../lib/sender-child');
 const inboxLib = require('../lib/panel-inbox');
+const quick = require('../lib/quick-replies');
 
 const router = express.Router();
 const HARD_STATUS = {
@@ -612,6 +613,25 @@ router.post('/panel/api/chat/send', wrap(async (req, res) => {
     if (e && (e.code === 'sender_down' || e.message === 'timeout')) return senderDown(res);
     throw e;
   }
+}));
+
+// ── 빠른 답장(받은 갠톡) ───────────────────────────────────────────────────
+// 버튼을 누르면 화면이 /panel/api/chat/send 로 그 글을 보낸다. 여기서는 목록만 읽고 저장한다.
+router.get('/panel/api/quick-replies', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const row = await db.one('SELECT quick_replies FROM members WHERE id=$1', [s.member.id]);
+  const stored = row ? db.jsonOf(row.quick_replies) : null;
+  res.json({ ok: true, items: quick.readStored(stored), max: quick.MAX_ITEMS, max_label: quick.MAX_LABEL, max_text: quick.MAX_TEXT });
+}));
+
+router.post('/panel/api/quick-replies', wrap(async (req, res) => {
+  const s = await session(req, res);
+  if (!s) return;
+  const v = quick.validate((req.body || {}).items);
+  if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+  await db.q('UPDATE members SET quick_replies=$2::jsonb WHERE id=$1', [s.member.id, JSON.stringify(v.items)]);
+  res.json({ ok: true, items: v.items });
 }));
 
 // ── 기록 ──────────────────────────────────────────────────────────────────
