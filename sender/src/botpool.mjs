@@ -1805,6 +1805,10 @@ export class BotSlot {
       this.schedulePump(now + this.opts.transientWaitMs)
       return
     }
+    // 카카오가 거절 이유 문장(errMsg)을 주면 남긴다 — 방 문제인지 봇 계정 제한인지 가를 수 있게(관리자 화면 오류 자세히에도)
+    const em = res.body && typeof res.body.errMsg === 'string' ? res.body.errMsg.replace(/\s+/g, ' ').trim().slice(0, 160) : ''
+    if (status !== 0 || em) log(this.id, `install ${row.id} join ${ctx.step || '?'} status ${status}${em ? ' msg ' + em : ''}`)
+    const why = (st) => '카카오 상태 ' + st + (em ? ' · ' + em : '')
     if (RATE_STATUS.has(status)) {
       const n = this.rateN.get(Number(row.id)) || 0
       this.rateN.set(Number(row.id), n + 1)
@@ -1844,7 +1848,7 @@ export class BotSlot {
         this.schedulePump(now + this.opts.transientWaitMs)
         return
       }
-      await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
+      await this.fail(row, 'kakao_error', why(status))
       return
     }
     // 입장 단계: 오픈프로필(ptp 16) 입장을 카카오가 거절한 status(BOT_PROFILE_BLOCK_STATUS) → profile_blocked.
@@ -1860,7 +1864,7 @@ export class BotSlot {
       await this.joined(row, ch, null, ctx.prof || null)
       return
     }
-    await this.fail(row, 'kakao_error', '카카오 상태 ' + status)
+    await this.fail(row, 'kakao_error', why(status))
   }
 
   async rateLimited(row, until) {
