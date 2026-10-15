@@ -4074,7 +4074,7 @@
         roomCmds.push(pfx + '내보내기', pfx + '설정');
       }
       // 추억의 검 강화(sender/src/sword.mjs HELP_CMDS)
-      var swordCmds = $('r-games-sword').checked ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map(function (x) { return pfx + x; }) : [];
+      var swordCmds = $('r-games-sword').checked ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화랭킹', '강화도움'].map(function (x) { return pfx + x; }) : [];
       $('r-games-preview-t').textContent = helpCard('K bot 명령어', [
         { name: '미니게임', cmds: out }, { name: '검 강화', cmds: swordCmds }, { name: '방 관리', cmds: roomCmds }
       ], roomCmds.length ? '「' + pfx + '도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' : '');

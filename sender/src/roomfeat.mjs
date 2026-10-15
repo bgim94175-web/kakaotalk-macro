@@ -1,7 +1,9 @@
 // 방 설치형 봇(K bot 계정)의 방별 기능 — 순수 함수만 둔다(docs/ACCOUNTS_V1.md 5.5·5.7·7장).
 // 네트워크·DB·타이머를 쓰지 않는다. 시각은 늘 인자로 받는다. botpool.mjs 가 이 함수들의 결과를 실행한다.
 // 이 파일은 features.mjs 를 가져오지 않는다(features.mjs 가 이 파일의 profileObserve 를 쓴다).
+// sword.mjs 와는 서로 가져온다(검 강화 도움 목록 · josa). 둘 다 함수 안에서만 쓰고 파일을 읽을 때는 부르지 않는다.
 import { helpCard } from './helpcard.mjs'
+import { helpCommands as swordHelpCommands } from './sword.mjs'
 
 const SEP = '\u0001'
 const MIN = 60 * 1000
@@ -389,17 +391,31 @@ export function feedHas(feed, userId) {
   return !!(feed && me && feed.members.some((m) => m.userId === me))
 }
 
-/** 첨부의 멘션 user_id 목록. */
-export function mentionIds(attachment) {
+function mentionList(attachment) {
   let a = attachment
   if (typeof a === 'string') {
     try { a = JSON.parse(a) } catch { a = null }
   }
-  const list = isObj(a) && Array.isArray(a.mentions) ? a.mentions : []
+  return isObj(a) && Array.isArray(a.mentions) ? a.mentions : []
+}
+
+/** 첨부의 멘션 user_id 목록. */
+export function mentionIds(attachment) {
   const out = []
-  for (const m of list) {
+  for (const m of mentionList(attachment)) {
     const id = idText(m && m.user_id)
     if (id && !out.includes(id)) out.push(id)
+  }
+  return out
+}
+
+/** 첨부의 멘션 글자 수 {user_id: len}(len = 글 안 「@닉네임」의 닉네임 글자 수). 검 강화 결투가 이름과 내기를 가른다. */
+export function mentionLens(attachment) {
+  const out = {}
+  for (const m of mentionList(attachment)) {
+    const id = idText(m && m.user_id)
+    const len = Number(m && m.len)
+    if (id && !(id in out) && Number.isInteger(len) && len > 0) out[id] = len
   }
   return out
 }
@@ -1031,12 +1047,13 @@ export function helpLine(view) {
     if (g.rps) games.push(p + '가위바위보')
     if (g.quiz) games.push(p + '퀴즈', p + '힌트', p + '정답')
     if (g.word || g.baseball || g.quiz) games.push(p + '포기')
+    // 점수가 없는 방(검 강화만 하는 방)의 「!랭킹」은 「!강화랭킹」을 알려 준다(features)
     games.push(p + '랭킹')
   }
-  // 추억의 검 강화(sword.mjs HELP_CMDS 와 같은 목록 — sword-check 가 맞춰 본다)
-  const sword = gamesLive(view) && cfg.games.sword ? ['강화', '내검', '사냥', '출석', '결투', '보스', '강화도움'].map((c) => p + c) : []
+  // 추억의 검 강화: 목록은 sword.mjs HELP_CMDS 하나만 쓴다(features 「!게임」·sword-check 와 같은 목록)
+  const sword = gamesLive(view) && cfg.games.sword ? swordHelpCommands(p) : []
   const room = roomCommandNames(view)
-  if (!games.length && !room.length) return ''
+  if (!games.length && !sword.length && !room.length) return ''
   return helpCard('K bot 명령어', [
     { name: '미니게임', cmds: games },
     { name: '검 강화', cmds: sword },
@@ -1251,8 +1268,21 @@ export class Pacer {
     return out
   }
 
-  /** 지금 보낼 항목 하나. → {key, item} | null. 항목의 cost(기본 1)는 실제로 나가는 글 수(그림 + 멘션 한 줄 = 2)다. */
-  next(now) {
+  /**
+   * 방의 발송 밀림: 대기열 길이 + 지금 방 한도(분당 6)가 찼으면 1. 모르는 방은 0.
+   * botpool 이 게임 명령어를 받기 전에 본다(많이 밀려 있으면 답이 한참 늦거나 빠지니 게임 상태를 바꾸지 않는다).
+   */
+  backlog(key, now) {
+    const r = this.rooms.get(key)
+    if (!r) return 0
+    return r.queue.length + (r.win.fits(now, 1) ? 0 : 1)
+  }
+
+  /**
+   * 지금 보낼 항목 하나. → {key, item} | null. 항목의 cost(기본 1)는 실제로 나가는 글 수(그림 + 멘션 한 줄 = 2)다.
+   * skip(key, item) 이 true 인 방은 이번에 건너뛴다(사진을 올리는 중인 방 — 그 방 안의 순서는 지킨다).
+   */
+  next(now, skip) {
     if (!this.botWin.ok(now)) return null
     const n = this.order.length
     for (let i = 0; i < n; i++) {
@@ -1261,6 +1291,7 @@ export class Pacer {
       const r = this.rooms.get(key)
       if (!r || !r.queue.length) continue
       if (r.queue[0].notBefore > now) continue
+      if (skip && skip(key, r.queue[0])) continue
       const cost = costOf(r.queue[0])
       if (!r.win.fits(now, cost) || !this.botWin.fits(now, cost)) continue
       const item = r.queue.shift()
@@ -1274,11 +1305,12 @@ export class Pacer {
     return null
   }
 
-  /** 다음에 무언가 보낼 수 있는 가장 이른 시각(없으면 0). */
-  wakeAt(now) {
+  /** 다음에 무언가 보낼 수 있는 가장 이른 시각(없으면 0). skip 은 next 와 같다(건너뛴 방은 그 일이 끝날 때 다시 깨운다). */
+  wakeAt(now, skip) {
     let at = 0
-    for (const r of this.rooms.values()) {
+    for (const [key, r] of this.rooms) {
       if (!r.queue.length) continue
+      if (skip && skip(key, r.queue[0])) continue
       const cost = costOf(r.queue[0])
       const t = Math.max(r.queue[0].notBefore, r.win.freeAt(now, cost), this.botWin.freeAt(now, cost))
       if (!at || t < at) at = t

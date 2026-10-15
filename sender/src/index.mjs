@@ -500,25 +500,30 @@ if (fakeOn()) {
   }))
 }
 
-// 멈출 때 방별 실행 상태(room_state)를 한 번 더 저장한다(5.7)
+// 멈출 때 방별 실행 상태(room_state)를 한 번 더 저장한다(5.7). 새 메시지를 받지 않게 한 뒤, 진행 중인 저장을 기다리고
+// 방마다 동시에 저장하고(pool.finalFlush), 끝나면 바로 나간다. DB 가 멈춰 있어도 정해진 시간(ms)이 지나면 나간다.
+// 저장 전에 나가면 방에 이미 보인 결과(강화·거래)가 다음 시작 때 되돌아간다. 부모(lib/sender-child.js)는 이 프로세스가 끝나기를
+// 이 시간보다 조금 더 기다린다.
 let closing = false
-for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
-    if (closing) return
-    closing = true
-    const t = setTimeout(() => process.exit(0), 3000)
-    if (t.unref) t.unref()
-    hub.pool.flush().catch(() => {}).finally(() => process.exit(0))
+function finalSave(code, ms) {
+  if (closing) return
+  closing = true
+  const t = setTimeout(() => process.exit(code), ms)
+  hub.pool.finalFlush().catch(() => {}).finally(() => {
+    clearTimeout(t)
+    process.exit(code)
   })
 }
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => finalSave(0, 5000))
 
+// 예기치 못한 오류로 끝날 때도 마지막 저장을 짧게(1.5초) 해 본다(이미 멈추는 중이면 그 저장을 마저 기다린다)
 process.on('uncaughtException', (e) => {
   process.stderr.write(`[sender] uncaughtException ${e && e.stack ? e.stack : e}\n`)
-  process.exit(1)
+  finalSave(1, 1500)
 })
 process.on('unhandledRejection', (e) => {
   process.stderr.write(`[sender] unhandledRejection ${e && e.stack ? e.stack : e}\n`)
-  process.exit(1)
+  finalSave(1, 1500)
 })
 
 export async function createApp() {

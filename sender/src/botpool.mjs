@@ -43,6 +43,14 @@ const MEMBER_FAIL_MAX = 3             // 카드 채우기에서 세 번 못 읽�
 const MEMBER_LOG_MS = 60 * MIN        // 명부 동기화 요약은 처음·수가 바뀔 때·1시간마다만 남긴다
 const BAD_LINK_MS = 30 * MIN          // 혼자서도 읽기가 실패한 pli 는 30분 동안 묶음 읽기에서 뺀다(모름으로 둔다)
 const NOTICE_LINK_MAX = 20            // 동기화 한 번에 안내 전 옾링을 혼자 읽는 사람 수
+const GAME_BACKLOG_MAX = 3            // 방 발송이 이만큼 밀려 있으면(분당 6 → 30초쯤 늦음) 검 강화 명령어를 받지 않는다
+const PHOTO_MAX = 2                   // 봇 하나가 한꺼번에 올리는 사진 수(방마다는 하나씩, 순서대로)
+const LOAD_RETRY_MS = 5000            // room_state 읽기가 실패한 방을 다시 읽기까지(실패할 때마다 두 배, 최대 2분)
+const LOAD_RETRY_MAX_MS = 2 * MIN
+const SAVE_SOON_MS = 300              // 게임 답이 나간 방은 이만큼 뒤에 한 번 저장한다(5초 주기를 기다리다 꺼지면 방에 보인 결과가 되돌아간다)
+const PHOTO_LATE_MAX_MS = 2 * MIN     // 기다림을 넘긴 사진 올리기를 PHOTO_MAX 에 세고 그 방의 다음 글을 붙잡아 두는 최대 시간
+// 다시 읽기(loadRuntime)에서 저장본보다 실패한 동안의 임시본을 쓰는 칸: 이 봇이 이 방에서 남긴 기록(프로필·안내 표시)
+const OWN_KEYS = ['prof', 'welcomed', 'promoted']
 
 // 카드를 더 읽어야 하는 사람: 카드를 읽은 적이 없거나(pli 모름), pli 는 있는데 옾링을 모른다
 function needsCard(m) {
@@ -114,6 +122,10 @@ export function poolOptions(over) {
     memberGapMs: envNum('BOT_MEMBER_GAP_MS', 500),
     // 명부 일 하나(동기화·채우기·다시 읽기)를 기다리는 최대 시간. 넘기면 명부 줄은 다음 일로 넘어간다
     memberJobMs: envNum('BOT_MEMBER_JOB_MS', 2 * MIN),
+    // 사진 1장 올리기(SHIP → 업로드 → COMPLETE)를 기다리는 최대 시간. 넘기면 글로 대신 보낸다
+    photoTimeoutMs: envNum('BOT_PHOTO_TIMEOUT_MS', 25000),
+    // room_state 한 번 읽기를 기다리는 최대 시간. 넘기면 읽기 실패로 보고 늦춰 가며 다시 읽는다(멈춘 읽기가 방을 붙잡지 않게)
+    loadTimeoutMs: envNum('BOT_LOAD_TIMEOUT_MS', 10000),
     flushMs: 5000,
     tickMs: 1000,
     reconnectGapMs: 2000,
@@ -449,8 +461,22 @@ export class BotPool {
     }
   }
 
+  // 봇·방마다 따로 저장한다(한 방의 느린 저장이 다른 방을 막지 않게 — 멈출 때 정해진 시간 안에 끝나도록)
   async flush() {
-    for (const s of this.bots.values()) await s.flush()
+    await Promise.allSettled([...this.bots.values()].map((s) => s.flush()))
+  }
+
+  // 멈출 때의 마지막 저장(index.mjs). 먼저 새 메시지·점검을 받지 않게 한다 — 저장을 시작한 뒤에 처리한 결과(강화 등)는
+  // 방에만 보이고 다음 시작 때 되돌아간다. 이미 대기열에 있는 답은 그대로 보낸다(그 결과는 이미 runtime 에 있다).
+  // 진행 중인 저장은 flushView 가 기다린다. 처리 중이던 메시지가 그 사이 바꾼 것은 한 번 더 저장한다.
+  async finalFlush() {
+    for (const t of this.timers) clearInterval(t)
+    this.timers = []
+    const slots = [...this.bots.values()]
+    for (const s of slots) s.close()
+    await this.flush()
+    await Promise.allSettled(slots.flatMap((s) => [s.chain, s.checks]))
+    await this.flush()
   }
 
   // ── /v1/bot/resolve ─────────────────────────────────────────────────────
@@ -673,6 +699,8 @@ export class BotPool {
   async gamesReset(installId) {
     const got = await this.viewOrRow(installId)
     if (!got) return { ok: true }
+    // 저장된 기록을 아직 못 읽은 방(loadFailed): 지금 runtime 은 저장되지 않는 임시본이라 지워도 남는다
+    if (got.view.loadFailed) return { ok: false, error: 'busy' }
     const rt = got.view.runtime
     if (rt.scores) rt.scores.r = {}
     if (rt.names) rt.names.r = {}
@@ -718,6 +746,9 @@ export class BotSlot {
     this.limits = R.botLimits()
     this.pacer = new R.Pacer()
     this.sending = false
+    this.photoBusy = new Set()   // 사진을 올리는 중인 방(pacer 열쇠 = install id)
+    this.photoLate = new Map()   // 기다림을 넘겼지만 아직 끝나지 않은 사진 올리기: pacer 열쇠 → 수(holdLate)
+    this.photoLateN = 0
     this.sendTimer = null
     this.sendAt = 0
     this.ownKicks = new Map()
@@ -793,6 +824,19 @@ export class BotSlot {
     await this.ensure()
   }
 
+  // 멈추기 직전(BotPool.finalFlush): 새 푸시(메시지·입장)·점검·입장 작업을 받지 않는다. 연결과 보내기는 그대로 둔다
+  close() {
+    this.closing = true
+    for (const t of this.timers) clearInterval(t)
+    this.timers = []
+    if (this.pumpTimer) clearTimeout(this.pumpTimer)
+    this.pumpTimer = null
+    for (const v of this.byInstall.values()) {
+      if (v.saveTimer) clearTimeout(v.saveTimer)
+      v.saveTimer = null
+    }
+  }
+
   async stop() {
     this.stopped = true
     for (const t of this.timers) clearInterval(t)
@@ -803,6 +847,10 @@ export class BotSlot {
     this.pumpTimer = null
     this.sendTimer = null
     this.profileTimer = null
+    for (const v of this.byInstall.values()) {
+      if (v.saveTimer) clearTimeout(v.saveTimer)
+      v.saveTimer = null
+    }
     await this.flush()
     try { this.unpush && this.unpush() } catch {}
     try { this.unsession && this.unsession() } catch {}
@@ -1394,14 +1442,11 @@ export class BotSlot {
     if (!v) {
       // 맵에 먼저 넣고 읽는다(겹친 호출이 뷰를 둘 만들지 않게)
       v = this.newView(row)
+      v.adoptLegacy = !(opts && opts.joining)
       this.byInstall.set(id, v)
-      let saved = null
-      try {
-        saved = await this.store.loadRoomState(id)
-      } catch (e) {
-        log(this.id, `room_state read failed: ${errText(e)}`)
-      }
-      v.runtime = v.dirty ? Object.assign(saved || {}, v.runtime) : (saved || {})
+      await this.loadRuntime(v)
+    } else if (v.loadFailed) {
+      await this.retryLoad(v)
     }
     v.member_id = Number(row.member_id)
     v.link_id = row.link_id || ''
@@ -1477,9 +1522,84 @@ export class BotSlot {
     v.dirty = true
   }
 
+  // room_state 읽기. 읽기가 실패하면(DB 끊김 등) 빈 runtime 을 저장본처럼 쓰지 않는다 — 다음 저장이 그 방 사람들의 검·골드·점수·
+  // 차단 기록을 빈 것으로 덮어쓰기 때문이다. v.loadFailed 인 동안은 저장(flushView)·미니게임·첫 안내를 하지 않고,
+  // 늦춰 가며(5초 → 10초 → … 최대 2분) 다시 읽는다(tick · 메시지 · 재조정). → 읽었으면 true
+  async loadRuntime(v) {
+    let saved
+    try {
+      saved = await withTimeout(Promise.resolve(this.store.loadRoomState(v.install_id)), this.opts.loadTimeoutMs)
+    } catch (e) {
+      v.loadFails = (v.loadFails || 0) + 1
+      v.loadFailed = true
+      v.loadRetryAt = this.now() + Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_MS * 2 ** Math.min(10, v.loadFails - 1))
+      log(this.id, `room_state read failed install ${v.install_id} (${v.loadFails}): ${errText(e)}`)
+      return false
+    }
+    if (!v.loadFailed) {
+      // 처음 읽기: 읽는 동안 쌓인 것(dirty)은 합친다
+      v.runtime = v.dirty ? Object.assign(saved || {}, v.runtime) : (saved || {})
+      return true
+    }
+    // 다시 읽기: 저장본이 기준이다. 실패한 동안의 임시 runtime 은 저장본에 없는 칸만 옮긴다(입장 안내 표시·프로필 등).
+    // 통째로 합치면 거의 빈 임시 칸(sword 등)이 저장본을 덮는다. 다만 두 가지는 임시본도 살린다:
+    // - 이 봇이 이 방에서 남긴 기록(OWN_KEYS)은 저장본 것이 이 봇·이 방 것이 아니면(다른 봇으로 옮긴 뒤 등) 임시본을 쓴다
+    // - 재입장 차단(bans)은 합친다(실패한 동안 나간 사람의 차단 기록이 사라지지 않게, 같은 사람이면 나중 것)
+    const base = saved || {}
+    const tmp = v.runtime || {}
+    let moved = false
+    for (const k of Object.keys(tmp)) {
+      if (!(k in base)) {
+        base[k] = tmp[k]
+        moved = true
+      } else if (OWN_KEYS.includes(k) && this.ownRecord(v, tmp[k]) && !this.ownRecord(v, base[k])) {
+        base[k] = tmp[k]
+        moved = true
+      } else if (k === 'bans' && tmp.bans && typeof tmp.bans === 'object') {
+        if (!base.bans || typeof base.bans !== 'object') base.bans = {}
+        for (const [uid, b] of Object.entries(tmp.bans)) {
+          const old = base.bans[uid]
+          if (old && Number(old.at) >= Number(b && b.at)) continue
+          base.bans[uid] = b
+          moved = true
+        }
+        R.pruneBans(base, this.now())
+      }
+    }
+    v.runtime = base
+    v.dirty = moved
+    v.loadFailed = false
+    v.loadFails = 0
+    v.loadRetryAt = 0
+    log(this.id, `room_state read ok install ${v.install_id} after a failure`)
+    this.adoptLegacyNotices(v, v.adoptLegacy)
+    // 읽기가 실패해 미뤘던 안내: 입장 안내는 지금(이미 보낸 봇·방이면 noticed 가 막는다), 방 관리봇 추가 안내는 곧 점검에서
+    if (v.joinPending) this.bg(this.joinNotices(v), 'join notice')
+    if (v.addedPending) this.soon(v)
+    return true
+  }
+
+  // 이 봇이 이 방(지금 chat)에서 남긴 기록인가(noticed·profOf 와 같은 기준)
+  ownRecord(v, n) {
+    return !!n && typeof n === 'object' && n.chat === v.chat_id && n.by === this.id
+  }
+
+  // 읽기가 실패한 방을 때가 되었으면 다시 읽는다(겹쳐 읽지 않는다). → 지금 읽혀 있으면 true
+  async retryLoad(v) {
+    if (!v.loadFailed) return true
+    if (!v.loading) {
+      if (this.now() < (v.loadRetryAt || 0)) return false
+      v.loading = this.loadRuntime(v).finally(() => { v.loading = null })
+    }
+    await v.loading
+    return !v.loadFailed
+  }
+
   async dropView(installId) {
     const v = this.byInstall.get(Number(installId))
     if (!v) return
+    if (v.saveTimer) clearTimeout(v.saveTimer)
+    v.saveTimer = null
     await this.flushView(v)
     if (v.chat_id && this.views.get(v.chat_id) === v) this.views.delete(v.chat_id)
     this.byInstall.delete(Number(installId))
@@ -1488,23 +1608,41 @@ export class BotSlot {
 
   async flushView(v) {
     await this.flushMembers(v)
-    if (!v.dirty) return
+    // 앞선 저장이 끝나기를 기다린 뒤 본다. 저장 중에는 dirty 가 이미 내려가 있어서, 기다리지 않으면 멈출 때의 마지막 저장이
+    // 아직 DB 에 닿지 않은 저장(pg 대기열)을 '저장됨'으로 보고 건너뛴 채 끝난다
+    while (v.saving) await v.saving
+    // 저장본을 못 읽은 방은 저장하지 않는다(빈 runtime 이 저장본을 덮지 않게, loadRuntime)
+    if (!v.dirty || v.loadFailed) return
     v.dirty = false
-    try {
-      await this.store.saveRoomState(v.install_id, v.runtime)
-    } catch (e) {
+    const saving = Promise.resolve(this.store.saveRoomState(v.install_id, v.runtime)).catch((e) => {
       v.dirty = true
       log(this.id, `room_state save failed: ${errText(e)}`)
+    })
+    v.saving = saving
+    try {
+      await saving
+    } finally {
+      if (v.saving === saving) v.saving = null
     }
   }
 
+  // 게임 답이 나간 방은 SAVE_SOON_MS 뒤에 한 번 저장한다(그 사이 답이 더 나가면 한 번으로 묶는다)
+  saveSoon(v) {
+    if (v.saveTimer || this.closing) return
+    v.saveTimer = setTimeout(() => {
+      v.saveTimer = null
+      if (this.byInstall.get(v.install_id) === v) this.bg(this.flushView(v), 'room_state save')
+    }, SAVE_SOON_MS)
+    if (v.saveTimer.unref) v.saveTimer.unref()
+  }
+
   async flush() {
-    for (const v of this.byInstall.values()) await this.flushView(v)
+    await Promise.allSettled([...this.byInstall.values()].map((v) => this.flushView(v)))
   }
 
   // ── 나가기 → 입장 작업 줄(5.2·5.3) ──────────────────────────────────────
   schedulePump(at) {
-    if (this.stopped) return
+    if (this.stopped || this.closing) return
     const now = this.now()
     const when = Math.max(now, at || now)
     if (this.pumpTimer && this.pumpAt <= when) return
@@ -1940,15 +2078,29 @@ export class BotSlot {
     // 바로 저장한다: 부모는 이 기록이 없는 입장 완료 방을 v6 때 기본 프로필로 들어간 방으로 본다(installs.BOT_NAME_SQL)
     this.noteSelf(v, self)
     await this.flushView(v)
+    await this.joinNotices(v)
+  }
+
+  // 입장 안내·부방장 지정 확인(7.9). 저장본을 못 읽은 방(loadFailed)은 이 봇이 이미 안내했는지 모르니 미루고,
+  // 다시 읽은 뒤 보낸다(loadRuntime → joinPending). 같은 봇이 같은 방에 다시 들어온 것이면 저장본의 표시가 막는다.
+  async joinNotices(v) {
+    if (v.loadFailed) {
+      v.joinPending = true
+      return
+    }
+    v.joinPending = false
+    if (!v.chat_id || (v.state !== 'active' && v.state !== 'waiting_host') || this.byInstall.get(v.install_id) !== v) return
+    const products = v.products
     // 미니게임봇으로 안내했던 방에 방 관리봇을 더한 뒤 다시 들어왔으면 방 관리봇 안내(지정할 계정 이름)를 한 번 더 한다
     const welcomed = this.noticed(v, 'welcomed') && (!products.roombot || v.runtime.welcomed.roombot)
     if (!welcomed && v.licensed) {
       this.markNoticed(v, 'welcomed', { roombot: !!products.roombot })
+      v.addedPending = false
       this.say(v, R.joinNotice(v, this.nameIn(v)), { what: 'notice' })
     }
-    if (state === 'active' && products.roombot && !this.noticed(v, 'promoted')) {
+    if (v.state === 'active' && products.roombot && !this.noticed(v, 'promoted')) {
       this.markNoticed(v, 'promoted')
-      await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: true, to: 'active' } })
+      await this.roomLog(v.install_id, 'perm', { detail: { perm: v.perm, granted: true, to: 'active' } })
       this.say(v, R.PROMOTED_NOTICE, { what: 'notice' })
     }
   }
@@ -2198,6 +2350,7 @@ export class BotSlot {
     for (const v of this.byInstall.values()) {
       this.memberSync(v, now)
       this.memberFill(v, now)
+      if (v.loadFailed && !v.loading && now >= (v.loadRetryAt || 0)) this.bg(this.retryLoad(v), 'room_state retry')
     }
     for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
     // 오픈프로필 목록을 주기적으로 다시 읽는다(모르는 상태면 5분마다)
@@ -2279,18 +2432,29 @@ export class BotSlot {
     v.perm = perm
     v.state = state
     v.error_code = null
-    const promote = state === 'active' && v.products.roombot && !this.noticed(v, 'promoted')
-    if (prev === state && !promote) return
+    // 저장본을 못 읽은 방(loadFailed)은 안내 표시를 모르니 안내하지 않는다(다시 읽은 뒤 다음 점검 때)
+    const promote = state === 'active' && v.products.roombot && !v.loadFailed && !this.noticed(v, 'promoted')
+    // 읽기가 실패해 미룬 방 관리봇 추가 안내(addedPending)는 상태가 그대로여도 다시 읽은 뒤의 점검에서 보낸다
+    if (state !== 'waiting_host') v.addedPending = false
+    const pending = !!v.addedPending && !v.loadFailed
+    if (prev === state && !promote && !pending) return
     if (prev === 'error') await this.roomLog(v.install_id, 'state', { detail: { state, event: 'revive' } })
     // 부방장 없이 사용 중이던 방(미니게임만)에 방 관리봇이 붙음: 강등이 아니라 처음 부방장 대기다(4.2). 해제 기록·알림을 남기지 않는다.
     const added = v.products.roombot && prev === 'active' && !(prevPerm != null && (prevPerm & 5))
     if (v.products.roombot && prev !== state && (prev === 'waiting_host' || (prev === 'active' && !added))) {
       await this.roomLog(v.install_id, 'perm', { detail: { perm, granted: state === 'active', to: state } })
     }
-    if (added && state === 'waiting_host' && v.licensed && !(this.noticed(v, 'welcomed') && v.runtime.welcomed.roombot)) {
-      // 방장이 어느 계정을 부방장으로 지정할지 알 수 있게 봇 닉네임을 방에 알린다(7.9·D12)
-      this.markNoticed(v, 'welcomed', { roombot: true })
-      this.say(v, R.roombotAddedNotice(v, this.nameIn(v)), { what: 'notice' })
+    if ((added || pending) && state === 'waiting_host' && v.licensed) {
+      if (v.loadFailed) {
+        v.addedPending = true
+      } else {
+        v.addedPending = false
+        if (!(this.noticed(v, 'welcomed') && v.runtime.welcomed.roombot)) {
+          // 방장이 어느 계정을 부방장으로 지정할지 알 수 있게 봇 닉네임을 방에 알린다(7.9·D12)
+          this.markNoticed(v, 'welcomed', { roombot: true })
+          this.say(v, R.roombotAddedNotice(v, this.nameIn(v)), { what: 'notice' })
+        }
+      }
     }
     if (promote) {
       this.markNoticed(v, 'promoted')
@@ -2324,7 +2488,7 @@ export class BotSlot {
 
   // ── 푸시 ────────────────────────────────────────────────────────────────
   onPushRaw(packet) {
-    if (!packet || this.stopped) return
+    if (!packet || this.stopped || this.closing) return
     if (this.opts.trace && !this.pool.traced.has(packet.method)) {
       this.pool.traced.add(packet.method)
       log(this.id, `push ${packet.method} keys ${Object.keys(packet.body || {}).join(',')}`)
@@ -2903,6 +3067,9 @@ export class BotSlot {
 
   // ── 메시지(5.7) ─────────────────────────────────────────────────────────
   async onMessage(v, m) {
+    // 저장본을 못 읽은 방이면 때가 되었을 때 뒤에서 한 번 더 읽어 본다. 기다리지 않는다 — 이 봇의 메시지 줄(enqueue)이
+    // 읽기가 끝날 때까지 다른 방 메시지까지 붙잡게 된다. 이번 메시지는 아래에서 미니게임을 건너뛴다
+    if (v.loadFailed && !v.loading && this.now() >= (v.loadRetryAt || 0)) this.bg(this.retryLoad(v), 'room_state retry')
     const cfg = v.cfg
     const now = this.now()
     const name = m.nick || (v.names.get(m.authorId) || '')
@@ -2994,10 +3161,15 @@ export class BotSlot {
       v.dirty = true
     }
     if (rc) return
-    if (R.gamesLive(v)) {
-      const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mentions, mine: false })
+    // 저장본을 못 읽은 방은 미니게임을 받지 않는다(빈 기록으로 검 강화가 새로 시작되지 않게, loadRuntime).
+    // 이 메시지를 처리하는 사이에 다시 읽기가 끝났으면(runtime 이 바뀜) 옛 임시본에 쓰지 않게 이번 것은 건너뛴다
+    if (R.gamesLive(v) && !v.loadFailed && adapter.runtime === v.runtime) {
+      // 답이 바로 나갈 수 없으면(방 발송이 밀림 · 보낼 수 없는 방) 검 강화는 상태를 바꾸지 않는다(features swordReady)
+      adapter.config.minigame.sendBusy = !v.chat_id || !v.licensed || this.pacer.backlog(String(v.install_id), now) >= GAME_BACKLOG_MAX
+      const sends = onInbound(adapter, { chatId: v.chat_id, text, authorName: name, authorId: m.authorId, mentions, mentionLen: R.mentionLens(m.attachment), mine: false })
       this.sendAll(v, sends, 'reply')
       v.dirty = true
+      if (sends.length) this.saveSoon(v)
     }
   }
 
@@ -3629,18 +3801,21 @@ export class BotSlot {
   }
 
   // 이미지 1장(PNG Buffer, card.mjs). 보내지 못하면 text 를 글로 대신 보낸다(text 가 없으면 조용히 넘어간다).
+  // png 가 함수면(검 강화 카드) 대기열에 들어간 뒤 보낼 차례에 그린다 — 대기열이 차서 건너뛰거나 묵어 버려지는 답은 그리지 않는다.
   // o.after = {text, mention}: 그림이 나간 바로 뒤에 보내는 한 줄(기록 카드의 멘션 줄). 그림이 실패하면 보내지 않는다(text 가 대신한다).
   // 그림 + 한 줄은 대기 목록의 한 자리이지만 발송 한도는 2개로 센다(cost).
   sayImage(v, png, opt) {
     const o = opt || {}
     if (!v.chat_id || !v.licensed) return
-    if (!png || !png.length) {
+    const render = typeof png === 'function' ? png : null
+    if (!render && (!png || !png.length)) {
       if (o.text) this.say(v, o.text, o)
       return
     }
     const now = this.now()
     const after = o.after && o.after.text ? { text: String(o.after.text), mention: o.after.mention || null } : null
-    const item = { image: png, text: o.text ? String(o.text) : '', mention: o.mention || null, notBefore: now + Math.max(0, Number(o.delayMs) || 0), what: o.what || 'send', chat_id: v.chat_id }
+    const item = { image: render ? null : png, text: o.text ? String(o.text) : '', mention: o.mention || null, notBefore: now + Math.max(0, Number(o.delayMs) || 0), what: o.what || 'send', chat_id: v.chat_id }
+    if (render) item.render = render
     if (after) {
       item.after = after
       item.cost = 2
@@ -3654,7 +3829,9 @@ export class BotSlot {
 
   sendAll(v, sends, what) {
     for (const s of sends || []) {
-      if (s.image) this.sayImage(v, s.image, { text: s.text, mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
+      // s.render(features pushSend): 그림을 아직 그리지 않은 카드 — s.image 를 읽으면 지금 그려지므로 함수째 넘긴다
+      const art = typeof s.render === 'function' ? s.render : s.image
+      if (art) this.sayImage(v, art, { text: s.text, mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
       else if (s.card && this.cardStyle(v, s.kind) === 'image') this.sayCard(v, s, what || 'notice')
       else this.say(v, s.text, { mention: s.mention, delayMs: s.delayMs, what: what || 'notice' })
     }
@@ -3689,19 +3866,52 @@ export class BotSlot {
     if (this.sendTimer.unref) this.sendTimer.unref()
   }
 
+  // 사진을 올리는 중인 방(기다림을 넘겼지만 아직 끝나지 않은 올리기도), 또는 봇 전체로 올리는 사진이 PHOTO_MAX 개인데
+  // 사진 차례인 방은 이번에 건너뛴다(Pacer skip)
+  photoWait(key, item) {
+    return this.photoBusy.has(key) || this.photoLate.has(key) || (!!(item.image || item.render) && this.photoBusy.size + this.photoLateN >= PHOTO_MAX)
+  }
+
+  // 기다림(photoTimeoutMs)을 넘긴 사진 올리기는 끊기지 않고 뒤에서 이어진다(늦게 올라갈 수 있다). 끝날 때까지(최대 PHOTO_LATE_MAX_MS)
+  // PHOTO_MAX 에 세고 그 방의 다음 글도 붙잡아 둔다 — 늦은 사진이 그 뒤에 나간 새 결과보다 나중에 올라가지 않게
+  holdLate(key, up) {
+    this.photoLate.set(key, (this.photoLate.get(key) || 0) + 1)
+    this.photoLateN++
+    withTimeout(Promise.resolve(up), PHOTO_LATE_MAX_MS)
+      .then((res) => { if (res && res.success === true) log(this.id, `image posted late install ${key}`) }, () => {})
+      .finally(() => {
+        const n = (this.photoLate.get(key) || 1) - 1
+        if (n > 0) this.photoLate.set(key, n)
+        else this.photoLate.delete(key)
+        this.photoLateN = Math.max(0, this.photoLateN - 1)
+        this.scheduleSend(this.now())
+      })
+  }
+
   async drainSends() {
     if (this.sending) return
     this.sending = true
+    const skip = (key, item) => this.photoWait(key, item)
     try {
       const now0 = this.now()
       for (const s of this.pacer.stale(now0)) {
         await this.roomLog(Number(s.key), 'skip', { detail: { what: 'send', note: 'stale' } })
       }
       while (this.live()) {
-        const next = this.pacer.next(this.now())
+        const next = this.pacer.next(this.now(), skip)
         if (!next) break
         const v = this.byInstall.get(Number(next.key))
         if (!v || v.state === 'error' || v.chat_id !== next.item.chat_id) continue
+        if (next.item.image || next.item.render) {
+          // 사진은 기다리지 않는다: 한 방의 업로드가 멈춰도 다른 방의 글은 나간다. 그 방의 다음 글은 업로드가 끝난 뒤(순서 유지)
+          const key = next.key
+          this.photoBusy.add(key)
+          this.bg(this.deliver(v, next.item).finally(() => {
+            this.photoBusy.delete(key)
+            this.scheduleSend(this.now())
+          }), 'photo send')
+          continue
+        }
         await this.deliver(v, next.item)
       }
     } finally {
@@ -3712,16 +3922,21 @@ export class BotSlot {
       this.scheduleSend(this.now() + 2000)
       return
     }
-    const wake = this.pacer.wakeAt(this.now())
+    const wake = this.pacer.wakeAt(this.now(), skip)
     if (wake) this.scheduleSend(Math.max(wake, this.now() + 50))
   }
 
   // 사진 1장. 라이브러리 sendPhoto(SHIP → 업로드 → COMPLETE). SHIP 이 업로드 주소(k·vh·p) 없이 답하면
   // 확장자를 jpg 로 바꿔 한 번 더 보내 보고, 처음 한 번은 SHIP 답을 그대로 로그에 남긴다(원인 확인용, 토큰 값은 가린다).
+  // 업로드 자체는 patch-kakao 가 끝을 둔다(연결 10초 · COMPLETE 20초). 여기서도 photoTimeoutMs(25초)까지만 기다리고(라이브러리가
+  // 그래도 멈출 때의 상한), 넘기면 실패로 보고 글로 대신 보낸다. 그 올리기는 끝날 때까지 holdLate 가 센다(사진이 늦게 올라가 둘 다
+  // 보일 수는 있다 — 결과가 안 보이는 것보다 낫다. 그래도 그 방의 다음 글보다 늦게 올라가지는 않는다).
   async sendPhoto(v, png) {
     for (const name of ['kbot.png', 'kbot.jpg']) {
+      let up = null
       try {
-        const res = await this.client.sendPhoto(v.chat_id, png, name)
+        up = this.client.sendPhoto(v.chat_id, png, name)
+        const res = await withTimeout(up, this.opts.photoTimeoutMs)
         if (res && res.success === true) {
           if (name !== 'kbot.png' && !this.photoExtNoted) {
             this.photoExtNoted = true
@@ -3734,6 +3949,7 @@ export class BotSlot {
       } catch (e) {
         const msg = errText(e)
         log(this.id, `image send failed install ${v.install_id} (${name}): ${msg}`)
+        if (e && e.timeout && up) this.holdLate(String(v.install_id), up)
         if (!/SHIP response missing/.test(msg)) return false
         if (!this.shipProbed) {
           this.shipProbed = true
@@ -3742,6 +3958,15 @@ export class BotSlot {
       }
     }
     return false
+  }
+
+  renderCard(v, render) {
+    try {
+      return render() || null
+    } catch (e) {
+      log(this.id, `card render failed install ${v.install_id}: ${errText(e)}`)
+      return null
+    }
   }
 
   async shipProbe(chatId, png) {
@@ -3755,13 +3980,15 @@ export class BotSlot {
   }
 
   async deliver(v, item) {
-    if (item.image) {
-      if (await this.sendPhoto(v, item.image)) {
+    if (item.image || item.render) {
+      // 그림은 보낼 차례에 그린다(sayImage). 못 그리면(렌더러 없음·오류) 글로 대신 보낸다
+      const png = item.image || this.renderCard(v, item.render)
+      if (png && png.length && (await this.sendPhoto(v, png))) {
         if (item.after) await this.deliver(v, { text: item.after.text, mention: item.after.mention })
         return
       }
       if (!item.text) return
-      item = Object.assign({}, item, { image: null, after: null })
+      item = Object.assign({}, item, { image: null, render: null, after: null })
     }
     try {
       const extra = item.mention ? visitMentionExtra(item.text, item.mention) : ''
