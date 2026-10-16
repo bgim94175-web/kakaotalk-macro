@@ -504,24 +504,59 @@ export function shapeBody(shape, vals) {
   return o
 }
 
-/** 모양 찾기 판정. rows = [{tag, st}] → {verdict, next, shape} */
+// 상태코드가 갈리는 자리에서 칸 이름을 읽어 낸다(2026-10-16 실측).
+//   chatId 계열 -203(바디를 못 읽음) vs c 계열 -500(읽고 나서 실패)  → 방 id 칸은 `c`
+//   c+li+t(-300, 타입을 모름)                                      → 타입 칸은 `type`(t 아님)
+//   c+li+v·c+li+meta(-203, 내용 없음) vs c+li(-500)                 → 내용 칸은 `content`
+// -500 은 이 저장소가 "요청은 읽었는데 그 일을 못 했다"로 보는 코드다(SYNCLINK·INFOLINK·KICKMEM 실측).
+export function fieldReport(rows) {
+  const st = (tag) => { const h = (rows || []).find((r) => r && r.tag === tag); return h ? Number(h.st) : null }
+  const out = []
+  const chatId = st('chatId')
+  const c = st('c') != null ? st('c') : st('c+li')
+  if (chatId != null && c != null && chatId !== c) out.push('방 id 칸은 `c`')
+  if (st('c+li+t') === STATUS_UNKNOWN) out.push('타입 칸은 `type`')
+  const cli = st('c+li')
+  if (cli != null && (st('c+li+v') === STATUS_BAD_REQUEST || st('c+li+meta') === STATUS_BAD_REQUEST) && cli !== STATUS_BAD_REQUEST) {
+    out.push('내용 칸은 `content`')
+  }
+  return out
+}
+
+/** 모양 찾기 판정. rows = [{tag, st}], o = {type} → {verdict, next, shape} */
 export function shapeVerdict(rows, o) {
   const opt = o || {}
-  const hit = (rows || []).find((r) => Number(r.st) === 0 && !String(r.tag).startsWith('보이스룸'))
-  if (!hit) {
-    return {
-      verdict: '어떤 모양으로도 통하지 않아요. SETMETA 는 오픈채팅에서 쓰는 명령어가 아닐 수 있습니다 — 명령어 쪽을 찾아야 합니다.',
-      next: 'no_shape',
-      shape: '',
+  const type = Number(opt.type) || 3
+  const list = rows || []
+  const hit = list.find((r) => Number(r.st) === 0 && !String(r.tag).startsWith('보이스룸'))
+  const voice = list.find((r) => String(r.tag).startsWith('보이스룸'))
+  if (type === 16) {
+    const ok = list.find((r) => Number(r.st) === 0)
+    if (ok) return { verdict: `보이스룸이 켜졌어요! 받아 준 모양은 ${ok.tag} 입니다.`, next: 'voice_on', shape: ok.tag }
+    const reached = list.find((r) => Number(r.st) === -500)
+    if (reached) {
+      return {
+        verdict: `${reached.tag} 모양은 카카오가 **읽었는데**(-500 = 읽고 나서 못 했다) 작업을 거절했어요. 바디 모양은 맞고, 막힌 것은 그 다음 단계입니다.`,
+        next: 'reached',
+        shape: reached.tag,
+      }
     }
+    return { verdict: '보이스룸 타입은 어떤 모양으로도 바디조차 읽히지 않아요.', next: 'bad_shape', shape: '' }
   }
-  const voice = (rows || []).find((r) => String(r.tag).startsWith('보이스룸'))
-  if (voice && Number(voice.st) === 0) {
-    return {
-      verdict: `모양을 찾았어요(${hit.tag}). 그 모양으로 보이스룸도 받아들였습니다 — 켜집니다!`,
-      next: 'voice_on',
-      shape: hit.tag,
+  if (!hit) {
+    const fields = fieldReport(list)
+    const reached = list.find((r) => Number(r.st) === -500)
+    if (reached) {
+      return {
+        verdict: `${reached.tag} 모양은 카카오가 읽었어요(-500 = 읽고 나서 못 했다 · 나머지는 -203 = 못 읽었다)${fields.length ? ` → ${fields.join(' · ')}` : ''}. 제목은 오픈채팅이 링크에서 가져오니 못 바꾸는 게 맞아요. 이제 이 모양으로 보이스룸을 쳐 봐야 합니다 — 「보룸모양 16」.`,
+        next: 'try_voice',
+        shape: reached.tag,
+      }
     }
+    return { verdict: '어떤 모양으로도 통하지 않아요. SETMETA 는 오픈채팅에서 쓰는 명령어가 아닐 수 있습니다 — 명령어 쪽을 찾아야 합니다.', next: 'no_shape', shape: '' }
+  }
+  if (voice && Number(voice.st) === 0) {
+    return { verdict: `모양을 찾았어요(${hit.tag}). 그 모양으로 보이스룸도 받아들였습니다 — 켜집니다!`, next: 'voice_on', shape: hit.tag }
   }
   if (voice) {
     return {
