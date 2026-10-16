@@ -13,7 +13,7 @@ import { profileChangeNotice, visitNoticeText } from './roomfeat.mjs'
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public', 'img')
 const kst = (mo, d, h, mi) => Date.UTC(2026, mo - 1, d, h - 9, mi)
 const LINK = 'https://open.kakao.com/o/sH7k2Lb'
-const ROOM = 'K bot 체험방'
+export const ROOM = 'K bot 체험방'
 
 export const SAMPLES = {
   'logcard-join.png': visitNoticeText('join', { userId: '2001', name: '하늘', link: LINK }, [kst(10, 8, 20, 2), kst(10, 9, 21, 14)]).card,
