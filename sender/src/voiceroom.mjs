@@ -294,6 +294,13 @@ export function sessionRow(v, s, now) {
 //   unknown        쓰지 않는 type(97) 대조군 — "모르는 타입" 코드가 무엇인지 못박는다
 //   same           지금 방에 있는 메타를 글자 그대로 다시 쓰기(바뀌는 것 없음, 「전체」일 때만)
 //                  → 0 이면 이 봇은 메타를 쓸 수 있다는 뜻이라, 거부가 보이스룸 메타에만 걸린 것이다
+// 실측으로 밝혀진 LOCO 상태코드(2026-10-16, 봇이 방장인 시험 방)
+//   -300 = 없는 명령어·모르는 메타 타입   (가짜 명령어 ZZQXNON1·QWEORIZZ9 와 쓰지 않는 type 97 이 모두 -300)
+//   -203 = 있는데 보낸 내용이 틀림        (봇이 잘 쓰는 WRITE 를 빈 바디로 보냈더니 -203)
+// 저장소가 예전에 -203 을 '권한 없음'으로 가정했으나(fake.mjs·9.4) 실측은 그렇지 않다.
+export const STATUS_BAD_REQUEST = -203
+export const STATUS_UNKNOWN = -300
+
 export function metaTypeNum(v) {
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (v && typeof v === 'object' && 'low' in v) return Number(v.low)
@@ -315,48 +322,46 @@ export function isVoiceMetaType(t) {
 
 /**
  * 진단 결과 한 줄 판정. rows = [{tag, st}], o = {perm, sameType}
- * → {verdict, next:'banner'|'server_only'|'owner_test'|'full'}
- * 핵심은 두 가지를 함께 보는 것이다:
- *   · 봇이 방장(perm & 1)인가 — 방장인데 거부면 권한으로는 설명되지 않는다
- *   · 모르는 타입(unknown)과 보이스룸 타입의 코드가 다른가 — 다르면 서버가 "모르는 타입"과
- *     "이 타입은 거부"를 가려서 답한다는 뜻이고, 거부가 보이스룸 자리에만 걸린 것이다
- * same 은 보이스룸이 아닌 메타로 돌렸을 때만 센다(거부당하는 타입을 다시 써 보는 것은 대조군이 아니다).
+ * → {verdict, next:'banner'|'bad_shape'|'unknown_type'|'owner_test'|'server_only'|'full'}
+ *
+ * 실측으로 밝혀진 상태코드(2026-10-16, 아래 STATUS_* 주석):
+ *   -300 = 없는 명령어·모르는 타입 · -203 = 있는데 보낸 내용이 틀림
+ * 그래서 보이스룸 타입이 -203 이고 모르는 타입이 -300 이면, 카카오는 그 타입을 **알고** 있고
+ * 거부당한 것은 우리 내용이다 → 「보룸따라」로 카카오가 써 둔 메타를 따라 쓰는 것이 다음 수다.
+ * same(보이스룸이 아닌 메타 다시 쓰기)이 -203 인 것도 같은 뜻이라(우리가 revision 같은 칸을 빠뜨렸을 수 있다)
+ * 권한 이야기로 읽지 않는다.
  */
 export function diagVerdict(rows, o) {
   const opt = o || {}
   const owner = (Number(opt.perm) & 1) !== 0
-  const who = owner ? '방장' : '부방장'
   const on = [stOf(rows, 'on+li'), stOf(rows, 'on-li')].filter((x) => x != null)
   const onOk = on.some((x) => x === 0)
   const onSt = on.find((x) => x !== 0)
-  const off = stOf(rows, 'off')
   const unknown = stOf(rows, 'unknown')
+  const off = stOf(rows, 'off')
   // 보이스룸 타입으로 돌린 same 은 대조군이 아니다 — 없는 셈 친다
   const same = isVoiceMetaType(opt.sameType) ? null : stOf(rows, 'same')
   if (onOk) return { verdict: '카카오가 켜기 신호를 받았어요. 방에 보이스룸 배너가 보이는지 확인해 주세요.', next: 'banner' }
-  if (same === 0) {
-    return { verdict: `이 봇은 다른 방 메타는 쓸 수 있는데 보이스룸 메타만 거부돼요(${who}). 카카오가 음성 서버로만 쓰는 자리입니다.`, next: 'server_only' }
+  if (onSt === STATUS_UNKNOWN) {
+    return { verdict: `카카오가 보이스룸 타입을 모른다고 답해요(${onSt}). 타입 번호부터 다시 봐야 합니다.`, next: 'unknown_type' }
   }
-  if (same != null && same !== 0 && !owner) {
-    return { verdict: '이 봇은 보이스룸이 아닌 메타도 쓸 수 없어요. 권한 문제일 수 있으니 봇이 방장인 방에서 한 번 더 확인해 주세요.', next: 'owner_test' }
-  }
-  if (same != null && same !== 0 && owner) {
-    return { verdict: '봇이 방장인데도 방 메타를 아예 쓸 수 없어요. 방 메타는 클라이언트가 쓰는 자리가 아닙니다.', next: 'server_only' }
-  }
-  if (unknown != null && onSt != null && unknown !== onSt) {
-    if (owner) {
-      return {
-        verdict: `봇이 방장인데도 보이스룸 타입만 ${onSt} 로 거부되고, 모르는 타입은 ${unknown} 이에요. 권한이 아니라 카카오가 음성 서버로만 쓰는 자리라는 뜻입니다.`,
-        next: 'server_only',
-      }
+  if (onSt === STATUS_BAD_REQUEST && unknown === STATUS_UNKNOWN) {
+    return {
+      verdict: `모르는 타입은 ${unknown}, 보이스룸 타입은 ${onSt} — 카카오는 이 타입을 알고 있고 우리가 보낸 내용을 거부한 거예요. 권한 문제가 아닙니다.`,
+      next: 'bad_shape',
     }
-    return { verdict: `모르는 타입은 ${unknown}, 보이스룸 타입은 ${onSt} — 거부가 보이스룸 메타에만 걸려 있어요.`, next: 'full' }
+  }
+  if (same === 0 && onSt != null) {
+    return { verdict: `다른 방 메타는 쓸 수 있는데 보이스룸만 ${onSt} 로 거부돼요.`, next: onSt === STATUS_BAD_REQUEST ? 'bad_shape' : 'server_only' }
+  }
+  if (same != null && same !== 0 && same !== STATUS_BAD_REQUEST && !owner) {
+    return { verdict: '이 봇은 보이스룸이 아닌 메타도 쓸 수 없어요. 권한 문제일 수 있으니 봇이 방장인 방에서 한 번 더 확인해 주세요.', next: 'owner_test' }
   }
   if (off === 0 && onSt != null) {
     return { verdict: '끄기는 받고 켜기만 거부돼요. 켜는 값(callId)을 서버가 먼저 만들어 줘야 하는 것으로 보입니다.', next: 'server_only' }
   }
-  if (owner) {
-    return { verdict: `봇이 방장인데도 보이스룸 메타가 ${onSt} 로 거부돼요. 권한으로는 설명되지 않습니다.`, next: 'server_only' }
+  if (onSt === STATUS_BAD_REQUEST) {
+    return { verdict: `보이스룸 메타가 ${onSt}(보낸 내용이 틀림) 로 거부돼요. 카카오가 써 둔 메타를 따라 써 보는 것이 다음 수입니다.`, next: 'bad_shape' }
   }
   return { verdict: '아직 가릴 수 없어요. 보이스룸이 아닌 메타가 있는 방에서 「보룸진단 전체」를 돌려 주세요.', next: 'full' }
 }
@@ -370,6 +375,71 @@ export function diagText(rows, o) {
   const v = diagVerdict(rows, { perm, sameType: opt.sameType })
   const head = `보룸 진단 (${who} ${perm} · 방 메타 ${Array.isArray(opt.types) && opt.types.length ? opt.types.join(',') : '없음'})`
   const note = opt.sameSkip ? `\n(대조군 생략: ${opt.sameSkip})` : ''
-  const tail = v.next === 'full' && !opt.full ? '\n「보룸진단 전체」로 한 번 더 돌리면 더 가려집니다(보이스룸이 아닌 방 메타를 같은 값으로 다시 써 봅니다).' : ''
+  const tail = v.next === 'bad_shape' ? '\n「보룸따라」를 치면 카카오가 이 방에 써 둔 보이스룸 메타를 글자 그대로 따라 써 봅니다.'
+    : v.next === 'full' && !opt.full ? '\n「보룸진단 전체」로 한 번 더 돌리면 더 가려집니다(보이스룸이 아닌 방 메타를 같은 값으로 다시 써 봅니다).' : ''
   return `${head}\n${line}${note}\n→ ${v.verdict}${tail}`
+}
+
+// ── 따라 쓰기(mirror) ────────────────────────────────────────────────────
+// 실측으로 밝혀진 상태코드(2026-10-16):
+//   -300 = 없는 명령어 · 모르는 메타 타입   (가짜 명령어 두 개와 쓰지 않는 type 97 이 모두 -300)
+//   -203 = 있는데 요청 내용이 잘못됨        (봇이 잘 쓰는 WRITE 를 빈 바디로 보냈더니 -203)
+// 즉 SETMETA type 16 의 -203 은 "권한 없음"이 아니라 "이 타입은 아는데 네가 보낸 내용이 틀렸다"는 뜻이다.
+// 그래서 다음 수는 카카오가 그 방에 직접 써 둔 보이스룸 메타를 글자 그대로 따라 쓰는 것이다.
+/** 로그에 남길 때 url 값만 가린다(주소에 토큰이 들어 있을 수 있다). */
+export function maskMeta(content) {
+  return String(content == null ? '' : content).replace(/"url"\s*:\s*"([^"]*)"/g, (m, u) => `"url":"<hidden ${u.length}>"`)
+}
+
+/** 카카오가 준 메타에서 content·type 말고 함께 온 칸들(revision·authorId·updatedAt …). 그대로 돌려보내려고 모은다. */
+export function metaExtras(meta) {
+  const out = {}
+  if (!meta || typeof meta !== 'object') return out
+  for (const [k, v] of Object.entries(meta)) {
+    if (k === 'type' || k === 'content') continue
+    if (v === undefined) continue
+    out[k] = v
+  }
+  return out
+}
+
+/**
+ * 카카오가 써 둔 메타 본문을 켜진 모양으로 바꾼다. callId 정밀도를 잃지 않게 글자만 손본다(JSON.parse 금지).
+ * liveon 을 true 로, updateTime 을 지금으로. 둘 중 없는 칸은 앞에 끼워 넣는다.
+ */
+export function turnOn(content, nowSec) {
+  let t = String(content == null ? '' : content)
+  const sec = Math.floor(Number(nowSec) || 0)
+  if (/"liveon"\s*:\s*(true|false)/.test(t)) t = t.replace(/"liveon"\s*:\s*(true|false)/, '"liveon":true')
+  else t = t.replace(/^\s*\{/, '{"liveon":true,')
+  if (/"updateTime"\s*:\s*\d+/.test(t)) t = t.replace(/"updateTime"\s*:\s*\d+/, '"updateTime":' + sec)
+  else t = t.replace(/^\s*\{/, '{"updateTime":' + sec + ',')
+  return t
+}
+
+/** 따라 쓰기 결과 판정. rows = [{tag, st}] → {verdict, next} */
+export function mirrorVerdict(rows) {
+  const st = (tag) => { const h = (rows || []).find((r) => r && r.tag === tag); return h ? Number(h.st) : null }
+  const any = (rows || []).filter((r) => Number(r.st) === 0).map((r) => r.tag)
+  if (any.length) {
+    return { verdict: `카카오가 받은 모양이 있어요: ${any.join(', ')}. 이 모양으로 켜기를 다시 맞추면 됩니다.`, next: 'shape_found' }
+  }
+  const asis = st('asis')
+  const echo = st('echo')
+  if (asis === STATUS_UNKNOWN || echo === STATUS_UNKNOWN) {
+    return { verdict: '카카오가 이 타입을 모른다고 답해요. 타입 번호부터 다시 봐야 합니다.', next: 'unknown_type' }
+  }
+  return {
+    verdict: '카카오가 써 둔 메타를 글자 그대로 돌려보내도 거부해요. 클라이언트가 쓸 수 있는 자리가 아닐 가능성이 큽니다.',
+    next: 'server_only',
+  }
+}
+
+/** 방에 보낼 따라 쓰기 답. o = {type, keys, has16} */
+export function mirrorText(rows, o) {
+  const opt = o || {}
+  const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
+  const v = mirrorVerdict(rows)
+  const keys = Array.isArray(opt.keys) && opt.keys.length ? opt.keys.join(',') : '없음'
+  return `보룸 따라쓰기 (type ${opt.type} · 함께 온 칸 ${keys})\n${line}\n→ ${v.verdict}`
 }
