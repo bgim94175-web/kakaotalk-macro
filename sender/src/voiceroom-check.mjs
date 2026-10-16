@@ -137,4 +137,28 @@ eq(row.install_id, 5, 'row install_id')
 eq(row.left_ms, V.MAX_MS - 3600_000, 'row 남은 시간')
 eq(row.call_id, a.callId, 'row callId 는 문자열')
 
+// ── 진단 판정 ────────────────────────────────────────────────────────────
+eq(V.metaTypeNum(16), 16, 'metaTypeNum 숫자')
+eq(V.metaTypeNum({ low: 17, high: 0 }), 17, 'metaTypeNum Long')
+eq(V.metaTypeNum('3'), 3, 'metaTypeNum 문자열')
+ok(Number.isNaN(V.metaTypeNum('x')), 'metaTypeNum 이상한 값')
+
+// 켜기가 되면 배너 확인으로 보낸다
+eq(V.diagVerdict([{ tag: 'on+li', st: -203 }, { tag: 'on-li', st: 0 }]).next, 'banner', 'li 없이 되면 성공')
+// 메타는 쓸 수 있는데 보이스룸만 거부 → 서버(또는 방장) 전용
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }, { tag: 'same', st: 0 }]).next, 'server_only', '메타는 쓰는데 보이스룸만 거부')
+// 아무 메타도 못 씀 → 권한 문제, 방장 방에서 시험할 값이 있다
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }]).next, 'owner_test', '메타 전체 거부')
+// 모르는 타입과 코드가 다르면 보이스룸 메타에만 걸린 신호
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -500 }]).next, 'full', '모르는 타입과 다른 코드')
+// 끄기는 받고 켜기만 거부
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'off', st: 0 }, { tag: 'unknown', st: -203 }]).next, 'server_only', '끄기만 받음')
+// 전부 같은 코드면 아직 모름
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }]).next, 'full', '전부 같은 코드')
+
+const dt = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }], { types: [3], perm: 4, full: false })
+ok(dt.includes('on-li -203') && dt.includes('권한 4') && dt.includes('방 메타 3'), '진단 답에 코드·권한·메타: ' + dt)
+ok(dt.includes('보룸진단 전체'), '아직 모르면 전체로 안내')
+ok(!V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'same', st: 0 }], { types: [3], perm: 4, full: true }).includes('보룸진단 전체'), '전체로 돌린 뒤에는 안내하지 않는다')
+
 process.stderr.write('[voiceroom-check] ok\n')

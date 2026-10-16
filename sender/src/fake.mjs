@@ -441,6 +441,9 @@ class FakeServer {
         chatInfo: {
           chatId: L(r.chatId), type: 'OM', li: L(r.li), a: Object.keys(r.members).length, left: !this.isMember(r, me),
           lastLogId: r.msgs.length ? L(r.msgs[r.msgs.length - 1].logId) : undefined,
+          // 방 메타: 제목(type 3)은 늘, 보이스룸(type 16)은 켜져 있을 때만
+          chatMetas: [{ type: 3, content: r.ln, revision: L(1), authorId: L('1'), updatedAt: sec() }]
+            .concat(r.voice ? [{ type: 16, content: r.voice, revision: L(1), authorId: L('1'), updatedAt: sec() }] : []),
         },
       })
     }

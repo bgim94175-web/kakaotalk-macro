@@ -1421,12 +1421,13 @@ export class BotSlot {
     if (!chatId) return { ok: false, status: -1 }
     const li = v && v.link_id ? String(v.link_id) : ''
     const attempts = []
-    if (li) attempts.push({ body: { chatId: L(chatId), li: L(li), type: 16, content } })
-    attempts.push({ body: { chatId: L(chatId), type: 16, content } })
+    if (li) attempts.push({ tag: 'with-li', body: { chatId: L(chatId), li: L(li), type: 16, content } })
+    attempts.push({ tag: 'no-li', body: { chatId: L(chatId), type: 16, content } })
     let last = { ok: false, status: -1 }
     for (const a of attempts) {
       const r = await this.raw('SETMETA', a.body)
       last = { ok: R.locoOk(r), status: R.locoStatus(r) }
+      log(this.id, `voice signal ${a.tag} chat ${chatId} li ${li || '-'} → status ${last.status}`)
       if (last.ok) break
     }
     return last
@@ -1594,6 +1595,45 @@ export class BotSlot {
       this.saveSoon(v)
       log(this.id, `voice meta install ${v.install_id} adopted callId ${s.callId} cs ${s.csIP}:${s.csPort}`)
     }
+  }
+
+  // 보룸 진단(SENDER_VOICE_EXPERIMENT 전용): 켜기 거절의 까닭을 가린다(voiceroom.mjs diagVerdict).
+  // SETMETA 를 여러 모양으로 던져 어디서 갈리는지 본다. full 이면 지금 방 메타를 '같은 값으로' 한 번 다시 쓴다
+  // (바뀌는 것은 없지만 카카오가 그 방에 변경 알림을 띄울 수 있어, 시험 방에서만 쓰도록 인자로 받는다).
+  async voiceDiag(v, full) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const rows = []
+    const run = async (tag, body) => {
+      const r = await this.raw('SETMETA', body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice diag ${tag} chat ${chatId} type ${body.type} → status ${st} body ${traceText((r && r.body) || {})}`)
+      rows.push({ tag, st })
+      // 과속 방지로 사이에 쉰다. unref 하지 않는다 — 이것 말고 깨울 것이 없으면 타이머가 울지 않는다(selfcheck)
+      await new Promise((ok) => setTimeout(ok, 400))
+      return st
+    }
+    // 방 메타는 읽기만 한다(CHATINFO)
+    const info = await this.raw('CHATINFO', { chatId: L(chatId) })
+    const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
+      .filter((m) => m && typeof m.content === 'string'))
+    const types = metas.map((m) => VR.metaTypeNum(m.type)).filter((n) => Number.isFinite(n))
+    log(this.id, `voice diag start chat ${chatId} li ${li || '-'} perm ${v.perm} state ${v.state} metas ${JSON.stringify(types)}`)
+    const nowSec = Math.floor(this.now() / 1000)
+    const on = VR.onContent({ title: '진단', startSec: nowSec, nowSec, callId: VR.newCallId(nowSec) })
+    if (li) await run('on+li', { chatId: L(chatId), li: L(li), type: 16, content: on })
+    await run('on-li', { chatId: L(chatId), type: 16, content: on })
+    await run('off', { chatId: L(chatId), type: 16, content: VR.offContent() })
+    await run('count', { chatId: L(chatId), type: 17, content: '{"count":0}' })
+    await run('unknown', { chatId: L(chatId), type: 97, content: '{}' })
+    if (full && metas.length) {
+      const m = metas[0]
+      await run('same', { chatId: L(chatId), type: VR.metaTypeNum(m.type), content: m.content })
+    }
+    const text = VR.diagText(rows, { types, perm: v.perm, full: !!full })
+    log(this.id, `voice diag done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${VR.diagVerdict(rows).next}`)
+    return { ok: true, rows, types, text }
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
@@ -3362,6 +3402,18 @@ export class BotSlot {
     // 보이스룸 명령어 찾기(실험): SENDER_VOICE_EXPERIMENT=1 일 때만 남겨 둔 탐색용 명령어.
     if (process.env.SENDER_VOICE_EXPERIMENT === '1' && isCmd) {
       const t = text.trim().slice(prefix.length).trim()
+      const dm = /^보룸진단(?:\s+(전체))?$/.exec(t)
+      if (dm) {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 진단은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, '보룸 진단 중… 잠시만요(약 5초).', { what: 'reply' })
+        const r = await this.voiceDiag(v, !!dm[1])
+        this.say(v, r.ok ? r.text : '진단을 돌리지 못했어요.', { what: 'reply' })
+        return
+      }
       if (t === '보룸찾기') {
         const n = Number(await this.permOf(v, m.authorId))
         if (!(Number.isFinite(n) && (n & 5))) {

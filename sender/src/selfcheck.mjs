@@ -4064,6 +4064,26 @@ async function withLog(fn) {
     // 둘째 방은 그대로 켜져 있다(방마다 따로다)
     if (!botA.slot.voiceOf(botA.slot.byInstall.get(iV2))) throw new Error('#42 the other room keeps its voice room')
     await pool.voiceCmd({ install_id: iV2 }, 'off')
+    // 진단(보룸진단): 카카오가 켜기만 거절하는 방에서 '보이스룸 메타만 거부' 판정이 나와야 한다
+    fs.room('voicex1').voiceDeny = -203
+    try {
+      const d1 = await botA.slot.voiceDiag(vv, false)
+      if (!d1.ok) throw new Error('#42 diag runs')
+      const tags = d1.rows.map((r) => r.tag).join(',')
+      if (tags !== 'on+li,on-li,off,count,unknown') throw new Error('#42 diag probes ' + tags)
+      if (d1.rows.filter((r) => r.tag.startsWith('on')).some((r) => r.st !== -203)) throw new Error('#42 diag sees the refusal ' + JSON.stringify(d1.rows))
+      if (!d1.types.includes(3)) throw new Error('#42 diag reads the room metas ' + JSON.stringify(d1.types))
+      if (VR.diagVerdict(d1.rows).next !== 'full') throw new Error('#42 diag asks for 전체 first')
+      if (!d1.text.includes('보룸진단 전체')) throw new Error('#42 diag reply points at 전체')
+      // 전체: 지금 있는 메타(제목)를 같은 값으로 다시 쓴다 → 되면 보이스룸 메타만 거부된 것
+      const d2 = await botA.slot.voiceDiag(vv, true)
+      if (!d2.rows.some((r) => r.tag === 'same' && r.st === 0)) throw new Error('#42 diag rewrites a meta as is ' + JSON.stringify(d2.rows))
+      if (VR.diagVerdict(d2.rows).next !== 'server_only') throw new Error('#42 diag verdict ' + JSON.stringify(VR.diagVerdict(d2.rows)))
+      if (fs.room('voicex1').ln !== '테스트방 voicex1') throw new Error('#42 diag does not change the room')
+      if (botA.slot.voiceOf(vv)) throw new Error('#42 diag leaves no session')
+    } finally {
+      fs.room('voicex1').voiceDeny = 0
+    }
     pacer.botWin.max = prevBotMax
     ;[iV, iV2, iV3].forEach((id, k) => { pacer.room(String(id)).win.max = prevRoomMax[k] })
   }
