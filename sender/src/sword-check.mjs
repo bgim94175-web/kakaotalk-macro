@@ -53,6 +53,15 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
 
 // ── 표 ────────────────────────────────────────────────────────────────────
 {
+  const T = S.TABLES
+  eq(S.MAX_LV, 30, 'max level 30')
+  eq(T.CHANCE.length, 30, 'odds table: one row per attempt +0..+29')
+  eq(T.COST.length, 30, 'cost table length')
+  eq(T.MAT.length, 30, 'material table length')
+  eq(T.GUARD_K.length, 30, 'guard table length')
+  eq(T.PRICE.length, 31, 'price table: +0..+30')
+  eq(S.NAMES.length, 31, 'one name per level +0..+30')
+  assert(Object.isFrozen(T.CHANCE) && Object.isFrozen(T.CHANCE[0]), 'tables are frozen')
   let prevUp = 101
   let prevBroke = -1
   for (let lv = 0; lv < S.MAX_LV; lv++) {
@@ -61,56 +70,157 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
     assert(c.broke >= prevBroke, 'destroy chance never falls ' + lv)
     assert(c.up + c.broke + c.fail === 100 && c.fail >= 0, 'chances add to 100 at ' + lv)
     assert(lv >= 5 ? c.broke > 0 : c.broke === 0, 'destroy only from +5 (' + lv + ')')
+    // 축복 없이 성공 100%가 되는 단계는 없다(보정 최대 +10%까지 더해도)
+    assert(c.up + S.PITY_MAX < 100, 'bless always helps at ' + lv)
     assert(S.cost(lv).gold > 0 && (lv === 0 || S.cost(lv).gold > S.cost(lv - 1).gold), 'cost rises ' + lv)
-    assert(S.cost(lv).mana === (lv >= 10 && lv < 15 ? 1 : 0) && S.cost(lv).scale === (lv >= 15 ? 1 : 0), 'materials ' + lv)
     prevUp = c.up
     prevBroke = c.broke
   }
+  // 재료: +10~+14 마력석 1/2/3/3/4 · +15~+19 용의 비늘 2/2/3/3/3 · +20~+29 별빛 결정 1/1/2/2/2/3/4/5/6/7
+  const mats = (lv) => { const c = S.cost(lv); return [c.mana, c.scale, c.star] }
+  for (let lv = 0; lv < 10; lv++) eq(JSON.stringify(mats(lv)), '[0,0,0]', 'gold only below +10 (' + lv + ')')
+  eq(JSON.stringify([10, 11, 12, 13, 14].map((lv) => mats(lv))), '[[1,0,0],[2,0,0],[3,0,0],[3,0,0],[4,0,0]]', 'mana +10..+14')
+  eq(JSON.stringify([15, 16, 17, 18, 19].map((lv) => mats(lv))), '[[0,2,0],[0,2,0],[0,3,0],[0,3,0],[0,3,0]]', 'scale +15..+19')
+  eq(JSON.stringify([20, 21, 22, 23, 24, 25, 26, 27, 28, 29].map((lv) => S.cost(lv).star)), '[1,1,2,2,2,3,4,5,6,7]', 'star +20..+29')
+  // 보호 주문서 수: 부서질 수 있는 단계부터, +5~+14 는 1개, +15~+19 는 비늘 수, +20부터는 결정 1개마다 5개
+  for (let lv = 0; lv < S.MAX_LV; lv++) {
+    const k = S.guardK(lv)
+    assert((k > 0) === (S.chance(lv).broke > 0), 'guard only where a destroy can happen ' + lv)
+    if (lv >= 5 && lv < 15) eq(k, 1, 'one scroll below +15 (' + lv + ')')
+    if (lv >= 15 && lv < 20) eq(k, S.cost(lv).scale, 'scroll count = scale count at +' + lv)
+    if (lv >= 20) eq(k, 5 * S.cost(lv).star, 'scroll count = 5 per star at +' + lv)
+    assert(lv === 0 || k >= S.guardK(lv - 1), 'scroll count never falls ' + lv)
+  }
+  eq(S.guardK(29), 35, 'guard +29')
   for (let lv = 1; lv <= S.MAX_LV; lv++) assert(S.price(lv) > S.price(lv - 1), 'sell price rises ' + lv)
   eq(S.price(0), 0, '+0 sells for nothing')
+  eq(S.price(S.MAX_LV), 4000000, '+30 sells for 4,000,000G')
+  // +9~+20 판매가는 예전 그대로(가지고 있던 검의 값이 바뀌지 않는다)
+  eq(JSON.stringify([9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((lv) => S.price(lv))), '[5000,7000,9500,13000,18000,25000,35000,50000,70000,100000,150000,250000]', 'old sell prices kept at +9..+20')
+  // 이름: 31개 모두 다르고 7자까지, 「검」으로 끝난다(「…이에요」·「…이」 조사가 맞다). 예전 이름은 그 단계에 그대로
+  eq(new Set(S.NAMES).size, 31, 'names are unique')
+  for (const n of S.NAMES) assert([...n].length <= 7 && n.endsWith('검'), 'name shape ' + n)
+  const old = { 0: '녹슨 철검', 3: '강철 장검', 6: '은빛 기사검', 9: '푸른 서리검', 12: '붉은 화염검', 15: '황금 용검', 18: '칠흑의 마검', 20: '추억의 전설검' }
+  for (const lv of Object.keys(old)) eq(S.swordName(Number(lv)), old[lv], 'old name kept at +' + lv)
+  // 묶음: 14개, 그림 번호 = 묶음 번호, 묶음 이름 = 첫 단계 이름
+  eq(S.FAMILIES.length, 14, '14 art families')
+  S.FAMILIES.forEach((f, i) => {
+    eq(f.art, i, 'family art index ' + i)
+    eq(f.name, S.NAMES[f.from], 'family name is its first level name ' + i)
+    eq(S.tierOf(f.from), i, 'tierOf at the family start ' + f.from)
+    if (i) eq(S.tierOf(f.from - 1), i - 1, 'tierOf just before the family ' + f.from)
+  })
+  eq(S.FAMILIES[13].from, 30, 'the last family is +30 only')
   eq(S.swordLabel(0), '+0 녹슨 철검', 'label 0')
-  eq(S.swordLabel(7), '+7 은빛 기사검', 'label 7')
+  eq(S.swordLabel(7), '+7 은빛 근위검', 'label 7')
+  eq(S.swordLabel(19), '+19 칠흑의 마왕검', 'label 19')
   eq(S.swordLabel(20), '+20 추억의 전설검', 'label 20')
+  eq(S.swordLabel(25), '+25 성운의 은하검', 'label 25')
+  eq(S.swordLabel(30), '+30 태초의 창세검', 'label 30')
   eq(S.tierOf(2), 0, 'tier 2')
   eq(S.tierOf(18), 6, 'tier 18')
+  eq(S.tierOf(20), 7, 'tier 20')
+  eq(S.tierOf(22), 8, 'tier 22')
+  eq(S.tierOf(30), 13, 'tier 30')
+  // 사냥 한 번(보물 상자 포함 기대값)이 어느 단계든 강화 비용의 0.5~1.5배
+  for (let lv = 0; lv < S.MAX_LV; lv++) {
+    const band = T.HUNT[S.tierOf(lv)]
+    const ev = (band.reduce((n, m) => n + (m[1] + m[2]) / 2, 0) / band.length) * (1 + (T.TREASURE_PCT / 100) * 4)
+    const r = ev / S.cost(lv).gold
+    assert(r >= 0.5 && r <= 1.5, `hunt funds about one press at +${lv} (${r.toFixed(2)})`)
+  }
+  eq(T.HUNT.length, S.FAMILIES.length, 'one hunting ground per family')
+  // 아이템은 늘 산 값보다 싸게 팔린다
+  for (const id of Object.keys(S.ITEMS)) assert(S.ITEMS[id].buy > S.ITEMS[id].sell && S.ITEMS[id].sell > 0, 'item sells below its price ' + id)
   eq(S.won(1234567), '1,234,567', 'won')
   eq(S.helpLine('#'), '검 강화 : #강화 #내검 #사냥 #출석 #결투 #보스 #강화랭킹 #강화도움', 'help line')
+}
+
+// ── 이익 고리 없음: 검을 만드는 가장 싼 기대 비용(정확한 계산)보다 판매가가 늘 낮다 ──
+// 상태 (단계, 연속 실패), 강화마다 축복·보호를 쓸지 고르고 파괴되면 +0(위로금은 돌려받음). 아이템은 되팔 값으로 쳐서(가장 싸게)
+// 만든 검을 팔아 남기는 고리가 없는지 본다. 결과는 스펙의 정확한 계산과 같다(+20 에서 0.72).
+function buildCost(L, val) {
+  const FMAX = S.PITY_MAX / S.PITY_STEP
+  let X = 0 // +0 에서 +L 까지의 기대 비용(파괴되면 다시 여기서)
+  for (let it = 0; it < 20000; it++) {
+    let next = [0]
+    for (let lv = L - 1; lv >= 0; lv--) {
+      const ch = S.chance(lv)
+      const c = S.cost(lv)
+      const base = c.gold + c.mana * val.mana + c.scale * val.scale + c.star * val.star
+      const comfort = lv >= S.COMFORT_FROM ? Math.floor(S.price(lv) / 10) : 0
+      const V = []
+      for (let f = FMAX; f >= 0; f--) {
+        let best = Infinity
+        for (const bless of [false, true]) {
+          for (const guard of ch.broke ? [false, true] : [false]) {
+            const cost = base + (bless ? val.bless : 0) + (guard ? S.guardK(lv) * val.guard : 0)
+            const up = Math.min(100, ch.up + (bless ? S.BLESS_PCT : 0) + S.pityOf(f)) / 100
+            const broke = Math.min(ch.broke / 100, 1 - up)
+            const stay = 1 - up - broke + (guard ? broke : 0)
+            const reset = guard ? 0 : broke
+            const fn = Math.min(FMAX, f + 1)
+            const v = fn === f ? (cost + up * next[0] + reset * (X - comfort)) / (1 - stay) : cost + up * next[0] + stay * V[fn] + reset * (X - comfort)
+            if (v < best) best = v
+          }
+        }
+        V[f] = best
+      }
+      next = V
+    }
+    if (Math.abs(next[0] - X) < 0.01) return next[0]
+    X = next[0]
+  }
+  return X
+}
+{
+  const at = (k) => Object.fromEntries(Object.keys(S.ITEMS).map((id) => [id, S.ITEMS[id][k]]))
+  let worst = 0
+  for (let L = 1; L <= S.MAX_LV; L++) {
+    const r = S.price(L) / buildCost(L, at('sell'))
+    worst = Math.max(worst, r)
+    assert(r <= 0.75, `no profit loop: +${L} sells for ${(r * 100).toFixed(0)}% of its cheapest expected cost`)
+  }
+  assert(worst > 0.6, 'the solver really ran ' + worst)
+  const top = buildCost(S.MAX_LV, at('buy'))
+  assert(top > 60e6 && top < 80e6 && S.price(S.MAX_LV) / top < 0.1, '+30 from scratch at shop prices ' + Math.round(top))
 }
 
 // ── 강화: 확률 경계(고정 난수) ────────────────────────────────────────────
 {
   const g = game()
-  const r = g.run('1', '가', '강화', { rand: fixed(0.94) }) // +0 성공 95%
-  assert(r.text.startsWith('[강화 성공]\n가님의 검이 +1 녹슨 철검이 됐어요.'), 'first enhance ' + r.text)
+  const r = g.run('1', '가', '강화', { rand: fixed(0.84) }) // +0 성공 85%
+  assert(r.text.startsWith('[강화 성공]\n가님의 검이 +1 손질한 철검이 됐어요.'), 'first enhance ' + r.text)
   eq(r.card.kind, 'enhance', 'card kind')
   eq(r.card.result, 'up', 'card result')
   eq(g.u('1').g, S.START_GOLD - S.cost(0).gold, 'gold paid')
   eq(g.u('1').lv, 1, 'level 1')
   eq(g.u('1').b, 1, 'best 1')
-  // +9: 성공 50 · 파괴 6 · 실패 44
+  // +9: 성공 26 · 파괴 8 · 실패 66
   const setLv = (lv, gold) => Object.assign(g.u('1'), { lv, g: gold == null ? 100000 : gold, e: 0, w: 0, f: 0 })
   setLv(9)
-  eq(g.run('1', '가', '강화', { rand: fixed(0.4999) }).card.result, 'up', '+9 roll 49.99 → up')
+  eq(g.run('1', '가', '강화', { rand: fixed(0.2599) }).card.result, 'up', '+9 roll 25.99 → up')
   setLv(9)
   const idBefore = g.u('1').id
-  const br = g.run('1', '가', '강화', { rand: fixed(0.5) })
-  eq(br.card.result, 'broke', '+9 roll 50 → broke')
+  const br = g.run('1', '가', '강화', { rand: fixed(0.26) })
+  eq(br.card.result, 'broke', '+9 roll 26 → broke')
   assert(br.text.startsWith('[강화 파괴]\n가님의 +9 푸른 서리검이 부서졌어요. 새 +0 녹슨 철검을 받았어요.'), 'broke text ' + br.text)
   eq(g.u('1').lv, 0, 'broke → +0')
   assert(g.u('1').id !== idBefore, 'broke → new sword id')
   eq(g.u('1').k, 1, 'broken count')
   eq(g.u('1').b, 10, 'best record kept after break')
   setLv(9)
-  eq(g.run('1', '가', '강화', { rand: fixed(0.56) }).card.result, 'fail', '+9 roll 56 → fail')
+  eq(g.run('1', '가', '강화', { rand: fixed(0.34) }).card.result, 'fail', '+9 roll 34 → fail')
   eq(g.u('1').lv, 9, 'fail keeps level')
-  // 보호 주문서: 파괴 → 지킴, 주문서 1장 씀
+  // 보호 주문서: 파괴 → 지킴, +5~+14 는 1장
   setLv(9)
   g.u('1').it = { guard: 2 }
-  const gd = g.run('1', '가', '강화 보호', { rand: fixed(0.5) })
+  const gd = g.run('1', '가', '강화 보호', { rand: fixed(0.3) })
   eq(gd.card.result, 'guarded', 'guard saves')
   eq(g.u('1').lv, 9, 'guarded level')
   eq(g.u('1').it.guard, 1, 'guard used once')
   assert(gd.text.startsWith('[강화 실패]\n부서질 뻔했지만 보호 주문서가 지켜 줬어요. +9 푸른 서리검 그대로예요.'), 'guarded text ' + gd.text)
+  assert(gd.text.includes('\n사용 : 1,600G · 보호 주문서 1개 (보유 '), 'guarded: used line shows the scroll count ' + gd.text)
   // 실패여도 보호 주문서를 썼으면 사라진다(쓴 만큼)
   setLv(9)
   g.run('1', '가', '강화 보호주문서', { rand: fixed(0.9) })
@@ -118,7 +228,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   // 축복: +10%p
   setLv(9)
   g.u('1').it = { bless: 1 }
-  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.59) }).card.result, 'up', 'bless 60%')
+  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.359) }).card.result, 'up', 'bless 36%')
   eq(g.u('1').it.bless, undefined, 'bless used')
   // +5 미만에서 보호 주문서는 받지 않고 쓰지도 않는다
   setLv(3)
@@ -130,7 +240,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   // 없는 주문서
   setLv(7)
   g.u('1').it = {}
-  eq(g.run('1', '가', '강화 보호').text, '보호 주문서가 없어요. 「!구매 보호 1」로 살 수 있어요.', 'no guard')
+  eq(g.run('1', '가', '강화 보호').text, '+7에서 보호하려면 보호 주문서가 1개 필요해요. (보유 0개) 「!구매 보호 1」로 살 수 있어요.', 'no guard')
   eq(g.run('1', '가', '강화 축복').text, '축복 주문서가 없어요. 「!구매 축복 1」로 살 수 있어요.', 'no bless')
   // 골드 부족 · 재료 부족: 상태 그대로
   setLv(6, 10)
@@ -138,27 +248,101 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(g.u('1').lv, 6, 'no gold → same level')
   setLv(10)
   g.u('1').it = {}
-  eq(g.run('1', '가', '강화').text, '+10부터는 강화할 때 마력석이 1개 필요해요. 「!사냥」이나 「!상점」에서 구할 수 있어요.', 'no mana')
+  eq(g.run('1', '가', '강화').text, '+10 강화에는 마력석이 1개 필요해요. (보유 0개) 「!사냥」으로 모으거나 「!구매 마력석 1」로 살 수 있어요.', 'no mana')
   eq(g.u('1').g, 100000, 'no mana → no gold paid')
   g.u('1').it = { mana: 1 }
   g.run('1', '가', '강화', { rand: fixed(0.99) })
   eq(g.u('1').it.mana, undefined, 'mana used')
   eq(g.u('1').g, 100000 - S.cost(10).gold, 'gold at +10')
+  setLv(13)
+  g.u('1').it = { mana: 1 }
+  eq(g.run('1', '가', '강화').text, '+13 강화에는 마력석이 3개 필요해요. (보유 1개) 「!사냥」으로 모으거나 「!구매 마력석 2」로 살 수 있어요.', 'mana count at +13')
+  eq(g.u('1').it.mana, 1, 'short of mana → nothing taken')
   setLv(15)
   g.u('1').it = { mana: 3 }
-  assert(g.run('1', '가', '강화').text.startsWith('+15부터는 강화할 때 용의 비늘이 1개 필요해요.'), 'no scale')
-  g.u('1').it = { scale: 1 }
-  g.run('1', '가', '강화', { rand: fixed(0.0) })
+  eq(g.run('1', '가', '강화').text, '+15 강화에는 용의 비늘이 2개 필요해요. (보유 0개) 「!사냥」으로 모으거나 「!구매 비늘 2」로 살 수 있어요.', 'no scale')
+  g.u('1').it = { scale: 2 }
+  const s15 = g.run('1', '가', '강화', { rand: fixed(0.0) })
   eq(g.u('1').lv, 16, 'scale used, level up')
-  eq(g.u('1').it.scale, undefined, 'scale gone')
-  // 최고 단계
+  eq(g.u('1').it.scale, undefined, 'both scales gone')
+  assert(s15.text.includes('\n사용 : 2,700G · 용의 비늘 2개 (보유 ') && s15.text.endsWith('\n다음 강화 : 3,000G + 용의 비늘 2개 · 성공 16% · 파괴 15%\n보호하려면 보호 주문서가 2개 필요해요.'), 'material counts in the text ' + s15.text)
+  setLv(17)
+  g.u('1').it = { scale: 3 }
+  eq(g.run('1', '가', '강화 보호').text, '+17에서 보호하려면 보호 주문서가 3개 필요해요. (보유 0개) 「!구매 보호 3」으로 살 수 있어요.', 'guard count at +17 (으로 after 3)')
+  // +19 → +20 은 이제 최고 단계가 아니다: 다음은 별빛 결정
   setLv(19)
-  g.u('1').it = { scale: 1 }
-  const top = g.run('1', '가', '강화', { rand: fixed(0.0) })
-  eq(top.card.lv, 20, 'reach +20')
-  assert(top.text.startsWith('[강화 성공]\n가님의 검이 +20 추억의 전설검이 됐어요.\n') && top.text.endsWith('\n최고 단계예요.') && top.text.split('최고 단계예요.').length === 2, 'top text ' + top.text)
+  g.u('1').it = { scale: 3 }
+  const t20 = g.run('1', '가', '강화', { rand: fixed(0.0) })
+  assert(t20.text.startsWith('[강화 성공]\n가님의 검이 +20 추억의 전설검이 됐어요.\n') && t20.text.endsWith('\n다음 강화 : 4,300G + 별빛 결정 1개 · 성공 12% · 파괴 18%\n보호하려면 보호 주문서가 5개 필요해요.'), '+20 text ' + t20.text)
   setLv(20)
-  eq(g.run('1', '가', '강화').text, '가님의 검은 이미 최고 단계 +20 추억의 전설검이에요. 「!판매」로 팔 수 있어요.', 'max level')
+  g.u('1').it = { guard: 99 }
+  eq(g.run('1', '가', '강화 보호').text, '+20 강화에는 별빛 결정이 1개 필요해요. (보유 0개) 「!사냥」으로 모으거나 「!구매 결정 1」로 살 수 있어요.', 'no star')
+  // 최고 단계 +30
+  setLv(29)
+  g.u('1').it = { star: 7 }
+  const top = g.run('1', '가', '강화', { rand: fixed(0.0) })
+  eq(top.card.lv, 30, 'reach +30')
+  eq(g.u('1').it.star, undefined, '7 stars used at +29')
+  assert(top.text.startsWith('[강화 성공]\n가님의 검이 +30 태초의 창세검이 됐어요.\n') && top.text.endsWith('\n최고 단계예요.') && top.text.split('최고 단계예요.').length === 2, 'top text ' + top.text)
+  setLv(30)
+  eq(g.run('1', '가', '강화').text, '가님의 검은 이미 최고 단계 +30 태초의 창세검이에요. 「!판매」로 팔 수 있어요.', 'max level')
+}
+
+// ── 보호 주문서 수는 단계마다(+15부터 여러 장). 모자라면 아무것도 쓰지 않고, 있으면 그 수만큼 쓴다 ──
+{
+  const g = game()
+  g.run('1', '가', '내검')
+  for (let lv = 5; lv < S.MAX_LV; lv++) {
+    const k = S.guardK(lv)
+    const c = S.cost(lv)
+    const it = Object.fromEntries(Object.entries({ guard: k - 1, bless: 1, mana: c.mana, scale: c.scale, star: c.star }).filter((x) => x[1] > 0))
+    Object.assign(g.u('1'), { lv, b: lv, g: 1e6, e: 0, w: 0, f: 0, it })
+    const before = JSON.stringify(g.u('1'))
+    const no = g.run('1', '가', '강화 보호 축복', { rand: fixed(0) })
+    const more = String(1)
+    eq(no.text, `+${lv}에서 보호하려면 보호 주문서가 ${k}개 필요해요. (보유 ${k - 1}개) 「!구매 보호 ${more}」로 살 수 있어요.`, 'short of scrolls at +' + lv)
+    eq(JSON.stringify(g.u('1')), before, 'short of scrolls → nothing changes at +' + lv)
+    // 파괴 구간 한가운데: 지켜 주고 정확히 k장을 쓴다
+    g.u('1').it.guard = k + 2
+    const ch = S.chance(lv)
+    const roll = (Math.min(100, ch.up + S.BLESS_PCT) + Math.min(ch.broke, 100 - Math.min(100, ch.up + S.BLESS_PCT)) / 2) / 100
+    const r = g.run('1', '가', '강화 보호 축복', { rand: fixed(roll) })
+    eq(r.card.result, 'guarded', 'guarded at +' + lv)
+    eq(g.u('1').it.guard, 2, `exactly ${k} scrolls used at +${lv}`)
+    eq(JSON.stringify(r.card.used), JSON.stringify([`보호 주문서 ${k}개`, '축복 주문서 1개']), 'card chips show the count at +' + lv)
+    assert(r.text.includes(` · 보호 주문서 ${k}개 · 축복 주문서 1개 (보유 `), 'used line counts at +' + lv)
+    assert(['mana', 'scale', 'star'].every((id) => !g.u('1').it[id]), 'materials used at +' + lv)
+  }
+  // +22: 결정 2 · 보호 10. 둘 다 모자라면 한 번에 모두(더 필요한 수)와 모두 사서 강화하는 골드를 알린다(아무것도 쓰지 않는다)
+  Object.assign(g.u('1'), { lv: 22, g: 1e6, e: 0, w: 0, f: 0, it: { star: 1, guard: 3 } })
+  eq(g.run('1', '가', '강화 보호').text, '+22 보호 강화에는 별빛 결정 1개 · 보호 주문서 7개가 더 필요해요.\n모두 사서 강화하려면 445,100G가 들어요. (보유 1,000,000G)\n「!사냥」으로 모으거나 「!구매 결정 1」 · 「!구매 보호 7」로 살 수 있어요.', 'every shortfall at once')
+  eq(JSON.stringify(g.u('1').it), '{"star":1,"guard":3}', 'nothing taken')
+  eq(g.u('1').g, 1e6, 'no gold taken')
+  // 알려 준 대로 모두 사면 그대로 보호 강화가 된다
+  assert(g.run('1', '가', '구매 결정 1').text.startsWith('별빛 결정 1개를 300,000G에 샀어요.'), 'buy the star from the hint')
+  assert(g.run('1', '가', '구매 보호 7').text.startsWith('보호 주문서 7개를 140,000G에 샀어요.'), 'buy the scrolls from the hint')
+  const ok = g.run('1', '가', '강화 보호', { rand: fixed(0.2) }) // +22 성공 10 · 파괴 20 → 0.2 는 파괴 구간(10~30)
+  eq(ok.card.result, 'guarded', 'hint was enough for a guarded press')
+  eq(g.u('1').g, 1e6 - 445100, 'the hint total is what it cost')
+  // 리뷰 사례: +20 · 310,000G · 아이템 없음 → 결정만 사면 보호 주문서 살 골드가 없다는 것을 처음부터 안다
+  Object.assign(g.u('1'), { lv: 20, g: 310000, e: 0, w: 0, f: 0, it: {} })
+  eq(g.run('1', '가', '강화 보호').text, '+20 보호 강화에는 별빛 결정 1개 · 보호 주문서 5개가 더 필요해요.\n모두 사서 강화하려면 404,300G가 들어요. (보유 310,000G)\n「!사냥」으로 모으거나 「!구매 결정 1」 · 「!구매 보호 5」로 살 수 있어요.', '+20 guard + star shortfall together')
+  // 골드도 모자라고 재료도 모자라면 함께(축복도 모자라면 끝에)
+  Object.assign(g.u('1'), { lv: 15, g: 100, e: 0, w: 0, f: 0, it: { scale: 1 } })
+  eq(g.run('1', '가', '강화 축복').text, '+15 강화에는 용의 비늘 1개 · 축복 주문서 1개가 더 필요해요.\n모두 사서 강화하려면 54,700G가 들어요. (보유 100G)\n「!사냥」으로 모으거나 「!구매 비늘 1」 · 「!구매 축복 1」로 살 수 있어요.', 'gold + material + bless together')
+  Object.assign(g.u('1'), { lv: 15, g: 100, e: 0, w: 0, f: 0, it: {} })
+  eq(g.run('1', '가', '강화').text, '+15 강화에는 용의 비늘 2개가 더 필요해요.\n모두 사서 강화하려면 102,700G가 들어요. (보유 100G)\n「!사냥」으로 모으거나 「!구매 비늘 2」로 살 수 있어요.', 'gold short and one material short')
+  eq(JSON.stringify([g.u('1').lv, g.u('1').g, g.u('1').it]), '[15,100,{}]', 'combined shortfall → nothing changes')
+  // 보호 없이 하면 주문서가 없어도 된다
+  Object.assign(g.u('1'), { lv: 22, g: 1e6, e: 0, w: 0, f: 0, it: { star: 2 } })
+  eq(g.run('1', '가', '강화', { rand: fixed(0.5) }).card.result, 'fail', 'no guard asked → no scrolls needed')
+  // 「!내검」: +15부터 보호에 드는 수를 한 줄 더
+  Object.assign(g.u('1'), { lv: 14 })
+  assert(!g.run('1', '가', '내검').text.includes('보호하려면'), 'no scroll line below +15')
+  Object.assign(g.u('1'), { lv: 25, f: 0 })
+  const inf = g.run('1', '가', '내검')
+  assert(inf.text.endsWith('\n다음 강화 : 6,400G + 별빛 결정 3개 · 성공 7% · 파괴 23%\n보호하려면 보호 주문서가 15개 필요해요.'), 'info scroll line ' + inf.text)
+  eq(JSON.stringify([inf.card.next.gold, inf.card.next.star, inf.card.next.guard]), '[6400,3,15]', 'info card next carries the counts')
 }
 
 // ── 강화: 주문서 낱말. 띄어 쓰거나 수를 붙여도 읽고, 모르는 낱말이면 아무것도 쓰지 않고 다시 묻는다 ──
@@ -166,17 +350,17 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   const g = game()
   g.run('1', '가', '내검')
   const at15 = (it) => Object.assign(g.u('1'), { lv: 15, g: 100000, e: 0, w: 0, f: 0, it })
-  // +15: 성공 20 · 파괴 18 → 0.30 은 파괴 구간
-  for (const line of ['강화 보호', '강화 파괴방지', '강화 파괴 방지', '강화 보호 주문서', '강화 보호1', '강화 보호 1개', '강화 보호 1']) {
-    at15({ guard: 1, scale: 1 })
+  // +15: 성공 17 · 파괴 14 → 0.30 은 파괴 구간. 보호 한 번에 주문서 2장
+  for (const line of ['강화 보호', '강화 파괴방지', '강화 파괴 방지', '강화 보호 주문서', '강화 보호1', '강화 보호 1개', '강화 보호 1', '강화 보호 2개']) {
+    at15({ guard: 2, scale: 2 })
     eq(g.run('1', '가', line, { rand: fixed(0.3) }).card.result, 'guarded', 'guard word: ' + line)
     eq(g.u('1').it.guard, undefined, 'guard used: ' + line)
   }
-  at15({ bless: 1, scale: 1 })
-  eq(g.run('1', '가', '강화 축복 주문서', { rand: fixed(0.29) }).card.result, 'up', 'spaced bless name (20 + 10 > 29)')
+  at15({ bless: 1, scale: 2 })
+  eq(g.run('1', '가', '강화 축복 주문서', { rand: fixed(0.26) }).card.result, 'up', 'spaced bless name (17 + 10 > 26)')
   eq(g.u('1').it.bless, undefined, 'spaced bless name: used')
-  at15({ guard: 1, bless: 1, scale: 1 })
-  eq(JSON.stringify(g.run('1', '가', '강화 보호 주문서 축복 주문서', { rand: fixed(0.5) }).card.used), '["보호 주문서","축복 주문서"]', 'both spaced names')
+  at15({ guard: 2, bless: 1, scale: 2 })
+  eq(JSON.stringify(g.run('1', '가', '강화 보호 주문서 축복 주문서', { rand: fixed(0.5) }).card.used), '["보호 주문서 2개","축복 주문서 1개"]', 'both spaced names')
   // 잘못 쓴 낱말·군말(「!강화 ㄱㄱ」): 주문서 없이 강화하지 않는다(골드·주문서·재료·쿨타임 그대로).
   // 처음 못 읽은 낱말을 보이고 「!강화」만 쳐도 된다는 것을 먼저 알린다. 링크·긴 글은 따라 올리지 않는다
   const tail = ' 알 수 없어서 강화하지 않았어요. 「!강화」, 「!강화 보호」, 「!강화 축복」처럼 입력해 주세요.'
@@ -188,27 +372,29 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
     assert(u.lv === 15 && u.g === 100000 && u.it.guard === 1 && u.it.scale === 1 && u.e === 0, 'unknown word changes nothing: ' + line + ' ' + JSON.stringify(u))
   }
   // 검·재료 이름은 강화 때 저절로 쓰는 것이라 그냥 넘어간다
-  at15({ scale: 1 })
+  at15({ scale: 2 })
   eq(g.run('1', '가', '강화 검', { rand: fixed(0.5) }).card.result, 'fail', 'sword word is fine')
+  at15({ scale: 2 })
+  eq(g.run('1', '가', '강화 비늘 결정', { rand: fixed(0.5) }).card.result, 'fail', 'material words are fine')
 }
 
-// ── 축복: 축복 없이도 성공 100%면 쓰지 않고(알려 준다) 강화는 한다 ──────────
+// ── 축복: 축복 없이도 성공 100%면 쓰지 않는다 — 지금 표에서는 그런 단계가 없어서(85% + 보정 10%) 늘 쓴다 ──
 {
   const g = game()
   g.run('1', '가', '내검')
-  // +0 · 연속 실패 3번(95 + 6 → 100)
-  Object.assign(g.u('1'), { lv: 0, g: 10000, e: 0, w: 0, f: 3, it: { bless: 1 } })
+  // +0 · 연속 실패 5번(85 + 10 = 95): 축복이 도움이 되므로 쓰고, 성공 100%
+  Object.assign(g.u('1'), { lv: 0, g: 10000, e: 0, w: 0, f: 5, it: { bless: 1 } })
   const r = g.run('1', '가', '강화 축복', { rand: fixed(0.999) })
-  eq(r.card.result, 'up', 'bless at 100%: still enhances')
-  eq(g.u('1').it.bless, 1, 'bless at 100%: kept')
-  assert(r.text.includes('\n이미 성공 확률이 100%라서 축복 주문서는 쓰지 않았어요.\n사용 : 100G (보유 9,900G)\n'), 'bless at 100%: text ' + r.text)
-  assert(r.card.used.length === 0 && r.card.notes.includes('축복 주문서 안 씀'), 'bless at 100%: card ' + JSON.stringify(r.card))
-  // +1 · 연속 실패 5번(90 + 10 → 100): 축복 주문서가 없어도 막지 않는다
+  eq(r.card.result, 'up', 'bless + max pity at +0: 100%')
+  eq(g.u('1').it.bless, undefined, 'bless used at 95%')
+  assert(r.text.includes('\n실패 보정 +10%가 적용됐어요.\n사용 : 60G · 축복 주문서 1개 (보유 9,940G)\n') && !r.text.includes('쓰지 않았어요'), 'bless at 95%: text ' + r.text)
+  // +1 · 연속 실패 5번(80 + 10 = 90): 축복 주문서가 없으면 아무것도 하지 않고 알린다
   Object.assign(g.u('1'), { lv: 1, e: 0, w: 0, f: 5, it: {} })
-  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.999) }).card.result, 'up', 'bless not needed and none owned → enhance')
-  // +0 · 보정 없음(95 → 100): 축복이 도움이 되므로 쓴다
+  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.999) }).text, '축복 주문서가 없어요. 「!구매 축복 1」로 살 수 있어요.', 'bless needed and none owned')
+  eq(g.u('1').lv, 1, 'no bless → no enhance')
+  // +0 · 보정 없음(85 → 95)
   Object.assign(g.u('1'), { lv: 0, e: 0, w: 0, f: 0, it: { bless: 1 } })
-  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.97) }).card.result, 'up', 'bless 95 + 10 → 100')
+  eq(g.run('1', '가', '강화 축복', { rand: fixed(0.94) }).card.result, 'up', 'bless 85 + 10 → 95')
   eq(g.u('1').it.bless, undefined, 'bless used when it helps')
 }
 
@@ -216,12 +402,12 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
 {
   const g = game()
   const rand = seeded(20261017)
-  for (const [lv, bless] of [[0, false], [9, false], [9, true], [14, false], [19, false], [19, true]]) {
+  for (const [lv, bless] of [[0, false], [9, false], [9, true], [14, false], [19, false], [19, true], [25, false], [29, true]]) {
     const n = 20000
     const got = { up: 0, broke: 0, fail: 0 }
     for (let i = 0; i < n; i++) {
       g.run('p', '확률', '내검')
-      Object.assign(g.u('p'), { lv, g: 1e6, e: 0, w: 0, f: 0, it: { mana: 1, scale: 1, bless: 1 } })
+      Object.assign(g.u('p'), { lv, g: 1e6, e: 0, w: 0, f: 0, it: { mana: 9, scale: 9, star: 9, bless: 1 } })
       const r = g.run('p', '확률', bless ? '강화 축복' : '강화', { rand })
       got[r.card.result === 'guarded' ? 'broke' : r.card.result]++
     }
@@ -260,17 +446,31 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(g.run('3', '다', '사냥').text, '', 'still silent until it ends')
   g.tick(29500)
   assert(g.run('3', '다', '사냥', { rand: fixed(0.5) }).text.startsWith('[사냥]'), 'hunt after 2 minutes')
-  // 드롭: 난수 0 → 모든 드롭 + 보물(5배)
+  // 드롭: 난수 0 → 모든 드롭 + 보물(5배). +15 아래에서는 별빛 결정이 나오지 않는다
   g.tick(S.HUNT_CD_MS)
   const before = g.u('3').g
   const all = g.run('3', '다', '사냥', { rand: fixed(0) })
-  assert(all.text.includes('보물 상자를 찾았어요. 골드를 5배로 받았어요.') && all.text.includes('마력석 1개 · 축복 주문서 1개 · 보호 주문서 1개 · 용의 비늘 1개'), 'all drops ' + all.text)
-  eq(g.u('3').g - before, 5 * 80, 'treasure x5 of the lowest roll (초록 슬라임 80)')
-  assert(['guard', 'bless', 'mana', 'scale'].every((id) => g.u('3').it[id] === 1), 'drops in inventory ' + JSON.stringify(g.u('3').it))
-  // 높은 단계는 센 몬스터
-  g.tick(S.HUNT_CD_MS)
-  g.u('3').lv = 16
-  assert(/심연의 용|타락한 대마법사/.test(g.run('3', '다', '사냥', { rand: fixed(0.3) }).text), 'band by level')
+  assert(all.text.includes('보물 상자를 찾았어요. 골드를 5배로 받았어요.') && all.text.includes('\n+275G · 마력석 1개 · 축복 주문서 1개 · 보호 주문서 1개 · 용의 비늘 1개 (보유 '), 'all drops ' + all.text)
+  eq(g.u('3').g - before, 5 * 55, 'treasure x5 of the lowest roll (초록 슬라임 55)')
+  assert(['guard', 'bless', 'mana', 'scale'].every((id) => g.u('3').it[id] === 1) && !g.u('3').it.star, 'drops in inventory ' + JSON.stringify(g.u('3').it))
+  // 높은 단계는 센 몬스터(사냥터 = 검 그림 묶음)
+  const huntAt = (lv, x) => {
+    g.tick(S.HUNT_CD_MS)
+    g.u('3').lv = lv
+    return g.run('3', '다', '사냥', { rand: fixed(x) }).text
+  }
+  assert(/심연의 용|타락한 대마법사/.test(huntAt(16, 0.3)), 'band by level')
+  const h18 = huntAt(18, 0.4)
+  assert(h18.startsWith('[사냥] 다님이 그림자 마수를 잡았어요.\n+2,570G (보유 '), 'new monsters at +18 ' + h18)
+  assert(/빛 잃은 수호천사|날개 꺾인 석상/.test(huntAt(20, 0.3)), 'band at +20')
+  assert(/천둥 그리폰|폭풍의 거인|뇌운의 정령/.test(huntAt(22, 0.5)), 'band at +22')
+  assert(/창세의 수호룡|태초의 그림자/.test(huntAt(30, 0.7)), 'band at +30')
+  // 별빛 결정: +15~+19 0.2%, +20부터 0.7%(난수 0.0019 → 0.19 < 0.2 · 0.0069 → 0.69 < 0.7)
+  g.u('3').it = {}
+  assert(huntAt(16, 0.0019).includes('별빛 결정 1개') && g.u('3').it.star === 1, 'star drop at +16')
+  assert(!huntAt(16, 0.0021).includes('별빛 결정'), 'no star at +16 above 0.2%')
+  assert(huntAt(21, 0.0069).includes('별빛 결정 1개') && g.u('3').it.star === 2, 'star drop at +21')
+  assert(!huntAt(14, 0.0001).includes('별빛 결정'), 'no star below +15')
 }
 
 // ── 쿨타임 안내는 행동마다 한 번: 강화·사냥을 번갈아 해도 다시 알리지 않는다 ──
@@ -300,20 +500,28 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(g.run('1', '가', '판매').text, '+0 검은 팔 수 없어요. 「!강화」로 먼저 키워 보세요.', 'sell +0')
   Object.assign(g.u('1'), { lv: 5, g: 0 })
   const id5 = g.u('1').id
-  eq(g.run('1', '가', '판매').text, `+5 강철 장검을 ${S.won(S.price(5))}G에 팔았어요. (보유 ${S.won(S.price(5))}G)\n새 +0 녹슨 철검을 받았어요.`, 'sell +5')
+  eq(g.run('1', '가', '판매').text, `+5 명장의 강철검을 ${S.won(S.price(5))}G에 팔았어요. (보유 ${S.won(S.price(5))}G)\n새 +0 녹슨 철검을 받았어요.`, 'sell +5')
   assert(g.u('1').lv === 0 && g.u('1').id !== id5 && g.u('1').s === 1, 'sold → new +0 sword')
   Object.assign(g.u('1'), { lv: 12, g: 0 })
   eq(g.run('1', '가', '판매').text, `+12 붉은 화염검을 ${S.won(S.price(12))}G에 팔까요? 팔려면 「!판매 확인」을 입력해 주세요.`, 'sell +12 asks')
   eq(g.u('1').lv, 12, 'not sold before confirm')
   g.run('1', '가', '판매 확인')
   assert(g.u('1').lv === 0 && g.u('1').g === S.price(12), 'sold after confirm')
-  // 상점
+  // 상점: 다섯 가지 모두 산다
   const shop = g.run('1', '가', '상점').text
-  assert(shop.startsWith('[상점]\n보호 주문서 4,000G : ') && shop.includes('용의 비늘 : +15부터 강화할 때 1개씩 써요 (사냥·보스에서)') && shop.endsWith('구매 : !구매 보호 1'), 'shop ' + shop)
-  g.u('1').g = 10000
-  eq(g.run('1', '가', '구매 보호 주문서 2').text, '보호 주문서 2개를 8,000G에 샀어요. (보유 2,000G · 보호 주문서 2개)', 'buy 2 guard')
+  eq(shop, '[상점]\n보호 주문서 20,000G : 강화하다 부서질 때 검을 지켜 줘요 (+15부터 여러 개씩 써요)\n축복 주문서 2,000G : 강화 성공 확률 +10%\n마력석 2,500G : +10~+14 강화에 1~4개씩 써요\n용의 비늘 50,000G : +15~+19 강화에 2~3개씩 써요 (사냥·보스에서도 나와요)\n별빛 결정 300,000G : +20부터 강화에 1~7개씩 써요 (사냥에서도 나와요)\n구매 : !구매 보호 1', 'shop ' + shop)
+  g.u('1').g = 92000
+  eq(g.run('1', '가', '구매 보호 주문서 2').text, '보호 주문서 2개를 40,000G에 샀어요. (보유 52,000G · 보호 주문서 2개)', 'buy 2 guard')
+  eq(g.run('1', '가', '구매 비늘').text, '용의 비늘 1개를 50,000G에 샀어요. (보유 2,000G · 용의 비늘 1개)', 'scale is sold now')
   eq(g.run('1', '가', '구매 축복 2').text, '골드가 부족해요. 축복 주문서 2개는 4,000G예요. (보유 2,000G)', 'buy no gold')
-  eq(g.run('1', '가', '구매 비늘').text, '용의 비늘은 상점에서 팔지 않아요. 사냥·보스나 거래로 구해 주세요.', 'scale not sold')
+  eq(g.run('1', '가', '구매 결정').text, '골드가 부족해요. 별빛 결정 1개는 300,000G예요. (보유 2,000G)', 'star too dear')
+  g.u('1').g += 1200000
+  for (const w of ['별빛 결정 2', '별빛결정 1', '결정 1개']) assert(g.run('1', '가', '구매 ' + w).text.startsWith('별빛 결정 '), 'buy star by ' + w)
+  eq(g.u('1').it.star, 4, 'stars bought')
+  eq(g.u('1').g, 2000, 'stars cost 300,000G each')
+  eq(g.run('1', '가', '판매 결정 4').text, '별빛 결정 4개를 120,000G에 팔았어요. (보유 122,000G)', 'sell stars back at 30,000G')
+  eq(g.run('1', '가', '판매 비늘').text, '용의 비늘 1개를 3,000G에 팔았어요. (보유 125,000G)', 'scale sells at 3,000G as before')
+  g.u('1').g = 2000
   eq(g.run('1', '가', '구매 검').text, '「!구매 보호 1」처럼 입력해 주세요. 목록은 「!상점」에서 볼 수 있어요.', 'buy usage')
   eq(g.run('1', '가', '구매 보호 100').text, '한 번에 1~99개까지 살 수 있어요.', 'buy max')
   eq(g.run('1', '가', '판매 보호 3').text, '보호 주문서가 부족해요. (보유 2개)', 'sell more than owned')
@@ -325,12 +533,13 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   const inv = g.run('1', '가', '인벤').text
   eq(inv, '[인벤] 가님\n골드 1,000,000G · 검 +0 녹슨 철검\n아이템 : 마력석 999', 'inventory')
   const info = g.run('1', '가', '내검')
-  eq(info.text, '[내 검] 가님\n+0 녹슨 철검 · 최고 +12\n골드 1,000,000G · 판매가 0G\n아이템 : 마력석 999\n다음 강화 : 100G · 성공 95%', 'info text')
+  eq(info.text, '[내 검] 가님\n+0 녹슨 철검 · 최고 +12\n골드 1,000,000G · 판매가 0G\n아이템 : 마력석 999\n다음 강화 : 60G · 성공 85%', 'info text')
   eq(info.card.kind, 'info', 'info card')
   const help = g.run('1', '가', '강화도움').text
   assert(help.startsWith('《 검 강화 도움말 》\n━━━━━━━━━━━━\n▸ !강화 : '), 'help text')
   // 결투 신청·거래 제안을 거두는 명령어와 순위 명령어도 도움말에 있다
   assert(help.includes('\n▸ !거래취소 : 보낸 거래 제안·결투 신청을 취소해요\n') && help.includes('\n▸ !강화랭킹 : '), 'help lists 거래취소 and 강화랭킹 ' + help)
+  assert(help.endsWith('\n━━━━━━━━━━━━\n강화에 실패하면 다음 강화 성공 확률이 2%씩 올라요. (최대 +10%)\n높은 단계일수록 재료와 보호 주문서를 여러 개 써요.'), 'help footer: scaled materials and scrolls ' + help)
 }
 
 // ── 아이템 999개: 못 받은 보상을 받았다고 하지 않는다 ─────────────────────
@@ -339,7 +548,7 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   g.run('1', '가', '내검')
   g.u('1').it = { mana: 999 }
   const h = g.run('1', '가', '사냥', { rand: fixed(0) }) // 모든 드롭
-  assert(h.text.includes('\n+400G · 축복 주문서 1개 · 보호 주문서 1개 · 용의 비늘 1개 (보유 ') && !h.text.includes('마력석 1개') && h.text.endsWith('\n마력석은 999개까지 가질 수 있어서 더 받지 못했어요.'), 'hunt at the cap ' + h.text)
+  assert(h.text.includes('\n+275G · 축복 주문서 1개 · 보호 주문서 1개 · 용의 비늘 1개 (보유 ') && !h.text.includes('마력석 1개') && h.text.endsWith('\n마력석은 999개까지 가질 수 있어서 더 받지 못했어요.'), 'hunt at the cap ' + h.text)
   eq(g.u('1').it.mana, 999, 'mana stays at the cap')
   // 7일째 출석 보너스
   const a = game()
@@ -351,14 +560,15 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
     r7 = a.run('1', '가', '출석')
   }
   eq(r7.text, `[출석] 가님 7일 연속 출석했어요.\n+1,000G (보유 ${S.won(a.u('1').g)}G)\n보호 주문서·축복 주문서는 999개까지 가질 수 있어서 더 받지 못했어요.`, 'week bonus at the cap')
-  // 보스 마지막 일격 · 가장 큰 피해(혼자면 둘 다 같은 사람)
+  // 보스 마지막 일격 · 가장 큰 피해(혼자면 둘 다 같은 사람). 거대 왕슬라임: 마력석 2 + 축복 1, 가장 큰 피해 축복 2
   const b = game()
   b.run('1', '가', '내검')
-  Object.assign(b.u('1'), { lv: 20, it: { scale: 999, bless: 998 } })
+  Object.assign(b.u('1'), { lv: 20, it: { mana: 999, bless: 998 } })
   b.run('1', '가', '보스')
-  const k = b.run('1', '가', '공격', { rand: fixed(0.5) }) // 4,060 피해 → 한 번에
-  assert(k.text.includes('\n마지막 일격 : 가님 (보호 주문서 1개)\n가장 큰 피해 : 가님 (축복 주문서 1개)\n용의 비늘은 999개까지 가질 수 있어서 가님은 더 받지 못했어요.\n축복 주문서는 999개까지 가질 수 있어서 가님은 더 받지 못했어요.\n'), 'boss rewards at the cap ' + k.text)
-  assert(b.u('1').it.scale === 999 && b.u('1').it.bless === 999 && b.u('1').it.guard === 1, 'boss items capped ' + JSON.stringify(b.u('1').it))
+  b.s().r.hp = 1000 // 한 번에 최대 체력의 25%(1,000)까지라, 마지막 한 번만 남겨 둔다
+  const k = b.run('1', '가', '공격', { rand: fixed(0.5) })
+  assert(k.text.includes('\n마지막 일격 : 가님 (축복 주문서 1개)\n가장 큰 피해 : 가님\n마력석은 999개까지 가질 수 있어서 가님은 더 받지 못했어요.\n축복 주문서는 999개까지 가질 수 있어서 가님은 더 받지 못했어요.\n'), 'boss rewards at the cap ' + k.text)
+  assert(b.u('1').it.mana === 999 && b.u('1').it.bless === 999 && !b.u('1').it.guard && !b.u('1').it.scale, 'boss items capped ' + JSON.stringify(b.u('1').it))
 }
 
 // ── 거래: 읽기 ────────────────────────────────────────────────────────────
@@ -371,6 +581,8 @@ const PNG = (b) => Buffer.isBuffer(b) && b.length > 1000 && b.slice(0, 8).toStri
   eq(P('@a 마력석 3개 1,500'), '{"target":"a","item":"mana","qty":3,"price":1500}', 'parse qty unit + plain price with comma')
   eq(P('@a 비늘'), '{"target":"a","item":"scale","qty":1,"price":0}', 'parse gift')
   eq(P('@a 마력석 7'), '{"target":"a","item":"mana","qty":1,"price":7}', 'one plain number = price')
+  eq(P('@a 별빛 결정 2 500000'), '{"target":"a","item":"star","qty":2,"price":500000}', 'parse two-word star')
+  eq(P('@별빛 결정 1 1'), '{"target":"별빛","item":"star","qty":1,"price":1}', 'a person called 별빛 can still get 결정')
   eq(S.parseOffer('a 보호 1 1'), null, 'needs @')
   eq(S.parseOffer('@a 사과 1 1'), null, 'unknown item')
   eq(S.parseOffer('@보호 1'), null, 'no name')
@@ -479,15 +691,15 @@ function sums(g, keys) {
   // 제안 뒤 강화하면 다른 검 → 취소
   g.run('3', '셋', '내검')
   g.run('2', '구매자', '거래 @셋 검 1')
-  g.u('2').it = { mana: 1 }
+  g.u('2').it = { mana: 3 }
   g.run('2', '구매자', '강화', { rand: fixed(0) })
   eq(g.run('3', '셋', '수락').text, '구매자님의 검이 바뀌어서 거래를 취소했어요.', 'sword changed → cancelled')
   eq(g.u('2').lv, 13, 'seller keeps the upgraded sword')
   // 제안 뒤 부서짐 → 취소
   g.tick(S.ENHANCE_CD_MS)
   g.run('2', '구매자', '거래 @셋 검 1')
-  g.u('2').it = { mana: 1 }
-  g.run('2', '구매자', '강화', { rand: fixed(0.4) }) // +13: 성공 30 · 파괴 14 → 0.4 = 파괴
+  g.u('2').it = { mana: 3 }
+  g.run('2', '구매자', '강화', { rand: fixed(0.25) }) // +13: 성공 20 · 파괴 12 → 0.25 = 파괴
   eq(g.u('2').lv, 0, 'broke')
   eq(g.run('3', '셋', '수락').text, '구매자님의 검이 바뀌어서 거래를 취소했어요.', 'broken sword → cancelled')
   eq(g.u('3').lv, 0, 'nobody got a broken sword')
@@ -496,7 +708,7 @@ function sums(g, keys) {
 // ── 아무렇게나 한 3,000번: 음수·한도 초과·검 복제가 없다 ─────────────────
 {
   const g = game()
-  const rand = seeded(7)
+  const rand = seeded(8)
   const keys = ['1', '2', '3', '4']
   const names = { 1: '가', 2: '나', 3: '다', 4: '라' }
   let done = 0
@@ -504,14 +716,14 @@ function sums(g, keys) {
   const cmds = ['강화', '강화 보호', '강화 축복', '사냥', '판매', '판매', '판매 확인', '구매 보호 1', '구매 축복 2', '구매 마력석 1', '판매 마력석 1', '거래취소', '수락', '수락', '수락', '거절', '내검']
   for (const k of keys) {
     g.run(k, names[k], '내검')
-    Object.assign(g.u(k), { g: 200000, lv: k <= '2' ? 6 : 0, b: 6, it: { guard: 20, bless: 20, mana: 20, scale: 20 } })
+    Object.assign(g.u(k), { g: 200000, lv: k <= '2' ? 6 : 0, b: 6, it: { guard: 20, bless: 20, mana: 20, scale: 20, star: 5 } })
   }
   for (let i = 0; i < 3000; i++) {
     const k = keys[Math.floor(rand() * 4)]
     let line = cmds[Math.floor(rand() * cmds.length)]
     if (rand() < 0.3) {
       const to = names[keys[Math.floor(rand() * 4)]]
-      const what = ['검', '보호', '축복', '마력석', '비늘'][Math.floor(rand() * 5)]
+      const what = ['검', '보호', '축복', '마력석', '비늘', '결정'][Math.floor(rand() * 6)]
       line = `거래 @${to} ${what} ${1 + Math.floor(rand() * 2)} ${Math.floor(rand() * 3000)}`
     }
     const before = JSON.stringify(g.rt)
@@ -566,12 +778,12 @@ function sums(g, keys) {
   g2.run('1', '가', '내검')
   Object.assign(g2.u('1'), { lv: 9, g: 5000, it: { guard: 1 } })
   const saved = JSON.parse(JSON.stringify(g2.rt))
-  const r1 = S.run(saved, 'r', { cmd: '강화', arg: '보호', key: '1', name: '가', prefix: '!', now: g2.now, rand: fixed(0.5) })
+  const r1 = S.run(saved, 'r', { cmd: '강화', arg: '보호', key: '1', name: '가', prefix: '!', now: g2.now, rand: fixed(0.3) })
   eq(r1.card.result, 'guarded', 'continues after a JSON round trip')
   // 망가진 저장본
   const bad = { sword: { r: { u: { x: { g: '-5', lv: 99, it: { foo: 3, guard: '2', bless: -1 } }, y: null }, t: 'nope', q: 'a' } } }
   const r2 = S.run(bad, 'r', { cmd: '인벤', arg: '', key: 'x', name: '엑스', prefix: '!', now: T0, rand: fixed(0.5) })
-  eq(r2.text, '[인벤] 엑스님\n골드 0G · 검 +20 추억의 전설검\n아이템 : 보호 주문서 2', 'broken saved state is cleaned')
+  eq(r2.text, '[인벤] 엑스님\n골드 0G · 검 +30 태초의 창세검\n아이템 : 보호 주문서 2', 'broken saved state is cleaned')
   assert(Array.isArray(bad.sword.r.t) && bad.sword.r.q >= 1, 'broken lists fixed')
   // 방이 따로
   const two = {}
@@ -579,24 +791,81 @@ function sums(g, keys) {
   eq(S.run(two, 'b', { cmd: '강화랭킹', arg: '', key: '1', name: '가', prefix: '!', now: T0 }).text, '아직 강화 기록이 없어요. 「!강화」로 시작해 보세요.', 'rooms are separate')
 }
 
+// ── 예전 저장본(+0~+20 시절: 비늘 1개 · 보호 1장 · 별빛 결정 없음)이 옮기지 않고 그대로 이어진다 ──
+{
+  // 예전 모양 그대로: 숫자 하나인 w, 예전 아이템 네 가지, 난이도(bl) 없는 방, 받는 사람 검이 없는 결투 신청
+  const T1 = T0 - 3 * 24 * 3600 * 1000
+  const oldRoom = {
+    v: 1, q: 9, bk: 3, top: { lv: 20, n: '전설' },
+    u: {
+      a20: { n: '전설', g: 300000, lv: 20, id: 1, b: 20, it: { guard: 10, bless: 10, mana: 10, scale: 10 }, a: T1, e: T1, h: T1, w: T1, k: 2, s: 1, f: 3, d: S.dayNo(T1), ds: 4, dw: 2, dl: 1, r: T1 },
+      a15: { n: '중간', g: 60000, lv: 15, id: 2, b: 17, it: { scale: 1, guard: 1, mana: 2 }, a: T1, e: T1, h: T1, w: 0, k: 0, s: 0, f: 0 },
+      a7: { n: '새내기', g: 1000, lv: 7, id: 3, b: 7, it: {}, a: T1, e: 0, h: 0, w: {}, k: 0, s: 0, f: 0 },
+    },
+    t: [{ id: 8, f: 'a7', to: 'a20', it: 'duel', q: 1, p: 0, lv: 7, sid: 3, at: T0 - 1000 }],
+  }
+  const rt = { sword: { r: JSON.parse(JSON.stringify(oldRoom)) } }
+  let now = T0
+  const play = (key, name, line, x) => {
+    const sp = line.search(/\s/)
+    now += 20000
+    return S.run(rt, 'r', { cmd: sp < 0 ? line : line.slice(0, sp), arg: sp < 0 ? '' : line.slice(sp + 1), key, name, prefix: '!', now, rand: fixed(x == null ? 0.999 : x) })
+  }
+  const u = (k) => rt.sword.r.u[k]
+  // 보는 것만으로 아무것도 잃지 않는다(골드·단계·최고·아이템·기록)
+  const info = play('a20', '전설', '내검')
+  eq(info.text, '[내 검] 전설님\n+20 추억의 전설검 · 최고 +20\n골드 300,000G · 판매가 250,000G\n아이템 : 보호 주문서 10 · 축복 주문서 10 · 마력석 10 · 용의 비늘 10\n다음 강화 : 4,300G + 별빛 결정 1개 · 성공 18%(보정 +6%) · 파괴 18%\n보호하려면 보호 주문서가 5개 필요해요.', 'old +20 save: info')
+  eq(JSON.stringify([u('a20').g, u('a20').lv, u('a20').b, u('a20').k, u('a20').f]), '[300000,20,20,2,3]', 'old +20 save: nothing lost')
+  eq(rt.sword.r.bl, 3, 'old room: difficulty from kills')
+  // 받는 사람 검이 적혀 있지 않은 예전 결투 신청도 그대로 겨룬다
+  assert(play('a20', '전설', '수락', 0.5).text.startsWith('[결투] 새내기(+7) vs 전설(+20)'), 'old duel offer still fights')
+  // 예전 최고 단계(+20)에서 이어서 강화한다: 별빛 결정이 없으면 알려 주고, 사서 보호하며 강화한다
+  eq(play('a20', '전설', '강화 보호').text, '+20 강화에는 별빛 결정이 1개 필요해요. (보유 0개) 「!사냥」으로 모으거나 「!구매 결정 1」로 살 수 있어요.', 'old +20: needs a star')
+  assert(play('a20', '전설', '구매 결정 1').text.startsWith('별빛 결정 1개를 300,000G에 샀어요. (보유 0G'), 'old +20: buys a star')
+  u('a20').g = 50000
+  const g20 = play('a20', '전설', '강화 보호 축복', 0.3) // 12 + 10 + 6 = 28 성공 · 파괴 18 → 0.3 은 파괴 구간
+  eq(g20.card.result, 'guarded', 'old +20: guarded with 5 scrolls')
+  eq(JSON.stringify(u('a20').it), '{"guard":5,"bless":9,"mana":10,"scale":10}', 'old +20: 5 scrolls, 1 bless and the star used')
+  const up = play('a20', '전설', '구매 결정 1')
+  assert(up.text.startsWith('골드가 부족해요.'), 'old +20: gold check')
+  u('a20').it.star = 1
+  const w21 = play('a20', '전설', '강화', 0)
+  assert(w21.text.startsWith('[강화 성공]\n전설님의 검이 +21 천둥 폭풍검이 됐어요.\n[방 최고 기록] 이 방에서 처음 나온 +21 천둥 폭풍검이에요.'), 'old +20 → +21 ' + w21.text)
+  eq(u('a20').b, 21, 'best record moves past the old cap')
+  const h21 = play('a20', '전설', '사냥', 0.5)
+  assert(/폭풍의 거인/.test(h21.text), 'old +20 hunts the new ground at +21 ' + h21.text)
+  // 예전 +15(비늘 1개): 이제 2개가 필요하다고 알리고, 아무것도 쓰지 않는다. 사면 강화된다
+  eq(play('a15', '중간', '강화').text, '+15 강화에는 용의 비늘이 2개 필요해요. (보유 1개) 「!사냥」으로 모으거나 「!구매 비늘 1」로 살 수 있어요.', 'old +15: needs 2 scales')
+  eq(JSON.stringify([u('a15').g, u('a15').it.scale]), '[60000,1]', 'old +15: nothing taken')
+  assert(play('a15', '중간', '구매 비늘').text.startsWith('용의 비늘 1개를 50,000G에 샀어요.'), 'old +15 buys a scale')
+  eq(play('a15', '중간', '강화 보호', 0.2).text.split('\n')[0], '+15에서 보호하려면 보호 주문서가 2개 필요해요. (보유 1개) 「!구매 보호 1」로 살 수 있어요.', 'old +15: 2 scrolls to guard')
+  eq(play('a15', '중간', '강화', 0).card.lv, 16, 'old +15 enhances')
+  // 예전 +7
+  assert(play('a7', '새내기', '강화', 0).text.startsWith('[강화 성공]\n새내기님의 검이 +8 은빛 성기사검이 됐어요.'), 'old +7 enhances')
+  for (const k of Object.keys(rt.sword.r.u)) {
+    const x = u(k)
+    assert(x.lv >= 0 && x.lv <= S.MAX_LV && x.b >= x.lv && x.g >= 0 && Object.keys(x.it).every((id) => S.ITEMS[id] && x.it[id] > 0), 'old save stays valid ' + JSON.stringify(x))
+  }
+}
+
 // ── 실패 보정 · 방 최고 기록 · 위로금 ─────────────────────────────────────
 {
   const g = game()
   g.run('1', '가', '내검')
-  // +9 성공 50%: 실패 2번 → 보정 +4% → 53.99 는 성공
+  // +9 성공 26%: 실패 2번 → 보정 +4% → 29.99 는 성공
   Object.assign(g.u('1'), { lv: 9, g: 100000, e: 0, w: 0, f: 0, it: { mana: 9 } })
   eq(g.run('1', '가', '강화', { rand: fixed(0.6) }).card.result, 'fail', 'pity: first fail')
   eq(g.u('1').f, 1, 'pity: one fail counted')
   g.tick(S.ENHANCE_CD_MS)
   const f2 = g.run('1', '가', '강화', { rand: fixed(0.6) })
   eq(f2.card.pity, 4, 'pity: card shows +4 for the next try')
-  assert(f2.text.includes('실패 보정 +2%가 적용됐어요.') && f2.text.includes('성공 54%(보정 +4%)'), 'pity text ' + f2.text)
+  assert(f2.text.includes('실패 보정 +2%가 적용됐어요.') && f2.text.includes('성공 30%(보정 +4%)'), 'pity text ' + f2.text)
   g.tick(S.ENHANCE_CD_MS)
-  const up = g.run('1', '가', '강화', { rand: fixed(0.5399) })
-  eq(up.card.result, 'up', 'pity: 53.99 succeeds with +4')
+  const up = g.run('1', '가', '강화', { rand: fixed(0.2999) })
+  eq(up.card.result, 'up', 'pity: 29.99 succeeds with +4')
   eq(g.u('1').f, 0, 'pity resets on success')
   // +10 은 방 최고 기록(처음 +10 이상)
-  assert(up.text.includes('[방 최고 기록] 이 방에서 처음 나온 +10 푸른 서리검이에요.') && up.card.notes.includes('방 최고 기록'), 'room record ' + up.text)
+  assert(up.text.includes('[방 최고 기록] 이 방에서 처음 나온 +10 얼음꽃 서리검이에요.') && up.card.notes.includes('방 최고 기록'), 'room record ' + up.text)
   eq(g.s().top.lv, 10, 'room record saved')
   // 보정은 최대 +10
   eq(S.pityOf(3), 6, 'pity 3')
@@ -609,17 +878,18 @@ function sums(g, keys) {
   // +12 이 부서지면 판매가의 10% 위로금, 보정은 0
   Object.assign(g.u('1'), { lv: 12, g: 100000, e: 0, w: 0, f: 3, it: { mana: 9 } })
   const before = g.u('1').g
-  const br = g.run('1', '가', '강화', { rand: fixed(0.999 - 0.2) }) // 35+6=41 성공 · 파괴 12 → 41~53, 79.9 는 실패
+  const br = g.run('1', '가', '강화', { rand: fixed(0.999 - 0.2) }) // 21+6=27 성공 · 파괴 11 → 27~38, 79.9 는 실패
   eq(br.card.result, 'fail', 'pity +6: 79.9 is still a fail at +12')
   Object.assign(g.u('1'), { e: 0, w: 0, f: 0 })
-  const br2 = g.run('1', '가', '강화', { rand: fixed(0.4) })
-  eq(br2.card.result, 'broke', '+12 roll 40 → broke')
+  const br2 = g.run('1', '가', '강화', { rand: fixed(0.25) })
+  eq(br2.card.result, 'broke', '+12 roll 25 → broke')
   eq(g.u('1').g, before - S.cost(12).gold * 2 + Math.floor(S.price(12) / 10), 'comfort gold paid')
   assert(br2.text.includes(`위로금 ${S.won(S.price(12) / 10)}G 받았어요.`) && br2.card.notes[0] === `위로금 ${S.won(S.price(12) / 10)}G`, 'comfort text ' + br2.text)
   eq(g.u('1').f, 0, 'pity resets on break')
   // 낮은 단계는 위로금 없음
   Object.assign(g.u('1'), { lv: 6, e: 0, w: 0 })
-  assert(!g.run('1', '가', '강화', { rand: fixed(0.66) }).text.includes('위로금'), 'no comfort below +10')
+  const b6 = g.run('1', '가', '강화', { rand: fixed(0.43) }) // +6: 성공 41 · 파괴 5
+  assert(b6.card.result === 'broke' && !b6.text.includes('위로금'), 'no comfort below +10')
 }
 
 // ── 실패 보정은 그 검에 쌓인 것: 팔거나 거래로 검이 바뀌면 처음부터 ──────────
@@ -634,7 +904,7 @@ function sums(g, keys) {
   Object.assign(g.u('1'), { f: 5 })
   Object.assign(g.u('2'), { lv: 19, b: 19, f: 4 })
   g.run('2', '나', '거래 @가 검 0')
-  eq(g.run('1', '가', '수락').text, '[거래 완료] 가님이 나님에게서 +19 칠흑의 마검을 받았어요.', 'sword gift')
+  eq(g.run('1', '가', '수락').text, '[거래 완료] 가님이 나님에게서 +19 칠흑의 마왕검을 받았어요.', 'sword gift')
   eq(g.u('1').f, 0, 'pity resets for the one who got the sword')
   eq(g.u('2').f, 0, 'pity resets for the one who gave it away')
   assert(!g.run('1', '가', '내검').text.includes('보정'), 'no pity on the received sword')
@@ -670,7 +940,7 @@ function sums(g, keys) {
 {
   const g = game()
   const a1 = g.run('1', '가', '출석')
-  eq(a1.text, `[출석] 가님 출석했어요.\n+400G (보유 1,400G)\n6일 더 연속으로 오면 보호 주문서·축복 주문서를 받아요.`, 'attend day 1')
+  eq(a1.text, `[출석] 가님 출석했어요.\n+400G (보유 ${S.won(S.START_GOLD + 400)}G)\n6일 더 연속으로 오면 보호 주문서·축복 주문서를 받아요.`, 'attend day 1')
   eq(g.run('1', '가', '출첵').text, '가님은 오늘 이미 출석했어요. (1일 연속) 내일 또 와 주세요.', 'attend twice a day')
   for (let d = 2; d <= 7; d++) {
     g.tick(24 * 3600 * 1000)
@@ -696,6 +966,8 @@ function sums(g, keys) {
   eq(S.duelChance(12, 9), 62, 'duel chance +3 levels')
   eq(S.duelChance(20, 0), 90, 'duel chance cap')
   eq(S.duelChance(0, 20), 10, 'duel chance floor')
+  eq(S.duelChance(30, 20), 90, 'duel cap from a 10-level gap')
+  eq(S.duelChance(25, 24), 54, 'duel chance at the top')
   eq(g.run('1', '가', '결투').text, '「!결투 @상대」 또는 골드를 걸어 「!결투 @상대 3000」처럼 입력해 주세요.', 'duel usage')
   eq(g.run('1', '가', '결투 @없는사람').text.startsWith('「없는사람」님을 찾지 못했어요.'), true, 'duel unknown target')
   eq(g.run('1', '가', '결투 @나 6000').text, '나님의 골드가 6,000G보다 적어요. 내기를 줄여 주세요.', 'duel bet above target gold')
@@ -831,23 +1103,35 @@ function sums(g, keys) {
   eq(S.hitBase(20), 4060, 'hit +20')
   const b = g.run('1', '가', '보스')
   eq(b.text, '[보스 등장] 거대 왕슬라임이 나타났어요.\n체력 4,000\n「!공격」으로 함께 쓰러뜨리면 피해량만큼 골드를 나눠 받아요.', 'boss appears')
-  // rand 0.5 → 피해 ×1.0, 치명타 없음(0.5 ≥ 0.1)
-  eq(g.run('1', '가', '공격', { rand: fixed(0.5) }).text, '[공격] 가님이 거대 왕슬라임에게 1,692 피해를 줬어요.\n남은 체력 2,308 (최대 4,000)\n■■■■■■□□□□', 'attack')
+  // rand 0.5 → 피해 ×1.0, 치명타 없음(0.5 ≥ 0.1). +12 는 1,692 지만 한 번에 최대 체력의 25%(1,000)까지
+  eq(S.BOSS_HIT_MAX, 0.25, 'one hit is at most 25% of max hp')
+  eq(S.hitBase(12), 1692, 'hit +12')
+  eq(g.run('1', '가', '공격', { rand: fixed(0.5) }).text, '[공격] 가님이 거대 왕슬라임에게 1,000 피해를 줬어요.\n남은 체력 3,000 (최대 4,000)\n■■■■■■■■□□', 'attack (capped)')
   eq(g.run('1', '가', '공격').text, '가님, 공격은 1분 뒤에 다시 할 수 있어요.', 'attack cooldown')
   eq(g.run('1', '가', '공격').text, '', 'attack cooldown said once')
   const crit = g.run('2', '나', '공격', { rand: fixed(0.05) }) // 치명타 ×2, 피해 ×0.82
   eq(crit.text.split('\n')[0], `[공격] 나님이 거대 왕슬라임에게 치명타로 ${S.won(Math.round(S.hitBase(5) * 0.82 * 2))} 피해를 줬어요.`, 'critical hit')
   assert(g.run('3', '다', '보스').text.startsWith('[보스] 거대 왕슬라임\n체력 ') && g.run('3', '다', '보스').text.includes(' (최대 4,000)\n') && g.run('3', '다', '보스').text.endsWith('참여 2명 · 「!공격」으로 함께 쓰러뜨려요.'), 'boss status')
   g.run('3', '다', '공격', { rand: fixed(0.5) })
-  g.tick(S.ATTACK_CD_MS)
-  const kill = g.run('1', '가', '공격', { rand: fixed(0.5) })
-  assert(kill.text.includes('[보스 처치] 가님의 마지막 일격으로 거대 왕슬라임을 쓰러뜨렸어요.\n마지막 일격 : 가님 (용의 비늘 1개 · 보호 주문서 1개)\n가장 큰 피해 : 가님 (축복 주문서 2개)\n1. 가 '), 'boss killed ' + kill.text)
+  // 남은 체력 4,000 - 1,000 - 754 - 60 = 2,186 → 가가 1분마다 1,000 · 1,000 · 186
+  let kill = null
+  const hits = []
+  for (let i = 0; i < 3; i++) {
+    g.tick(S.ATTACK_CD_MS)
+    kill = g.run('1', '가', '공격', { rand: fixed(0.5) })
+    hits.push(kill.text.split('\n')[0])
+  }
+  eq(hits.slice(0, 2).join('|'), '[공격] 가님이 거대 왕슬라임에게 1,000 피해를 줬어요.|[공격] 가님이 거대 왕슬라임에게 1,000 피해를 줬어요.', 'capped hits until the end')
+  eq(hits[2], '[공격] 가님이 거대 왕슬라임에게 186 피해를 줬어요.', 'last hit takes only what is left')
+  assert(kill.text.includes('[보스 처치] 가님의 마지막 일격으로 거대 왕슬라임을 쓰러뜨렸어요.\n마지막 일격 : 가님 (마력석 2개 · 축복 주문서 1개)\n가장 큰 피해 : 가님 (축복 주문서 2개)\n1. 가 '), 'boss killed ' + kill.text)
   assert(kill.text.endsWith('다음 보스는 30분 뒤에 나타나요.'), 'next boss time')
   const paid = ['1', '2', '3'].map((k) => g.u(k).g)
-  // 다(+0)는 1인 최소 100G 몫이지만, 그만큼 합이 나눌 골드(4,000 × 0.6)를 넘어서 모두 같은 비율로 조금 줄었다
-  assert(paid.every((x) => x > 90) && paid.reduce((a, x) => a + x, 0) <= 4000 * S.BOSS_REWARD && paid[0] > paid[1] && paid[1] > paid[2], 'reward split by damage ' + paid)
-  eq(g.u('1').it.scale, 1, 'last hit scale')
-  eq(g.u('1').it.bless, 2, 'mvp bless')
+  // 다(+0)는 1인 최소 100G 몫이지만, 그만큼 합이 나눌 골드(4,000 × 0.15 = 600G)를 넘어서 모두 같은 비율로 줄었다
+  eq(S.BOSS_REWARD, 0.15, 'boss gold 0.15 per damage')
+  assert(paid.every((x) => x > 50) && paid.reduce((a, x) => a + x, 0) <= 4000 * S.BOSS_REWARD && paid.reduce((a, x) => a + x, 0) >= 4000 * S.BOSS_REWARD - 3 && paid[0] > paid[1] && paid[1] > paid[2], 'reward split by damage ' + paid)
+  eq(g.u('1').it.mana, 2, 'last hit mana')
+  eq(g.u('1').it.scale, undefined, 'no scale from the first boss')
+  eq(g.u('1').it.bless, 3, 'last hit bless + mvp bless')
   eq(g.s().r, null, 'boss gone')
   eq(g.s().bk, 1, 'boss count')
   eq(g.run('2', '나', '공격').text, '다음 보스는 30분 뒤에 나타나요.', 'no boss during the gap')
@@ -862,10 +1146,50 @@ function sums(g, keys) {
   g.s().bl = 5
   g.tick(S.BOSS_GAP_MS)
   assert(g.run('3', '다', '보스').text.startsWith('[보스 등장] 거대 왕슬라임이 나타났어요.\n체력 6,000'), 'second round is tougher')
+  // 마지막 일격 보상은 보스마다: 앞의 넷은 마력석 2 + 축복 1, 심연의 마왕은 용의 비늘 1 + 보호 1(별빛 결정은 보스에서 안 나온다)
+  for (let i = 0; i < 4; i++) eq(JSON.stringify(S.bossLastReward(i)), '[["mana",2],["bless",1]]', 'last hit reward of boss ' + i)
+  eq(JSON.stringify(S.bossLastReward(4)), '[["scale",1],["guard",1]]', 'last hit reward of 심연의 마왕')
+  Object.assign(g.s(), { r: null, bl: 9, rn: 0 }) // 두 바퀴째 심연의 마왕
+  assert(g.run('1', '가', '보스').text.startsWith('[보스 등장] 심연의 마왕이 나타났어요.\n체력 75,000\n'), '심연의 마왕 lap 2')
+  g.s().r.hp = 10
+  g.u('1').it = {}
+  g.tick(S.ATTACK_CD_MS)
+  const demon = g.run('1', '가', '공격', { rand: fixed(0.5) })
+  assert(demon.text.includes('\n마지막 일격 : 가님 (용의 비늘 1개 · 보호 주문서 1개)\n가장 큰 피해 : 가님 (축복 주문서 2개)\n'), '심연의 마왕 last hit ' + demon.text)
+  eq(JSON.stringify(g.u('1').it), '{"scale":1,"guard":1,"bless":2}', '심연의 마왕 items')
   // 망가진 저장본은 지운다
   g.s().r = { i: 99, hp: 1, mx: 1, d: {} }
   S.roomState(g.rt, 'r')
   eq(g.s().r, null, 'bad boss dropped')
+}
+
+// ── 보스: 높은 단계 혼자 나타나자마자 쓰러뜨리지 못한다(한 번에 최대 체력의 25%까지, 치명타도) ──
+{
+  for (const [lv, bl] of [[20, 0], [25, 0], [30, 0], [30, 1], [30, 5], [30, 10]]) {
+    const g = game()
+    g.run('1', '고수', '내검')
+    Object.assign(g.u('1'), { lv, g: 0 })
+    g.s().bl = bl
+    const rand = seeded(lv * 100 + bl)
+    for (let t = 0; t < 200; t++) {
+      Object.assign(g.s(), { r: null, rn: 0, bl })
+      g.u('1').r = 0
+      const r = g.run('1', '고수', '공격', { rand })
+      const mx = g.s().r ? g.s().r.mx : 0
+      assert(r.text.startsWith('[보스 등장] ') && !r.text.includes('[보스 처치]') && g.s().r && g.s().r.hp === mx - Math.ceil(mx * S.BOSS_HIT_MAX), `+${lv} bl ${bl}: the spawning reply never kills, one hit = 25% ` + r.text)
+    }
+    // 치명타(rand < 0.1)도 25%까지 · 혼자면 적어도 네 번
+    Object.assign(g.s(), { r: null, rn: 0, bl })
+    g.u('1').r = 0
+    let n = 0
+    let done = false
+    while (!done && n < 10) {
+      done = g.run('1', '고수', '공격', { rand: fixed(0.05) }).text.includes('[보스 처치]')
+      n++
+      g.tick(S.ATTACK_CD_MS)
+    }
+    eq(n, 4, `+${lv} bl ${bl}: a lone top player needs four hits`)
+  }
 }
 
 // ── 보스: 도망간 때부터 30분 · 도망가면 한 단계 쉬운 보스 · 보상 합은 나눌 골드를 넘지 않는다 ──
@@ -908,7 +1232,7 @@ function sums(g, keys) {
     w.tick(30 * 60 * 1000)
   }
   assert(kills >= 2 && w.s().bk === 4 + kills, 'a stuck room gets easier bosses and kills again (' + kills + ')')
-  // 조금 친 사람이 많아도(+10 하나 + +0 스물아홉) 보상 합은 체력 × 0.6 을 넘지 않는다
+  // 조금 친 사람이 많아도(+10 하나 + +0 스물아홉) 보상 합은 체력 × 0.15 를 넘지 않는다
   const o = game()
   const ks = Array.from({ length: 30 }, (_, i) => String(100 + i))
   for (const k of ks) {
@@ -984,15 +1308,32 @@ function sums(g, keys) {
   }
   const b = A.swordSvg(12, 'k', { broken: true })
   assert(b.body.includes('saturate') || b.defs.includes('saturate'), 'broken sword is grey')
-  // 묶음마다 그려 둔 검 그림(assets/swords): 8장 모두 있고, 서로 다르고, 진열장·랭킹이 그 그림을 쓴다
+  // 묶음마다 그려 둔 검 그림(assets/swords/tier{art}.png): 처음 8장(tier0~7)은 늘 있고, 있는 그림은 서로 다르고, 진열장·랭킹이 그 그림을 쓴다.
+  // 새 묶음 그림(tier8~13)은 없어도 된다 — 없으면 벡터 검으로 그린다(아래 vector 점검)
   const arts = new Set()
-  for (const t of S.TIERS) {
-    const art = A.artOf(t.from)
-    assert(art && art.uri.startsWith('data:image/png;base64,') && art.w > 40 && art.h > 300, 'sword art for tier ' + t.name)
-    arts.add(art && art.uri)
+  let have = 0
+  for (const f of S.FAMILIES) {
+    const art = A.artOf(f.from)
+    if (f.art < 8) assert(art, 'sword art for family ' + f.name)
+    if (!art) continue
+    assert(art.uri.startsWith('data:image/png;base64,') && art.w > 40 && art.h > 300, 'sword art shape for family ' + f.name)
+    arts.add(art.uri)
+    have++
   }
-  eq(arts.size, S.TIERS.length, 'every tier has its own sword art')
-  eq(A.artOf(S.MAX_LV), A.artOf(20), 'top level uses the last tier art')
+  eq(arts.size, have, 'every family with a picture has its own picture')
+  for (let lv = 0; lv <= S.MAX_LV; lv++) eq(A.artOf(lv), A.artOf(S.FAMILIES[S.tierOf(lv)].from), 'a level uses its family art ' + lv)
+  // 그림 파일이 없는 폴더: 모두 null(던지지 않는다)
+  const none = A.loadArt('/nonexistent/sword-art-dir')
+  assert(none.length === S.FAMILIES.length && none.every((x) => x === null), 'missing art files → null, no throw')
+  // 그림 없이(벡터 검) 31단계 모두: 진열장·랭킹이 그림 파일 없이 그려진다
+  for (let lv = 0; lv <= S.MAX_LV; lv++) {
+    const v = A.cardSvg({ kind: 'info', lv, best: lv, owner: '벡터', gold: 1, price: S.price(lv), broken: 0, items: [], next: null }, { vector: true })
+    assert(!v.includes('data:image/png') && v.includes('<path') && !/NaN|undefined/.test(v), 'vector fallback card ' + lv)
+    const vb = A.cardSvg({ kind: 'enhance', result: 'broke', from: lv, lv: 0, best: lv, owner: '벡터', gold: 0, spent: 1, used: [] }, { vector: true })
+    assert(!vb.includes('data:image/png') && !/NaN|undefined/.test(vb), 'vector fallback broken card ' + lv)
+  }
+  const rv = A.cardSvg({ kind: 'rank', rows: [{ name: '가', lv: 30, best: 30 }, { name: '나', lv: 23, best: 23 }] }, { vector: true })
+  assert(!rv.includes('data:image/png') && !/NaN|undefined/.test(rv), 'vector fallback rank card')
   const up = A.cardSvg({ kind: 'info', lv: 13, best: 13, owner: '하늘', gold: 1, price: 1, broken: 0, items: [], next: null })
   assert(up.includes(A.artOf(13).uri) && !up.includes(A.artOf(12 - 3).uri), 'showcase shows the tier art')
   const brk = A.cardSvg({ kind: 'enhance', result: 'broke', from: 18, lv: 0, best: 18, owner: '구름', gold: 0, spent: 1, used: [] })
@@ -1008,6 +1349,9 @@ function sums(g, keys) {
     { kind: 'info', lv: 0, best: 0, owner: '새싹', gold: 1000, price: 0, broken: 0, items: [{ name: '보호 주문서', n: 0 }], next: { gold: 100, up: 95, broke: 0, mana: 0, scale: 0 }, seed: 6 },
     { kind: 'info', lv: 20, best: 20, owner: '전설', gold: 1, price: 250000, broken: 9, items: [], next: null, seed: 7 },
     { kind: 'rank', rows: [{ name: '가', lv: 20, best: 20 }, { name: '나'.repeat(40), lv: 1, best: 3 }] },
+    { kind: 'enhance', result: 'guarded', from: 27, lv: 27, best: 28, owner: '일식', gold: 1, spent: 7400, used: ['보호 주문서 25개', '축복 주문서 1개'], pity: 10, seed: 8 },
+    { kind: 'enhance', result: 'up', from: 29, lv: 30, best: 30, owner: '창세', gold: 1, spent: 8700, used: ['보호 주문서 35개', '축복 주문서 1개'], seed: 9 },
+    { kind: 'info', lv: 24, best: 24, owner: '해일', gold: 1234567, price: 730000, broken: 2, items: ['보호 주문서', '축복 주문서', '마력석', '용의 비늘', '별빛 결정'].map((name, i) => ({ name, short: ['보호', '축복', '마력석', '비늘', '결정'][i], n: [12, 3, 999, 4, 17][i] })), next: { gold: 5900, mana: 0, scale: 0, star: 2, up: 19, broke: 22, pity: 10, guard: 10 }, seed: 10 },
   ]
   for (const c of cards) {
     const svg = A.cardSvg(c)
@@ -1015,6 +1359,13 @@ function sums(g, keys) {
     assert(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && svg.endsWith('</svg>') && !/NaN|undefined/.test(svg.replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, '')), 'card svg ' + c.kind + ' ' + c.result)
     eq(A.cardSvg(c), svg, 'card svg deterministic')
   }
+  // 높은 단계 카드: 다음 강화에 재료 수, 보호에 드는 주문서 수, 쓴 주문서 칩(수), 다섯 가지 아이템 칸
+  const c27 = A.cardSvg(cards[8])
+  assert(c27.includes('7,400G + 결정 5') && c27.includes('보호하려면 보호 주문서 25개') && c27.includes('보호 주문서 25개') && c27.includes('혼돈의 일식검'), 'enhance card at +27')
+  const c30 = A.cardSvg(cards[9])
+  assert(c30.includes('최고 단계 달성') && c30.includes('태초의 창세검') && !c30.includes('보호하려면'), 'enhance card at +30')
+  const c24 = A.cardSvg(cards[10])
+  assert(c24.includes('5,900G + 결정 2') && c24.includes('보호하려면 보호 주문서 10개') && c24.includes('>결정<') && c24.includes('>999<') && c24.includes('해신의 해일검'), 'info card at +24')
   const esc = A.cardSvg(cards[0])
   assert(esc.includes('&lt;b&gt;&amp;&quot;이름&#39;님의 검') && !esc.includes('<b>'), 'names are escaped in the card')
   eq(A.cardSvg({ kind: 'nope' }), '', 'unknown card')
@@ -1026,7 +1377,7 @@ function sums(g, keys) {
     assert(emb.includes('강화 성공') && emb.includes('&lt;b&gt;'), 'embedded card keeps the text')
   }
   if (Card.available()) {
-    for (const c of [cards[0], cards[1], cards[5], cards[7]]) assert(PNG(A.cardPng(c)), 'card renders to PNG ' + c.kind)
+    for (const c of [cards[0], cards[1], cards[5], cards[7], cards[9], cards[10]]) assert(PNG(A.cardPng(c)), 'card renders to PNG ' + c.kind)
   } else {
     eq(A.cardPng(cards[0]), null, 'no renderer → null (text is sent instead)')
     process.stdout.write('sword: PNG renderer not available, image checks skipped\n')
