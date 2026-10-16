@@ -1620,6 +1620,10 @@ export class BotSlot {
       .filter((m) => m && typeof m.content === 'string'))
     const types = metas.map((m) => VR.metaTypeNum(m.type)).filter((n) => Number.isFinite(n))
     log(this.id, `voice diag start chat ${chatId} li ${li || '-'} perm ${v.perm} state ${v.state} metas ${JSON.stringify(types)}`)
+    // 방에 이미 보이스룸 메타가 있으면 그 내용을 남긴다 — 카카오가 실제로 쓰는 값의 모양이다(방에는 싣지 않는다)
+    for (const m of metas) {
+      if (VR.isVoiceMetaType(m.type)) log(this.id, `voice diag existing meta type ${VR.metaTypeNum(m.type)} content ${String(m.content).slice(0, 800)}`)
+    }
     const nowSec = Math.floor(this.now() / 1000)
     const on = VR.onContent({ title: '진단', startSec: nowSec, nowSec, callId: VR.newCallId(nowSec) })
     if (li) await run('on+li', { chatId: L(chatId), li: L(li), type: 16, content: on })
@@ -1627,13 +1631,23 @@ export class BotSlot {
     await run('off', { chatId: L(chatId), type: 16, content: VR.offContent() })
     await run('count', { chatId: L(chatId), type: 17, content: '{"count":0}' })
     await run('unknown', { chatId: L(chatId), type: 97, content: '{}' })
-    if (full && metas.length) {
-      const m = metas[0]
-      await run('same', { chatId: L(chatId), type: VR.metaTypeNum(m.type), content: m.content })
+    // 대조군은 보이스룸이 아닌 메타로만 돌린다 — 거부당하는 타입(16·17)을 다시 써 보는 것은 대조군이 아니다
+    let sameType = null
+    let sameSkip = ''
+    if (full) {
+      const other = metas.find((m) => !VR.isVoiceMetaType(m.type))
+      if (other) {
+        sameType = VR.metaTypeNum(other.type)
+        await run('same', { chatId: L(chatId), type: sameType, content: other.content })
+      } else {
+        sameSkip = metas.length ? '이 방엔 보이스룸 메타(16·17)밖에 없어요' : '이 방엔 읽을 수 있는 방 메타가 없어요'
+        log(this.id, `voice diag same skipped — ${sameSkip}`)
+      }
     }
-    const text = VR.diagText(rows, { types, perm: v.perm, full: !!full })
-    log(this.id, `voice diag done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${VR.diagVerdict(rows).next}`)
-    return { ok: true, rows, types, text }
+    const text = VR.diagText(rows, { types, perm: v.perm, full: !!full, sameType, sameSkip })
+    const v2 = VR.diagVerdict(rows, { perm: v.perm, sameType })
+    log(this.id, `voice diag done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${v2.next}`)
+    return { ok: true, rows, types, text, next: v2.next }
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────

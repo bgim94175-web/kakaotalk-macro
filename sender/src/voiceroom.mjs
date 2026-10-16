@@ -306,50 +306,70 @@ function stOf(rows, tag) {
   return hit ? Number(hit.st) : null
 }
 
-/** 진단 결과 한 줄 판정. → {verdict, next} */
-export function diagVerdict(rows) {
+/** 보이스룸 계열 메타 타입(카카오가 보이스룸에 쓰는 자리) */
+export const VOICE_META_TYPES = Object.freeze([16, 17])
+
+export function isVoiceMetaType(t) {
+  return VOICE_META_TYPES.includes(metaTypeNum(t))
+}
+
+/**
+ * 진단 결과 한 줄 판정. rows = [{tag, st}], o = {perm, sameType}
+ * → {verdict, next:'banner'|'server_only'|'owner_test'|'full'}
+ * 핵심은 두 가지를 함께 보는 것이다:
+ *   · 봇이 방장(perm & 1)인가 — 방장인데 거부면 권한으로는 설명되지 않는다
+ *   · 모르는 타입(unknown)과 보이스룸 타입의 코드가 다른가 — 다르면 서버가 "모르는 타입"과
+ *     "이 타입은 거부"를 가려서 답한다는 뜻이고, 거부가 보이스룸 자리에만 걸린 것이다
+ * same 은 보이스룸이 아닌 메타로 돌렸을 때만 센다(거부당하는 타입을 다시 써 보는 것은 대조군이 아니다).
+ */
+export function diagVerdict(rows, o) {
+  const opt = o || {}
+  const owner = (Number(opt.perm) & 1) !== 0
+  const who = owner ? '방장' : '부방장'
   const on = [stOf(rows, 'on+li'), stOf(rows, 'on-li')].filter((x) => x != null)
   const onOk = on.some((x) => x === 0)
   const onSt = on.find((x) => x !== 0)
   const off = stOf(rows, 'off')
   const unknown = stOf(rows, 'unknown')
-  const same = stOf(rows, 'same')
-  if (onOk) {
-    return {
-      verdict: '카카오가 켜기 신호를 받았어요. 방에 보이스룸 배너가 보이는지 확인해 주세요.',
-      next: 'banner',
-    }
-  }
+  // 보이스룸 타입으로 돌린 same 은 대조군이 아니다 — 없는 셈 친다
+  const same = isVoiceMetaType(opt.sameType) ? null : stOf(rows, 'same')
+  if (onOk) return { verdict: '카카오가 켜기 신호를 받았어요. 방에 보이스룸 배너가 보이는지 확인해 주세요.', next: 'banner' }
   if (same === 0) {
-    return {
-      verdict: '이 봇은 방 메타를 쓸 수 있는데 보이스룸 메타만 거부돼요. 부방장 권한으로는 켤 수 없고, 음성 서버가 만들어 주는 값이 있어야 합니다.',
-      next: 'server_only',
-    }
+    return { verdict: `이 봇은 다른 방 메타는 쓸 수 있는데 보이스룸 메타만 거부돼요(${who}). 카카오가 음성 서버로만 쓰는 자리입니다.`, next: 'server_only' }
   }
-  if (same != null && same !== 0) {
-    return {
-      verdict: '이 봇은 어떤 방 메타도 쓸 수 없어요. 권한 문제라서, 봇이 방장인 방에서는 될 수 있습니다.',
-      next: 'owner_test',
-    }
+  if (same != null && same !== 0 && !owner) {
+    return { verdict: '이 봇은 보이스룸이 아닌 메타도 쓸 수 없어요. 권한 문제일 수 있으니 봇이 방장인 방에서 한 번 더 확인해 주세요.', next: 'owner_test' }
+  }
+  if (same != null && same !== 0 && owner) {
+    return { verdict: '봇이 방장인데도 방 메타를 아예 쓸 수 없어요. 방 메타는 클라이언트가 쓰는 자리가 아닙니다.', next: 'server_only' }
   }
   if (unknown != null && onSt != null && unknown !== onSt) {
-    return {
-      verdict: `모르는 타입은 ${unknown}, 보이스룸 타입은 ${onSt} — 거부가 보이스룸 메타에만 걸려 있어요.`,
-      next: 'full',
+    if (owner) {
+      return {
+        verdict: `봇이 방장인데도 보이스룸 타입만 ${onSt} 로 거부되고, 모르는 타입은 ${unknown} 이에요. 권한이 아니라 카카오가 음성 서버로만 쓰는 자리라는 뜻입니다.`,
+        next: 'server_only',
+      }
     }
+    return { verdict: `모르는 타입은 ${unknown}, 보이스룸 타입은 ${onSt} — 거부가 보이스룸 메타에만 걸려 있어요.`, next: 'full' }
   }
-  if (off != null && onSt != null && off === 0) {
+  if (off === 0 && onSt != null) {
     return { verdict: '끄기는 받고 켜기만 거부돼요. 켜는 값(callId)을 서버가 먼저 만들어 줘야 하는 것으로 보입니다.', next: 'server_only' }
   }
-  return { verdict: '모르는 타입도 같은 코드라 아직 가릴 수 없어요.', next: 'full' }
+  if (owner) {
+    return { verdict: `봇이 방장인데도 보이스룸 메타가 ${onSt} 로 거부돼요. 권한으로는 설명되지 않습니다.`, next: 'server_only' }
+  }
+  return { verdict: '아직 가릴 수 없어요. 보이스룸이 아닌 메타가 있는 방에서 「보룸진단 전체」를 돌려 주세요.', next: 'full' }
 }
 
-/** 방에 보낼 진단 답. rows = [{tag, st}], o = {types, perm, full} */
+/** 방에 보낼 진단 답. rows = [{tag, st}], o = {types, perm, full, sameType, sameSkip} */
 export function diagText(rows, o) {
   const opt = o || {}
+  const perm = Number(opt.perm)
+  const who = (perm & 1) !== 0 ? '방장' : (perm & 4) !== 0 ? '부방장' : '권한 없음'
   const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
-  const v = diagVerdict(rows)
-  const head = `보룸 진단 (권한 ${Number(opt.perm)} · 방 메타 ${Array.isArray(opt.types) && opt.types.length ? opt.types.join(',') : '없음'})`
-  const tail = v.next === 'full' && !opt.full ? '\n「보룸진단 전체」로 한 번 더 돌리면 권한인지 가려집니다(방 메타를 같은 값으로 다시 써 봅니다).' : ''
-  return `${head}\n${line}\n→ ${v.verdict}${tail}`
+  const v = diagVerdict(rows, { perm, sameType: opt.sameType })
+  const head = `보룸 진단 (${who} ${perm} · 방 메타 ${Array.isArray(opt.types) && opt.types.length ? opt.types.join(',') : '없음'})`
+  const note = opt.sameSkip ? `\n(대조군 생략: ${opt.sameSkip})` : ''
+  const tail = v.next === 'full' && !opt.full ? '\n「보룸진단 전체」로 한 번 더 돌리면 더 가려집니다(보이스룸이 아닌 방 메타를 같은 값으로 다시 써 봅니다).' : ''
+  return `${head}\n${line}${note}\n→ ${v.verdict}${tail}`
 }

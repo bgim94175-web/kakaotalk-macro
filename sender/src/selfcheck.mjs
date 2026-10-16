@@ -4073,12 +4073,14 @@ async function withLog(fn) {
       if (tags !== 'on+li,on-li,off,count,unknown') throw new Error('#42 diag probes ' + tags)
       if (d1.rows.filter((r) => r.tag.startsWith('on')).some((r) => r.st !== -203)) throw new Error('#42 diag sees the refusal ' + JSON.stringify(d1.rows))
       if (!d1.types.includes(3)) throw new Error('#42 diag reads the room metas ' + JSON.stringify(d1.types))
-      if (VR.diagVerdict(d1.rows).next !== 'full') throw new Error('#42 diag asks for 전체 first')
+      if (d1.next !== 'full') throw new Error('#42 diag asks for 전체 first')
       if (!d1.text.includes('보룸진단 전체')) throw new Error('#42 diag reply points at 전체')
       // 전체: 지금 있는 메타(제목)를 같은 값으로 다시 쓴다 → 되면 보이스룸 메타만 거부된 것
       const d2 = await botA.slot.voiceDiag(vv, true)
       if (!d2.rows.some((r) => r.tag === 'same' && r.st === 0)) throw new Error('#42 diag rewrites a meta as is ' + JSON.stringify(d2.rows))
-      if (VR.diagVerdict(d2.rows).next !== 'server_only') throw new Error('#42 diag verdict ' + JSON.stringify(VR.diagVerdict(d2.rows)))
+      if (d2.next !== 'server_only') throw new Error('#42 diag verdict ' + d2.next + ' ' + JSON.stringify(d2.rows))
+      // 대조군은 보이스룸이 아닌 메타(제목 3)로 돌려야 한다 — 거부당하는 타입을 다시 쓰는 것은 대조군이 아니다
+      if (!d2.text.includes('방장 1') && !d2.text.includes('부방장 4')) throw new Error('#42 diag says the permission in words ' + d2.text)
       if (fs.room('voicex1').ln !== '테스트방 voicex1') throw new Error('#42 diag does not change the room')
       if (botA.slot.voiceOf(vv)) throw new Error('#42 diag leaves no session')
     } finally {

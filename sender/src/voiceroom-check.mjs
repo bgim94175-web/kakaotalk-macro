@@ -144,21 +144,44 @@ eq(V.metaTypeNum('3'), 3, 'metaTypeNum 문자열')
 ok(Number.isNaN(V.metaTypeNum('x')), 'metaTypeNum 이상한 값')
 
 // 켜기가 되면 배너 확인으로 보낸다
-eq(V.diagVerdict([{ tag: 'on+li', st: -203 }, { tag: 'on-li', st: 0 }]).next, 'banner', 'li 없이 되면 성공')
-// 메타는 쓸 수 있는데 보이스룸만 거부 → 서버(또는 방장) 전용
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }, { tag: 'same', st: 0 }]).next, 'server_only', '메타는 쓰는데 보이스룸만 거부')
-// 아무 메타도 못 씀 → 권한 문제, 방장 방에서 시험할 값이 있다
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }]).next, 'owner_test', '메타 전체 거부')
-// 모르는 타입과 코드가 다르면 보이스룸 메타에만 걸린 신호
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -500 }]).next, 'full', '모르는 타입과 다른 코드')
-// 끄기는 받고 켜기만 거부
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'off', st: 0 }, { tag: 'unknown', st: -203 }]).next, 'server_only', '끄기만 받음')
-// 전부 같은 코드면 아직 모름
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }]).next, 'full', '전부 같은 코드')
+eq(V.diagVerdict([{ tag: 'on+li', st: -203 }, { tag: 'on-li', st: 0 }], { perm: 4 }).next, 'banner', 'li 없이 되면 성공')
+// 보이스룸이 아닌 메타는 쓰는데 보이스룸만 거부 → 서버 전용
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }, { tag: 'same', st: 0 }], { perm: 4, sameType: 3 }).next, 'server_only', '다른 메타는 쓰는데 보이스룸만 거부')
+// 부방장이 아무 메타도 못 씀 → 방장 방에서 한 번 더
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 4, sameType: 3 }).next, 'owner_test', '부방장이 메타 전체 거부')
+// 방장인데 아무 메타도 못 씀 → 권한이 아니다
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 1, sameType: 3 }).next, 'server_only', '방장이 메타 전체 거부')
+// 거부당하는 타입(16)으로 돌린 same 은 대조군이 아니다 — 없는 셈 친다
+const sameVoice = V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }, { tag: 'same', st: -203 }], { perm: 1, sameType: 16 })
+eq(sameVoice.next, 'server_only', '보이스룸 타입으로 돌린 same 은 세지 않는다')
+ok(!sameVoice.verdict.includes('방장인 방에서'), '방장에게 방장 방에서 해 보라고 하지 않는다: ' + sameVoice.verdict)
+// 부방장이면 같은 줄이라도 아직 가릴 수 있는 여지가 있다
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }], { perm: 4 }).next, 'full', '부방장은 전체로 더 본다')
 
-const dt = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }], { types: [3], perm: 4, full: false })
-ok(dt.includes('on-li -203') && dt.includes('권한 4') && dt.includes('방 메타 3'), '진단 답에 코드·권한·메타: ' + dt)
+// 실측 그대로(2026-10-16, 봇이 방장인 방): 모르는 타입 -300 · 보이스룸 -203 → 서버 전용
+const real = [
+  { tag: 'on+li', st: -203 }, { tag: 'on-li', st: -203 }, { tag: 'off', st: -203 },
+  { tag: 'count', st: -203 }, { tag: 'unknown', st: -300 }, { tag: 'same', st: -203 },
+]
+const rv = V.diagVerdict(real, { perm: 1, sameType: 16 })
+eq(rv.next, 'server_only', '실측 판정')
+ok(rv.verdict.includes('방장') && rv.verdict.includes('-300'), '실측 판정 문구: ' + rv.verdict)
+const realText = V.diagText(real, { types: [16, 17], perm: 1, full: true, sameType: 16, sameSkip: '' })
+ok(realText.startsWith('보룸 진단 (방장 1 · 방 메타 16,17)'), '권한을 말로 푼다: ' + realText)
+ok(!realText.includes('보룸진단 전체'), '이미 결론이 났으면 전체를 권하지 않는다')
+
+// 끄기만 받는 경우
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'off', st: 0 }, { tag: 'unknown', st: -203 }], { perm: 4 }).next, 'server_only', '끄기만 받음')
+// 대조군을 못 돌렸으면 까닭을 적는다
+const skipText = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }], { types: [16, 17], perm: 4, full: true, sameSkip: '이 방엔 보이스룸 메타(16·17)밖에 없어요' })
+ok(skipText.includes('대조군 생략: 이 방엔'), '대조군 생략 까닭: ' + skipText)
+
+eq(V.isVoiceMetaType(16), true, 'type 16 은 보이스룸 자리')
+eq(V.isVoiceMetaType({ low: 17 }), true, 'type 17(Long) 도')
+eq(V.isVoiceMetaType(3), false, 'type 3 은 아니다')
+
+const dt = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }], { types: [3], perm: 4, full: false })
+ok(dt.includes('on-li -203') && dt.includes('부방장 4') && dt.includes('방 메타 3'), '진단 답에 코드·권한·메타: ' + dt)
 ok(dt.includes('보룸진단 전체'), '아직 모르면 전체로 안내')
-ok(!V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'same', st: 0 }], { types: [3], perm: 4, full: true }).includes('보룸진단 전체'), '전체로 돌린 뒤에는 안내하지 않는다')
 
 process.stderr.write('[voiceroom-check] ok\n')
