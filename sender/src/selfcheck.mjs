@@ -1737,14 +1737,123 @@ async function withLog(fn) {
       if (svg.indexOf(want) < 0) throw new Error('#40-3 card svg has ' + want)
     }
     if (svg.indexOf('<하늘') >= 0 || LC.logCardSvg(pc).indexOf('변경전') < 0 || LC.ACCENT.join === LC.ACCENT.leave || LC.ACCENT.leave === LC.ACCENT.profile) throw new Error('#40-3 card svg escape / profile / accents')
+    // 모양(사이트 결 · 궤도 + K 로고): 숫자 줄(날짜 · 시각 · 기록) · 이름 아래 설명 · 최근 기록(마지막이 이번) · 강조색은 종류 하나만
+    const { readFileSync } = await import('node:fs')
+    for (const want of ['>날짜<', '>10.12<', '>입장 시각<', '>입장 기록<', '>2번째 입장<', '>최근 기록<', '>이번<']) {
+      if (svg.indexOf(want) < 0) throw new Error('#40-3 card layout has ' + want)
+    }
+    const lvSvg = LC.logCardSvg(lv)
+    const pcSvg = LC.logCardSvg(pc)
+    if (lvSvg.indexOf('>첫 퇴장<') < 0 || lvSvg.indexOf('>퇴장 시각<') < 0 || lvSvg.indexOf('>확인 못 함<') < 0 || lvSvg.indexOf('>최근 기록<') >= 0) throw new Error('#40-3 leave card: first leave, no recent list for one time')
+    for (const want of ['>변경전<', '>하늘<', '>하늘_판매<', '>옾링 변경전<', '>옾링 변경후<', '>https://open.kakao.com/o/sOld<', '>https://open.kakao.com/o/sNew<', '>변경 시각<', '>변경 기록<']) {
+      if (pcSvg.indexOf(want) < 0) throw new Error('#40-3 profile card has ' + want)
+    }
+    // 옛 이름은 줄을 긋지 않고 흐린 글로(꾸민 닉네임의 대체 글꼴 글자가 뭉개지지 않게). 앞의 '변경전' 이 옛 이름임을 말한다
+    if (/line-through/.test(pcSvg) || !/fill="#A1A1AA"[^>]*>하늘<\/text>/.test(pcSvg)) throw new Error('#40-3 profile card shows the old name without a strike')
+    const accents = (s) => Object.keys(LC.ACCENT).filter((k) => s.indexOf(LC.ACCENT[k]) >= 0).join(',')
+    if (accents(svg) !== 'join' || accents(lvSvg) !== 'leave' || accents(pcSvg) !== 'profile') throw new Error('#40-3 one accent per kind ' + [accents(svg), accents(lvSvg), accents(pcSvg)])
+    // K bot 로고: public/logo.svg 의 그 K 모양(네모 바탕 없이)을 궤도 가운데와 바닥 표시에 쓴다. 옛 행성 · 글자 K 상자는 없다
+    const kPath = readFileSync(new URL('../../public/logo.svg', import.meta.url), 'utf8').match(/<path fill="#ffffff" d="([^"]+)"/)[1]
+    if (svg.indexOf(`<path id="kmark" d="${kPath}"/>`) < 0 || (svg.match(/<use href="#kmark"/g) || []).length !== 2 || /id="planet"|>K<\/text>/.test(svg)) throw new Error('#40-3 card uses the K bot logo mark (orbit + footer)')
+    // 로고는 잘리지 않는다: 궤도 선은 모두 K 보다 먼저(뒤에) 그린다
+    for (const s of [svg, lvSvg, pcSvg]) {
+      const ring = s.lastIndexOf('fill="none" stroke="#EDEDEF"')
+      if (ring < 0 || ring > s.indexOf('<use href="#kmark"')) throw new Error('#40-3 orbit rings pass behind the K logo, never across it')
+    }
+    // 동그라미 첫 글자: 꾸밈 기호를 건너뛴 첫 한글 → 영문 · 숫자(대문자) → 다른 글자. 이름이 없으면 글자 대신 사람 모양
+    const initial = (name) => ((LC.logCardSvg(Object.assign({}, c, { name })).match(/font-size="31"[^>]*>([^<]*)<\/text>/) || [])[1])
+    for (const [nm, want] of [['하늘', '하'], ['꧁𝓚𝓐𝓚𝓐𝓞꧂ 백샤렌 ✿', '백'], ['୨୧ ʚmina ɞ', 'M'], ['꧁𝓚𝓐𝓚𝓐𝓞꧂', '𝓚'], ['✿★', '✿'], ['이름 없음', undefined]]) {
+      if (initial(nm) !== want) throw new Error('#40-3 avatar initial of ' + nm + ' = ' + initial(nm))
+    }
+    {
+      // 넉넉히 들어가는 꾸민 닉네임은 자르지 않고 다 보여 준다(대체 글꼴 글자 폭을 너무 크게 잡지 않음)
+      const deco = '꧁𝓚𝓐𝓚𝓐𝓞꧂ 백샤렌 ✿ 👍'
+      const nameOf = (nm) => {
+        const m = LC.logCardSvg(RF.visitNoticeText('join', { userId: '9', name: nm, link: '' }, [t1]).card).match(/<text [^>]*font-size="(\d+)" font-weight="700"[^>]*letter-spacing="[^"]*"[^>]*>([^<]*)<\/text>/)
+        return m ? { size: +m[1], text: m[2] } : {}
+      }
+      if (nameOf(deco).text !== deco) throw new Error('#40-3 decorated nickname shown in full')
+      // 취소선 꾸밈(결합 문자 U+0336)은 폭이 없다: 10글자 이름은 그대로 큰 글자(42)로 다 보인다
+      const struck = '하̶늘̶'.repeat(5)
+      if (nameOf(struck).text !== struck || nameOf(struck).size !== 42) throw new Error('#40-3 struck nickname shown in full at 42 ' + JSON.stringify(nameOf(struck)))
+      // 한자는 대체 글꼴에서 1em: 11자는 42 그대로, 14자도 줄여서 다 보인다(… 없이)
+      if (nameOf('山田太郎山田太郎山田太').size !== 42 || nameOf('山田太郎山田太郎山田太郎山田').text !== '山田太郎山田太郎山田太郎山田') throw new Error('#40-3 kanji nickname fits ' + JSON.stringify([nameOf('山田太郎山田太郎山田太'), nameOf('山田太郎山田太郎山田太郎山田')]))
+    }
     if (CARD.available()) {
       const png = LC.logCardPng(c, { room: '동네모임' })
       if (!png || png.readUInt32BE(16) !== 1440 || png.readUInt32BE(20) < 800 || png.readUInt32BE(20) > 2800) throw new Error('#40-3 card png 1440 wide (2x)')
-      // 패널 미리 보기 그림(public/img/logcard-*.png)은 sender/src/logcard-sample.mjs 가 만든다
-      const { readFileSync } = await import('node:fs')
+      // 긴 · 꾸민 닉네임(40자, 대체 글꼴의 넓은 글자)도 오른쪽 여백(44px)을 넘지 않는다: 그린 그림의 여백 띠에 밝은 글자 점이 없다.
+      // 띠는 이름 줄부터 끝까지(그 위 오른쪽 구석은 궤도 그림). 글자는 가장 흐린 #71717A(밝기 114)까지 잡고(문턱 100),
+      // 궤도 선 · 별 · 자취는 그보다 어둡다(띠 안에서 가장 밝은 그림 점이 64 안팎)
+      const { inflateSync } = await import('node:zlib')
+      const rgba = (buf) => {
+        const w = buf.readUInt32BE(16)
+        const h = buf.readUInt32BE(20)
+        const ch = { 2: 3, 6: 4 }[buf[25]]
+        if (buf[24] !== 8 || !ch || buf[28]) throw new Error('#40-3 unexpected png format')
+        const parts = []
+        for (let o = 8; o < buf.length;) {
+          const len = buf.readUInt32BE(o)
+          if (buf.toString('latin1', o + 4, o + 8) === 'IDAT') parts.push(buf.subarray(o + 8, o + 8 + len))
+          o += 12 + len
+        }
+        const raw = inflateSync(Buffer.concat(parts))
+        const stride = w * ch
+        const px = Buffer.alloc(h * stride)
+        for (let y = 0; y < h; y++) {
+          const f = raw[y * (stride + 1)]
+          for (let x = 0; x < stride; x++) {
+            const v = raw[y * (stride + 1) + 1 + x]
+            const a = x >= ch ? px[y * stride + x - ch] : 0
+            const b = y ? px[(y - 1) * stride + x] : 0
+            const cc = x >= ch && y ? px[(y - 1) * stride + x - ch] : 0
+            const p = a + b - cc
+            const pr = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - cc) ? a : Math.abs(p - b) <= Math.abs(p - cc) ? b : cc
+            px[y * stride + x] = (v + [0, a, b, (a + b) >> 1, pr][f]) & 255
+          }
+        }
+        return { w, h, ch, px }
+      }
+      const brightInMargin = (png) => {
+        const { w, h, ch, px } = rgba(png)
+        const s = w / LC.CARD_W
+        for (let y = Math.round(130 * s); y < h; y++) {
+          for (let x = Math.round((LC.CARD_W - 40) * s); x < w; x++) {
+            const i = (y * w + x) * ch
+            if (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11 > 100) return `${x},${y}`
+          }
+        }
+        return ''
+      }
+      const deco = '꧁𝓚𝓐𝓚𝓐𝓞꧂ 백샤렌 ✿ 👍'
+      const LONG = ['가'.repeat(40), 'W'.repeat(40), '하늘SkyBlue_공식판매계정OfficialStore최저가보장24시WWW', '꧁'.repeat(40), (deco + ' ').repeat(3), '👍😀'.repeat(20), '𝓚𝓐𝓚𝓐𝓞'.repeat(8), 'ꕥ꒰ 하늘 ꒱'.repeat(5), '⸻𓆩♡𓆪⸻'.repeat(6), '하̶늘̶'.repeat(20), '山田太郎'.repeat(10)]
+      const room = '『𝐊𝐀𝐊𝐀𝐎 ★ 방』 ꧁✿꧂ '.repeat(4)
+      const checked = []
+      for (const nm of LONG) {
+        const j = RF.visitNoticeText('join', { userId: '9', name: nm, link: 'https://open.kakao.com/o/sAbc' }, [t1 - 60000, t1]).card
+        const p = RF.profileChangeNotice({ userId: '9', name: nm, link: 'https://open.kakao.com/o/sAbc' }, [{ kind: 'name', from: [...nm].reverse().join(''), to: nm }, { kind: 'status', from: nm, to: (nm + ' ').repeat(3) }], [t1]).card
+        for (const card of [j, p]) {
+          const img = LC.logCardPng(card, { room })
+          if (!img || img.readUInt32BE(16) !== 1440) throw new Error('#40-3 long name card renders ' + nm)
+          const at = brightInMargin(img)
+          if (at) throw new Error('#40-3 text overflows the right margin at ' + at + ' for ' + JSON.stringify(nm) + ' (' + card.kind + ')')
+          checked.push(card.kind)
+        }
+        if (j.name.length >= 30 && LC.logCardSvg(j).indexOf('…') < 0) throw new Error('#40-3 40-char name is cut with … ' + nm)
+      }
+      if (checked.length !== LONG.length * 2) throw new Error('#40-3 long name cards checked')
+      // 밀어낸 글자가 정말 여백에 그려지면 잡는다(검사가 헛돌지 않음): 이름 줄 오른쪽 끝에 글자를 덧붙인 카드.
+      // 흰 글뿐 아니라 흐린 글(변경전 값 #8B8B94 · 가장 흐린 #71717A, 보통 굵기)도 잡아야 한다
+      for (const [fill, size, weight] of [['#EDEDEF', 30, 700], ['#8B8B94', 22, 400], ['#71717A', 22, 400]]) {
+        const spill = LC.logCardSvg(c).replace('</svg>', `<text x="690" y="180" font-size="${size}" font-weight="${weight}" fill="${fill}">가</text></svg>`)
+        if (!brightInMargin(CARD.svgToPng(spill, 1440))) throw new Error('#40-3 margin check sees a ' + fill + ' glyph in the margin')
+      }
+      // 패널 미리 보기 그림(public/img/logcard-*.png)은 sender/src/logcard-sample.mjs 가 만든다 — 지금 카드 모양과 같은 크기여야 한다
+      const SAMPLE = await import('./logcard-sample.mjs')
       for (const f of ['logcard-join.png', 'logcard-profile.png']) {
         const b = readFileSync(new URL('../../public/img/' + f, import.meta.url))
-        if (b.readUInt32BE(12) !== 0x49484452 || b.readUInt32BE(16) !== 1440) throw new Error('#40-3 panel preview ' + f + ' is a 1440-wide PNG')
+        const now = LC.logCardPng(SAMPLE.SAMPLES[f], { room: SAMPLE.ROOM })
+        if (b.readUInt32BE(12) !== 0x49484452 || b.readUInt32BE(16) !== 1440 || b.readUInt32BE(20) !== now.readUInt32BE(20)) throw new Error('#40-3 panel preview ' + f + ' is the current 1440-wide card (node sender/src/logcard-sample.mjs)')
       }
     }
     if (LC.logCardPng(null) !== null) throw new Error('#40-3 no card → null')
