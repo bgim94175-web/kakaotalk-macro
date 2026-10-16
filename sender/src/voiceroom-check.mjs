@@ -218,13 +218,17 @@ ok(bare.includes('"liveon":true') && bare.includes('"updateTime":5'), '없는 �
 JSON.parse(bare)
 
 // 판정
-eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }]).next, 'shape_found', '하나라도 받으면 모양을 찾은 것')
-ok(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }]).verdict.includes('echo'), '어느 모양이 됐는지 말한다')
-eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: -203 }, { tag: 'on', st: -203 }]).next, 'server_only', '전부 거부면 서버 전용')
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'off', st: 0 }]).next, 'written', '하나라도 써지면 쓸 수 있는 자리')
+ok(V.mirrorVerdict([{ tag: 'off', st: 0 }]).verdict.includes('off'), '어느 내용이 통했는지 말한다')
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'on', st: -500 }]).next, 'reached', '-500 이면 읽히는 자리')
+ok(V.mirrorVerdict([{ tag: 'on', st: -500 }]).verdict.includes('통화 할당'), '막힌 곳을 짚는다')
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'on', st: -203 }, { tag: 'empty', st: -203 }]).next, 'server_only', '전부 -203 이면 쓰는 자리가 아니다')
 eq(V.mirrorVerdict([{ tag: 'asis', st: -300 }]).next, 'unknown_type', '모르는 타입이면 번호부터')
-const mt = V.mirrorText([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }], { type: 16, keys: ['revision', 'authorId'] })
-ok(mt.startsWith('보룸 따라쓰기 (type 16 · 함께 온 칸 revision,authorId)'), '머리줄: ' + mt)
-ok(V.mirrorText([], { type: 16, keys: [] }).includes('함께 온 칸 없음'), '칸이 없을 때')
+// 대조군(@chatId)은 판정에 세지 않는다 — 읽히지 않는 모양이라는 것을 이미 안다
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'asis@chatId', st: 0 }]).next, 'server_only', '대조군은 판정에서 뺀다')
+const mt = V.mirrorText([{ tag: 'asis', st: -203 }, { tag: 'off', st: 0 }], { type: 16, keys: ['revision', 'authorId'], shape: 'c+li' })
+ok(mt.startsWith('보룸 따라쓰기 (모양 c+li · type 16 · 함께 온 칸 revision,authorId)'), '머리줄에 모양까지: ' + mt)
+ok(V.mirrorText([], { type: 16, keys: [], shape: 'c' }).includes('함께 온 칸 없음'), '칸이 없을 때')
 
 // ── 쓰기 시험 ────────────────────────────────────────────────────────────
 eq(V.writeTestVerdict([{ tag: 'type3', st: 0 }]).next, 'voice_closed', '다른 타입이 써지면 보이스룸만 막힌 것')

@@ -4095,15 +4095,25 @@ async function withLog(fn) {
       const m1 = await botA.slot.voiceMirror(vv)
       if (!m1.ok || m1.type !== 16) throw new Error('#42 mirror reads the voice meta ' + JSON.stringify(m1))
       if (!m1.keys.includes('revision')) throw new Error('#42 mirror carries the fields that came with it ' + JSON.stringify(m1.keys))
-      if (m1.rows[0].tag !== 'asis' || m1.rows[0].st !== 0) throw new Error('#42 mirror tries our own shape first ' + JSON.stringify(m1.rows))
-      if (m1.next !== 'shape_found') throw new Error('#42 mirror verdict when kakao accepts ' + m1.next)
+      if (m1.shape !== 'c+li') throw new Error('#42 mirror uses the shape that gets read ' + m1.shape)
+      if (m1.rows[0].tag !== 'asis') throw new Error('#42 mirror sends kakao own content first ' + JSON.stringify(m1.rows))
+      if (!m1.rows.some((r) => r.tag === 'asis@chatId')) throw new Error('#42 mirror keeps the old shape as a control')
+      if (!m1.rows.some((r) => r.tag === 'off') || !m1.rows.some((r) => r.tag === 'empty')) throw new Error('#42 mirror varies the content')
       // 카카오가 거절하는 방이면: 자기가 쓴 값을 그대로 돌려보내도 거부 → 클라이언트가 쓰는 자리가 아니다
       fs.room('voicex1').voiceDeny = -203
       try {
         const m2 = await botA.slot.voiceMirror(vv)
-        if (m2.rows.some((r) => r.st === 0)) throw new Error('#42 mirror sees every shape refused ' + JSON.stringify(m2.rows))
+        if (m2.rows.some((r) => r.st === 0)) throw new Error('#42 mirror sees every content refused ' + JSON.stringify(m2.rows))
         if (m2.next !== 'server_only') throw new Error('#42 mirror verdict when all refused ' + m2.next)
         if (!m2.rows.some((r) => r.tag === 'on')) throw new Error('#42 mirror also tries the liveon edit')
+      } finally {
+        fs.room('voicex1').voiceDeny = 0
+      }
+      // -500(읽고 나서 못 함)이 하나라도 있으면 "읽히는 자리"로 본다
+      fs.room('voicex1').voiceDeny = -500
+      try {
+        const m2b = await botA.slot.voiceMirror(vv)
+        if (m2b.next !== 'reached') throw new Error('#42 mirror verdict when kakao reads but fails ' + m2b.next)
       } finally {
         fs.room('voicex1').voiceDeny = 0
       }

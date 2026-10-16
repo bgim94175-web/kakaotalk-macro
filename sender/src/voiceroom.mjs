@@ -417,31 +417,39 @@ export function turnOn(content, nowSec) {
   return t
 }
 
-/** 따라 쓰기 결과 판정. rows = [{tag, st}] → {verdict, next} */
+// 따라 쓰기 판정. 모양찾기로 `{c, li, type, content}` 가 읽히는 모양임을 알았으니, 이제 **내용만** 바꿔 가며 본다.
+//   0    = 써졌다
+//   -500 = 읽고 나서 못 했다 → 그 내용은 서버가 받아들이는 자리다(상태 때문에 실패)
+//   -203 = 보낸 내용이 틀림 → 서버가 그 내용을 언제나 거절한다
 export function mirrorVerdict(rows) {
-  const st = (tag) => { const h = (rows || []).find((r) => r && r.tag === tag); return h ? Number(h.st) : null }
-  const any = (rows || []).filter((r) => Number(r.st) === 0).map((r) => r.tag)
-  if (any.length) {
-    return { verdict: `카카오가 받은 모양이 있어요: ${any.join(', ')}. 이 모양으로 켜기를 다시 맞추면 됩니다.`, next: 'shape_found' }
+  const list = (rows || []).filter((r) => r && !String(r.tag).endsWith('@chatId'))
+  const ok = list.find((r) => Number(r.st) === 0)
+  if (ok) {
+    return { verdict: `카카오가 받았어요: ${ok.tag}. 보이스룸 메타를 쓸 수 있습니다 — 이 내용으로 켜기를 맞추면 됩니다.`, next: 'written' }
   }
-  const asis = st('asis')
-  const echo = st('echo')
-  if (asis === STATUS_UNKNOWN || echo === STATUS_UNKNOWN) {
+  const reached = list.find((r) => Number(r.st) === -500)
+  if (reached) {
+    return {
+      verdict: `${reached.tag} 는 카카오가 읽었어요(-500 = 읽고 나서 못 했다). 그 내용은 받아들이는 자리이고, 막힌 것은 그다음 단계(진짜 통화 할당)로 보입니다.`,
+      next: 'reached',
+    }
+  }
+  if (list.some((r) => Number(r.st) === STATUS_UNKNOWN)) {
     return { verdict: '카카오가 이 타입을 모른다고 답해요. 타입 번호부터 다시 봐야 합니다.', next: 'unknown_type' }
   }
   return {
-    verdict: '카카오가 써 둔 메타를 글자 그대로 돌려보내도 거부해요. 클라이언트가 쓸 수 있는 자리가 아닐 가능성이 큽니다.',
+    verdict: '어떤 내용으로도 -203(보낸 내용이 틀림)이에요. 카카오가 써 둔 값을 그대로 돌려보내도 거부하니, 보이스룸 메타는 클라이언트가 쓰는 자리가 아닙니다.',
     next: 'server_only',
   }
 }
 
-/** 방에 보낼 따라 쓰기 답. o = {type, keys, has16} */
+/** 방에 보낼 따라 쓰기 답. o = {type, keys, shape} */
 export function mirrorText(rows, o) {
   const opt = o || {}
   const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
   const v = mirrorVerdict(rows)
   const keys = Array.isArray(opt.keys) && opt.keys.length ? opt.keys.join(',') : '없음'
-  return `보룸 따라쓰기 (type ${opt.type} · 함께 온 칸 ${keys})\n${line}\n→ ${v.verdict}`
+  return `보룸 따라쓰기 (모양 ${opt.shape || '-'} · type ${opt.type} · 함께 온 칸 ${keys})\n${line}\n→ ${v.verdict}`
 }
 
 // ── 쓰기 시험(write test) ────────────────────────────────────────────────
