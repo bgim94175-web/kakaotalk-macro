@@ -511,7 +511,9 @@ class FakeServer {
     // 보이스룸(LIVE_TALK_INFO): type 16 메타를 방에 적고, 참가자들에게 CHGMETA 로 알린다.
     // r.voiceDeny 를 0 이 아닌 값으로 두면 카카오가 거절하는 방이 된다(실패 경로 시험용).
     if (method === 'SETMETA') {
-      const r = this.byChat(b.chatId)
+      // 실측(2026-10-16): 진짜 서버가 읽는 칸은 `c` 다(chatId 로 보내면 -203 = 바디를 못 읽음).
+      // 가짜는 둘 다 받아 준다 — 옛 모양으로 보내는 자리가 남아 있어도 시험이 멈추지 않게.
+      const r = this.byChat(b.c != null ? b.c : b.chatId)
       if (!r) return resp(method, { status: -324 })
       // 실측(2026-10-16): 모르는 메타 타입은 -300, 아는 타입인데 내용이 틀리면 -203
       if (![3, 16, 17].includes(Number(b.type))) return resp(method, { status: -300 })

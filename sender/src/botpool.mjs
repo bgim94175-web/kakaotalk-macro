@@ -1415,14 +1415,15 @@ export class BotSlot {
     return rows
   }
 
-  // 신호 한 번(켜기·연장·끄기). 오픈채팅은 li 가 더 필요할 수 있어 li 포함본을 먼저 보낸다(voiceSetMeta 와 같은 방식).
+  // 신호 한 번(켜기·연장·끄기). 바디는 실측으로 밝혀진 모양 `{c, li, type, content}` 를 쓴다(7.10):
+  // 옛 `chatId` 모양은 카카오가 바디를 읽지도 못했다(-203). li 포함본을 먼저 보내고, 안 되면 li 없이 한 번 더.
   async voiceSignal(v, content) {
     const chatId = v && v.chat_id ? String(v.chat_id) : ''
     if (!chatId) return { ok: false, status: -1 }
     const li = v && v.link_id ? String(v.link_id) : ''
     const attempts = []
-    if (li) attempts.push({ tag: 'with-li', body: { chatId: L(chatId), li: L(li), type: 16, content } })
-    attempts.push({ tag: 'no-li', body: { chatId: L(chatId), type: 16, content } })
+    if (li) attempts.push({ tag: 'c+li', body: { c: L(chatId), li: L(li), type: 16, content } })
+    attempts.push({ tag: 'c', body: { c: L(chatId), type: 16, content } })
     let last = { ok: false, status: -1 }
     for (const a of attempts) {
       const r = await this.raw('SETMETA', a.body)
@@ -1650,10 +1651,10 @@ export class BotSlot {
     return { ok: true, rows, types, text, next: v2.next }
   }
 
-  // 보룸 따라쓰기(SENDER_VOICE_EXPERIMENT 전용): 카카오가 그 방에 직접 써 둔 보이스룸 메타를 글자 그대로 돌려보낸다.
-  // 실측에서 -300 = 없는 명령어·모르는 타입, -203 = 있는데 요청 내용이 틀림(빈 바디 WRITE 가 -203)이었다.
-  // type 16 은 -203 이므로 카카오가 아는 타입이고, 틀린 것은 우리 내용이다. 그래서 카카오 자신이 쓴 값을
-  // 그대로(함께 온 revision·authorId 까지) 되돌려 보며 어떤 모양을 받아 주는지 찾는다.
+  // 보룸 따라쓰기(SENDER_VOICE_EXPERIMENT 전용): 모양찾기로 `{c, li, type, content}` 가 '읽히는' 모양임을 알았다
+  // (제목으로 치면 -500 = 읽고 나서 못 함. 반면 chatId 모양은 -203 = 바디를 못 읽음).
+  // 그래서 이제 **모양은 고정하고 내용만** 바꿔 가며, 카카오가 보이스룸 자리에 무엇을 받아 주는지 본다.
+  // 대조군으로 같은 내용을 옛 chatId 모양으로도 한 번 보내 둘의 코드가 다른지 같이 남긴다.
   async voiceMirror(v) {
     const chatId = v && v.chat_id ? String(v.chat_id) : ''
     if (!chatId) return { ok: false, error: 'no_chat' }
@@ -1661,45 +1662,40 @@ export class BotSlot {
     const info = await this.raw('CHATINFO', { chatId: L(chatId) })
     const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
       .filter((m) => m && typeof m.content === 'string'))
-    const mine = metas.find((m) => VR.metaTypeNum(m.type) === 16) || metas.find((m) => VR.isVoiceMetaType(m.type))
+    const mine = metas.find((m) => VR.metaTypeNum(m.type) === 16)
     if (!mine) return { ok: false, error: 'no_voice_meta' }
+    const cnt = metas.find((m) => VR.metaTypeNum(m.type) === 17)
     const type = VR.metaTypeNum(mine.type)
     const extras = VR.metaExtras(mine)
     const keys = Object.keys(extras)
-    log(this.id, `voice mirror type ${type} keys ${keys.join(',') || '-'} extras ${traceText(extras)}`)
+    const shape = VR.SHAPES.find((x) => x.tag === (li ? 'c+li' : 'c'))
+    const oldShape = VR.SHAPES.find((x) => x.tag === 'chatId')
+    log(this.id, `voice mirror shape ${shape.tag} type ${type} keys ${keys.join(',') || '-'} extras ${traceText(extras)}`)
     log(this.id, `voice mirror content ${VR.maskMeta(mine.content)}`)
     const rows = []
     const run = async (tag, body) => {
       const r = await this.raw('SETMETA', body)
       const st = R.locoStatus(r)
-      log(this.id, `voice mirror ${tag} → status ${st} body ${traceText((r && r.body) || {})}`)
+      log(this.id, `voice mirror ${tag} body ${traceText(body)} → status ${st} body ${traceText((r && r.body) || {})}`)
       rows.push({ tag, st })
       await new Promise((ok) => setTimeout(ok, 400))
       return st
     }
-    const base = { chatId: L(chatId), type, content: mine.content }
-    const rev = extras.revision
-    const bump = (x) => {
-      if (x == null) return undefined
-      try { return Long.fromString(String(typeof x === 'object' && 'low' in x ? R.idText(x) : x)).add(1) } catch { return undefined }
-    }
-    await run('asis', base)                                                   // 지금 우리가 보내던 모양
-    await run('echo', Object.assign({}, base, extras))                        // 함께 온 칸까지 그대로
-    if (li) await run('echo+li', Object.assign({}, base, extras, { li: L(li) }))
-    if (extras.authorId !== undefined) {
-      const noAuthor = Object.assign({}, extras)
-      delete noAuthor.authorId
-      await run('echo-author', Object.assign({}, base, noAuthor))
-    }
-    const up = bump(rev)
-    if (up !== undefined) await run('rev+1', Object.assign({}, base, extras, { revision: up }))
-    // 마지막으로 그 모양 그대로 '켜진' 내용만 바꿔 본다
-    const on = VR.turnOn(mine.content, Math.floor(this.now() / 1000))
-    await run('on', Object.assign({}, base, extras, up !== undefined ? { revision: up } : {}, { content: on }))
-    const text = VR.mirrorText(rows, { type, keys })
+    const vals = (t, content) => ({ chatId: L(chatId), li: li ? L(li) : null, type: t, typeLong: L(String(t)), content })
+    const nowSec = Math.floor(this.now() / 1000)
+    // 카카오가 써 둔 값 그대로가 가장 중요한 한 발이다 — 이것마저 거부면 내용 문제가 아니다
+    await run('asis', VR.shapeBody(shape, vals(type, mine.content)))
+    await run('asis+extras', Object.assign(VR.shapeBody(shape, vals(type, mine.content)), extras))
+    await run('off', VR.shapeBody(shape, vals(type, VR.offContent())))
+    await run('on', VR.shapeBody(shape, vals(type, VR.turnOn(mine.content, nowSec))))
+    await run('empty', VR.shapeBody(shape, vals(type, '{}')))
+    if (cnt) await run('t17', VR.shapeBody(shape, vals(17, cnt.content)))
+    // 대조군: 같은 내용을 옛 모양으로(코드가 갈리는지 한 줄로 보여 준다)
+    await run('asis@chatId', VR.shapeBody(oldShape, vals(type, mine.content)))
+    const text = VR.mirrorText(rows, { type, keys, shape: shape.tag })
     const next = VR.mirrorVerdict(rows).next
     log(this.id, `voice mirror done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${next}`)
-    return { ok: true, rows, type, keys, text, next }
+    return { ok: true, rows, type, keys, shape: shape.tag, text, next }
   }
 
   // 보룸 쓰기시험(SENDER_VOICE_EXPERIMENT 전용): SETMETA 가 보이스룸이 아닌 타입으로는 통하는지 본다.
