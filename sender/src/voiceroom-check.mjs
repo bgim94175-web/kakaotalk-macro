@@ -226,4 +226,12 @@ const mt = V.mirrorText([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }], { t
 ok(mt.startsWith('보룸 따라쓰기 (type 16 · 함께 온 칸 revision,authorId)'), '머리줄: ' + mt)
 ok(V.mirrorText([], { type: 16, keys: [] }).includes('함께 온 칸 없음'), '칸이 없을 때')
 
+// ── 쓰기 시험 ────────────────────────────────────────────────────────────
+eq(V.writeTestVerdict([{ tag: 'type3', st: 0 }]).next, 'voice_closed', '다른 타입이 써지면 보이스룸만 막힌 것')
+ok(V.writeTestVerdict([{ tag: 'type3', st: 0 }]).verdict.includes('닫혔습니다'), '닫혔다고 분명히 말한다')
+eq(V.writeTestVerdict([{ tag: 'type3', st: -203 }, { tag: 'type3+li', st: -203 }]).next, 'bad_shape', '전부 막히면 우리 모양이 의심')
+ok(V.writeTestVerdict([{ tag: 'type3', st: -203 }]).verdict.includes('다른 명령어'), '오픈채팅은 다른 명령어일 수 있다고 짚는다')
+eq(V.writeTestVerdict([{ tag: 'type3', st: -300 }]).next, 'unknown_type', '그 타입도 모른다면')
+ok(V.writeTestText([{ tag: 'type3', st: 0 }], { what: 'type 3(제목)에 지금 방 이름 그대로' }).startsWith('보룸 쓰기시험 (type 3(제목)에 지금 방 이름 그대로)'), '무엇을 썼는지 밝힌다')
+
 process.stderr.write('[voiceroom-check] ok\n')
