@@ -37,7 +37,7 @@ import {
 } from './features.mjs'
 import { BotPool } from './botpool.mjs'
 import { BEAT_MS, Owner } from './owner.mjs'
-import { FakeKakaoClient, fakeOn } from './fake.mjs'
+import { FakeKakaoClient, fakeOn, fakeServer } from './fake.mjs'
 import { directType, openMultiCandidate, roomListKind, roomTitle, stampOpenLinkTitles } from './room-kind.mjs'
 import { isBotId, locoOk, withProfileLink } from './roomfeat.mjs'
 import { dbStore, listFeatureRows, listIds, loadRecord, saveRecord, updateFeatures } from './store.mjs'
@@ -395,7 +395,8 @@ export class Hub {
       store: d.store || Object.assign({ saveRecord }, dbStore),
       newClient: d.newClient || newKakaoClient,
       refreshToken: refreshBotToken,
-      opts: d.opts,
+      // 가짜 모드는 기록 카드의 프로필 사진도 가짜 사진 서버에서 받는다(진짜 네트워크를 쓰지 않음)
+      opts: fakeOn() ? Object.assign({ avatarFetch: (url, init) => fakeServer().avatarFetch(url, init) }, d.opts || {}) : d.opts,
       now: d.now,
       owner: this.owner,
     })

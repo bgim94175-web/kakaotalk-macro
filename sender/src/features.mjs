@@ -1958,6 +1958,7 @@ function applyVisit(record, ev, sends) {
     text: notice.text,
     mention: notice.mention,
     card: notice.card,            // 방 관리봇은 그림 카드로 보낸다(botpool sendAll, 7.2(a))
+    userId: /^[1-9][0-9]*$/.test(String(row.userId || '')) ? String(row.userId) : '',   // 카드 동그라미의 프로필 사진(명부)을 찾는 id
     delayMs: visitDelay(v, String(room.chat_id), now),
     kind: 'visit',
   })

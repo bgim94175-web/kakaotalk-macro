@@ -126,6 +126,8 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 | `BOT_PROFILE_SWITCH_PER_HOUR` · `BOT_PROFILE_RETRY_MS` | `6` · `86400000` (24시간) | K bot 계정마다 시간당 프로필 바꾸기 상한 · 거절된 방을 자동으로 다시 바꿔 보기까지 |
 | `BOT_PROFILE_BLOCK_STATUS` | `-804` | 카카오가 오픈프로필 입장을 거절했다고 볼 status(쉼표 목록, `none` = 없음). 실측에서 다른 값이 나오면 바꿉니다(아래 8 의 4) |
 | `BOT_MEMBER_SYNC_MS` | `600000` (10분) | 방 멤버 명부(닉네임·옾링)를 다시 읽는 주기. 봇이 방에 들어가면 바로 한 번 읽어, 봇보다 먼저 있던 사람이 나가도 퇴장 안내에 옾링을 적습니다 |
+| `BOT_AVATAR_HOSTS` | `kakaocdn.net,kakao.com,kakao.co.kr,daumcdn.net` | 입장·퇴장·프로필 변경 그림 카드의 동그라미에 넣을 멤버 프로필 사진을 받아도 되는 서버(끝이 같은 이름, 쉼표 목록). `none` 이면 사진을 받지 않고 이름 첫 글자로 그립니다. Render 로그에 `avatar host not allowed: …` 가 보이면 그 서버가 카카오 사진 서버인지 확인해 더해 주세요 |
+| `BOT_AVATAR_TIMEOUT_MS` · `BOT_AVATAR_MAX_BYTES` | `3000` · `1572864` (1.5MB) | 프로필 사진 받기를 기다리는 최대 시간 · 최대 크기. 넘으면 이름 첫 글자로 그립니다 |
 | `BOT_PROFILE_READ_MS` | `21600000` (6시간) | K bot 계정의 오픈프로필 목록을 다시 읽는 주기(접속할 때마다·`/manage` 의 **오픈프로필 다시 읽기**로도 읽습니다) |
 
 **그 외**
