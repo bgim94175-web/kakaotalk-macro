@@ -1765,6 +1765,53 @@ async function withLog(fn) {
     for (const [nm, want] of [['하늘', '하'], ['꧁𝓚𝓐𝓚𝓐𝓞꧂ 백샤렌 ✿', '백'], ['୨୧ ʚmina ɞ', 'M'], ['꧁𝓚𝓐𝓚𝓐𝓞꧂', '𝓚'], ['✿★', '✿'], ['이름 없음', undefined]]) {
       if (initial(nm) !== want) throw new Error('#40-3 avatar initial of ' + nm + ' = ' + initial(nm))
     }
+    // 동그라미 프로필 사진(avatar.mjs 가 만든 PNG data URI): 동그라미에 맞춰 잘라(가운데 채움) 그리고 첫 글자는 없다. 테두리는 사진 위에.
+    // 퇴장은 흐리게(점선 테두리 그대로). 이름이 없어도 사진. data URI 그림이 아닌 값(주소 · SVG · 스크립트)은 버리고 첫 글자로
+    {
+      const AVA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
+      const withPhoto = LC.logCardSvg(c, { room: '동네모임', avatar: AVA })
+      const img = (withPhoto.match(/<image [^>]*>/) || [])[0] || ''
+      const A = LC.AVATAR
+      if (img.indexOf(`href="${AVA}"`) < 0 || img.indexOf('preserveAspectRatio="xMidYMid slice"') < 0 || img.indexOf('clip-path="url(#avclip)"') < 0 ||
+        img.indexOf(`x="${A.cx - A.r}" y="${A.cy - A.r}" width="${A.r * 2}" height="${A.r * 2}"`) < 0 || /opacity/.test(img)) throw new Error('#40-3 photo in the avatar circle ' + img)
+      if (withPhoto.indexOf(`<clipPath id="avclip"><circle cx="${A.cx}" cy="${A.cy}" r="${A.r}"/></clipPath>`) < 0 || /font-size="31"/.test(withPhoto)) throw new Error('#40-3 photo clipped to the circle, no initial')
+      const ringAt = withPhoto.indexOf(`<circle cx="${A.cx}" cy="${A.cy}" r="${A.r - 0.75}" fill="none"`)
+      if (ringAt < withPhoto.indexOf('<image ')) throw new Error('#40-3 the ring is drawn over the photo')
+      const lvPhoto = LC.logCardSvg(lv, { avatar: AVA })
+      if (!/<image [^>]*opacity="0.6"/.test(lvPhoto) || lvPhoto.indexOf('stroke-dasharray="3.5 4.5"') < 0) throw new Error('#40-3 leave photo is dimmed with the dashed ring')
+      if (!/<image /.test(LC.logCardSvg(Object.assign({}, c, { name: '이름 없음' }), { avatar: AVA })) || /<image /.test(LC.logCardSvg(c))) throw new Error('#40-3 nameless member with a photo / no photo')
+      for (const bad of ['https://k.kakaocdn.net/dn/p/a.jpg', 'data:image/svg+xml;base64,PHN2Zy8+', 'javascript:alert(1)', 'data:image/png;base64,AAAA"/><script>', AVA + '#', 42, { a: 1 }]) {
+        const svgBad = LC.logCardSvg(c, { avatar: bad })
+        if (/<image |avclip/.test(svgBad) || !/font-size="31"[^>]*>하<\/text>/.test(svgBad)) throw new Error('#40-3 a bad avatar value falls back to the initial ' + String(bad))
+      }
+      // 사진이 없으면 사진 기능 전(main)과 같은 동그라미: 바탕 → 테두리(입장 실선 · 퇴장 점선) → 첫 글자 · 사람 모양. 아래 글은 main 의 SVG 에서 뗀 것
+      const avBlock = (svg) => {
+        const at = svg.indexOf(`<circle cx="${A.cx}" cy="${A.cy}" r="${A.r}" fill="url(#av)"/>`)
+        const m = at < 0 ? null : svg.slice(at).replace(/ font-family="[^"]*"/g, '').match(/^<circle[^>]*\/><circle[^>]*\/>(?:<text[^>]*>[^<]*<\/text>|<g [^>]*>.*?<\/g>)/)
+        return m ? m[0] : ''
+      }
+      const MAIN_AV = {
+        join: '<circle cx="86" cy="174" r="42" fill="url(#av)"/><circle cx="86" cy="174" r="41.25" fill="none" stroke="#2A2A2F" stroke-width="1.5"/>' +
+          '<text x="86" y="185" font-size="31" font-weight="700" fill="#EDEDEF" text-anchor="middle">하</text>',
+        leave: '<circle cx="86" cy="174" r="42" fill="url(#av)"/><circle cx="86" cy="174" r="41.25" fill="none" stroke="#3A3A40" stroke-width="1.5" stroke-dasharray="3.5 4.5"/>' +
+          '<text x="86" y="185" font-size="31" font-weight="700" fill="#A1A1AA" text-anchor="middle">하</text>',
+        nameless: '<circle cx="86" cy="174" r="42" fill="url(#av)"/><circle cx="86" cy="174" r="41.25" fill="none" stroke="#2A2A2F" stroke-width="1.5"/>' +
+          '<g fill="none" stroke="#5C5C64" stroke-width="2" stroke-linecap="round"><circle cx="86" cy="166" r="8.5"/><path d="M70 192c2.2-8.5 8.4-12.5 16-12.5s13.8 4 16 12.5"/></g>',
+      }
+      const noPhoto = { join: LC.logCardSvg(c, { room: '동네모임' }), leave: LC.logCardSvg(lv, { room: '동네모임' }), nameless: LC.logCardSvg(Object.assign({}, c, { name: '이름 없음' }), { room: '동네모임' }) }
+      for (const k of Object.keys(MAIN_AV)) {
+        if (avBlock(noPhoto[k]) !== MAIN_AV[k] || /<image |avclip/.test(noPhoto[k])) throw new Error('#40-3 no photo = the avatar circle of before (' + k + ') ' + avBlock(noPhoto[k]))
+      }
+      // 사진은 동그라미 안만 바꾼다: 사진 카드에서 사진(+ 자르는 틀)을 첫 글자로 되돌리면 사진 없는 카드와 글자 하나까지 같다
+      for (const [k, card] of [['join', c], ['leave', lv]]) {
+        const ph = LC.logCardSvg(card, { room: '동네모임', avatar: AVA })
+        const img = (ph.match(/<image [^>]*\/>/) || [])[0] || ''
+        const ringEl = (noPhoto[k].match(/<circle cx="86" cy="174" r="41.25"[^>]*\/>/) || [])[0] || ''
+        const initEl = (noPhoto[k].match(/<text [^>]*font-size="31"[^>]*>[^<]*<\/text>/) || [])[0] || ''
+        const back = ph.replace(img + ringEl, ringEl + initEl).replace(/<clipPath id="avclip">.*?<\/clipPath>/, '')
+        if (!img || !ringEl || !initEl || back !== noPhoto[k]) throw new Error('#40-3 the photo only replaces the initial inside the circle (' + k + ')')
+      }
+    }
     {
       // 넉넉히 들어가는 꾸민 닉네임은 자르지 않고 다 보여 준다(대체 글꼴 글자 폭을 너무 크게 잡지 않음)
       const deco = '꧁𝓚𝓐𝓚𝓐𝓞꧂ 백샤렌 ✿ 👍'
@@ -1906,6 +1953,8 @@ async function withLog(fn) {
       joinGapMs: 0, permPollMs: 150, activeCheckMs: 600000, pushDelayMs: 120, tickMs: 30, hideGapMs: 0,
       rateWaits: [60000, 120000, 240000], ipWaits: [300000, 600000, 900000], reconnectGapMs: 5, transientWaitMs: 60000,
       profilePushDelayMs: 30, profileReadGapMs: 50, profileConvert: 'off', linkGapMs: 0, memberGapMs: 0,
+      // 기록 카드의 프로필 사진은 가짜 사진 서버에서(진짜 네트워크를 쓰지 않음)
+      avatarFetch: (url, init) => fs.avatarFetch(url, init), avatarTimeoutMs: 400,
     },
   })
   async function addBot(n) {
@@ -2007,7 +2056,7 @@ async function withLog(fn) {
   }
 
   // #28 방 멤버 명부: 봇이 들어가기 전부터 있던 사람도 옾링을 안다(GETMEM + INFOLINK)
-  //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링 · 명부는 저장소에 남는다 · 사진은 어디에도 적지 않는다
+  //   · 먼저 있던 사람이 나가면 퇴장 안내에 옾링 · 명부는 저장소에 남는다 · 명부에는 사진 주소(pi, 기록 카드 동그라미)만 — 글 안내에는 싣지 않는다
   //   · 메시지 닉네임이 바뀌면 카드를 다시 읽어 프로필 변경 안내(닉네임 전·후 + 지금 옾링)
   //   · 주기 동기화가 닉네임·옾링(다른 오픈프로필로 바꿈) 변경을 찾는다(사진만 바뀌면 안내 없음) · 바뀔 때마다 알린다
   {
@@ -2027,7 +2076,8 @@ async function withLog(fn) {
     const vb = botA.slot.byInstall.get(iBook)
     await waitFor(() => vb.members.get('701') && vb.members.get('701').link && vb.members.get('702') && vb.members.get('702').link, 5000, '#28 member book')
     const m701 = vb.members.get('701')
-    if (m701.link !== 'https://open.kakao.com/o/first701' || m701.pli !== '7101' || m701.name !== '먼저온사람' || 'photo' in m701) throw new Error('#28 book row ' + JSON.stringify(m701))
+    if (m701.link !== 'https://open.kakao.com/o/first701' || m701.pli !== '7101' || m701.name !== '먼저온사람' || m701.photo !== 'https://k.kakaocdn.net/dn/p/701a.jpg?s=small') throw new Error('#28 book row ' + JSON.stringify(m701))
+    if (vb.members.get('703').photo !== '') throw new Error('#28 no photo = empty')
     if (vb.members.get('703').link !== '' || vb.members.get('703').pli !== '') throw new Error('#28 default profile has no link')
     if (sentIn(iBook).some((t) => t.indexOf('프로필 변경 감지') >= 0)) throw new Error('#28 the first read only sets a baseline')
     // 먼저 있던 사람이 나간다 → 퇴장 안내에 옾링(예전에는 '없음'이었다)
@@ -2770,14 +2820,129 @@ async function withLog(fn) {
       await setCfg({ cmd: { link: 'all' } })
       await expect(ask('4012', '바다', '!옾링 https://open.kakao.com/o/sky4011'), '[옾링]\n이름 : 하늘\n옾링 : https://open.kakao.com/o/sky4011', 'link for everyone')
       // 입장 안내 그림: 사진(폭 720) 1장 + 바로 뒤 글(멘션 + 옾링) `[입장 안내]\n이름 : @별빛\n옾링 : …`
-      const join = async (uid, name, pli) => {
-        room0.members[uid] = mem(2, name, pli)
+      const join = async (uid, name, pli, photo) => {
+        room0.members[uid] = Object.assign(mem(2, name, pli), photo ? { photo } : {})
         if (vc.runtime.visit && vc.runtime.visit.nextAt) vc.runtime.visit.nextAt = {}
         const n = sent().length
         fs.event(chat, botA.uid, { kind: 'join', user_id: uid, name })
         await waitFor(() => sent().slice(n).some((x) => x.text.indexOf('입장 안내') >= 0), 8000, '#40 join notice ' + uid)
         await sleep(50)
         return sent().slice(n)
+      }
+      // 카드 동그라미의 프로필 사진(avatar.mjs): 보낸 카드 PNG 의 동그라미 안 한 점(가운데에서 왼쪽 위로 24 — 첫 글자에 닿지 않는 곳)의 색,
+      // 그리고 동그라미 안의 밝은 회색 점 수(ink — 첫 글자. 사진이 없으면 수백 개, 사진이나 빈 그림이면 0)
+      const LC40 = await import('./logcard.mjs')
+      const { Resvg: Resvg40 } = (await import('node:module')).createRequire(import.meta.url)('@resvg/resvg-js')
+      const avatarScan = () => {
+        const buf = fs.photos.filter((p) => p.chatId === String(chat)).pop().buf
+        const w = buf.readUInt32BE(16)
+        const h = buf.readUInt32BE(20)
+        const px = new Resvg40(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><image href="data:image/png;base64,${buf.toString('base64')}" width="${w}" height="${h}"/></svg>`, { font: { loadSystemFonts: false } }).render().pixels
+        const k = w / LC40.CARD_W
+        const at = (x, y) => {
+          const i = (Math.round(y) * w + Math.round(x)) * 4
+          return [px[i], px[i + 1], px[i + 2]]
+        }
+        const cx = LC40.AVATAR.cx * k
+        const cy = LC40.AVATAR.cy * k
+        const r = (LC40.AVATAR.r - 4) * k
+        let ink = 0
+        for (let y = Math.ceil(cy - r); y <= cy + r; y++) {
+          for (let x = Math.ceil(cx - r); x <= cx + r; x++) {
+            if ((x - cx) ** 2 + (y - cy) ** 2 > r * r) continue
+            const c3 = at(x, y)
+            if (Math.min(...c3) > 120 && Math.max(...c3) - Math.min(...c3) < 40) ink++
+          }
+        }
+        return { px: at((LC40.AVATAR.cx - 24) * k, (LC40.AVATAR.cy - 24) * k), ink }
+      }
+      const avatarPx = () => avatarScan().px
+      const initialDrawn = () => avatarScan().ink > 300
+      const magenta = ([r, g, b]) => r > 120 && g < 70 && b > 120
+      const cyan = ([r, g, b]) => r < 70 && g > 120 && b > 120
+      const square = (fill) => CARD40.svgToPng(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="${fill}"/></svg>`)
+      const calls = () => fs.avatarCalls.slice()
+      const photoCards = async () => {
+        // (1) 입장: 명부의 작은 사진(pi = 사진 + '?s=small')을 받아 동그라미에. 멘션 한 줄 · 글은 그대로
+        const P1 = 'https://k.kakaocdn.net/dn/p/4021.jpg'
+        fs.avatars.set(P1 + '?s=small', { body: square('#FF00FF'), type: 'image/png' })
+        fs.avatars.set(P1 + '?s=orig', { body: square('#00FFFF'), type: 'image/png' })
+        let c0 = calls().length
+        const jp = await join('4021', '사진', null, P1)
+        if (jp.length !== 2 || jp[0].text !== '(사진)' || jp[1].text !== '[입장 안내]\n이름 : @사진\n옾링 : 없음' || jp[1].extra !== '{"mentions":[{"user_id":4021,"at":[1],"len":2}]}') throw new Error('#40 photo card + the same mention line ' + JSON.stringify(jp))
+        if (!magenta(avatarPx()) || avatarScan().ink) throw new Error('#40 join card shows the member photo, no initial ' + JSON.stringify(avatarScan()))
+        if (!calls().slice(c0).includes(P1 + '?s=small') || calls().slice(c0).includes(P1 + '?s=orig') || vc.members.get('4021').photo !== P1 + '?s=small') throw new Error('#40 the small photo (pi) is fetched ' + JSON.stringify(calls().slice(c0)))
+        // (2) 사진 받기 실패(500) → 첫 글자, 글은 그대로
+        const P2 = 'https://k.kakaocdn.net/dn/p/4022.jpg'
+        fs.avatars.set(P2 + '?s=small', { status: 500, body: square('#FF00FF') })
+        const jf = await join('4022', '실패', null, P2)
+        if (jf.length !== 2 || jf[1].text !== '[입장 안내]\n이름 : @실패\n옾링 : 없음' || magenta(avatarPx()) || !initialDrawn() || !calls().includes(P2 + '?s=small')) throw new Error('#40 a failed photo → the initial ' + JSON.stringify(jf))
+        // (3) 카카오 사진 서버가 아닌 주소는 받지 않는다 → 첫 글자
+        const P3 = 'https://evil.example.com/p/4023.jpg'
+        fs.avatars.set(P3 + '?s=small', { body: square('#FF00FF'), type: 'image/png' })
+        const je = await join('4023', '남의서버', null, P3)
+        if (je.length !== 2 || magenta(avatarPx()) || !initialDrawn() || calls().some((u) => u.startsWith('https://evil.'))) throw new Error('#40 a photo outside the Kakao hosts is never fetched')
+        // (4) 그리지 못하는 그림(진짜 WebP, 자홍색 — resvg 2.6 은 빈 그림으로 그린다) → 받고 나서 버리고 첫 글자.
+        //     너무 큰 그림(1.5MB 넘음, 자홍색 PNG)은 받다가 버리고 첫 글자
+        const P4 = 'https://k.kakaocdn.net/dn/p/4024.jpg'
+        fs.avatars.set(P4 + '?s=small', { body: Buffer.from('UklGRiQAAABXRUJQVlA4TBcAAAAvX8AXAAcQ/e9//8MAJIT/+6WI/qd+AAA=', 'base64'), type: 'image/jpeg' })
+        c0 = calls().length
+        const rj0 = pool.avatars.stats.rejected
+        const jw = await join('4024', '웹피', null, P4)
+        if (jw.length !== 2 || jw[0].text !== '(사진)' || magenta(avatarPx()) || !initialDrawn() || !calls().slice(c0).includes(P4 + '?s=small') || pool.avatars.stats.rejected !== rj0 + 1) throw new Error('#40 an unsupported photo is fetched, dropped → the initial ' + JSON.stringify(avatarScan()))
+        const P5 = 'https://k.kakaocdn.net/dn/p/4027.jpg'
+        fs.avatars.set(P5 + '?s=small', { body: Buffer.concat([square('#FF00FF'), Buffer.alloc(1600 * 1024)]), type: 'image/png', noLength: true })
+        c0 = calls().length
+        const jb = await join('4027', '큰사진', null, P5)
+        if (jb.length !== 2 || jb[0].text !== '(사진)' || magenta(avatarPx()) || !initialDrawn() || !calls().slice(c0).includes(P5 + '?s=small')) throw new Error('#40 an oversized photo is dropped → the initial ' + JSON.stringify(avatarScan()))
+        // (5) 나간 사람: 명부에 남은 마지막 사진(이미 받아 둔 것 — 다시 받지 않는다), 흐리게
+        c0 = calls().length
+        const nl = sent().length
+        fs.event(chat, botA.uid, { kind: 'leave', user_id: '4021', name: '사진' })
+        await waitFor(() => sent().slice(nl).some((x) => x.text.indexOf('[퇴장 안내]') === 0), 8000, '#40 leave card')
+        await sleep(50)
+        const lv = sent().slice(nl)
+        if (lv.length !== 2 || lv[0].text !== '(사진)' || lv[1].text !== '[퇴장 안내]\n이름 : @사진\n옾링 : 없음') throw new Error('#40 leave card ' + JSON.stringify(lv))
+        const lpx = avatarPx()
+        if (!magenta(lpx) || lpx[0] > 220 || calls().length !== c0) throw new Error('#40 leave card shows the last known photo, dimmed, from the cache ' + lpx + ' ' + JSON.stringify(calls().slice(c0)))
+        // 다시 시작한 뒤에도: 명부는 사진 주소만 저장하고(그림은 아님) 읽어 온다
+        await pool.flush()
+        const row = (await store.loadMembers(iC, chat, 0)).find((r) => r.user_id === '4021')
+        if (!row || row.photo !== P1 + '?s=small') throw new Error('#40 the photo url is saved with the member book ' + JSON.stringify(row))
+        vc.members.delete('4021')
+        await botA.slot.loadMembers(vc)
+        if (!vc.members.get('4021') || vc.members.get('4021').photo !== P1 + '?s=small') throw new Error('#40 the photo url is read back after a restart')
+        // (6) 프로필 변경(닉네임 + 사진): 새 사진으로
+        const PA = 'https://k.kakaocdn.net/dn/p/4025a.jpg'
+        const PB = 'https://k.kakaocdn.net/dn/p/4025b.jpg'
+        fs.avatars.set(PA + '?s=small', { body: square('#FF00FF'), type: 'image/png' })
+        fs.avatars.set(PB + '?s=small', { body: square('#00FFFF'), type: 'image/png' })
+        await join('4025', '바꿀이', null, PA)
+        if (!magenta(avatarPx())) throw new Error('#40 photo before the change')
+        const np = sent().length
+        fs.event(chat, botA.uid, { kind: 'profile', user_id: '4025', name: '바뀐이', photo: PB })
+        post('4025', '바뀐이', '닉 바꿨어요')
+        await waitFor(() => sent().slice(np).some((x) => x.text.indexOf('[프로필 변경 감지]') === 0), 8000, '#40 profile card')
+        await sleep(50)
+        const pc1 = sent().slice(np)
+        if (pc1.length !== 2 || pc1[0].text !== '(사진)' || pc1[1].text !== '[프로필 변경 감지]\n변경전 : ＠바꿀이\n변경후 : @바뀐이\n옾링 : 없음') throw new Error('#40 profile card ' + JSON.stringify(pc1))
+        if (!cyan(avatarPx()) || vc.members.get('4025').photo !== PB + '?s=small') throw new Error('#40 profile card shows the new photo ' + avatarPx())
+        // (7) 사진 서버가 멈춤: 안내를 만드는 줄(푸시 처리)은 기다리지 않고, 카드는 avatarTimeoutMs 뒤 첫 글자로 나간다
+        const PH = 'https://k.kakaocdn.net/dn/p/4026.jpg'
+        fs.avatars.set(PH + '?s=small', { hang: true })
+        room0.members['4026'] = Object.assign(mem(2, '멈춤'), { photo: PH })
+        if (vc.runtime.visit && vc.runtime.visit.nextAt) vc.runtime.visit.nextAt = {}
+        const nh = sent().length
+        const th = Date.now()
+        fs.event(chat, botA.uid, { kind: 'join', user_id: '4026', name: '멈춤' })
+        await waitFor(() => calls().includes(PH + '?s=small'), 3000, '#40 hanging photo requested')
+        const free = await Promise.race([botA.slot.chain.then(() => true), sleep(300).then(() => false)])
+        if (!free || sent().slice(nh).length) throw new Error('#40 the notice is queued without waiting for the photo ' + JSON.stringify([free, sent().slice(nh)]))
+        await waitFor(() => sent().slice(nh).some((x) => x.text.indexOf('[입장 안내]') === 0), 5000, '#40 card after the photo timeout')
+        await sleep(50)
+        const hung = sent().slice(nh)
+        const waited = Date.now() - th
+        if (hung.length !== 2 || hung[0].text !== '(사진)' || magenta(avatarPx()) || !initialDrawn() || waited < 350 || waited > 4000) throw new Error('#40 hanging photo → the initial after the timeout ' + waited + ' ' + JSON.stringify(hung))
       }
       const j1 = await join('4015', '별빛', '40151')
       const photo = j1[0] && j1[0].extra ? JSON.parse(j1[0].extra) : null
@@ -2786,6 +2951,7 @@ async function withLog(fn) {
         if (j1[1].text !== '[입장 안내]\n이름 : @별빛\n옾링 : https://open.kakao.com/o/star4015' || j1[1].extra !== '{"mentions":[{"user_id":4015,"at":[1],"len":2}]}') throw new Error('#40 mention line right after the card ' + JSON.stringify(j1[1]))
         const buf = fs.photos[fs.photos.length - 1].buf
         if (buf.readUInt32BE(16) !== 1440) throw new Error('#40 photo bytes')
+        await photoCards()
       } else if (j1.length !== 1 || j1[0].text.indexOf('[입장 안내]\n이름 : @별빛\n') !== 0) throw new Error('#40 without the renderer the text notice goes out ' + JSON.stringify(j1))
       // 그림 보내기가 실패하면 지금의 글 안내(멘션 포함) 하나만
       room0.photoFail = true
@@ -2955,6 +3121,31 @@ async function withLog(fn) {
       if (drew !== 0) throw new Error('#41 not drawn when queued')
       await waitFor(() => said(c2).length > q2, 3000, '#41 lazy card sent')
       if (drew !== 1 || said(c2)[q2] !== '[그림 없음] 글로') throw new Error('#41 drawn once at send time, text when there is no picture')
+      // 기록 카드의 프로필 사진도 대기열이 받은 카드만 받는다: 꽉 찬 대기열에서 건너뛴 카드 · 차단된 방의 카드는 사진 서버를 부르지 않는다
+      {
+        const CARD41 = await import('./card.mjs')
+        if (CARD41.available()) {
+          const PQ = 'https://k.kakaocdn.net/dn/p/4202.jpg?s=small'
+          fs.avatars.set(PQ, { body: CARD41.svgToPng('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#FF00FF"/></svg>'), type: 'image/png' })
+          v2.members.set('4202', { name: '사진', pli: '', link: '', photo: PQ, seenAt: Date.now() })
+          const note = RF.visitNoticeText('join', { userId: '4202', name: '사진', link: '' }, [Date.now()])
+          const sc = { text: note.text, mention: note.mention, card: note.card, userId: '4202' }
+          const a0 = fs.avatarCalls.length
+          hold(30)
+          s.sayCard(v2, sc, 'notice')
+          unhold()
+          const lic0 = v2.licensed
+          v2.licensed = false
+          s.sayCard(v2, sc, 'notice')
+          v2.licensed = lic0
+          await sleep(100)
+          if (fs.avatarCalls.length !== a0 || s.pool.avatars.inflight.size) throw new Error('#41 a refused card never fetches its photo ' + JSON.stringify(fs.avatarCalls.slice(a0)))
+          const q3 = said(c2).length
+          s.sayCard(v2, sc, 'notice')
+          await waitFor(() => said(c2).length >= q3 + 2, 5000, '#41 queued photo card')
+          if (!fs.avatarCalls.slice(a0).includes(PQ) || said(c2)[q3] !== '(사진)') throw new Error('#41 a queued card fetches its photo ' + JSON.stringify(said(c2).slice(q3)))
+        }
+      }
       // sendAll 은 features 의 카드(image 게터)를 읽지 않고 render 를 넘긴다
       const probe = { text: '미리 읽지 않음' }
       Object.defineProperty(probe, 'image', { enumerable: true, get() { throw new Error('image read before the send') } })

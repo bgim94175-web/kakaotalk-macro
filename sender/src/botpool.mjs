@@ -19,6 +19,8 @@ import {
   visitEventsFromMessage,
   visitMentionExtra,
 } from './features.mjs'
+import { AVATAR_HOSTS, Avatars } from './avatar.mjs'
+import { available as cardAvailable } from './card.mjs'
 import { logCardPng } from './logcard.mjs'
 import { Owner } from './owner.mjs'
 import * as C from './roomcmd.mjs'
@@ -57,6 +59,23 @@ function needsCard(m) {
   return !m || m.pli == null || (!!m.pli && m.link == null)
 }
 
+// 멤버의 프로필 사진 주소(기록 카드 동그라미): 작은 사진(pi) → 큰 사진(fpi) → 원본(opi). 라이브러리 모양(profile_image_url …)과
+// 원시 패킷(GETMEM·MEMBER) 모양 둘 다. 사진이 없으면 '', 사진 칸이 아예 없는 모양이면 null(모름 — 명부의 사진을 지우지 않는다)
+const PHOTO_KEYS = [['profile_image_url', 'pi'], ['full_profile_image_url', 'fpi'], ['original_profile_image_url', 'opi']]
+function photoOf(m) {
+  if (!m || typeof m !== 'object') return null
+  let seen = false
+  for (const keys of PHOTO_KEYS) {
+    for (const k of keys) {
+      if (m[k] === undefined) continue
+      seen = true
+      const s = typeof m[k] === 'string' ? m[k].trim() : ''
+      if (s && s.length <= 1000) return s
+    }
+  }
+  return seen ? '' : null
+}
+
 // 안내에 적을 옾링: 주소, 오픈프로필이 아님('') → '', 오픈프로필인데 못 읽음·카드를 모름 → null(확인 못 함)
 function noticeLink(m) {
   if (m && m.link) return m.link
@@ -74,6 +93,15 @@ function envList(name, dflt) {
   const raw = String(process.env[name] || '').trim()
   if (!raw) return dflt
   const list = raw.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n >= 0)
+  return list.length ? list : dflt
+}
+
+// 사진 서버 이름 목록(쉼표, 앞의 *. 는 지움). 'none' 이면 빈 목록(사진을 받지 않음).
+function envHosts(name, dflt) {
+  const raw = String(process.env[name] || '').trim().toLowerCase()
+  if (!raw) return dflt
+  if (raw === 'none') return []
+  const list = raw.split(',').map((x) => x.trim().replace(/^\*?\./, '')).filter((h) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(h))
   return list.length ? list : dflt
 }
 
@@ -126,6 +154,12 @@ export function poolOptions(over) {
     photoTimeoutMs: envNum('BOT_PHOTO_TIMEOUT_MS', 25000),
     // room_state 한 번 읽기를 기다리는 최대 시간. 넘기면 읽기 실패로 보고 늦춰 가며 다시 읽는다(멈춘 읽기가 방을 붙잡지 않게)
     loadTimeoutMs: envNum('BOT_LOAD_TIMEOUT_MS', 10000),
+    // 기록 카드 동그라미의 프로필 사진(avatar.mjs): 받기를 기다리는 최대 시간 · 최대 크기 · 받을 사진 서버(끝이 같은 이름, none = 받지 않음).
+    // avatarFetch 는 시험이 넣는 가짜 fetch(null = 진짜 fetch)
+    avatarTimeoutMs: envNum('BOT_AVATAR_TIMEOUT_MS', 3000),
+    avatarMaxBytes: envNum('BOT_AVATAR_MAX_BYTES', 1.5 * 1024 * 1024),
+    avatarHosts: envHosts('BOT_AVATAR_HOSTS', AVATAR_HOSTS),
+    avatarFetch: null,
     flushMs: 5000,
     tickMs: 1000,
     reconnectGapMs: 2000,
@@ -300,6 +334,11 @@ export class BotPool {
     this.traced = new Set()
     // 배포 겹침 울타리(owner.mjs). 주지 않으면 늘 주인이다(시험).
     this.owner = d.owner || new Owner(null)
+    // 기록 카드의 프로필 사진(봇 모두가 같이 쓰는 기억)
+    this.avatars = new Avatars({
+      fetch: this.opts.avatarFetch, hosts: this.opts.avatarHosts, timeoutMs: this.opts.avatarTimeoutMs, maxBytes: this.opts.avatarMaxBytes,
+      now: this.now, log: (line) => log('pool', line),
+    })
   }
 
   start() {
@@ -2665,6 +2704,7 @@ export class BotSlot {
         status: row.status_message == null ? null : String(row.status_message),
         perm,
         pli: row.open_profile_link_id ? String(row.open_profile_link_id) : '',
+        photo: photoOf(row),
       }
     } catch (e) {
       log(this.id, `member read failed: ${errText(e)}`)
@@ -2908,7 +2948,7 @@ export class BotSlot {
     // 들어온 사람은 카드(닉네임·옾링)를 명부에 합치고, 나간 사람은 명부에서 찾는다.
     // 명부는 봇이 들어간 뒤 방 전체를 읽어 둔 것이라, 봇보다 먼저 있던 사람이 나가도 옾링이 있다.
     if (card) {
-      await this.mergeMembers(v, [{ uid: ev.userId, name: card.name || ev.name || '', pli: card.pli || '' }], 'join')
+      await this.mergeMembers(v, [{ uid: ev.userId, name: card.name || ev.name || '', pli: card.pli || '', photo: card.photo }], 'join')
       // 입장 안내를 보낼 때만 옾링을 모르면 혼자 한 번 더 읽는다
       if (cfg.visit.enabled && R.roombotLive(v)) await withTimeout(this.fillLink(v, ev.userId), LEAVE_READ_MS).catch(() => {})
     }
@@ -3302,7 +3342,7 @@ export class BotSlot {
   async freshMember(v, uid) {
     const card = await this.memberCard(v, uid)
     if (!card) return null
-    await this.mergeMembers(v, [{ uid, name: card.name || '', pli: card.pli || '' }], 'refresh')
+    await this.mergeMembers(v, [{ uid, name: card.name || '', pli: card.pli || '', photo: card.photo }], 'refresh')
     const m = v.members.get(uid)
     if (m && m.pli && !m.link) await withTimeout(this.fillLink(v, uid), LEAVE_READ_MS).catch(() => {})
     return v.members.get(uid) || null
@@ -3481,6 +3521,7 @@ export class BotSlot {
           pli: r.pli == null ? null : String(r.pli),
           // pli 옆의 '' 는 예전 코드가 읽기 실패를 '없음'으로 저장한 것일 수 있다 → 모름으로 읽어 다시 확인한다
           link: r.link == null || (r.link === '' && r.pli) ? null : String(r.link),
+          photo: r.photo == null ? null : String(r.photo),
           seenAt: Number(r.seen_at) || 0,
         })
         // 카드·옾링을 모르는 행(메시지로 이름만 본 사람·옾링 읽기가 실패한 사람)은 카드 채우기가 읽는다
@@ -3498,7 +3539,8 @@ export class BotSlot {
     const rows = []
     for (const uid of uids) {
       const m = v.members.get(uid)
-      if (m) rows.push({ user_id: uid, name: m.name || '', pli: m.pli, link: m.link, photo: null, seen_at: m.seenAt || this.now() })
+      // 사진은 주소만 적는다(그림은 저장하지 않는다)
+      if (m) rows.push({ user_id: uid, name: m.name || '', pli: m.pli, link: m.link, photo: m.photo == null ? null : m.photo, seen_at: m.seenAt || this.now() })
     }
     try {
       await this.store.saveMembers(v.install_id, v.membersChat, rows)
@@ -3546,7 +3588,7 @@ export class BotSlot {
     this.memberJob(`member sync ${v.install_id}`, () => this.syncMembers(v).finally(() => { v.memberSyncing = false }))
   }
 
-  // GETMEM·MEMBER 의 멤버 하나 → {uid, name, pli}. 봇 자신·id 없는 것은 null.
+  // GETMEM·MEMBER 의 멤버 하나 → {uid, name, pli, photo}. 봇 자신·id 없는 것은 null.
   memberRow(m) {
     const uid = R.idText(m && m.userId)
     if (!uid || uid === this.userId) return null
@@ -3554,6 +3596,7 @@ export class BotSlot {
       uid,
       name: String(m.nickName || m.nickname || m.nn || '').trim().slice(0, 40),
       pli: R.idText(m.pli) || '',
+      photo: photoOf(m),
     }
   }
 
@@ -3650,7 +3693,7 @@ export class BotSlot {
     }
   }
 
-  // MEMBER 1회(다시 접속하지 않음) → [{uid, name, pli}] | null(읽지 못함)
+  // MEMBER 1회(다시 접속하지 않음) → [{uid, name, pli, photo}] | null(읽지 못함)
   async readMembers(v, ids) {
     const r = await this.raw('MEMBER', { chatId: L(v.chat_id), memberIds: ids.map((x) => L(x)) })
     const list = R.locoOk(r) && r.body && Array.isArray(r.body.members) ? r.body.members : null
@@ -3690,7 +3733,7 @@ export class BotSlot {
     log(this.id, `leave ${v.install_id}: ${uid} ${what} the member book (book ${v.members.size}, last sync ${ago}), ${linkOnly ? 'link' : 'member'} read: ${got}`)
   }
 
-  // 새로 읽은 값(rows: {uid, name, pli}, null = 모름)을 명부에 합친다. 옾링은 새로 보거나 바뀐 pli 와
+  // 새로 읽은 값(rows: {uid, name, pli, photo}, null = 모름)을 명부에 합친다. 옾링은 새로 보거나 바뀐 pli 와
   // 옾링이 아직 비어 있는('' 포함: 예전 읽기 실패가 '없음'으로 남았을 수 있다) pli 만 읽는다(읽어 둔 것은 캐시에서).
   // why 'sync'·'refresh' 면 아는 사람의 변경을 프로필 변경으로 알린다. 'join'(입장 안내가 대신)·'leave' 는 조용히 합친다.
   async mergeMembers(v, rows, why) {
@@ -3716,6 +3759,8 @@ export class BotSlot {
         name: r.name || (prev && prev.name) || '',
         pli: pliKnown ? r.pli : (prev ? prev.pli : null),
         link,
+        // 사진 주소(카드 동그라미). 모르면 예전 것. 사진만 바뀐 것은 안내하지 않는다(조용히 바꿔 둔다)
+        photo: r.photo != null ? String(r.photo) : (prev && prev.photo != null ? prev.photo : null),
         seenAt: now,
       }
       v.members.set(r.uid, next)
@@ -3761,7 +3806,7 @@ export class BotSlot {
     const prev = v.members.get(uid)
     if (!prev) {
       // 명부에 아직 없다(동기화 전·GETMEM 이 빠뜨린 사람): 닉네임만 적어 두고, 옾링은 카드 채우기가 1분 안에 읽는다.
-      v.members.set(uid, { name: nm, pli: null, link: null, seenAt: this.now() })
+      v.members.set(uid, { name: nm, pli: null, link: null, photo: null, seenAt: this.now() })
       v.membersDirty.add(uid)
       v.memberWant.add(uid)
       return
@@ -3781,7 +3826,7 @@ export class BotSlot {
     const card = await this.memberCard(v, uid)
     if (!this.sameView(v, chat)) return
     const row = card
-      ? { uid, name: card.name || hint || '', pli: card.pli || '' }
+      ? { uid, name: card.name || hint || '', pli: card.pli || '', photo: card.photo }
       : { uid, name: hint || '', pli: null }
     await this.mergeMembers(v, [row], 'refresh')
   }
@@ -3801,16 +3846,17 @@ export class BotSlot {
   }
 
   // 이미지 1장(PNG Buffer, card.mjs). 보내지 못하면 text 를 글로 대신 보낸다(text 가 없으면 조용히 넘어간다).
-  // png 가 함수면(검 강화 카드) 대기열에 들어간 뒤 보낼 차례에 그린다 — 대기열이 차서 건너뛰거나 묵어 버려지는 답은 그리지 않는다.
+  // png 가 함수면(검 강화 카드 · 기록 카드) 대기열에 들어간 뒤 보낼 차례에 그린다(Promise 도 된다) — 대기열이 차서 건너뛰거나 묵어 버려지는 답은 그리지 않는다.
   // o.after = {text, mention}: 그림이 나간 바로 뒤에 보내는 한 줄(기록 카드의 멘션 줄). 그림이 실패하면 보내지 않는다(text 가 대신한다).
   // 그림 + 한 줄은 대기 목록의 한 자리이지만 발송 한도는 2개로 센다(cost).
+  // → 그림이 대기열에 들어갔으면 true(글로 대신 보냈거나 · 건너뛰었으면 false)
   sayImage(v, png, opt) {
     const o = opt || {}
-    if (!v.chat_id || !v.licensed) return
+    if (!v.chat_id || !v.licensed) return false
     const render = typeof png === 'function' ? png : null
     if (!render && (!png || !png.length)) {
       if (o.text) this.say(v, o.text, o)
-      return
+      return false
     }
     const now = this.now()
     const after = o.after && o.after.text ? { text: String(o.after.text), mention: o.after.mention || null } : null
@@ -3822,9 +3868,10 @@ export class BotSlot {
     }
     if (!this.pacer.push(String(v.install_id), item, now)) {
       this.bg(this.roomLog(v.install_id, 'skip', { detail: { what: item.what === 'reply' ? 'reply' : 'send' } }), 'skip log')
-      return
+      return false
     }
     this.scheduleSend(item.notBefore)
+    return true
   }
 
   sendAll(v, sends, what) {
@@ -3846,10 +3893,22 @@ export class BotSlot {
   }
 
   // 기록 카드: 그림 1장 + 바로 뒤 멘션 한 줄(`[입장 안내] @하늘`). 그림을 못 만들거나 못 보내면 지금까지의 글 안내 그대로(멘션 포함).
+  // 동그라미의 프로필 사진(명부의 주소)은 카드가 대기열에 들어간 뒤 받기 시작하고(기다리지 않는다) 그림은 보낼 차례에 그린다 —
+  // 그때 받은 사진을 넣고, 아직이면 그 방만 avatarTimeoutMs 까지 기다린다. 사진이 없거나 못 받으면 이름 첫 글자. 퇴장은 명부에 남은 마지막 사진.
+  // 대기열이 받지 않은 카드(꽉 참 · 차단된 방)는 사진을 받지도 그리지도 않는다.
   sayCard(v, s, what) {
-    const png = logCardPng(s.card, { room: v.link_name })
     const line = R.cardMentionLine(s.card, s.mention && s.mention.userId)
-    this.sayImage(v, png, { text: s.text, mention: s.mention, delayMs: s.delayMs, what, after: line })
+    const opt = { text: s.text, mention: s.mention, delayMs: s.delayMs, what, after: line }
+    if (!cardAvailable()) return this.sayImage(v, null, opt)
+    const uid = R.idText(s.userId || (s.mention && s.mention.userId))
+    const m = uid ? v.members.get(uid) : null
+    const url = m && m.photo ? m.photo : ''
+    const card = s.card
+    const room = v.link_name
+    const wait = this.opts.avatarTimeoutMs + 500
+    let photo = null // 그리기는 늘 나중(보낼 차례, 타이머)이라 아래에서 정해진다
+    const queued = this.sayImage(v, async () => logCardPng(card, { room, avatar: photo ? await withTimeout(photo, wait).catch(() => null) : null }), opt)
+    if (queued && url) photo = this.pool.avatars.get(url)
   }
 
   scheduleSend(at) {
@@ -3960,9 +4019,9 @@ export class BotSlot {
     return false
   }
 
-  renderCard(v, render) {
+  async renderCard(v, render) {
     try {
-      return render() || null
+      return (await render()) || null
     } catch (e) {
       log(this.id, `card render failed install ${v.install_id}: ${errText(e)}`)
       return null
@@ -3982,7 +4041,7 @@ export class BotSlot {
   async deliver(v, item) {
     if (item.image || item.render) {
       // 그림은 보낼 차례에 그린다(sayImage). 못 그리면(렌더러 없음·오류) 글로 대신 보낸다
-      const png = item.image || this.renderCard(v, item.render)
+      const png = item.image || (await this.renderCard(v, item.render))
       if (png && png.length && (await this.sendPhoto(v, png))) {
         if (item.after) await this.deliver(v, { text: item.after.text, mention: item.after.mention })
         return

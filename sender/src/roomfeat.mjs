@@ -723,7 +723,7 @@ function known(v) {
 /**
  * 방 관리봇: 멤버 명부에서 본 한 사람의 변경(before → after, 각 {name, link}, null 은 모름 = 비교하지 않음).
  * 바뀐 칸을 기록하고, 켜진 항목(닉네임·옾링 = name)이 바뀌었으면 바뀔 때마다 안내 1개.
- * → [{text, mention, delayMs, kind}]
+ * → [{text, mention, card, userId, delayMs, kind}]
  */
 export function profileChange(runtime, chatId, pcfg, ev, now) {
   const userId = idText(ev && ev.userId)
@@ -752,7 +752,7 @@ export function profileChange(runtime, chatId, pcfg, ev, now) {
   // 옾링은 지금 것(after)만 쓴다. 모르면(null) '확인 못 함' — 예전 옾링을 지금 것처럼 적지 않는다
   const cur = { userId, name: an || bn, link: a.link === undefined ? b.link : a.link }
   const note = profileChangeNotice(cur, shown, changeTimes(p.people[key].changes))
-  return [{ text: note.text, mention: note.mention, card: note.card, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
+  return [{ text: note.text, mention: note.mention, card: note.card, userId, delayMs: noticeDelay(p, chatId, now), kind: 'profile' }]
 }
 
 /**

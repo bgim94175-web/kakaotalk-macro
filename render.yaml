@@ -89,6 +89,7 @@ services:
       #   봇 오픈프로필 (DEPLOY.md 8 의 실측을 마친 뒤에만 바꾼다)
       #     BOT_PROFILE_CONVERT       off         기본 프로필로 들어가 있는 방을 오픈프로필로 바꾸기. off=판매 관리에서 누를 때만 / auto=자동
       #     BOT_MEMBER_SYNC_MS        600000      방 멤버 명부(닉네임·옾링)를 다시 읽는 주기(퇴장 안내 옾링·프로필 변경 감지)
+      #     BOT_AVATAR_HOSTS          kakaocdn.net,kakao.com,kakao.co.kr,daumcdn.net   그림 카드 프로필 사진을 받을 서버(none = 받지 않음)
       #     BOT_PROFILE_SWITCH_PER_HOUR  6        auto 일 때 봇마다 시간당 바꾸는 방 수
       #     BOT_PROFILE_BLOCK_STATUS  -804        카카오가 오픈프로필 입장을 거부할 때의 status(쉼표 목록). 실측 값으로 고친다
       #   Google 시험용 덮어쓰기 — 운영에서는 넣지 마라

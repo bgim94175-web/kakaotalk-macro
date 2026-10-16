@@ -13,9 +13,12 @@ export const FONT = 'Pretendard'
 const planGlyphs = glyphPlanner(FONT_DIR, ['Pretendard-Regular.otf', 'Pretendard-Bold.otf'])
 
 let Resvg = null
+let renderAsync = null
 let loadError = ''
 try {
-  Resvg = createRequire(import.meta.url)('@resvg/resvg-js').Resvg
+  const lib = createRequire(import.meta.url)('@resvg/resvg-js')
+  Resvg = lib.Resvg
+  renderAsync = typeof lib.renderAsync === 'function' ? lib.renderAsync : null
 } catch (e) {
   loadError = String((e && e.message) || e).slice(0, 200)
 }
@@ -37,6 +40,26 @@ export function svgToPng(svg, width) {
     const opts = { font: { fontFiles: p.files, loadSystemFonts: false, defaultFontFamily: FONT } }
     if (width) opts.fitTo = { mode: 'width', value: width }
     return new Resvg(p.svg, opts).render().asPng()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 사진 바이트(PNG·JPEG·GIF) → px×px PNG Buffer: 가운데를 채워 자른다(기록 카드 동그라미, avatar.mjs). 메타데이터는 남지 않는다.
+ * resvg 는 읽지 못하는 그림(WebP·CMYK JPEG 등)을 오류 없이 빈 그림으로 그린다 → 보이는 점이 거의 없으면 null.
+ * 해독은 renderAsync(스레드)로 한다 — 큰 사진이 봇의 다른 일을 붙잡지 않게.
+ */
+export async function photoPng(buf, mime, px) {
+  if (!Resvg || !Buffer.isBuffer(buf) || !/^image\/(png|jpeg|gif)$/.test(mime)) return null
+  try {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}"><image href="data:${mime};base64,${buf.toString('base64')}" width="${px}" height="${px}" preserveAspectRatio="xMidYMid slice"/></svg>`
+    const opts = { font: { loadSystemFonts: false } }
+    const img = renderAsync ? await renderAsync(svg, opts) : new Resvg(svg, opts).render()
+    const p = img.pixels
+    let seen = 0
+    for (let i = 3; i < p.length && seen <= 16; i += 4) if (p[i]) seen++
+    return seen > 16 ? img.asPng() : null
   } catch {
     return null
   }

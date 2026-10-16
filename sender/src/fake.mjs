@@ -24,6 +24,8 @@
 //   r.memberNoPli(MEMBER 가 pli 를 빼고 준다).
 //   서버: infolinkFail = status(방 링크가 아닌 INFOLINK, 곧 사람의 오픈프로필 링크 읽기를 그 status 로 거절) ·
 //   infolinkBad = Set(li)(그 li 가 하나라도 든 INFOLINK 는 묶음 전체가 -500 — 지운 프로필 하나가 묶음을 망치는 경우).
+// 멤버 사진(members[id].photo, 입장 이벤트의 photo)은 pi = photo + '?s=small' · opi = photo + '?s=orig' 로 준다. 가짜 사진 서버는
+//   server.avatars(주소 → 답) · server.avatarFetch(기록 카드 사진을 받는 fetch 자리) — 진짜 네트워크를 쓰지 않는다.
 // 서버 상태는 프로세스 메모리. FAKE_STATE_FILE 이 있으면 그 파일에 남겨 자식을 다시 띄워도 이어진다(시험용).
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -106,6 +108,9 @@ class FakeServer {
     this.holds = []          // 답을 미룬 패킷(getmemHang·memberHang) — releaseHeld() 로 푼다
     this.infolinkFail = 0
     this.infolinkBad = new Set()
+    // 가짜 사진 서버: 주소 → {body(Buffer), type, status, location, hang, delayMs, noLength}. 부른 주소는 avatarCalls 에
+    this.avatars = new Map()
+    this.avatarCalls = []
     this.load()
   }
 
@@ -523,6 +528,30 @@ class FakeServer {
     return { status: 0, logId: L(logId), chatId: L(str(chatId)), sendAt: sec() }
   }
 
+  /**
+   * 가짜 사진 서버(fetch 자리, avatar.mjs). 없는 주소는 404. hang = signal 이 끊을 때까지 답하지 않음, delayMs = 늦게 답함,
+   * location = 넘기는 답(status 302 와 함께), noLength = content-length 없이(받으면서 크기를 세는지 본다).
+   */
+  async avatarFetch(url, init) {
+    const u = String(url)
+    this.avatarCalls.push(u)
+    if (this.avatarCalls.length > 500) this.avatarCalls.splice(0, this.avatarCalls.length - 500)
+    const a = this.avatars.get(u)
+    const signal = init && init.signal
+    if (a && (a.hang || a.delayMs)) {
+      await new Promise((ok, no) => {
+        const t = a.hang ? null : setTimeout(ok, a.delayMs)
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(t); no(signal.reason || new Error('aborted')) }, { once: true })
+      })
+    }
+    if (!a) return new Response('not found', { status: 404 })
+    const headers = {}
+    if (a.type) headers['content-type'] = a.type
+    if (a.location) headers.location = a.location
+    if (a.body && !a.noLength) headers['content-length'] = String(a.body.length)
+    return new Response(a.body || null, { status: a.status || 200, headers })
+  }
+
   // ── 푸시 ───────────────────────────────────────────────────────────────
   pushTo(userId, packet) {
     for (const c of this.clients) if (c.userId === str(userId)) c._dispatch(packet)
@@ -605,7 +634,7 @@ class FakeServer {
     const logId = ev.log_id ? String(ev.log_id) : this.nextLog()
     if (kind === 'join' || kind === 'leave') {
       if (kind === 'leave' && r.keepLeft && r.members[uid]) r.left = Object.assign(r.left || {}, { [uid]: r.members[uid] })
-      if (kind === 'join') r.members[uid] = Object.assign({ mt: 2, photo: '', status: null }, r.members[uid] || {}, { nick: name || (r.members[uid] && r.members[uid].nick) || '' })
+      if (kind === 'join') r.members[uid] = Object.assign({ mt: 2, photo: '', status: null }, r.members[uid] || {}, { nick: name || (r.members[uid] && r.members[uid].nick) || '' }, ev.photo != null ? { photo: String(ev.photo) } : {})
       else delete r.members[uid]
       this.save()
       // 큰 id 가 숫자로 뭉개지지 않게 JSON 을 글로 만든다(진짜 피드처럼 userId 는 숫자 칸)
