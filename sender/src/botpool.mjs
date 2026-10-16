@@ -409,6 +409,17 @@ export class BotPool {
     return got.slot.voiceSetMeta(got.view, on)
   }
 
+  // 다중 방 실험: 모든 봇의 모든 방(또는 특정 봇)에 보룸 신호를 보낸다. bot_id 를 주면 그 계정만.
+  async voiceAll(on, botId) {
+    const rooms = []
+    for (const slot of this.bots.values()) {
+      if (botId && slot.id !== botId) continue
+      const rows = await slot.voiceAllRooms(on)
+      for (const r of rows) rooms.push(Object.assign({ bot_id: slot.id }, r))
+    }
+    return { count: rooms.length, ok: rooms.filter((x) => x.ok).length, rooms }
+  }
+
   // 보이스룸 유지(B층) 켜기·끄기·보기. body = { on?, hours?|span?, status? }
   async voiceKeep(sel, body) {
     const got = this.voiceFind(sel)
@@ -1271,6 +1282,24 @@ export class BotSlot {
       if (last.ok) break
     }
     return { ok: last.ok, status: last.status, callId, sent: content }
+  }
+
+  // 다중 방 실험: 이 봇(한 계정)이 들어간 모든 방에 보룸 신호(SETMETA 16)를 차례로 보낸다.
+  // 한 계정으로 여러 방이 동시에 보룸이 열리는지 보는 테스트용. 방 사이 300ms 쉰다(속도 제한 회피).
+  async voiceAllRooms(on) {
+    const out = []
+    for (const v of [...this.byInstall.values()]) {
+      if (!v.chat_id) continue
+      try {
+        const r = await this.voiceSetMeta(v, on)
+        out.push({ install_id: v.install_id, chat_id: String(v.chat_id), name: cleanName(v.link_name) || '', ok: !!r.ok, status: r.status })
+      } catch (e) {
+        out.push({ install_id: v.install_id, chat_id: String(v.chat_id), ok: false, error: errText(e) })
+      }
+      await new Promise((ok) => { const t = setTimeout(ok, 300); if (t.unref) t.unref() })
+    }
+    log(this.id, `voice all-rooms ${on ? 'on' : 'off'}: ${out.length} rooms, ${out.filter((x) => x.ok).length} ok`)
+    return out
   }
 
   // ── 보이스룸 유지(B층) ──────────────────────────────────────────────────
@@ -3127,6 +3156,20 @@ export class BotSlot {
         this.say(v, '보룸 명령어 후보를 찾는 중… 잠시만요(약 20초).', { what: 'reply' })
         const r = await this.voiceProbe(v)
         this.say(v, `REAL[${r.real}]\nFAKE[${r.fake}]\n튀는 후보: ${r.standout && r.standout.length ? r.standout.join(', ') : '없음'}`, { what: 'reply' })
+        return
+      }
+      // 다중 방 실험: 이 계정(이 봇)이 들어간 모든 방에 보룸 신호를 한 번에 쏜다. 한 계정으로 여러 방이 동시에 열리는지 테스트용.
+      if (t === '보룸전체' || t === '보룸전체끄기' || t === '보룸전체꺼') {
+        const on = t === '보룸전체'
+        const perm = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(perm) && (perm & 5))) {
+          this.say(v, '보룸 전체 실험은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, `이 계정의 모든 방에 보룸 ${on ? '켜기' : '끄기'} 신호를 보내는 중…`, { what: 'reply' })
+        const rows = await this.voiceAllRooms(on)
+        const okN = rows.filter((x) => x.ok).length
+        this.say(v, `방 ${rows.length}개에 신호 보냄 — 성공 ${okN}, 실패 ${rows.length - okN}. 각 방에 보룸이 떴는지 확인해 주세요.`, { what: 'reply' })
         return
       }
     }

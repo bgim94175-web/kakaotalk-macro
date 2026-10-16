@@ -437,6 +437,13 @@ if (process.env.SENDER_VOICE_EXPERIMENT === '1') {
     const on = !(b.on === false)
     return hub.pool.voiceExperiment(sel, on)
   }))
+
+  // POST /v1/bot/voice-all { on?, bot_id? } — 한 계정(또는 전체)의 모든 방에 보룸 신호를 한 번에. 다중 방 테스트.
+  app.post('/v1/bot/voice-all', botRoute(async (req, res) => {
+    const b = req.body || {}
+    const on = !(b.on === false)
+    return hub.pool.voiceAll(on, b.bot_id != null ? String(b.bot_id) : null)
+  }))
 }
 
 // ── 보이스룸 유지(B층). SENDER_VOICE_KEEP=1 또는 SENDER_VOICE_EXPERIMENT=1 일 때 ──
