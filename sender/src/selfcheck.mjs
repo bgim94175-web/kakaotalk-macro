@@ -4143,6 +4143,12 @@ async function withLog(fn) {
       const sh3 = await botA.slot.voiceShape(vv)
       if (sh3.next !== 'voice_on') throw new Error('#42 shape verdict when voice is accepted ' + sh3.next)
       await botA.slot.voiceSignal(vv, VR.offContent())
+      // 보이스룸 타입으로 바로 돌리기(「보룸모양 16」): 제목을 거치지 않고 같은 모양들을 보이스룸으로 친다
+      const sh16 = await botA.slot.voiceShape(vv, 16)
+      if (sh16.next !== 'voice_on') throw new Error('#42 shape 16 verdict ' + sh16.next)
+      if (sh16.rows.some((r) => r.tag === '보이스룸16')) throw new Error('#42 shape 16 does not need the title retry')
+      if (!sh16.text.includes('보이스룸(16)')) throw new Error('#42 shape 16 says what it wrote: ' + sh16.text)
+      await botA.slot.voiceSignal(vv, VR.offContent())
       // 보이스룸 메타가 없는 방에서는 그렇게 알린다
       const vOther = botA.slot.byInstall.get(iV3)
       const m3 = await botA.slot.voiceMirror(vOther)

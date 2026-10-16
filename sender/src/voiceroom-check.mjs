@@ -247,6 +247,28 @@ eq(V.shapeBody(byTag('chatId+li'), { chatId: 'CID', li: null, type: 3, content: 
 ok(V.SHAPES.length >= 6 && V.SHAPES[0].tag === 'chatId', '지금 모양부터 먼저 본다')
 
 eq(V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: -203 }]).next, 'no_shape', '전부 막히면 명령어 쪽을 봐야 한다')
+
+// 실측 그대로(2026-10-16): 코드가 갈린 자리에서 칸 이름을 읽어 낸다
+const shapeReal = [
+  { tag: 'chatId', st: -203 }, { tag: 'chatId+li', st: -203 }, { tag: 'c', st: -500 }, { tag: 'c+li', st: -500 },
+  { tag: 'c+li+t', st: -300 }, { tag: 'c+li+v', st: -203 }, { tag: 'c+li+meta', st: -203 }, { tag: 'c+li+long', st: -500 },
+]
+const fr = V.fieldReport(shapeReal)
+ok(fr.includes('방 id 칸은 `c`'), '방 id 칸: ' + JSON.stringify(fr))
+ok(fr.includes('타입 칸은 `type`'), '타입 칸(t 는 -300 이었다)')
+ok(fr.includes('내용 칸은 `content`'), '내용 칸(v·meta 는 -203 이었다)')
+const sv = V.shapeVerdict(shapeReal, { type: 3 })
+eq(sv.next, 'try_voice', '제목은 -500 이어도 그 모양으로 보이스룸을 쳐 봐야 한다')
+eq(sv.shape, 'c', '읽힌 모양을 돌려준다')
+ok(sv.verdict.includes('보룸모양 16'), '다음 수를 알려 준다: ' + sv.verdict)
+
+// 보이스룸 타입으로 돌렸을 때
+eq(V.shapeVerdict([{ tag: 'c+li', st: 0 }], { type: 16 }).next, 'voice_on', '보이스룸이 켜짐')
+const reached = V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: -500 }], { type: 16 })
+eq(reached.next, 'reached', '읽히기는 했다')
+ok(reached.verdict.includes('바디 모양은 맞고'), '모양은 맞다고 말한다')
+eq(V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: -203 }], { type: 16 }).next, 'bad_shape', '보이스룸은 읽히지도 않음')
+eq(V.fieldReport([{ tag: 'chatId', st: -203 }, { tag: 'c', st: -203 }]).length, 0, '코드가 같으면 아무것도 못 읽는다')
 ok(V.shapeVerdict([{ tag: 'chatId', st: -203 }]).verdict.includes('명령어'), '명령어 쪽을 짚는다')
 const f = V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: 0 }])
 eq(f.next, 'shape_found', '통하는 모양을 찾음')

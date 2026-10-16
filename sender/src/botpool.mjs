@@ -1745,7 +1745,7 @@ export class BotSlot {
   // 해가 없는 타입(제목 3에 지금 방 이름 그대로)으로 먼저 찾고, 통하는 모양이 나오면 **그 모양 그대로**
   // 보이스룸(16)을 한 번 쳐 본다. 거기서 0 이 나오면 보이스룸이 켜지는 것이고, 거부되면 그때야
   // "보이스룸 자리만 막혔다"가 처음으로 증명된다.
-  async voiceShape(v) {
+  async voiceShape(v, type) {
     const chatId = v && v.chat_id ? String(v.chat_id) : ''
     if (!chatId) return { ok: false, error: 'no_chat' }
     const li = v && v.link_id ? String(v.link_id) : ''
@@ -1755,6 +1755,12 @@ export class BotSlot {
     const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
       .filter((m) => m && typeof m.content === 'string'))
     const voiceMeta = metas.find((m) => VR.metaTypeNum(m.type) === 16)
+    // type 16 으로 돌리면 제목 대신 보이스룸 내용으로 같은 모양들을 친다(카카오가 써 둔 값이 있으면 그것을 켠 모양으로)
+    const want = Number(type) === 16 ? 16 : 3
+    const nowSec = Math.floor(this.now() / 1000)
+    const voiceBody = voiceMeta
+      ? VR.turnOn(voiceMeta.content, nowSec)
+      : this.voiceContent(VR.newSession({ title, by: this.id, chat: chatId, now: this.now() }), this.now())
     const rows = []
     const run = async (tag, body) => {
       const r = await this.raw('SETMETA', body)
@@ -1767,17 +1773,16 @@ export class BotSlot {
     const vals = (type, content) => ({ chatId: L(chatId), li: li ? L(li) : null, type, typeLong: L(String(type)), content })
     let found = null
     for (const shape of VR.SHAPES) {
-      const st = await run(shape.tag, VR.shapeBody(shape, vals(3, title)))
+      const st = await run(shape.tag, VR.shapeBody(shape, vals(want, want === 16 ? voiceBody : title)))
       if (st === 0) { found = shape; break }
     }
-    // 통하는 모양을 찾았으면 그 모양 그대로 보이스룸을 쳐 본다
-    if (found) {
-      const content = voiceMeta ? VR.turnOn(voiceMeta.content, Math.floor(this.now() / 1000)) : this.voiceContent(VR.newSession({ title: title, by: this.id, chat: chatId, now: this.now() }), this.now())
-      await run('보이스룸16', VR.shapeBody(found, vals(16, content)))
-    }
-    const what = `제목(3)에 「${title}」 그대로${voiceMeta ? ' · 보이스룸 메타 있음' : ''}`
-    const text = VR.shapeText(rows, { what })
-    const verdict = VR.shapeVerdict(rows, {})
+    // 제목으로 통하는 모양을 찾았으면 그 모양 그대로 보이스룸을 쳐 본다
+    if (found && want === 3) await run('보이스룸16', VR.shapeBody(found, vals(16, voiceBody)))
+    const what = want === 16
+      ? `보이스룸(16)${voiceMeta ? ' · 카카오가 써 둔 값을 켠 모양으로' : ' · 우리가 만든 값으로'}`
+      : `제목(3)에 「${title}」 그대로${voiceMeta ? ' · 보이스룸 메타 있음' : ''}`
+    const text = VR.shapeText(rows, { what, type: want })
+    const verdict = VR.shapeVerdict(rows, { type: want })
     log(this.id, `voice shape done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${verdict.next} shape ${verdict.shape || '-'}`)
     return { ok: true, rows, text, next: verdict.next, shape: verdict.shape }
   }
@@ -3560,14 +3565,15 @@ export class BotSlot {
         this.say(v, r.ok ? r.text : '진단을 돌리지 못했어요.', { what: 'reply' })
         return
       }
-      if (t === '보룸모양' || t === '보룸모양찾기') {
+      const sm = /^보룸모양(?:찾기)?(?:\s+(16))?$/.exec(t)
+      if (sm) {
         const n = Number(await this.permOf(v, m.authorId))
         if (!(Number.isFinite(n) && (n & 5))) {
           this.say(v, '보룸 모양찾기는 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
           return
         }
-        this.say(v, 'SETMETA 바디 모양을 하나씩 바꿔 보는 중… 잠시만요(약 5초).', { what: 'reply' })
-        const r = await this.voiceShape(v)
+        this.say(v, `${sm[1] ? '보이스룸' : '제목'} 으로 SETMETA 바디 모양을 하나씩 바꿔 보는 중… 잠시만요(약 5초).`, { what: 'reply' })
+        const r = await this.voiceShape(v, sm[1] ? 16 : 3)
         this.say(v, r.ok ? r.text : '모양찾기를 돌리지 못했어요.', { what: 'reply' })
         return
       }
