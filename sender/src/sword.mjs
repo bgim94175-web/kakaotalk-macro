@@ -2,7 +2,7 @@
 // 상태는 방 runtime.sword[방 열쇠] = { v, u: {사람 열쇠: 사람}, t: [거래 제안], q: 다음 번호 } 하나뿐(점수처럼 room_state 에 저장).
 // features.mjs 가 명령어를 넘기고(run), 답 글과 카드(card)를 받아 보낸다. 카드 그림은 sword-art.mjs.
 //
-// 사람 u = { n: 이름, g: 골드, lv: 검 단계, id: 검 번호, b: 최고 단계, it: {guard, bless, mana, scale}, a: 마지막 활동,
+// 사람 u = { n: 이름, g: 골드, lv: 검 단계, id: 검 번호, b: 최고 단계, it: {guard, bless, mana, scale, star}, a: 마지막 활동,
 //            e: 마지막 강화, h: 마지막 사냥, w: 쿨타임 안내를 이미 한 행동 시각 {e, h, du, r}(행동마다), k: 부서진 횟수, s: 판매 횟수,
 //            f: 연속 실패(실패 보정 — 검이 바뀌면 0), d: 마지막 출석 날(KST 날 번호), ds: 연속 출석 일수, du: 마지막 결투 신청,
 //            dw·dl: 결투 승·패, r: 마지막 보스 공격 }
@@ -13,8 +13,8 @@
 import { josa } from './roomfeat.mjs'
 import { helpCard } from './helpcard.mjs'
 
-export const MAX_LV = 20
-export const START_GOLD = 1000
+export const MAX_LV = 30
+export const START_GOLD = 2700
 export const MAX_GOLD = 999999999
 export const MAX_ITEM = 999
 export const MAX_USERS = 200
@@ -38,7 +38,9 @@ export const MAX_BET = 1000000
 export const ATTACK_CD_MS = 60 * 1000
 export const BOSS_GAP_MS = 30 * 60 * 1000 // 보스를 쓰러뜨리면 30분 뒤 다음 보스
 export const BOSS_TTL_MS = 24 * 60 * 60 * 1000 // 하루 안에 못 쓰러뜨리면 도망간다
-export const BOSS_REWARD = 0.6 // 체력 × 0.6 골드를 피해량대로 나눈다
+export const BOSS_REWARD = 0.15 // 체력 × 0.15 골드를 피해량대로 나눈다(때린 피해 1마다 0.15G)
+// 한 번의 공격은 보스 최대 체력의 25%까지 — 높은 단계 혼자 나타나자마자 쓰러뜨리지 않게(적어도 네 번, 방 사람들이 함께 칠 틈)
+export const BOSS_HIT_MAX = 0.25
 // 방 보스(이름은 모두 이 게임에서 지은 것). 다섯을 다 쓰러뜨리면 처음부터, 한 바퀴마다 체력이 처음의 0.5배씩 는다(2바퀴째 1.5배, 3바퀴째 2배)
 export const BOSSES = [
   { name: '거대 왕슬라임', hp: 4000 },
@@ -48,54 +50,134 @@ export const BOSSES = [
   { name: '심연의 마왕', hp: 50000 },
 ]
 
-// 단계별 [성공 %, 파괴 %]. 나머지는 실패(검은 그대로).
-const CHANCE = [
-  [95, 0], [90, 0], [85, 0], [80, 0], [75, 0],
-  [70, 2], [65, 3], [60, 4], [55, 5], [50, 6],
-  [45, 8], [40, 10], [35, 12], [30, 14], [25, 16],
-  [20, 18], [15, 20], [10, 22], [7, 25], [5, 30],
-]
-// 단계별 강화 비용(골드)
-const COST = [100, 150, 200, 300, 400, 600, 800, 1000, 1300, 1600, 2000, 2500, 3000, 3600, 4300, 5000, 6000, 7000, 8500, 10000]
-// 단계별 판매가(골드)
-const PRICE = [0, 100, 250, 500, 800, 1200, 1800, 2600, 3600, 5000, 7000, 9500, 13000, 18000, 25000, 35000, 50000, 70000, 100000, 150000, 250000]
+// 보스 마지막 일격 보상(보스 번호마다): 앞의 넷은 마력석 2 + 축복 1, 심연의 마왕은 용의 비늘 1 + 보호 1. 가장 큰 피해는 축복 2
+export function bossLastReward(i) {
+  return i === BOSSES.length - 1 ? [['scale', 1], ['guard', 1]] : [['mana', 2], ['bless', 1]]
+}
+const BOSS_MVP = [['bless', 2]]
 
-// 검의 이름은 단계 묶음(tier)마다. 그림도 묶음마다 바뀐다(sword-art.mjs).
-export const TIERS = [
-  { from: 0, name: '녹슨 철검' },
-  { from: 3, name: '강철 장검' },
-  { from: 6, name: '은빛 기사검' },
-  { from: 9, name: '푸른 서리검' },
-  { from: 12, name: '붉은 화염검' },
-  { from: 15, name: '황금 용검' },
-  { from: 18, name: '칠흑의 마검' },
-  { from: 20, name: '추억의 전설검' },
+// 단계별 [성공 %, 파괴 %](+lv 에서 한 단계 올릴 때). 나머지는 실패(검은 그대로).
+const CHANCE = [
+  [85, 0], [80, 0], [75, 0], [70, 0], [65, 0],
+  [48, 4], [41, 5], [35, 6], [30, 7], [26, 8],
+  [25, 9], [23, 10], [21, 11], [20, 12], [19, 13],
+  [17, 14], [16, 15], [15, 16], [14, 17], [13, 18],
+  [12, 18], [11, 19], [10, 20], [9, 21], [8, 22],
+  [7, 23], [6, 24], [5, 25], [4, 26], [3, 27],
 ]
+// 단계별 강화 비용(골드) — 어느 단계든 사냥 한 번쯤. 높은 단계의 값은 재료와 주문서가 맡는다
+const COST = [
+  60, 75, 95, 125, 160, 340, 800, 850, 900, 1600,
+  1650, 1700, 1850, 2100, 2400, 2700, 3000, 3300, 3600, 3900,
+  4300, 4700, 5100, 5500, 5900, 6400, 6900, 7400, 8000, 8700,
+]
+// 단계별 판매가(골드). +9~+20 은 예전과 같다
+const PRICE = [
+  0, 50, 110, 190, 300, 450, 1000, 2000, 3400, 5000,
+  7000, 9500, 13000, 18000, 25000, 35000, 50000, 70000, 100000, 150000,
+  250000, 330000, 430000, 560000, 730000, 950000, 1250000, 1600000, 2100000, 2800000,
+  4000000,
+]
+// 단계별 재료([아이템, 수] — 성공·실패와 상관없이 강화할 때마다 골드와 함께 쓴다)
+const MAT = [
+  null, null, null, null, null, null, null, null, null, null,
+  ['mana', 1], ['mana', 2], ['mana', 3], ['mana', 3], ['mana', 4],
+  ['scale', 2], ['scale', 2], ['scale', 3], ['scale', 3], ['scale', 3],
+  ['star', 1], ['star', 1], ['star', 2], ['star', 2], ['star', 2],
+  ['star', 3], ['star', 4], ['star', 5], ['star', 6], ['star', 7],
+]
+// 단계별로 보호 한 번에 쓰는 보호 주문서 수: +5~+14 는 1개, +15~+19 는 용의 비늘 수만큼, +20부터는 별빛 결정 1개마다 5개
+const GUARD_K = [
+  0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 2, 2, 3, 3, 3,
+  5, 5, 10, 10, 10, 15, 20, 25, 30, 35,
+]
+
+// 검 이름은 단계마다 하나씩(+0~+30). 묶음(family)마다 그림(sword-art.mjs, assets/swords/tier{art}.png)과 사냥터가 같다.
+// 묶음 첫 단계의 이름이 그 묶음 이름이다(예전 이름: +0 · +3 · +6 · +9 · +12 · +15 · +18 · +20 그대로)
+export const NAMES = [
+  '녹슨 철검', '손질한 철검', '날 세운 철검',
+  '강철 장검', '담금질한 장검', '명장의 강철검',
+  '은빛 기사검', '은빛 근위검', '은빛 성기사검',
+  '푸른 서리검', '얼음꽃 서리검', '만년설 서리검',
+  '붉은 화염검', '작열의 화염검', '업화의 화염검',
+  '황금 용검', '황금 비룡검', '황금 용왕검',
+  '칠흑의 마검', '칠흑의 마왕검',
+  '추억의 전설검',
+  '천둥 폭풍검', '뇌신의 폭풍검',
+  '심해의 조류검', '해신의 해일검',
+  '성운의 은하검', '초승달 은하검',
+  '혼돈의 일식검', '검은 태양검',
+  '천상의 태엽검',
+  '태초의 창세검',
+]
+// from: 묶음 첫 단계, art: 그림 번호(tier{art}.png)
+export const FAMILIES = [
+  { from: 0, art: 0 }, // 녹슨 철
+  { from: 3, art: 1 }, // 강철
+  { from: 6, art: 2 }, // 은빛 기사
+  { from: 9, art: 3 }, // 푸른 서리
+  { from: 12, art: 4 }, // 붉은 화염
+  { from: 15, art: 5 }, // 황금 용
+  { from: 18, art: 6 }, // 칠흑의 마검
+  { from: 20, art: 7 }, // 추억의 전설검(천사 날개)
+  { from: 21, art: 8 }, // 천둥 폭풍(번개)
+  { from: 23, art: 9 }, // 심해의 조류(바다 유리)
+  { from: 25, art: 10 }, // 성운의 은하
+  { from: 27, art: 11 }, // 혼돈의 일식(검정·진홍)
+  { from: 29, art: 12 }, // 천상의 태엽(백금·금 톱니)
+  { from: 30, art: 13 }, // 태초의 창세검(무지개 수정)
+].map((f) => Object.assign(f, { name: NAMES[f.from] }))
 
 export const ITEMS = {
-  guard: { name: '보호 주문서', buy: 4000, sell: 1000, desc: '강화하다 부서질 때 검을 지켜 줘요', alias: ['보호', '보호주문서', '보호권', '파괴방지'] },
+  guard: { name: '보호 주문서', buy: 20000, sell: 1000, desc: '강화하다 부서질 때 검을 지켜 줘요 (+15부터 여러 개씩 써요)', alias: ['보호', '보호주문서', '보호권', '파괴방지'] },
   bless: { name: '축복 주문서', buy: 2000, sell: 500, desc: `강화 성공 확률 +${BLESS_PCT}%`, alias: ['축복', '축복주문서'] },
-  mana: { name: '마력석', buy: 2500, sell: 800, desc: '+10부터 강화할 때 1개씩 써요', alias: ['마력석', '마석'] },
-  scale: { name: '용의 비늘', buy: 0, sell: 3000, desc: '+15부터 강화할 때 1개씩 써요 (사냥·보스에서)', alias: ['용의비늘', '비늘', '용비늘'] },
+  mana: { name: '마력석', buy: 2500, sell: 800, desc: '+10~+14 강화에 1~4개씩 써요', alias: ['마력석', '마석'] },
+  scale: { name: '용의 비늘', buy: 50000, sell: 3000, desc: '+15~+19 강화에 2~3개씩 써요 (사냥·보스에서도 나와요)', alias: ['용의비늘', '비늘', '용비늘'] },
+  star: { name: '별빛 결정', buy: 300000, sell: 30000, desc: '+20부터 강화에 1~7개씩 써요 (사냥에서도 나와요)', alias: ['별빛결정', '별빛', '결정'] },
 }
 const ITEM_IDS = Object.keys(ITEMS)
+const MAT_IDS = ['mana', 'scale', 'star']
+// 모자랄 때 「!구매 별칭 수」로 알려 주는 짧은 이름
+const SHORT = { guard: '보호', bless: '축복', mana: '마력석', scale: '비늘', star: '결정' }
 const SWORD_ALIAS = ['검', '칼']
 
-// 사냥터: 검 단계가 높을수록 센 몬스터(이름은 모두 이 게임에서 지은 것)
+// 사냥터 = 검 그림 묶음(tierOf). 몬스터 하나를 고르고 골드는 [lo, hi] 사이(이름은 모두 이 게임에서 지은 것)
 const HUNT = [
-  [['초록 슬라임', 80, 150], ['들판 토끼', 70, 140], ['꼬마 고블린', 100, 180]],
-  [['동굴 박쥐', 120, 220], ['버섯 도깨비', 130, 240], ['떠돌이 들개', 150, 260]],
-  [['해골 병사', 220, 380], ['늪지 도마뱀', 250, 400], ['잿빛 늑대', 230, 360]],
-  [['바위 오우거', 400, 650], ['불꽃 정령', 450, 700], ['서리 골렘', 420, 680]],
-  [['고대 비룡', 700, 1100], ['몰락한 기사', 750, 1150]],
-  [['심연의 용', 1200, 2000], ['타락한 대마법사', 1100, 1800]],
+  [['초록 슬라임', 55, 95], ['들판 토끼', 50, 90], ['꼬마 고블린', 65, 120]],
+  [['동굴 박쥐', 120, 190], ['버섯 도깨비', 130, 200], ['떠돌이 들개', 140, 210]],
+  [['해골 병사', 340, 500], ['늪지 도마뱀', 360, 520], ['잿빛 늑대', 350, 510]],
+  [['바위 오우거', 660, 960], ['불꽃 정령', 680, 980], ['서리 골렘', 670, 970]],
+  [['고대 비룡', 1050, 1550], ['몰락한 기사', 1100, 1600]],
+  [['심연의 용', 1550, 2250], ['타락한 대마법사', 1500, 2200]],
+  [['저주받은 망령', 2200, 3000], ['그림자 마수', 2250, 3050], ['어둠의 사제', 2150, 2950]],
+  [['빛 잃은 수호천사', 2700, 3700], ['날개 꺾인 석상', 2750, 3750]],
+  [['천둥 그리폰', 3300, 4500], ['폭풍의 거인', 3350, 4550], ['뇌운의 정령', 3250, 4450]],
+  [['해일 수룡', 3900, 5300], ['심해의 파수꾼', 3950, 5350], ['유리 비늘 해마', 3850, 5250]],
+  [['별을 삼킨 고래', 4400, 5800], ['성운의 수호자', 4450, 5850], ['떠도는 유성 골렘', 4350, 5750]],
+  [['일식의 군주', 5000, 6600], ['혼돈의 쌍두룡', 5100, 6700]],
+  [['태엽 거신', 5600, 7600], ['시간을 먹는 톱니룡', 5700, 7700]],
+  [['창세의 수호룡', 6400, 8800], ['태초의 그림자', 6500, 8900]],
 ]
-const DROPS = [
-  ['mana', 12],
-  ['bless', 6],
-  ['guard', 2],
-]
+// 사냥 한 번에 아이템마다 따로 굴린다(이 차례로): [아이템, %]
+function dropsAt(lv) {
+  return [
+    ['mana', 12],
+    ['bless', 6],
+    ['guard', 2],
+    ['scale', lv >= 10 ? 4 : 1],
+    ['star', lv >= 20 ? 0.7 : lv >= 15 ? 0.2 : 0],
+  ]
+}
 const TREASURE_PCT = 2 // 보물 상자: 골드 5배
+
+// 점검(sword-check.mjs)이 읽는 표. 얼려 두어 밖에서 바꾸지 못한다
+for (const t of [CHANCE, COST, PRICE, MAT, GUARD_K, HUNT]) {
+  for (const row of t) if (row && typeof row === 'object') Object.freeze(row)
+  Object.freeze(t)
+}
+for (const band of HUNT) for (const m of band) Object.freeze(m)
+export const TABLES = Object.freeze({ CHANCE, COST, PRICE, MAT, GUARD_K, HUNT, TREASURE_PCT })
 
 /** 이 게임이 받는 명령어(앞글자 뺀 첫 낱말) */
 export const COMMANDS = new Set([
@@ -104,35 +186,49 @@ export const COMMANDS = new Set([
   '출석', '출첵', '결투', '보스', '공격',
 ])
 
-// ── 표 ────────────────────────────────────────────────────────────────────
+// ── 표 ──────────────────────────────────────────────────────────────────
+function clampLv(lv, top) {
+  return Math.max(0, Math.min(top, Math.floor(Number(lv) || 0)))
+}
+
+/** 이 단계의 묶음 번호(= 그림 번호 = 사냥터) */
 export function tierOf(lv) {
   let t = 0
-  for (let i = 0; i < TIERS.length; i++) if (lv >= TIERS[i].from) t = i
+  for (let i = 0; i < FAMILIES.length; i++) if (lv >= FAMILIES[i].from) t = i
   return t
 }
 
+/** 단계마다 다른 검 이름 */
 export function swordName(lv) {
-  return TIERS[tierOf(lv)].name
+  return NAMES[clampLv(lv, MAX_LV)]
 }
 
-/** "+7 은빛 기사검" */
+/** "+7 은빛 근위검" */
 export function swordLabel(lv) {
   return `+${lv} ${swordName(lv)}`
 }
 
 /** lv 에서 한 단계 올릴 때 확률(%) */
 export function chance(lv) {
-  const c = CHANCE[Math.max(0, Math.min(MAX_LV - 1, lv))]
+  const c = CHANCE[clampLv(lv, MAX_LV - 1)]
   return { up: c[0], broke: c[1], fail: 100 - c[0] - c[1] }
 }
 
-/** lv 에서 한 단계 올릴 때 드는 것 */
+/** lv 에서 한 단계 올릴 때 드는 것(성공·실패와 상관없이): 골드와 재료 수 */
 export function cost(lv) {
-  return { gold: COST[Math.max(0, Math.min(MAX_LV - 1, lv))], mana: lv >= 10 && lv < 15 ? 1 : 0, scale: lv >= 15 ? 1 : 0 }
+  const i = clampLv(lv, MAX_LV - 1)
+  const out = { gold: COST[i], mana: 0, scale: 0, star: 0 }
+  if (MAT[i]) out[MAT[i][0]] = MAT[i][1]
+  return out
+}
+
+/** lv 에서 보호하며 강화할 때 쓰는 보호 주문서 수(부서지지 않는 단계는 0) */
+export function guardK(lv) {
+  return GUARD_K[clampLv(lv, MAX_LV - 1)]
 }
 
 export function price(lv) {
-  return PRICE[Math.max(0, Math.min(MAX_LV, lv))]
+  return PRICE[clampLv(lv, MAX_LV)]
 }
 
 export function won(n) {
@@ -319,7 +415,10 @@ export function helpText(p) {
     `${p}거래 @상대 보호 1 3000 : 아이템이나 검을 팔아요 (상대는 ${p}수락 · ${p}거절)`,
     `${p}거래취소 : 보낸 거래 제안·결투 신청을 취소해요`,
     `${p}강화랭킹 : 방 강화 순위를 봐요`,
-  ] }], `강화에 실패하면 다음 강화 성공 확률이 ${PITY_STEP}%씩 올라요. (최대 +${PITY_MAX}%)`)
+  ] }], [
+    `강화에 실패하면 다음 강화 성공 확률이 ${PITY_STEP}%씩 올라요. (최대 +${PITY_MAX}%)`,
+    '높은 단계일수록 재료와 보호 주문서를 여러 개 써요.',
+  ].join('\n'))
 }
 
 export function shopText(p) {
@@ -362,20 +461,26 @@ export function pityOf(n) {
   return Math.min(PITY_MAX, Math.max(0, Math.floor(Number(n) || 0)) * PITY_STEP)
 }
 
+// 재료 「마력석 2개」 목록(강화 한 번에 쓰는 것)
+function matList(c) {
+  return MAT_IDS.filter((id) => c[id]).map((id) => `${ITEMS[id].name} ${c[id]}개`)
+}
+
+// 다음 강화 줄. +15부터는 보호에 드는 주문서 수를 한 줄 더 알린다
 function nextLine(lv, pity) {
   if (lv >= MAX_LV) return '최고 단계예요.'
   const c = cost(lv)
   const ch = chance(lv)
-  const need = [g(c.gold)]
-  if (c.mana) need.push(`${ITEMS.mana.name} 1개`)
-  if (c.scale) need.push(`${ITEMS.scale.name} 1개`)
+  const need = [g(c.gold)].concat(matList(c))
   const up = Math.min(100, ch.up + (pity || 0))
-  return `다음 강화 : ${need.join(' + ')} · 성공 ${up}%${pity ? `(보정 +${pity}%)` : ''}${ch.broke ? ` · 파괴 ${Math.min(ch.broke, 100 - up)}%` : ''}`
+  const line = `다음 강화 : ${need.join(' + ')} · 성공 ${up}%${pity ? `(보정 +${pity}%)` : ''}${ch.broke ? ` · 파괴 ${Math.min(ch.broke, 100 - up)}%` : ''}`
+  const k = guardK(lv)
+  return k > 1 ? `${line}\n보호하려면 보호 주문서가 ${k}개 필요해요.` : line
 }
 
 // 「강화」 뒤 낱말 → 쓸 주문서. 「보호 주문서」·「파괴 방지」처럼 띄어 써도, 「보호1」·「보호 1개」처럼 수를 붙여도 읽는다.
 // 모르는 낱말이 하나라도 있으면 { bad: 그 낱말 }(잘못 쓴 주문서 이름 때문에 주문서 없이 강화되지 않게 아무것도 하지 않고 다시 묻는다).
-// 검·마력석·비늘은 강화 때 저절로 쓰는 것이라 적어도 그냥 넘어간다.
+// 검·마력석·비늘·결정은 강화 때 저절로 쓰는 것이라 적어도 그냥 넘어간다.
 function enhanceArgs(arg) {
   const raw = String(arg || '').split(/\s+/).filter((t) => t && !numTok(t))
   const toks = raw.map((t) => t.replace(/\d+개?$/, '') || t)
@@ -401,6 +506,32 @@ function badEnhanceText(bad, p) {
   return `${head} 알 수 없어서 강화하지 않았어요. 「${p}강화」, 「${p}강화 보호」, 「${p}강화 축복」처럼 입력해 주세요.`
 }
 
+// 강화에 모자란 것 알림. 하나만 모자라면 그것만 자세히, 둘 이상이면 한 줄에 모두와 「모두 사서 강화하는 데 드는 골드」를
+function shortText(ctx, c, short, useGuard) {
+  const { u, p } = ctx
+  const lv = u.lv
+  if (!short.length) {
+    return `골드가 부족해요. +${lv} 강화에는 ${g(c.gold)}가 필요해요. (보유 ${g(u.g)})\n「${p}사냥」으로 골드를 모아 보세요.`
+  }
+  if (short.length === 1 && u.g >= c.gold) {
+    const { id, need, have } = short[0]
+    const more = String(need - have)
+    if (id === 'bless') return `축복 주문서가 없어요. 「${p}구매 축복 1」로 살 수 있어요.`
+    if (id === 'guard') return `+${lv}에서 보호하려면 보호 주문서가 ${need}개 필요해요. (보유 ${have}개) 「${p}구매 보호 ${more}」${josa(more, '으로')} 살 수 있어요.`
+    const nm = ITEMS[id].name
+    return `+${lv} 강화에는 ${nm}${josa(nm, '이')} ${need}개 필요해요. (보유 ${have}개) 「${p}사냥」으로 모으거나 「${p}구매 ${SHORT[id]} ${more}」${josa(more, '으로')} 살 수 있어요.`
+  }
+  const parts = short.map((x) => `${ITEMS[x.id].name} ${x.need - x.have}개`)
+  const buys = short.map((x) => `「${p}구매 ${SHORT[x.id]} ${x.need - x.have}」`)
+  const shop = short.reduce((n, x) => n + ITEMS[x.id].buy * (x.need - x.have), 0)
+  const lastMore = String(short[short.length - 1].need - short[short.length - 1].have)
+  return [
+    `+${lv}${useGuard ? ' 보호' : ''} 강화에는 ${parts.join(' · ')}${josa(parts[parts.length - 1], '이')} 더 필요해요.`,
+    `모두 사서 강화하려면 ${g(c.gold + shop)}가 들어요. (보유 ${g(u.g)})`,
+    `「${p}사냥」으로 모으거나 ${buys.join(' · ')}${josa(lastMore, '으로')} 살 수 있어요.`,
+  ].join('\n')
+}
+
 function enhance(ctx) {
   const { u, p } = ctx
   if (u.lv >= MAX_LV) return { text: `${ctx.name}님의 검은 이미 최고 단계 ${swordLabel(u.lv)}이에요. 「${p}판매」로 팔 수 있어요.` }
@@ -414,25 +545,24 @@ function enhance(ctx) {
   // 축복 없이도 성공 100%면 축복 주문서는 쓰지 않는다(강화는 그대로 한다)
   const useBless = want.bless && ch.up + pityOf(u.f) < 100
   const keepBless = want.bless && !useBless
-  if (u.g < c.gold) {
-    return { text: `골드가 부족해요. +${u.lv} 강화에는 ${g(c.gold)}가 필요해요. (보유 ${g(u.g)})\n「${p}사냥」으로 골드를 모아 보세요.` }
-  }
-  if (c.mana && (u.it.mana || 0) < c.mana) {
-    return { text: `+10부터는 강화할 때 ${ITEMS.mana.name}이 1개 필요해요. 「${p}사냥」이나 「${p}상점」에서 구할 수 있어요.` }
-  }
-  if (c.scale && (u.it.scale || 0) < c.scale) {
-    return { text: `+15부터는 강화할 때 ${ITEMS.scale.name}이 1개 필요해요. 「${p}사냥」·「${p}보스」에서 얻거나 다른 사람과 거래해 보세요.` }
-  }
   if (useGuard && !ch.broke) return { text: `+${u.lv}에서는 검이 부서지지 않아요. 보호 주문서는 +5부터 써 주세요.` }
-  if (useGuard && !(u.it.guard > 0)) return { text: `보호 주문서가 없어요. 「${p}구매 보호 1」로 살 수 있어요.` }
-  if (useBless && !(u.it.bless > 0)) return { text: `축복 주문서가 없어요. 「${p}구매 축복 1」로 살 수 있어요.` }
+  const k = useGuard ? guardK(u.lv) : 0
+  // 모자란 것(골드·재료·보호 주문서·축복 주문서)을 모두 모아 한 번에 알린다. 하나씩 알리면 알려 준 것만 사고 나서
+  // 다음 것이 모자라 오도 가도 못 한다(예: 결정을 산 뒤에야 보호 주문서 5개가 모자란다는 걸 안다)
+  const short = []
+  for (const id of MAT_IDS) {
+    const have = u.it[id] || 0
+    if (c[id] && have < c[id]) short.push({ id, need: c[id], have })
+  }
+  if (useGuard && (u.it.guard || 0) < k) short.push({ id: 'guard', need: k, have: u.it.guard || 0 })
+  if (useBless && !(u.it.bless > 0)) short.push({ id: 'bless', need: 1, have: 0 })
+  if (u.g < c.gold || short.length) return { text: shortText(ctx, c, short, useGuard) }
 
   // 여기서부터 바꾼다(검사는 모두 끝났다)
   const from = u.lv
   u.g -= c.gold
-  if (c.mana) take(u, 'mana', c.mana)
-  if (c.scale) take(u, 'scale', c.scale)
-  if (useGuard) take(u, 'guard', 1)
+  for (const id of MAT_IDS) if (c[id]) take(u, id, c[id])
+  if (useGuard) take(u, 'guard', k)
   if (useBless) take(u, 'bless', 1)
   u.e = ctx.now
   const pity = pityOf(u.f)
@@ -471,12 +601,11 @@ function enhance(ctx) {
     result = 'fail'
     u.f = Math.min(50, u.f + 1)
   }
+  // 쓴 주문서(카드 칩에도 같은 글): 「보호 주문서 5개」
   const used = []
-  if (useGuard) used.push(ITEMS.guard.name)
-  if (useBless) used.push(ITEMS.bless.name)
-  const spent = [g(c.gold)]
-  if (c.mana) spent.push(ITEMS.mana.name)
-  if (c.scale) spent.push(ITEMS.scale.name)
+  if (useGuard) used.push(`${ITEMS.guard.name} ${k}개`)
+  if (useBless) used.push(`${ITEMS.bless.name} 1개`)
+  const spent = [g(c.gold)].concat(matList(c))
   let head
   let body
   if (result === 'up') {
@@ -559,8 +688,8 @@ function info(ctx) {
     text,
     card: {
       kind: 'info', lv: u.lv, best: u.b, owner: ctx.name, gold: u.g, price: price(u.lv), broken: u.k || 0,
-      items: ITEM_IDS.map((id) => ({ name: ITEMS[id].name, n: u.it[id] || 0 })),
-      next: u.lv >= MAX_LV ? null : { gold: cost(u.lv).gold, up: Math.min(100, ch.up + pityOf(u.f)), broke: Math.min(ch.broke, 100 - Math.min(100, ch.up + pityOf(u.f))), pity: pityOf(u.f), mana: cost(u.lv).mana, scale: cost(u.lv).scale },
+      items: ITEM_IDS.map((id) => ({ id, name: ITEMS[id].name, short: SHORT[id], n: u.it[id] || 0 })),
+      next: u.lv >= MAX_LV ? null : Object.assign(cost(u.lv), { up: Math.min(100, ch.up + pityOf(u.f)), broke: Math.min(ch.broke, 100 - Math.min(100, ch.up + pityOf(u.f))), pity: pityOf(u.f), guard: guardK(u.lv) }),
     },
   }
 }
@@ -579,18 +708,17 @@ function hunt(ctx) {
   const cd = cooling(ctx, 'h', HUNT_CD_MS, '사냥')
   if (cd) return cd
   u.h = ctx.now
-  const band = HUNT[Math.min(HUNT.length - 1, Math.floor(u.lv / 3))]
+  const band = HUNT[Math.min(HUNT.length - 1, tierOf(u.lv))]
   const [mob, lo, hi] = pick(rand, band)
   let gold = lo + Math.floor(rand() * (hi - lo + 1))
   const treasure = rand() * 100 < TREASURE_PCT
   if (treasure) gold *= 5
   u.g = Math.min(MAX_GOLD, u.g + gold)
   const drops = []
-  for (const [id, pct] of DROPS) {
+  // 아이템마다 한 번씩(확률 0 이어도) 굴린다 — 차례: 마력석 · 축복 · 보호 · 용의 비늘 · 별빛 결정
+  for (const [id, pct] of dropsAt(u.lv)) {
     if (rand() * 100 < pct) drops.push([id, 1])
   }
-  const scalePct = u.lv >= 10 ? 4 : 1
-  if (rand() * 100 < scalePct) drops.push(['scale', 1])
   const { got, full } = reward(u, drops)
   const lines = [`[사냥] ${ctx.name}님이 ${mob}${josa(mob, '을')} 잡았어요.`]
   if (treasure) lines.push('보물 상자를 찾았어요. 골드를 5배로 받았어요.')
@@ -1048,7 +1176,7 @@ function attack(ctx) {
   const nm = BOSSES[r.i].name
   const crit = rand() < 0.1
   let dmg = Math.round(hitBase(u.lv) * (0.8 + rand() * 0.4) * (crit ? 2 : 1))
-  dmg = Math.max(1, Math.min(dmg, r.hp))
+  dmg = Math.max(1, Math.min(dmg, Math.ceil(r.mx * BOSS_HIT_MAX), r.hp))
   r.hp -= dmg
   r.d[key] = (Number(r.d[key]) || 0) + dmg
   const lines = head.concat(`[공격] ${ctx.name}님이 ${nm}에게 ${crit ? '치명타로 ' : ''}${won(dmg)} 피해를 줬어요.`)
@@ -1056,7 +1184,7 @@ function attack(ctx) {
     lines.push(`남은 체력 ${won(r.hp)} (최대 ${won(r.mx)})`, hpBar(r.hp, r.mx))
     return { text: lines.join('\n') }
   }
-  // 쓰러뜨렸다: 피해량대로 골드를 나누고, 마지막 일격·가장 큰 피해에 아이템
+  // 쓰러뜨렸다: 피해량대로 골드를 나누고, 마지막 일격(보스마다 다르다, bossLastReward)·가장 큰 피해에 아이템
   const pool = Math.round(r.mx * BOSS_REWARD)
   const rows = Object.keys(r.d)
     .filter((k) => has(s.u, k) && isObj(s.u[k]))
@@ -1071,10 +1199,10 @@ function attack(ctx) {
     const v = s.u[x.k]
     v.g = Math.min(MAX_GOLD, v.g + x.g)
   }
-  const last = reward(u, [['scale', 1], ['guard', 1]])
+  const last = reward(u, bossLastReward(r.i))
   const mvp = rows[0]
   const mvpName = mvp ? s.u[mvp.k].n || '참가자' : ''
-  const best = mvp ? reward(s.u[mvp.k], [['bless', 2]]) : null
+  const best = mvp ? reward(s.u[mvp.k], BOSS_MVP) : null
   s.bk += 1
   s.bl += 1
   s.r = null

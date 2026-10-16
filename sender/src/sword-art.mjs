@@ -1,15 +1,16 @@
-// 「추억의 검 강화」 카드 그림(SVG → PNG). 검은 단계 묶음(tier)마다 그려 둔 그림(assets/swords/tier0~7.png)을 붙이고,
-// 그림 파일이 없으면 이 파일에서 직접 그린 벡터 검으로 대신한다. 단계가 오를수록 빛(오라)과 반짝임이 늘어난다.
+// 「추억의 검 강화」 카드 그림(SVG → PNG). 검은 단계 묶음(sword.mjs FAMILIES)마다 그려 둔 그림(assets/swords/tier0~13.png)을 붙이고,
+// 그림 파일이 없으면(새 묶음 그림이 아직 없을 때 등) 이 파일에서 직접 그린 벡터 검으로 대신한다. 단계가 오를수록 빛(오라)과 반짝임이 늘어난다.
 // 순수 모듈: 같은 카드 값이면 같은 SVG. PNG 는 card.mjs(resvg)가 만든다 — 못 만들면 null(부르는 쪽이 글로 보낸다).
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { svgToPng, esc, ellipsis, textWidth } from './card.mjs'
-import { MAX_LV, tierOf, swordName, won, cost, chance } from './sword.mjs'
+import { MAX_LV, FAMILIES, tierOf, swordName, won, cost, chance, guardK } from './sword.mjs'
 
 const F = "font-family=\"Pretendard\""
 
-// 묶음별 색·모양. bl 날 길이, hw 날 반폭, gw 코등이 폭
+// 묶음별 색·모양(FAMILIES 차례). bl 날 길이, hw 날 반폭, gw 코등이 폭. 그림 파일이 없을 때 쓰는 벡터 검.
+// wave: 물결 날(wavy)의 덧칠 색(위·가운데·아래, 없으면 불꽃), rune: 룬 날(jagged)의 룬 색(없으면 분홍)
 const LOOK = [
   { shape: 'notched', guard: 'bar', bl: 226, hw: 17, gw: 50, gl: 64, blade: ['#c2b6a4', '#9a8b78', '#6c5f50', '#4a4036'], edge: '#d9cdb9', metal: ['#a08468', '#6e5642', '#463526'], grip: '#3a281b', wrap: '#6b4a32', gem: '', aura: '' },
   { shape: 'plain', guard: 'bar', bl: 250, hw: 18, gw: 58, gl: 66, blade: ['#ffffff', '#dfe5ec', '#9aa6b5', '#5f6b7b'], edge: '#ffffff', metal: ['#e3e8ef', '#9aa5b3', '#5b6573'], grip: '#2b3044', wrap: '#525a7a', gem: '#e0413a', aura: '#cfe0ff' },
@@ -19,10 +20,22 @@ const LOOK = [
   { shape: 'broad', guard: 'dragon', bl: 274, hw: 24, gw: 96, gl: 70, blade: ['#fffdf0', '#ffe48a', '#e3ad2c', '#9a6a0c'], edge: '#fffbe0', metal: ['#fff0b0', '#e6b23a', '#9a6a10'], grip: '#5a1717', wrap: '#e6b23a', gem: '#1fe08a', aura: '#ffcf3a' },
   { shape: 'jagged', guard: 'horn', bl: 278, hw: 22, gw: 88, gl: 70, blade: ['#c9b1ff', '#7f5bc4', '#43277a', '#170a2c'], edge: '#e9d9ff', metal: ['#6c5596', '#33234f', '#140b22'], grip: '#120818', wrap: '#7a52c0', gem: '#ff2f8f', aura: '#a24dff' },
   { shape: 'holy', guard: 'angel', bl: 284, hw: 22, gw: 112, gl: 70, blade: ['#ffffff', '#f2f9ff', '#bfe0ff', '#7fb2ee'], edge: '#ffffff', metal: ['#ffffff', '#ffe9a6', '#d2a23a'], grip: '#f4ecff', wrap: '#d9ae45', gem: '#ff7ad9', aura: '#fff2b8' },
+  // 천둥 폭풍: 청백 날 · 노란 번개 모서리
+  { shape: 'crystal', guard: 'curve', bl: 286, hw: 22, gw: 96, gl: 70, blade: ['#ffffff', '#dff3ff', '#7fc4ff', '#2f5fb8'], edge: '#fff27a', metal: ['#f2f6ff', '#9fb4d8', '#4a5f8a'], grip: '#1b2440', wrap: '#ffd84a', gem: '#ffe14a', aura: '#8fd0ff' },
+  // 심해의 조류: 청록 바다 유리 · 산호 코등이 · 진주
+  { shape: 'wavy', guard: 'crystal', bl: 288, hw: 23, gw: 96, gl: 70, blade: ['#f4fffd', '#9ff0e4', '#2fb8b0', '#0d5f6e'], edge: '#e8fffb', metal: ['#ffe0d6', '#ff8f7a', '#b8483a'], grip: '#0b3340', wrap: '#ff8f7a', gem: '#fff4e8', aura: '#3fe0d0', wave: ['#f4fffd', '#7fe8dc', '#0d6f80'] },
+  // 성운의 은하: 보랏빛 성운
+  { shape: 'broad', guard: 'curve', bl: 290, hw: 24, gw: 104, gl: 70, blade: ['#f3e9ff', '#c49bff', '#6a3fc4', '#24104f'], edge: '#f6eaff', metal: ['#e9dcff', '#9b7ad8', '#4a2f86'], grip: '#1a0f33', wrap: '#c49bff', gem: '#7af0ff', aura: '#b07aff' },
+  // 혼돈의 일식: 검정·진홍
+  { shape: 'jagged', guard: 'horn', bl: 292, hw: 23, gw: 100, gl: 70, blade: ['#ff9a8a', '#c4202a', '#3a0a10', '#0a0204'], edge: '#ffb0a0', metal: ['#4a4a52', '#1e1e24', '#08080a'], grip: '#0a0204', wrap: '#c4202a', gem: '#ff2a2a', aura: '#ff3a3a', rune: '#ffb347' },
+  // 천상의 태엽: 백금 날 · 금 톱니
+  { shape: 'broad', guard: 'dragon', bl: 294, hw: 24, gw: 108, gl: 70, blade: ['#ffffff', '#eef1f5', '#b9c2cf', '#6f7a8a'], edge: '#ffffff', metal: ['#fff0b0', '#e6b23a', '#9a6a10'], grip: '#3a3f4a', wrap: '#e6b23a', gem: '#ffe680', aura: '#ffe9a6' },
+  // 태초의 창세검: 무지개 수정 · 날개
+  { shape: 'holy', guard: 'angel', bl: 300, hw: 24, gw: 120, gl: 72, blade: ['#ffffff', '#f6f0ff', '#d6e8ff', '#a8b8ff'], edge: '#ffffff', metal: ['#ffffff', '#f0e6ff', '#b8a6e8'], grip: '#f8f4ff', wrap: '#c9b6ff', gem: '#7af0ff', aura: '#e6d8ff' },
 ]
 
 export function lookOf(lv) {
-  return LOOK[tierOf(lv)]
+  return LOOK[Math.min(LOOK.length - 1, tierOf(lv))]
 }
 
 // 반복해도 같은 값이 나오는 작은 난수(반짝임 자리)
@@ -36,17 +49,22 @@ function lcg(seed) {
 
 const r1 = (n) => Math.round(n * 10) / 10
 
-// 묶음별 검 그림(세로, 끝이 위, 둘레는 투명). → { uri, w, h } 또는 null(파일이 없으면 벡터 검)
+// 묶음별 검 그림(세로, 끝이 위, 둘레는 투명). → { uri, w, h } 또는 null(파일이 없거나 PNG 가 아니면 벡터 검)
 const ART_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'swords')
-const ART = Array.from({ length: 8 }, (_, i) => {
-  try {
-    const b = readFileSync(join(ART_DIR, `tier${i}.png`))
-    if (b.length < 24 || b.toString('latin1', 12, 16) !== 'IHDR') return null
-    return { uri: 'data:image/png;base64,' + b.toString('base64'), w: b.readUInt32BE(16), h: b.readUInt32BE(20) }
-  } catch {
-    return null
-  }
-})
+
+/** dir 의 tier{art}.png 를 묶음 차례로 읽는다(없는 파일은 null) */
+export function loadArt(dir) {
+  return FAMILIES.map((f) => {
+    try {
+      const b = readFileSync(join(dir, `tier${f.art}.png`))
+      if (b.length < 24 || b.toString('latin1', 12, 16) !== 'IHDR') return null
+      return { uri: 'data:image/png;base64,' + b.toString('base64'), w: b.readUInt32BE(16), h: b.readUInt32BE(20) }
+    } catch {
+      return null
+    }
+  })
+}
+const ART = loadArt(ART_DIR)
 const ART_MAX_H = Math.max(1, ...ART.map((a) => (a ? a.h : 0)))
 
 /** 이 단계의 검 그림(없으면 null) */
@@ -240,8 +258,9 @@ function guardSvg(L, id, y0, lv) {
   return s
 }
 
+// 이 단계가 속한 묶음의 첫 단계(묶음 안에서 단계가 오를수록 작은 보석·빛이 는다)
 function LOOK_FROM(lv) {
-  return [0, 3, 6, 9, 12, 15, 18, 20][tierOf(lv)]
+  return FAMILIES[tierOf(lv)].from
 }
 
 /**
@@ -269,7 +288,8 @@ export function swordSvg(lv, id, opt) {
   defs += `<filter id="${id}f" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="7"/></filter>`
   if (L.gem) defs += gemDef(`${id}g`, L.gem)
   if (L.shape === 'wavy') {
-    defs += `<linearGradient id="${id}w" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${L.bl}"><stop offset="0" stop-color="#fff7d6" stop-opacity=".95"/><stop offset=".45" stop-color="#ffb347" stop-opacity=".55"/><stop offset="1" stop-color="#c0150c" stop-opacity=".75"/></linearGradient>`
+    const wv = L.wave || ['#fff7d6', '#ffb347', '#c0150c']
+    defs += `<linearGradient id="${id}w" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${L.bl}"><stop offset="0" stop-color="${wv[0]}" stop-opacity=".95"/><stop offset=".45" stop-color="${wv[1]}" stop-opacity=".55"/><stop offset="1" stop-color="${wv[2]}" stop-opacity=".75"/></linearGradient>`
   }
   if (L.shape === 'holy') {
     defs += `<linearGradient id="${id}h" gradientUnits="userSpaceOnUse" x1="${-L.hw * 1.3}" y1="0" x2="${L.hw * 1.3}" y2="${L.bl}"><stop offset="0" stop-color="#ff9be3"/><stop offset=".3" stop-color="#ffe680"/><stop offset=".6" stop-color="#8ef0ff"/><stop offset="1" stop-color="#b59bff"/></linearGradient>`
@@ -314,7 +334,7 @@ export function swordSvg(lv, id, opt) {
     // 빛나는 룬
     for (let i = 0; i < 5; i++) {
       const y = L.bl * (0.3 + i * 0.13)
-      bladeBody += `<path d="M-4,${r1(y)} L4,${r1(y + 5)} L-3,${r1(y + 10)}" fill="none" stroke="#ff7ad0" stroke-width="2" stroke-linecap="round" opacity=".9"/>`
+      bladeBody += `<path d="M-4,${r1(y)} L4,${r1(y + 5)} L-3,${r1(y + 10)}" fill="none" stroke="${L.rune || '#ff7ad0'}" stroke-width="2" stroke-linecap="round" opacity=".9"/>`
     }
   }
   if (L.shape === 'holy') bladeBody += `<path d="${corePath(L, 0.2)}" fill="#ffffff" opacity=".85"/>`
@@ -423,7 +443,7 @@ function showcase(lv, x, y, w, h, opt) {
   // 바닥 격자(옛 게임 느낌)
   for (let i = 1; i < 6; i++) s += `<path d="M${x},${r1(y + h - i * 16)} L${x + w},${r1(y + h - i * 16)}" stroke="${aura}" stroke-opacity="${r1(0.12 - i * 0.015) > 0 ? r1((0.12 - i * 0.018) * 100) / 100 : 0.02}" stroke-width="1"/>`
   s += `<ellipse cx="${cx}" cy="${y + h - 34}" rx="${w * 0.32}" ry="10" fill="#000" opacity=".35"/>`
-  const A = artOf(lv)
+  const A = o.vector ? null : artOf(lv)
   if (A) {
     const sw = artSword(A, cx, cy - 22, h - 92, 'sw', { broken: o.broken })
     defs += sw.defs
@@ -443,25 +463,41 @@ function showcase(lv, x, y, w, h, opt) {
 }
 
 // 진열장은 단계(와 부러짐)마다 늘 같은 그림이라 PNG 로 한 번 그려 두고 카드에 붙인다(빛번짐 필터가 비싸다).
-// 단계 21개 × 부러짐 = 많아야 42장. 렌더러가 없으면 null(카드는 벡터로 그린다).
+// 단계 31개 × 부러짐 = 많아야 62장. 렌더러가 없으면 null(카드는 벡터로 그린다).
+// vector: 그림 파일이 있어도 벡터 검으로 그린다(그림이 없을 때 모양을 점검할 때)
 const SHOWCASE_PNG = new Map()
-function showcaseImage(lv, x, y, w, h, broken) {
-  const k = `${lv}|${broken ? 1 : 0}|${w}x${h}`
+function showcaseImage(lv, x, y, w, h, broken, vector) {
+  const k = `${lv}|${broken ? 1 : 0}|${vector ? 1 : 0}|${w}x${h}`
   let uri = SHOWCASE_PNG.get(k)
   if (uri === undefined) {
-    const sc = showcase(lv, 0, 0, w, h, { broken })
+    const sc = showcase(lv, 0, 0, w, h, { broken, vector })
     const png = svgToPng(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs>${sc.defs}</defs>${sc.body}</svg>`)
     uri = png ? 'data:image/png;base64,' + png.toString('base64') : null
-    if (SHOWCASE_PNG.size < 64) SHOWCASE_PNG.set(k, uri)
+    if (SHOWCASE_PNG.size < 80) SHOWCASE_PNG.set(k, uri)
   }
   return uri ? `<image x="${x}" y="${y}" width="${w}" height="${h}" href="${uri}"/>` : ''
 }
 
-function showcaseAt(lv, x, y, w, h, broken, embed) {
-  const img = embed ? showcaseImage(lv, x, y, w, h, broken) : ''
+function showcaseAt(lv, x, y, w, h, broken, opt) {
+  const o = opt || {}
+  const img = o.embed ? showcaseImage(lv, x, y, w, h, broken, o.vector) : ''
   if (img) return img
-  const sc = showcase(lv, x, y, w, h, { broken })
+  const sc = showcase(lv, x, y, w, h, { broken, vector: o.vector })
   return `<defs>${sc.defs}</defs>` + sc.body
+}
+
+// 다음 강화에 드는 것 「4,300G + 결정 1」(재료는 짧은 이름 · 수)
+function needText(c) {
+  const out = [won(c.gold) + 'G']
+  if (c.mana) out.push('마력석 ' + c.mana)
+  if (c.scale) out.push('비늘 ' + c.scale)
+  if (c.star) out.push('결정 ' + c.star)
+  return out.join(' + ')
+}
+
+// +15부터: 보호에 드는 주문서 수(글 답의 「보호하려면 …」 줄과 같다)
+function guardLine(x, y, k) {
+  return k > 1 ? text(x, y, `보호하려면 보호 주문서 ${k}개`, 15, '#7ef0c8', { bold: true }) : ''
 }
 
 function lvBadge(lv, x, y, color) {
@@ -488,8 +524,12 @@ function probBar(x, y, w, up, broke) {
   return s
 }
 
+function chipW(label) {
+  return Math.round(textWidth(label, 15, true) + 28)
+}
+
 function chip(x, y, label, color) {
-  const w = Math.round(textWidth(label, 15, true) + 28)
+  const w = chipW(label)
   return { w, svg: `<rect x="${x}" y="${y}" width="${w}" height="30" rx="15" fill="${color}" fill-opacity=".16" stroke="${color}" stroke-opacity=".6"/>` + text(x + w / 2, y + 21, label, 15, color, { bold: true, anchor: 'middle' }) }
 }
 
@@ -506,7 +546,7 @@ export function enhanceSvg(c, opt) {
   const shownLv = broken ? c.from : c.lv
   const L = lookOf(shownLv)
   let s = frame(W, H, R.bg, R.color)
-  s += showcaseAt(shownLv, 34, 34, 312, 446, broken, opt && opt.embed)
+  s += showcaseAt(shownLv, 34, 34, 312, 446, broken, opt)
   s += lvBadge(shownLv, 52, 462, broken ? '#9a9fb0' : L.aura || '#e8e2d4')
   s += ribbons(c.notes, 48, 48)
   const X = 374
@@ -530,17 +570,14 @@ export function enhanceSvg(c, opt) {
   // 다음 강화
   const rows = []
   if (c.lv >= MAX_LV) rows.push(['다음 강화', '최고 단계'])
-  else {
-    const need = cost(c.lv)
-    rows.push(['다음 강화 비용', won(need.gold) + 'G' + (need.mana ? ' + 마력석' : '') + (need.scale ? ' + 비늘' : '')])
-  }
+  else rows.push(['다음 강화', needText(cost(c.lv))])
   rows.push(['보유 골드', won(c.gold) + 'G'])
   rows.push(['사용한 골드', won(c.spent) + 'G'])
-  let y = 280
+  let y = 278
   for (const [k, v] of rows) {
     s += text(X, y, k, 19, '#8f9bc7')
-    s += text(RX, y, v, 22, '#ffffff', { bold: true, anchor: 'end' })
-    y += 38
+    s += text(RX, y, ellipsis(v, 22, RX - X - textWidth(k, 19) - 16, true), 22, '#ffffff', { bold: true, anchor: 'end' })
+    y += 36
   }
   if (c.lv < MAX_LV) {
     const ch = nextChance(c.lv, c.pity)
@@ -548,17 +585,26 @@ export function enhanceSvg(c, opt) {
     if (ch.broke) s += text(RX, y + 4, `파괴 ${ch.broke}%`, 16, '#ff7a6a', { bold: true, anchor: 'end' })
     s += probBar(X, y + 14, RX - X, ch.up, ch.broke)
     y += 44
+    const k = guardK(c.lv)
+    if (k > 1) {
+      s += guardLine(X, y + 4, k)
+      y += 22
+    }
   }
+  // 이번에 쓴 주문서 칩(「보호 주문서 5개」) — 넘치면 다음 줄
   const chips = (c.used || []).slice()
   if (c.result === 'up' && c.lv >= MAX_LV) chips.push('최고 단계 달성')
   if (broken) chips.push(`새 +0 ${swordName(0)}`)
-  if (chips.length) {
-    let cx = X
-    for (const u of chips) {
-      const ch = chip(cx, y + 6, u, u.startsWith('보호') ? '#7ef0c8' : u.startsWith('새') ? '#c7cfe6' : '#ffd84a')
-      s += ch.svg
-      cx += ch.w + 8
+  let cx = X
+  let cy = y + 6
+  for (const u of chips) {
+    if (cx > X && cx + chipW(u) > RX) {
+      cx = X
+      cy += 36
     }
+    const ch = chip(cx, cy, u, u.startsWith('보호') ? '#7ef0c8' : u.startsWith('새') ? '#c7cfe6' : '#ffd84a')
+    s += ch.svg
+    cx += ch.w + 8
   }
   s += footer(W, H, `최고 기록 +${c.best}`)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${s}</svg>`
@@ -592,7 +638,7 @@ export function infoSvg(c, opt) {
   const L = lookOf(c.lv)
   const accent = L.aura || '#d9cdb9'
   let s = frame(W, H, ['#111633', '#1c2550'], accent)
-  s += showcaseAt(c.lv, 34, 34, 312, 446, false, opt && opt.embed)
+  s += showcaseAt(c.lv, 34, 34, 312, 446, false, opt)
   s += lvBadge(c.lv, 52, 462, L.aura || '#e8e2d4')
   const X = 374
   const RX = 686
@@ -601,16 +647,11 @@ export function infoSvg(c, opt) {
   s += text(X, 160, `+${c.lv} · 최고 기록 +${c.best}`, 20, accent, { bold: true })
   s += `<path d="M${X},184 L${RX},184" stroke="#ffffff" stroke-opacity=".14" stroke-width="1.5"/>`
   const rows = [['보유 골드', won(c.gold) + 'G'], ['판매가', won(c.price) + 'G']]
-  if (c.next) {
-    const need = [won(c.next.gold) + 'G']
-    if (c.next.mana) need.push('마력석')
-    if (c.next.scale) need.push('비늘')
-    rows.push(['다음 강화', need.join(' + ')])
-  } else rows.push(['다음 강화', '최고 단계'])
+  rows.push(['다음 강화', c.next ? needText(c.next) : '최고 단계'])
   let y = 222
   for (const [k, v] of rows) {
     s += text(X, y, k, 19, '#8f9bc7')
-    s += text(RX, y, ellipsis(v, 22, 190, true), 22, '#ffffff', { bold: true, anchor: 'end' })
+    s += text(RX, y, ellipsis(v, 22, RX - X - textWidth(k, 19) - 16, true), 22, '#ffffff', { bold: true, anchor: 'end' })
     y += 38
   }
   if (c.next) {
@@ -618,22 +659,35 @@ export function infoSvg(c, opt) {
     if (c.next.broke) s += text(RX, y + 2, `파괴 ${c.next.broke}%`, 16, '#ff7a6a', { bold: true, anchor: 'end' })
     s += probBar(X, y + 12, RX - X, c.next.up, c.next.broke)
     y += 40
+    if (c.next.guard > 1) {
+      s += guardLine(X, y + 6, c.next.guard)
+      y += 22
+    }
   }
-  // 아이템 2×2
-  const iw = (RX - X - 10) / 2
-  ;(c.items || []).slice(0, 4).forEach((it, i) => {
-    const ix = X + (i % 2) * (iw + 10)
-    const iy = y + 6 + Math.floor(i / 2) * 50
-    s += `<rect x="${r1(ix)}" y="${iy}" width="${r1(iw)}" height="42" rx="10" fill="#ffffff" fill-opacity="${it.n ? 0.08 : 0.03}" stroke="#ffffff" stroke-opacity=".12"/>`
-    s += text(ix + 12, iy + 27, it.name, 16, it.n ? '#dfe4fb' : '#6d769c')
-    s += text(ix + iw - 12, iy + 28, String(it.n), 19, it.n ? '#ffffff' : '#6d769c', { bold: true, anchor: 'end' })
+  // 아이템: 첫 줄은 주문서 두 칸(넓게), 둘째 줄은 재료 세 칸(짧은 이름)
+  const items = (c.items || []).slice(0, 5)
+  items.forEach((it, i) => {
+    const wide = i < 2
+    const per = wide ? 2 : 3
+    const col = wide ? i : i - 2
+    const iw = (RX - X - 8 * (per - 1)) / per
+    const ix = X + col * (iw + 8)
+    const iy = y + 6 + (wide ? 0 : 46)
+    // 이름 칸 = 칸 폭 - 여백 - 수. 좁은 칸에서 넘치면 글자를 줄이고, 그래도 넘치면 … 로 줄인다
+    const nameW = iw - 18 - textWidth(String(it.n), wide ? 19 : 18, true) - 4
+    const raw = wide ? it.name : it.short || it.name
+    const size = wide ? 16 : textWidth(raw, 15) <= nameW ? 15 : 13
+    s += `<rect x="${r1(ix)}" y="${iy}" width="${r1(iw)}" height="40" rx="10" fill="#ffffff" fill-opacity="${it.n ? 0.08 : 0.03}" stroke="#ffffff" stroke-opacity=".12"/>`
+    s += text(r1(ix + 9), iy + 26, ellipsis(raw, size, nameW), size, it.n ? '#dfe4fb' : '#6d769c')
+    s += text(r1(ix + iw - 9), iy + 27, String(it.n), wide ? 19 : 18, it.n ? '#ffffff' : '#6d769c', { bold: true, anchor: 'end' })
   })
   s += footer(W, H, c.broken ? `부서진 검 ${c.broken}자루` : '')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${s}</svg>`
 }
 
 /** 강화 랭킹 카드 SVG */
-export function rankSvg(c) {
+export function rankSvg(c, opt) {
+  const o = opt || {}
   const rows = (c.rows || []).slice(0, 10)
   const W = 720
   const RH = 58
@@ -649,7 +703,7 @@ export function rankSvg(c) {
     s += `<rect x="34" y="${y}" width="${W - 68}" height="${RH - 8}" rx="12" fill="#ffffff" fill-opacity="${i < 3 ? 0.08 : 0.04}" stroke="#ffffff" stroke-opacity="${i < 3 ? 0.16 : 0.08}"/>`
     if (medal) s += `<circle cx="66" cy="${y + 25}" r="16" fill="${medal}"/>` + text(66, y + 32, String(i + 1), 18, '#1a1a2e', { bold: true, anchor: 'middle' })
     else s += text(66, y + 32, String(i + 1), 20, '#aab3d6', { bold: true, anchor: 'middle' })
-    const A = artOf(r.lv)
+    const A = o.vector ? null : artOf(r.lv)
     if (A) {
       s += `<g transform="translate(116,${y + 25}) rotate(45)">${artSword(A, 0, 0, 60, 'r' + i).body}</g>`
     } else {
@@ -658,21 +712,24 @@ export function rankSvg(c) {
       const sc = 40 / (sw.len * 0.72)
       s += `<g transform="translate(116,${y + 25}) rotate(45) scale(${r1(sc * 1000) / 1000})">${sw.body}</g>`
     }
-    s += text(150, y + 33, ellipsis(r.name, 22, 250, true), 22, '#ffffff', { bold: true })
+    // 이름 칸은 오른쪽 검 이름(단계마다 길이가 다르다)과 겹치지 않을 만큼
+    const label = `+${r.lv} ${swordName(r.lv)}`
+    const nameW = Math.max(80, W - 160 - textWidth(label, 20, true) - 16 - 150)
+    s += text(150, y + 33, ellipsis(r.name, 22, nameW, true), 22, '#ffffff', { bold: true })
     const L = lookOf(r.lv)
-    s += text(W - 160, y + 33, `+${r.lv} ${swordName(r.lv)}`, 20, L.aura || '#d9cdb9', { bold: true, anchor: 'end' })
+    s += text(W - 160, y + 33, label, 20, L.aura || '#d9cdb9', { bold: true, anchor: 'end' })
     s += text(W - 50, y + 33, `최고 +${r.best}`, 16, '#8f9bc7', { anchor: 'end' })
   })
   s += footer(W, H, '')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${s}</svg>`
 }
 
-/** 카드 값(sword.mjs run 의 card) → SVG */
+/** 카드 값(sword.mjs run 의 card) → SVG. opt.embed: 진열장을 PNG 로 붙인다, opt.vector: 그림 파일 대신 벡터 검 */
 export function cardSvg(card, opt) {
   if (!card) return ''
   if (card.kind === 'enhance') return enhanceSvg(card, opt)
   if (card.kind === 'info') return infoSvg(card, opt)
-  if (card.kind === 'rank') return rankSvg(card)
+  if (card.kind === 'rank') return rankSvg(card, opt)
   return ''
 }
 
