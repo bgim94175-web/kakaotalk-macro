@@ -4118,6 +4118,31 @@ async function withLog(fn) {
       } finally {
         fs.room('voicex1').voiceDeny = 0
       }
+      // 모양찾기: 통하는 바디 모양을 찾고, 그 모양으로 보이스룸까지 쳐 본다
+      fs.room('voicex1').voiceDeny = -203
+      try {
+        const sh = await botA.slot.voiceShape(vv)
+        if (!sh.ok) throw new Error('#42 shape probe runs')
+        if (sh.shape !== 'chatId') throw new Error('#42 shape probe stops at the first shape that works ' + JSON.stringify(sh.rows))
+        if (!sh.rows.some((r) => r.tag === '보이스룸16')) throw new Error('#42 shape probe retries the voice type with the shape it found')
+        if (sh.next !== 'voice_closed') throw new Error('#42 shape verdict when the title works but voice does not: ' + sh.next)
+      } finally {
+        fs.room('voicex1').voiceDeny = 0
+      }
+      // 어떤 모양으로도 안 통하면 명령어 쪽을 보라고 한다
+      fs.room('voicex1').metaDeny = -203
+      try {
+        const sh2 = await botA.slot.voiceShape(vv)
+        if (sh2.next !== 'no_shape' || sh2.shape) throw new Error('#42 shape verdict when nothing works ' + JSON.stringify(sh2))
+        if (sh2.rows.length !== VR.SHAPES.length) throw new Error('#42 every shape is tried before giving up ' + sh2.rows.length)
+        if (sh2.rows.some((r) => r.tag === '보이스룸16')) throw new Error('#42 no voice retry without a working shape')
+      } finally {
+        fs.room('voicex1').metaDeny = 0
+      }
+      // 통하는 모양으로 보이스룸까지 받아 주면 켜진 것
+      const sh3 = await botA.slot.voiceShape(vv)
+      if (sh3.next !== 'voice_on') throw new Error('#42 shape verdict when voice is accepted ' + sh3.next)
+      await botA.slot.voiceSignal(vv, VR.offContent())
       // 보이스룸 메타가 없는 방에서는 그렇게 알린다
       const vOther = botA.slot.byInstall.get(iV3)
       const m3 = await botA.slot.voiceMirror(vOther)

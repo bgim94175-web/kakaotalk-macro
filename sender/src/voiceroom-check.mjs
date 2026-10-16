@@ -234,4 +234,29 @@ ok(V.writeTestVerdict([{ tag: 'type3', st: -203 }]).verdict.includes('다른 명
 eq(V.writeTestVerdict([{ tag: 'type3', st: -300 }]).next, 'unknown_type', '그 타입도 모른다면')
 ok(V.writeTestText([{ tag: 'type3', st: 0 }], { what: 'type 3(제목)에 지금 방 이름 그대로' }).startsWith('보룸 쓰기시험 (type 3(제목)에 지금 방 이름 그대로)'), '무엇을 썼는지 밝힌다')
 
+// ── 바디 모양 찾기 ───────────────────────────────────────────────────────
+const vals = { chatId: 'CID', li: 'LI', type: 16, typeLong: 'L16', content: 'BODY' }
+const byTag = (t) => V.SHAPES.find((x) => x.tag === t)
+eq(JSON.stringify(V.shapeBody(byTag('chatId'), vals)), JSON.stringify({ chatId: 'CID', type: 16, content: 'BODY' }), '지금까지 보내던 모양')
+eq(JSON.stringify(V.shapeBody(byTag('c+li'), vals)), JSON.stringify({ c: 'CID', li: 'LI', type: 16, content: 'BODY' }), 'openAction 과 같은 모양')
+eq(JSON.stringify(V.shapeBody(byTag('c+li+t'), vals)), JSON.stringify({ c: 'CID', li: 'LI', t: 16, content: 'BODY' }), 'type 을 t 로')
+eq(JSON.stringify(V.shapeBody(byTag('c+li+v'), vals)), JSON.stringify({ c: 'CID', li: 'LI', type: 16, v: 'BODY' }), 'content 를 v 로')
+eq(V.shapeBody(byTag('c+li+long'), vals).type, 'L16', 'type 을 Long 으로')
+eq(V.shapeBody(byTag('c'), vals).li, undefined, 'li 를 안 쓰는 모양')
+eq(V.shapeBody(byTag('chatId+li'), { chatId: 'CID', li: null, type: 3, content: 'x' }).li, undefined, '옾링 id 가 없으면 빼고 보낸다')
+ok(V.SHAPES.length >= 6 && V.SHAPES[0].tag === 'chatId', '지금 모양부터 먼저 본다')
+
+eq(V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: -203 }]).next, 'no_shape', '전부 막히면 명령어 쪽을 봐야 한다')
+ok(V.shapeVerdict([{ tag: 'chatId', st: -203 }]).verdict.includes('명령어'), '명령어 쪽을 짚는다')
+const f = V.shapeVerdict([{ tag: 'chatId', st: -203 }, { tag: 'c+li', st: 0 }])
+eq(f.next, 'shape_found', '통하는 모양을 찾음')
+eq(f.shape, 'c+li', '어느 모양인지 돌려준다')
+const won = V.shapeVerdict([{ tag: 'c+li', st: 0 }, { tag: '보이스룸16', st: 0 }])
+eq(won.next, 'voice_on', '그 모양으로 보이스룸도 받으면 켜지는 것')
+ok(won.verdict.includes('켜집니다'), '켜진다고 말한다')
+const closed = V.shapeVerdict([{ tag: 'c+li', st: 0 }, { tag: '보이스룸16', st: -203 }])
+eq(closed.next, 'voice_closed', '제목은 되는데 보이스룸만 거부 → 그때야 막힌 것이 증명된다')
+ok(closed.verdict.includes('이제야'), '그때야 확인됐다고 말한다')
+ok(V.shapeText([{ tag: 'c+li', st: 0 }], { what: '제목(3)에 「방」 그대로' }).startsWith('보룸 모양찾기 (제목(3)에 「방」 그대로)'), '무엇을 썼는지 밝힌다')
+
 process.stderr.write('[voiceroom-check] ok\n')

@@ -1741,6 +1741,47 @@ export class BotSlot {
     return { ok: true, rows, type, text, next }
   }
 
+  // 보룸 모양찾기(SENDER_VOICE_EXPERIMENT 전용): SETMETA 바디의 칸 이름을 하나씩 바꿔 가며 통하는 모양을 찾는다.
+  // 해가 없는 타입(제목 3에 지금 방 이름 그대로)으로 먼저 찾고, 통하는 모양이 나오면 **그 모양 그대로**
+  // 보이스룸(16)을 한 번 쳐 본다. 거기서 0 이 나오면 보이스룸이 켜지는 것이고, 거부되면 그때야
+  // "보이스룸 자리만 막혔다"가 처음으로 증명된다.
+  async voiceShape(v) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const title = cleanName(v.link_name) || ''
+    if (!title) return { ok: false, error: 'no_title' }
+    const info = await this.raw('CHATINFO', { chatId: L(chatId) })
+    const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
+      .filter((m) => m && typeof m.content === 'string'))
+    const voiceMeta = metas.find((m) => VR.metaTypeNum(m.type) === 16)
+    const rows = []
+    const run = async (tag, body) => {
+      const r = await this.raw('SETMETA', body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice shape ${tag} body ${traceText(body)} → status ${st} body ${traceText((r && r.body) || {})}`)
+      rows.push({ tag, st })
+      await new Promise((ok) => setTimeout(ok, 400))
+      return st
+    }
+    const vals = (type, content) => ({ chatId: L(chatId), li: li ? L(li) : null, type, typeLong: L(String(type)), content })
+    let found = null
+    for (const shape of VR.SHAPES) {
+      const st = await run(shape.tag, VR.shapeBody(shape, vals(3, title)))
+      if (st === 0) { found = shape; break }
+    }
+    // 통하는 모양을 찾았으면 그 모양 그대로 보이스룸을 쳐 본다
+    if (found) {
+      const content = voiceMeta ? VR.turnOn(voiceMeta.content, Math.floor(this.now() / 1000)) : this.voiceContent(VR.newSession({ title: title, by: this.id, chat: chatId, now: this.now() }), this.now())
+      await run('보이스룸16', VR.shapeBody(found, vals(16, content)))
+    }
+    const what = `제목(3)에 「${title}」 그대로${voiceMeta ? ' · 보이스룸 메타 있음' : ''}`
+    const text = VR.shapeText(rows, { what })
+    const verdict = VR.shapeVerdict(rows, {})
+    log(this.id, `voice shape done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${verdict.next} shape ${verdict.shape || '-'}`)
+    return { ok: true, rows, text, next: verdict.next, shape: verdict.shape }
+  }
+
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
   async write(installId, fields) {
     return this.store.updateInstall(Number(installId), this.id, fields)
@@ -3517,6 +3558,17 @@ export class BotSlot {
         this.say(v, '보룸 진단 중… 잠시만요(약 5초).', { what: 'reply' })
         const r = await this.voiceDiag(v, !!dm[1])
         this.say(v, r.ok ? r.text : '진단을 돌리지 못했어요.', { what: 'reply' })
+        return
+      }
+      if (t === '보룸모양' || t === '보룸모양찾기') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 모양찾기는 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, 'SETMETA 바디 모양을 하나씩 바꿔 보는 중… 잠시만요(약 5초).', { what: 'reply' })
+        const r = await this.voiceShape(v)
+        this.say(v, r.ok ? r.text : '모양찾기를 돌리지 못했어요.', { what: 'reply' })
         return
       }
       if (t === '보룸쓰기시험' || t === '보룸쓰기') {

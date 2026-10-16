@@ -475,3 +475,67 @@ export function writeTestText(rows, o) {
   const v = writeTestVerdict(rows)
   return `보룸 쓰기시험 (${opt.what || '-'})\n${line}\n→ ${v.verdict}`
 }
+
+// ── 바디 모양 찾기(shape) ────────────────────────────────────────────────
+// 쓰기시험에서 보이스룸이 아닌 타입(제목 3)마저 -203 이었다 → 우리 SETMETA 바디 모양 자체가 의심스럽다.
+// 실제로 이 저장소에서 **운영 중 통하는** 오픈채팅 명령어(KICKMEM·REWRITE·KLDELITEM)는 openAction 을 거치며
+// `{li, c}` 를 쓴다 — `chatId` 가 아니라 `c` 다. 반면 CHATONROOM·GETMEM 은 `chatId` 로 통한다(명령어마다 다르다).
+// 그래서 SETMETA 가 어느 이름을 원하는지 모아 두고 하나씩 던져 본다. 해가 없는 타입(제목)으로 먼저 찾고,
+// 통하는 모양이 있으면 그 모양으로 보이스룸(16)을 다시 친다.
+export const SHAPES = Object.freeze([
+  { tag: 'chatId', chat: 'chatId', li: false, type: 'type', content: 'content' },      // 지금까지 보내던 모양
+  { tag: 'chatId+li', chat: 'chatId', li: true, type: 'type', content: 'content' },
+  { tag: 'c', chat: 'c', li: false, type: 'type', content: 'content' },
+  { tag: 'c+li', chat: 'c', li: true, type: 'type', content: 'content' },              // openAction 과 같은 모양
+  { tag: 'c+li+t', chat: 'c', li: true, type: 't', content: 'content' },
+  { tag: 'c+li+v', chat: 'c', li: true, type: 'type', content: 'v' },
+  { tag: 'c+li+meta', chat: 'c', li: true, type: 'type', content: 'meta' },
+  { tag: 'c+li+long', chat: 'c', li: true, type: 'type', content: 'content', longType: true },
+])
+
+/** 모양 하나로 바디를 만든다. vals = {chatId, li, type, typeLong, content} — 값은 부르는 쪽이 Long 으로 넣는다. */
+export function shapeBody(shape, vals) {
+  const o = {}
+  const v = vals || {}
+  o[shape.chat] = v.chatId
+  if (shape.li && v.li != null) o.li = v.li
+  o[shape.type] = shape.longType ? v.typeLong : v.type
+  o[shape.content] = v.content
+  return o
+}
+
+/** 모양 찾기 판정. rows = [{tag, st}] → {verdict, next, shape} */
+export function shapeVerdict(rows, o) {
+  const opt = o || {}
+  const hit = (rows || []).find((r) => Number(r.st) === 0 && !String(r.tag).startsWith('보이스룸'))
+  if (!hit) {
+    return {
+      verdict: '어떤 모양으로도 통하지 않아요. SETMETA 는 오픈채팅에서 쓰는 명령어가 아닐 수 있습니다 — 명령어 쪽을 찾아야 합니다.',
+      next: 'no_shape',
+      shape: '',
+    }
+  }
+  const voice = (rows || []).find((r) => String(r.tag).startsWith('보이스룸'))
+  if (voice && Number(voice.st) === 0) {
+    return {
+      verdict: `모양을 찾았어요(${hit.tag}). 그 모양으로 보이스룸도 받아들였습니다 — 켜집니다!`,
+      next: 'voice_on',
+      shape: hit.tag,
+    }
+  }
+  if (voice) {
+    return {
+      verdict: `모양을 찾았어요(${hit.tag}) — 제목은 이 모양으로 써집니다. 그런데 같은 모양으로 보이스룸은 ${voice.st} 로 거부돼요. 보이스룸 자리만 막힌 것이 이제야 확인됐습니다.`,
+      next: 'voice_closed',
+      shape: hit.tag,
+    }
+  }
+  return { verdict: `모양을 찾았어요(${hit.tag}). 이 모양으로 보이스룸을 다시 쳐 봐야 합니다.`, next: 'shape_found', shape: hit.tag }
+}
+
+export function shapeText(rows, o) {
+  const opt = o || {}
+  const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
+  const v = shapeVerdict(rows, opt)
+  return `보룸 모양찾기 (${opt.what || '-'})\n${line}\n→ ${v.verdict}`
+}
