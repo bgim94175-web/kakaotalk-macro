@@ -170,6 +170,7 @@ class FakeServer {
         rateHit: false,
         voice: '',         // 보이스룸 메타(LIVE_TALK_INFO) 본문. '' = 꺼짐
         voiceDeny: 0,      // 0 이 아니면 SETMETA(16) 를 이 상태코드로 거절한다
+        metaDeny: 0,       // 0 이 아니면 SETMETA 를 타입과 상관없이 이 상태코드로 거절한다
         dropOlu: false,
         dropMember: false,
       }
@@ -514,6 +515,7 @@ class FakeServer {
       if (!r) return resp(method, { status: -324 })
       // 실측(2026-10-16): 모르는 메타 타입은 -300, 아는 타입인데 내용이 틀리면 -203
       if (![3, 16, 17].includes(Number(b.type))) return resp(method, { status: -300 })
+      if (r.metaDeny) return resp(method, { status: Number(r.metaDeny) })
       if (Number(b.type) !== 16) return resp(method, { status: 0 })
       if (r.voiceDeny) return resp(method, { status: Number(r.voiceDeny) })
       const content = String(b.content || '')
