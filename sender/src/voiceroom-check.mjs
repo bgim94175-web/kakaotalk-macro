@@ -146,17 +146,20 @@ ok(Number.isNaN(V.metaTypeNum('x')), 'metaTypeNum 이상한 값')
 // 켜기가 되면 배너 확인으로 보낸다
 eq(V.diagVerdict([{ tag: 'on+li', st: -203 }, { tag: 'on-li', st: 0 }], { perm: 4 }).next, 'banner', 'li 없이 되면 성공')
 // 보이스룸이 아닌 메타는 쓰는데 보이스룸만 거부 → 서버 전용
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }, { tag: 'same', st: 0 }], { perm: 4, sameType: 3 }).next, 'server_only', '다른 메타는 쓰는데 보이스룸만 거부')
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }, { tag: 'same', st: 0 }], { perm: 4, sameType: 3 }).next, 'bad_shape', '다른 메타는 쓰는데 보이스룸만 -203')
+eq(V.diagVerdict([{ tag: 'on-li', st: -777 }, { tag: 'unknown', st: -777 }, { tag: 'same', st: 0 }], { perm: 4, sameType: 3 }).next, 'server_only', '모르는 코드로 거부되면 서버 전용')
+eq(V.diagVerdict([{ tag: 'on-li', st: -300 }], { perm: 1 }).next, 'unknown_type', '타입을 모른다고 하면 번호부터')
 // 부방장이 아무 메타도 못 씀 → 방장 방에서 한 번 더
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 4, sameType: 3 }).next, 'owner_test', '부방장이 메타 전체 거부')
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -777 }], { perm: 4, sameType: 3 }).next, 'owner_test', '부방장이 설명 안 되는 코드로 거부')
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 4, sameType: 3 }).next, 'bad_shape', '-203 은 권한 이야기로 읽지 않는다')
 // 방장인데 아무 메타도 못 씀 → 권한이 아니다
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 1, sameType: 3 }).next, 'server_only', '방장이 메타 전체 거부')
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'same', st: -203 }], { perm: 1, sameType: 3 }).next, 'bad_shape', '방장이어도 -203 은 내용 문제')
 // 거부당하는 타입(16)으로 돌린 same 은 대조군이 아니다 — 없는 셈 친다
 const sameVoice = V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }, { tag: 'same', st: -203 }], { perm: 1, sameType: 16 })
-eq(sameVoice.next, 'server_only', '보이스룸 타입으로 돌린 same 은 세지 않는다')
+eq(sameVoice.next, 'bad_shape', '보이스룸 타입으로 돌린 same 은 세지 않는다')
 ok(!sameVoice.verdict.includes('방장인 방에서'), '방장에게 방장 방에서 해 보라고 하지 않는다: ' + sameVoice.verdict)
 // 부방장이면 같은 줄이라도 아직 가릴 수 있는 여지가 있다
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }], { perm: 4 }).next, 'full', '부방장은 전체로 더 본다')
+eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }], { perm: 4 }).next, 'bad_shape', '부방장도 같은 판정(권한 이야기가 아니다)')
 
 // 실측 그대로(2026-10-16, 봇이 방장인 방): 모르는 타입 -300 · 보이스룸 -203 → 서버 전용
 const real = [
@@ -164,14 +167,15 @@ const real = [
   { tag: 'count', st: -203 }, { tag: 'unknown', st: -300 }, { tag: 'same', st: -203 },
 ]
 const rv = V.diagVerdict(real, { perm: 1, sameType: 16 })
-eq(rv.next, 'server_only', '실측 판정')
-ok(rv.verdict.includes('방장') && rv.verdict.includes('-300'), '실측 판정 문구: ' + rv.verdict)
+eq(rv.next, 'bad_shape', '실측 판정: 타입은 알고 내용이 틀린 것')
+ok(rv.verdict.includes('-300') && rv.verdict.includes('권한 문제가 아닙니다'), '실측 판정 문구: ' + rv.verdict)
+ok(V.diagText(real, { types: [16, 17], perm: 1, full: true, sameType: 16 }).includes('보룸따라'), '다음 수로 따라쓰기를 알려 준다')
 const realText = V.diagText(real, { types: [16, 17], perm: 1, full: true, sameType: 16, sameSkip: '' })
 ok(realText.startsWith('보룸 진단 (방장 1 · 방 메타 16,17)'), '권한을 말로 푼다: ' + realText)
 ok(!realText.includes('보룸진단 전체'), '이미 결론이 났으면 전체를 권하지 않는다')
 
 // 끄기만 받는 경우
-eq(V.diagVerdict([{ tag: 'on-li', st: -203 }, { tag: 'off', st: 0 }, { tag: 'unknown', st: -203 }], { perm: 4 }).next, 'server_only', '끄기만 받음')
+eq(V.diagVerdict([{ tag: 'on-li', st: -500 }, { tag: 'off', st: 0 }, { tag: 'unknown', st: -500 }], { perm: 4 }).next, 'server_only', '끄기만 받음')
 // 대조군을 못 돌렸으면 까닭을 적는다
 const skipText = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -203 }], { types: [16, 17], perm: 4, full: true, sameSkip: '이 방엔 보이스룸 메타(16·17)밖에 없어요' })
 ok(skipText.includes('대조군 생략: 이 방엔'), '대조군 생략 까닭: ' + skipText)
@@ -180,8 +184,46 @@ eq(V.isVoiceMetaType(16), true, 'type 16 은 보이스룸 자리')
 eq(V.isVoiceMetaType({ low: 17 }), true, 'type 17(Long) 도')
 eq(V.isVoiceMetaType(3), false, 'type 3 은 아니다')
 
-const dt = V.diagText([{ tag: 'on-li', st: -203 }, { tag: 'unknown', st: -300 }], { types: [3], perm: 4, full: false })
-ok(dt.includes('on-li -203') && dt.includes('부방장 4') && dt.includes('방 메타 3'), '진단 답에 코드·권한·메타: ' + dt)
+const dt = V.diagText([{ tag: 'on-li', st: -999 }, { tag: 'unknown', st: -999 }], { types: [3], perm: 4, full: false })
+ok(dt.includes('on-li -999') && dt.includes('부방장 4') && dt.includes('방 메타 3'), '진단 답에 코드·권한·메타: ' + dt)
 ok(dt.includes('보룸진단 전체'), '아직 모르면 전체로 안내')
+
+// ── 따라 쓰기(mirror) ────────────────────────────────────────────────────
+// 실측 상태코드
+eq(V.STATUS_BAD_REQUEST, -203, '-203 = 요청 내용이 틀림')
+eq(V.STATUS_UNKNOWN, -300, '-300 = 없는 명령어·모르는 타입')
+
+// url 가리기(주소에 토큰이 들어 있을 수 있다)
+const masked = V.maskMeta('{"liveon":true,"url":"https://x.kakao.com/t?k=secret","callId":123}')
+ok(masked.includes('"url":"<hidden 30>"') && !masked.includes('secret'), 'url 을 가린다: ' + masked)
+ok(masked.includes('"callId":123'), '다른 칸은 그대로')
+eq(V.maskMeta(null), '', '없는 본문')
+
+// 함께 온 칸 모으기
+const ex = V.metaExtras({ type: 16, content: '{}', revision: 7, authorId: '9', updatedAt: 1, nope: undefined })
+eq(JSON.stringify(ex), JSON.stringify({ revision: 7, authorId: '9', updatedAt: 1 }), 'content·type 말고 전부: ' + JSON.stringify(ex))
+eq(JSON.stringify(V.metaExtras(null)), '{}', '없는 메타')
+
+// 켜진 모양으로 바꾸기 — callId 는 글자 그대로 남아야 한다
+const kakaoMeta = '{"liveon":false,"title":"수다","updateTime":1760000000,"startTime":1759999000,"csIP":"1.2.3.4","csPort":9000,"callId":17600000001234567,"url":"https://x"}'
+const on = V.turnOn(kakaoMeta, 1760009999)
+ok(on.includes('"liveon":true'), 'liveon 을 켠다')
+ok(on.includes('"updateTime":1760009999'), 'updateTime 을 지금으로')
+ok(on.includes('"callId":17600000001234567'), 'callId 는 글자 그대로: ' + on)
+ok(on.includes('"startTime":1759999000'), 'startTime 은 건드리지 않는다')
+JSON.parse(on)
+// 칸이 없으면 끼워 넣는다
+const bare = V.turnOn('{"title":"x"}', 5)
+ok(bare.includes('"liveon":true') && bare.includes('"updateTime":5'), '없는 칸은 끼워 넣는다: ' + bare)
+JSON.parse(bare)
+
+// 판정
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }]).next, 'shape_found', '하나라도 받으면 모양을 찾은 것')
+ok(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }]).verdict.includes('echo'), '어느 모양이 됐는지 말한다')
+eq(V.mirrorVerdict([{ tag: 'asis', st: -203 }, { tag: 'echo', st: -203 }, { tag: 'on', st: -203 }]).next, 'server_only', '전부 거부면 서버 전용')
+eq(V.mirrorVerdict([{ tag: 'asis', st: -300 }]).next, 'unknown_type', '모르는 타입이면 번호부터')
+const mt = V.mirrorText([{ tag: 'asis', st: -203 }, { tag: 'echo', st: 0 }], { type: 16, keys: ['revision', 'authorId'] })
+ok(mt.startsWith('보룸 따라쓰기 (type 16 · 함께 온 칸 revision,authorId)'), '머리줄: ' + mt)
+ok(V.mirrorText([], { type: 16, keys: [] }).includes('함께 온 칸 없음'), '칸이 없을 때')
 
 process.stderr.write('[voiceroom-check] ok\n')

@@ -1644,7 +1644,12 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 - **카카오가 주인**: `CHGMETA` 로 온 보이스룸 메타의 `callId`·`csIP`·`csIP6`·`csPort` 를 session 에 바꿔 끼워(`adopt`) 다음 연장에 쓴다. 카카오의 `startTime` 이 더 이르면 48시간은 그때부터 센다. `liveon:false` 가 오면(방장이 카카오 앱에서 직접 끔) 우리 기록도 접는다. 연장이 내리 5번(`MAX_FAILS`) 거절되면 내려간 것으로 보고 방에 알린 뒤 접는다.
 - **켜기가 거절되면 아무것도 남기지 않는다**: 첫 신호가 `status ≠ 0` 이면 session 을 만들지 않고 `보이스룸을 켜지 못했어요 (카카오 응답 N)` 라고 답한다(없는 보이스룸을 48시간 연장하지 않게). `room_log` 에 `voice` + `ok:false` 로 남는다.
 - **HTTP**(3.6): `POST /v1/bot/voiceroom {install_id|chat_id|li, op:'on'|'off'|'status', title?}` · `GET /v1/bot/voicerooms`(이 서버의 봇들이 지금 들고 있는 보이스룸 전부).
-- **실측(2026-10-16) — 결론: 이 길은 막혀 있다.** 먼저 부방장인 방에서 `!보룸켜기` 가 `status -203` 으로 거절됐고, 이어서 **봇이 방장인 방**에서 진단을 돌려 가렸다: `on+li -203 · on-li -203 · off -203 · count(17) -203 · unknown(97) -300`. 카카오는 **모르는 타입(-300)과 "이 타입은 거부"(-203)를 가려서 답한다.** 방장인데도 보이스룸 자리(16·17)만 -203 → 권한이 아니라 **보이스룸 메타는 클라이언트가 쓰는 자리가 아니다**(음성 서버만 쓴다). `SETMETA` 로 켜는 길은 닫혔다. 신호를 보내는 자리는 `voiceSignal()` 하나이므로, 진짜 방법(보이스룸 생성 명령어나 음성 서버 쪽)을 찾으면 그 함수만 바꾸면 48시간 유지·여러 방·명령어·저장은 그대로 쓴다.
+- **실측 상태코드(2026-10-16, 봇이 방장인 시험 방) — 이 두 줄이 모든 것을 가른다.**
+  - `!보룸찾기` 대조군: 가짜 명령어 `ZZQXNON1`·`QWEORIZZ9` → **-300**, 진짜 명령어 `GETMEM`·`CHATINFO` → 0, **진짜 명령어 `WRITE` 를 빈 바디로 → -203**(봇은 그 방에서 메시지를 잘 보낸다 = 권한은 있다).
+  - `!보룸진단`: `on+li -203 · on-li -203 · off -203 · count(17) -203 · unknown(97) -300`.
+  - → **-300 = 없는 명령어·모르는 메타 타입**, **-203 = 있는데 보낸 내용이 틀림**. 저장소가 예전에 -203 을 '권한 없음'으로 가정했으나(9.4) 실측은 그렇지 않다.
+  - → **type 16·17 은 카카오가 아는 타입이고(모르면 -300 이었을 것), 거부당한 것은 우리가 보낸 내용이다.** 권한 문제도, 서버 전용 자리라는 증거도 아니다. 다음 수는 카카오가 그 방에 써 둔 메타를 글자 그대로 따라 쓰는 것(`voiceMirror`).
+- **따라쓰기(`voiceMirror`, 「보룸따라」, `SENDER_VOICE_EXPERIMENT=1` 전용)**: `CHATINFO.chatMetas` 에서 type 16 메타를 찾아, `content` 와 **함께 온 칸(`revision`·`authorId`·`updatedAt` …)을 그대로** 돌려보낸다. 순서는 `asis`(우리가 보내던 모양) · `echo`(함께 온 칸까지) · `echo+li` · `echo-author` · `rev+1` · `on`(그 모양 그대로 `liveon` 만 켜고 `updateTime` 만 지금으로 — `turnOn` 이 글자만 손봐 `callId` 정밀도를 지킨다). 하나라도 0 이면 `shape_found`(그 모양으로 켜기를 맞추면 된다), 전부 거부면 `server_only`(카카오 자신이 쓴 값을 돌려보내도 안 받는다 = 클라이언트가 쓰는 자리가 아니다), -300 이면 `unknown_type`.
 - **덤으로 알게 된 것**: 전에 보이스룸이 열린 적 있는 방에는 16·17 메타가 **남아 있다.** 진단이 그 내용을 로그로 남기므로(`voice diag existing meta …`) 카카오가 실제로 쓰는 `callId`·`csIP`·`url` 의 모양을 볼 수 있다.
 - **진단(`SENDER_VOICE_EXPERIMENT=1` 전용, `voiceDiag`·`diagVerdict`)**: 「보룸진단 [전체]」 — 같은 방에 `SETMETA` 를 켜기(`li` 포함·미포함)·끄기·`type 17`·쓰지 않는 `type 97`(대조군)으로 던져 어디서 갈리는지 본다. `전체` 면 `CHATINFO.chatMetas` 중 **보이스룸이 아닌** 메타 하나를 **글자 그대로** 한 번 더 쓴다(값은 그대로지만 카카오가 변경 알림을 띄울 수 있어 인자로 받는다. 보이스룸 타입(16·17)으로 쓰는 것은 대조군이 아니므로 고르지 않고, 쓸 메타가 없으면 건너뛰고 까닭을 적는다). 판정은 봇 권한(`perm & 1` = 방장)을 함께 본다: 켜기가 되면 `banner` · 보이스룸이 아닌 메타는 쓰는데 보이스룸만 거부면 `server_only` · **부방장**이 아무 메타도 못 쓰면 `owner_test`(방장 방에서 시험) · 방장인데도 거부면 `server_only` · 아직 못 가리면 `full`.
 - **아직 실측 전**: 봇은 음성 미디어 세션에 들어가지 않는다(말하거나 듣지 않는다). 켜기 신호 본문은 과거 캡처로 조립한 것이라 카카오가 받아 주는지, 받아 준 뒤 배너가 실제로 보이는지는 `DEPLOY.md` 9장 순서로 한 번 확인한다. 응답·메타는 `voice on`·`voice keep`·`voice off`·`voice meta` 로그 줄에 남는다.
@@ -1817,7 +1822,7 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
   - `SYNCLINK {ltk}` → 그 계정의 오픈프로필(`lt:1`, `lu` = `open.kakao.com/me/…`, `op`, `olu{userId, nn, ptp:2}`) + 걸러져야 할 링크 2개(이 계정이 만든 방 `lt:2`, 1:1 오픈채팅 `lt:1` `/o/`). 봇 계정은 따로 정하지 않으면 오픈프로필 1개(`K봇 오픈 <4 hex>`, 닉네임과 다름). `syncFail` 이면 `status:-500`.
   - `UPLINKPROF {li, ptp, pli}` → 방에 없으면 `-403`, `noopen` 이고 `ptp===16` 이거나 `pli` 가 그 계정 것이 아니면 `-804`, 성공이면 멤버 `ptp`·`pli`·이름을 바꾸고 방에 SYNCLINKPF `{c, li, olu}` 푸시 + `{olu}`.
   - `JOININFO {lu: open.kakao.com/me/…}` → 그 오픈프로필 링크(`lt:1`, `olu.userId` = 주인), 없으면 `-324`.
-  - `KICKMEM`·`KLDELITEM`·`REWRITE`·`KICKLEAVE` → 봇 `mt & 5` 가 아니면 `status:-203`(가정 값), 아니면 성공하고 상태를 바꾼다(나간 사람 KICKMEM 은 `FAKE_KICK_LEFT=0` 이면 실패 — 7.2(b) 의 대체 경로 시험).
+  - `KICKMEM`·`KLDELITEM`·`REWRITE`·`KICKLEAVE` → 봇 `mt & 5` 가 아니면 `status:-203`(가짜 모드의 '거절' 값일 뿐이다. 실측에서 -203 은 '보낸 내용이 틀림'이고 권한 거절 코드는 아직 모른다, 7.10), 아니면 성공하고 상태를 바꾼다(나간 사람 KICKMEM 은 `FAKE_KICK_LEFT=0` 이면 실패 — 7.2(b) 의 대체 경로 시험).
   - `getChats({all:true})` → 봇이 들어간 방들 `{chat_id, link_id, type:'OM'}`.
 - 푸시(`onPush` 처리기로 진짜 모양을 보냄):
   - `/v1/fake/perm {install_id, perm, drop_olu?}` → 그 방의 봇 `mt` 를 바꾸고 SYNCMEMT `{c, li, mids:[봇], mts:[perm]}` + 피드 11(승격)·12(강등) MSG `{chatLog:{type:0, message: JSON.stringify({feedType, members:[{userId:봇}]})}}` 를 보낸다. 상태 전환은 sender 의 실제 처리(3초 뒤 권한 읽기)로 일어난다.

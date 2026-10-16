@@ -4073,18 +4073,45 @@ async function withLog(fn) {
       if (tags !== 'on+li,on-li,off,count,unknown') throw new Error('#42 diag probes ' + tags)
       if (d1.rows.filter((r) => r.tag.startsWith('on')).some((r) => r.st !== -203)) throw new Error('#42 diag sees the refusal ' + JSON.stringify(d1.rows))
       if (!d1.types.includes(3)) throw new Error('#42 diag reads the room metas ' + JSON.stringify(d1.types))
-      if (d1.next !== 'full') throw new Error('#42 diag asks for 전체 first')
-      if (!d1.text.includes('보룸진단 전체')) throw new Error('#42 diag reply points at 전체')
+      // 모르는 타입은 -300, 보이스룸 타입은 -203 → "타입은 아는데 내용이 틀렸다" 판정
+      if (d1.rows.find((r) => r.tag === 'unknown').st !== -300) throw new Error('#42 unknown meta type is -300')
+      if (d1.next !== 'bad_shape') throw new Error('#42 diag reads -203 as a bad body, not a permission ' + d1.next)
+      if (!d1.text.includes('보룸따라')) throw new Error('#42 diag points at 따라쓰기: ' + d1.text)
       // 전체: 지금 있는 메타(제목)를 같은 값으로 다시 쓴다 → 되면 보이스룸 메타만 거부된 것
       const d2 = await botA.slot.voiceDiag(vv, true)
       if (!d2.rows.some((r) => r.tag === 'same' && r.st === 0)) throw new Error('#42 diag rewrites a meta as is ' + JSON.stringify(d2.rows))
-      if (d2.next !== 'server_only') throw new Error('#42 diag verdict ' + d2.next + ' ' + JSON.stringify(d2.rows))
+      if (d2.next !== 'bad_shape') throw new Error('#42 diag verdict ' + d2.next + ' ' + JSON.stringify(d2.rows))
       // 대조군은 보이스룸이 아닌 메타(제목 3)로 돌려야 한다 — 거부당하는 타입을 다시 쓰는 것은 대조군이 아니다
       if (!d2.text.includes('방장 1') && !d2.text.includes('부방장 4')) throw new Error('#42 diag says the permission in words ' + d2.text)
       if (fs.room('voicex1').ln !== '테스트방 voicex1') throw new Error('#42 diag does not change the room')
       if (botA.slot.voiceOf(vv)) throw new Error('#42 diag leaves no session')
     } finally {
       fs.room('voicex1').voiceDeny = 0
+    }
+
+    // 따라쓰기(보룸따라): 카카오가 써 둔 보이스룸 메타를 글자 그대로 돌려보낸다
+    {
+      if (!(await botA.slot.voiceCmd(vv, 'on', { title: '따라시험' })).ok) throw new Error('#42 mirror needs a voice meta in the room')
+      const m1 = await botA.slot.voiceMirror(vv)
+      if (!m1.ok || m1.type !== 16) throw new Error('#42 mirror reads the voice meta ' + JSON.stringify(m1))
+      if (!m1.keys.includes('revision')) throw new Error('#42 mirror carries the fields that came with it ' + JSON.stringify(m1.keys))
+      if (m1.rows[0].tag !== 'asis' || m1.rows[0].st !== 0) throw new Error('#42 mirror tries our own shape first ' + JSON.stringify(m1.rows))
+      if (m1.next !== 'shape_found') throw new Error('#42 mirror verdict when kakao accepts ' + m1.next)
+      // 카카오가 거절하는 방이면: 자기가 쓴 값을 그대로 돌려보내도 거부 → 클라이언트가 쓰는 자리가 아니다
+      fs.room('voicex1').voiceDeny = -203
+      try {
+        const m2 = await botA.slot.voiceMirror(vv)
+        if (m2.rows.some((r) => r.st === 0)) throw new Error('#42 mirror sees every shape refused ' + JSON.stringify(m2.rows))
+        if (m2.next !== 'server_only') throw new Error('#42 mirror verdict when all refused ' + m2.next)
+        if (!m2.rows.some((r) => r.tag === 'on')) throw new Error('#42 mirror also tries the liveon edit')
+      } finally {
+        fs.room('voicex1').voiceDeny = 0
+      }
+      await botA.slot.voiceCmd(vv, 'off', {})
+      // 보이스룸 메타가 없는 방에서는 그렇게 알린다
+      const vOther = botA.slot.byInstall.get(iV3)
+      const m3 = await botA.slot.voiceMirror(vOther)
+      if (m3.ok || m3.error !== 'no_voice_meta') throw new Error('#42 mirror needs a meta to copy ' + JSON.stringify(m3))
     }
     pacer.botWin.max = prevBotMax
     ;[iV, iV2, iV3].forEach((id, k) => { pacer.room(String(id)).win.max = prevRoomMax[k] })

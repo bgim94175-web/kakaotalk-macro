@@ -512,6 +512,8 @@ class FakeServer {
     if (method === 'SETMETA') {
       const r = this.byChat(b.chatId)
       if (!r) return resp(method, { status: -324 })
+      // 실측(2026-10-16): 모르는 메타 타입은 -300, 아는 타입인데 내용이 틀리면 -203
+      if (![3, 16, 17].includes(Number(b.type))) return resp(method, { status: -300 })
       if (Number(b.type) !== 16) return resp(method, { status: 0 })
       if (r.voiceDeny) return resp(method, { status: Number(r.voiceDeny) })
       const content = String(b.content || '')

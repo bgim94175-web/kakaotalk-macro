@@ -1650,6 +1650,58 @@ export class BotSlot {
     return { ok: true, rows, types, text, next: v2.next }
   }
 
+  // 보룸 따라쓰기(SENDER_VOICE_EXPERIMENT 전용): 카카오가 그 방에 직접 써 둔 보이스룸 메타를 글자 그대로 돌려보낸다.
+  // 실측에서 -300 = 없는 명령어·모르는 타입, -203 = 있는데 요청 내용이 틀림(빈 바디 WRITE 가 -203)이었다.
+  // type 16 은 -203 이므로 카카오가 아는 타입이고, 틀린 것은 우리 내용이다. 그래서 카카오 자신이 쓴 값을
+  // 그대로(함께 온 revision·authorId 까지) 되돌려 보며 어떤 모양을 받아 주는지 찾는다.
+  async voiceMirror(v) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const info = await this.raw('CHATINFO', { chatId: L(chatId) })
+    const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
+      .filter((m) => m && typeof m.content === 'string'))
+    const mine = metas.find((m) => VR.metaTypeNum(m.type) === 16) || metas.find((m) => VR.isVoiceMetaType(m.type))
+    if (!mine) return { ok: false, error: 'no_voice_meta' }
+    const type = VR.metaTypeNum(mine.type)
+    const extras = VR.metaExtras(mine)
+    const keys = Object.keys(extras)
+    log(this.id, `voice mirror type ${type} keys ${keys.join(',') || '-'} extras ${traceText(extras)}`)
+    log(this.id, `voice mirror content ${VR.maskMeta(mine.content)}`)
+    const rows = []
+    const run = async (tag, body) => {
+      const r = await this.raw('SETMETA', body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice mirror ${tag} → status ${st} body ${traceText((r && r.body) || {})}`)
+      rows.push({ tag, st })
+      await new Promise((ok) => setTimeout(ok, 400))
+      return st
+    }
+    const base = { chatId: L(chatId), type, content: mine.content }
+    const rev = extras.revision
+    const bump = (x) => {
+      if (x == null) return undefined
+      try { return Long.fromString(String(typeof x === 'object' && 'low' in x ? R.idText(x) : x)).add(1) } catch { return undefined }
+    }
+    await run('asis', base)                                                   // 지금 우리가 보내던 모양
+    await run('echo', Object.assign({}, base, extras))                        // 함께 온 칸까지 그대로
+    if (li) await run('echo+li', Object.assign({}, base, extras, { li: L(li) }))
+    if (extras.authorId !== undefined) {
+      const noAuthor = Object.assign({}, extras)
+      delete noAuthor.authorId
+      await run('echo-author', Object.assign({}, base, noAuthor))
+    }
+    const up = bump(rev)
+    if (up !== undefined) await run('rev+1', Object.assign({}, base, extras, { revision: up }))
+    // 마지막으로 그 모양 그대로 '켜진' 내용만 바꿔 본다
+    const on = VR.turnOn(mine.content, Math.floor(this.now() / 1000))
+    await run('on', Object.assign({}, base, extras, up !== undefined ? { revision: up } : {}, { content: on }))
+    const text = VR.mirrorText(rows, { type, keys })
+    const next = VR.mirrorVerdict(rows).next
+    log(this.id, `voice mirror done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${next}`)
+    return { ok: true, rows, type, keys, text, next }
+  }
+
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
   async write(installId, fields) {
     return this.store.updateInstall(Number(installId), this.id, fields)
@@ -3426,6 +3478,17 @@ export class BotSlot {
         this.say(v, '보룸 진단 중… 잠시만요(약 5초).', { what: 'reply' })
         const r = await this.voiceDiag(v, !!dm[1])
         this.say(v, r.ok ? r.text : '진단을 돌리지 못했어요.', { what: 'reply' })
+        return
+      }
+      if (t === '보룸따라') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 따라쓰기는 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, '카카오가 써 둔 보이스룸 메타를 따라 써 보는 중… 잠시만요(약 5초).', { what: 'reply' })
+        const r = await this.voiceMirror(v)
+        this.say(v, r.ok ? r.text : (r.error === 'no_voice_meta' ? '이 방엔 카카오가 써 둔 보이스룸 메타가 없어요. 전에 보이스룸이 열린 적 있는 방에서 쳐 주세요.' : '따라쓰기를 돌리지 못했어요.'), { what: 'reply' })
         return
       }
       if (t === '보룸찾기') {
