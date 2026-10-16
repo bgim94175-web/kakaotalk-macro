@@ -5,6 +5,7 @@ import { Hub, Slot } from './runner.mjs'
 import { Owner } from './owner.mjs'
 import { open, seal } from './store.mjs'
 import { groupLinkType, kstClock, kstWhen, linkText, recordLines, withProfileLink } from './roomfeat.mjs'
+import * as VR from './voiceroom.mjs'
 
 // 방 안내 맨 아래 시각 줄(`오후 7:31`)
 const CLOCK_RE = /\n오[전후] (?:[1-9]|1[0-2]):[0-5][0-9]$/
@@ -1693,11 +1694,11 @@ async function withLog(fn) {
   {
     const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
     const h = RF.helpLine(v)
-    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!') + '\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!') + '\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
     const ah = RF.adminHelp(v)
     if (!ah.startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기\n▸ !프로필조회 @닉네임 : 프로필 기록 보기\n▸ !가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n▸ !내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n▸ !금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
     const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
-    if (RF.helpLine(off) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
+    if (RF.helpLine(off) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
     const waiting = view({ state: 'waiting_host' })
     if (RF.helpLine(waiting) !== '' || RF.adminHelp(waiting) !== '') throw new Error('#40-2 no room commands while waiting for the host')
     if (!RF.isAdminHelpCommand('!도움 관리', '!') || !RF.isAdminHelpCommand('!도움관리', '!') || RF.isAdminHelpCommand('!도움', '!') || RF.isAdminHelpCommand('!도움 관리자', '!')) throw new Error('#40-2 admin help command')
@@ -2698,7 +2699,7 @@ async function withLog(fn) {
       await waitFor(() => vc.members.get('4014') && vc.members.get('4014').link === 'https://open.kakao.com/o/cloud4014' && vc.memberOkAt > 0, 5000, '#40 member book')
       await sleep(100)
       // 도움말
-      await expect(ask('4012', '바다', '!도움'), '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
+      await expect(ask('4012', '바다', '!도움'), '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
       if (!(await ask('4012', '바다', '!도움 관리')).startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기')) throw new Error('#40 admin help')
       // !옾링: 기본은 방장·부방장만
       await expect(ask('4012', '바다', '!옾링 구름'), '옾링 조회는 방장과 부방장만 할 수 있어요.', 'link staff only')
@@ -3891,6 +3892,180 @@ async function withLog(fn) {
     if ((await newOwner.tick()) !== 'mine') throw new Error('owner: a live owner beats again')
     await newHub.pool.stop()
     store.senderOwner = null
+  }
+
+  // #42 보이스룸 봇(voiceroom.mjs): 방 명령어로 켜고 끄기 · 48시간까지 연장 · 한 계정이 여러 방 · 저장본 이어가기 ·
+  //   카카오가 준 진짜 값 반영 · 카카오가 끄면 우리 기록도 접기 · 카카오가 거절하면 session 을 남기지 않기
+  {
+    const iV = install('voicex1')
+    const iV2 = install('voicex2')
+    const iV3 = install('voicex3')
+    await pool.reconcile(null)
+    await waitFor(() => [iV, iV2, iV3].every((id) => rowOf(id).state === 'waiting_host'), 6000, '#42 join')
+    const chats = [iV, iV2, iV3].map((id) => rowOf(id).chat_id)
+    for (const c of chats) fs.setPerm(c, botA.uid, 4)
+    await waitFor(() => [iV, iV2, iV3].every((id) => rowOf(id).state === 'active'), 4000, '#42 promotion')
+    const vv = botA.slot.byInstall.get(iV)
+    const chat = chats[0]
+    // 이 칸은 한 방에서 답을 여럿 받는다 — 시험 동안만 발송 한도를 넉넉히 둔다(한도 자체는 #40 에서 본다)
+    const pacer = botA.slot.pacer
+    const prevBotMax = pacer.botWin.max
+    pacer.botWin.max = 500
+    const prevRoomMax = [iV, iV2, iV3].map((id) => { const r = pacer.room(String(id)); const was = r.win.max; r.win.max = 500; return was })
+    // 방장(mt 1)·손님(mt 2) 한 명씩
+    fs.room('voicex1').members['6101'] = { mt: 1, nick: '방장', photo: '', status: null }
+    fs.room('voicex2').members['6101'] = { mt: 1, nick: '방장', photo: '', status: null }
+    fs.room('voicex3').members['6101'] = { mt: 1, nick: '방장', photo: '', status: null }
+    const chat2 = chats[1]
+    const say = (c, uid, text) => fs.event(c, botA.uid, { kind: 'message', user_id: uid, name: uid === '6101' ? '방장' : '손님', text })
+    const last = (id) => { const t = sentIn(id); return t[t.length - 1] || '' }
+    const metas = (c) => packets('SETMETA', (p) => p.chat === c && p.type === 16)
+    const until = async (fn, what) => waitFor(fn, 5000, '#42 ' + what)
+
+    // 안 켠 방: 「!보룸」은 누구나 볼 수 있고, 켜기는 방장·부방장만
+    say(chat, '6102', '!보룸')
+    await until(() => last(iV).indexOf('켜 둔 보이스룸이 없어요') >= 0, 'status before')
+    say(chat, '6102', '!보룸켜기')
+    await until(() => last(iV) === VR.staffOnlyReply(), 'guests cannot turn it on')
+    if (metas(chat).length) throw new Error('#42 a guest command sends no signal')
+
+    // 방장이 켜기: SETMETA(16) liveon + 48시간 안내 + 방 메타에 적힘
+    say(chat, '6101', '!보룸켜기 야간수다')
+    await until(() => metas(chat).length === 1, 'on signal')
+    const on1 = metas(chat)[0]
+    if (on1.content.indexOf('"liveon":true') < 0 || on1.content.indexOf('"title":"야간수다"') < 0) throw new Error('#42 on content ' + on1.content)
+    const callId = /"callId":(\d+)/.exec(on1.content)[1]
+    if (callId.length < 17) throw new Error('#42 callId keeps its 17 digits ' + callId)
+    if (fs.room('voicex1').voice.indexOf('"liveon":true') < 0) throw new Error('#42 kakao holds the voice meta')
+    await until(() => last(iV).indexOf('48시간') >= 0 && last(iV).indexOf('야간수다') >= 0, 'on reply')
+    const s1 = botA.slot.voiceOf(vv)
+    if (!s1 || s1.endAt - s1.startAt !== VR.MAX_MS) throw new Error('#42 the session lasts 48 hours')
+    if (s1.by !== botA.id) throw new Error('#42 the session says which bot holds it')
+
+    // 두 번 켜도 늘어나지 않는다
+    say(chat, '6101', '!보룸켜기')
+    await until(() => last(iV).indexOf('이미 켜져 있어요') >= 0, 'already on')
+    if (metas(chat).length !== 1 || botA.slot.voiceOf(vv).endAt !== s1.endAt) throw new Error('#42 turning it on twice does not extend it')
+
+    // 연장: KEEP_MS 가 지난 모양으로 돌려 두고 tick 을 돌린다 → updateTime 만 새로, startTime·callId 는 그대로
+    s1.lastAt -= VR.KEEP_MS + 1000
+    botA.slot.voiceTick(Date.now())
+    await until(() => metas(chat).length === 2, 'keepalive signal')
+    const keep = metas(chat)[1]
+    const num = (c, k) => Number(new RegExp('"' + k + '":(\\d+)').exec(c)[1])
+    if (num(keep.content, 'startTime') !== num(on1.content, 'startTime')) throw new Error('#42 keepalive keeps startTime')
+    if (num(keep.content, 'updateTime') < num(on1.content, 'updateTime')) throw new Error('#42 keepalive moves updateTime')
+    if (/"callId":(\d+)/.exec(keep.content)[1] !== callId) throw new Error('#42 keepalive keeps callId')
+    if (botA.slot.voiceOf(vv).keeps !== 1) throw new Error('#42 the keepalive is counted')
+
+    // 저장본: room_state 에 남고, 되살리면 남은 시간이 그대로다(sender 재시작)
+    await pool.flush()
+    const saved = store.states.get(iV)
+    if (!saved || !saved.voice || !saved.voice.on) throw new Error('#42 the session is saved in room_state')
+    if (String(saved.voice.callId) !== callId) throw new Error('#42 callId survives the save as text')
+    const back = VR.restore(JSON.parse(JSON.stringify(saved.voice)), { now: Date.now(), chat })
+    if (!back || back.endAt !== s1.endAt || back.title !== '야간수다') throw new Error('#42 a restarted sender carries on with the same 48 hours')
+
+    // 한 계정 여러 방: 둘째 방도 따로 켜진다
+    say(chat2, '6101', '!보룸켜기 낮수다')
+    await until(() => metas(chat2).length === 1, 'second room on')
+    if (botA.slot.voiceCount() !== 2) throw new Error('#42 one account holds two voice rooms ' + botA.slot.voiceCount())
+    const rows = pool.voiceList()
+    if (rows.count !== 2 || !rows.rooms.every((r) => r.on && r.left_ms > 0)) throw new Error('#42 the list shows both rooms ' + JSON.stringify(rows))
+    if (new Set(rows.rooms.map((r) => r.call_id)).size !== 2) throw new Error('#42 each room has its own callId')
+
+    // 동시 개수 한도
+    const prevMax = process.env.SENDER_VOICE_MAX_ROOMS
+    process.env.SENDER_VOICE_MAX_ROOMS = '2'
+    try {
+      say(chats[2], '6101', '!보룸켜기')
+      await until(() => last(iV3).indexOf('최대 2개') >= 0, 'cap reply')
+      if (metas(chats[2]).length) throw new Error('#42 the capped room sends no signal')
+    } finally {
+      if (prevMax === undefined) delete process.env.SENDER_VOICE_MAX_ROOMS
+      else process.env.SENDER_VOICE_MAX_ROOMS = prevMax
+    }
+
+    // 카카오가 준 진짜 값 반영(CHGMETA): 다음 연장은 그 callId·음성서버로 나간다
+    const realCall = '98700000000012345'
+    botA.slot.voiceMeta(vv, '{"liveon":true,"title":"야간수다","csIP":"10.9.8.7","csIP6":"::9","csPort":9500,"callId":' + realCall + ',"startTime":' + Math.floor(s1.startAt / 1000) + '}')
+    if (botA.slot.voiceOf(vv).callId !== realCall || botA.slot.voiceOf(vv).csIP !== '10.9.8.7') throw new Error('#42 kakao values are adopted')
+    botA.slot.voiceOf(vv).lastAt -= VR.KEEP_MS + 1000
+    botA.slot.voiceTick(Date.now())
+    await until(() => metas(chat).length === 3, 'keepalive after adopt')
+    const after = metas(chat)[2].content
+    if (after.indexOf('"callId":' + realCall) < 0 || after.indexOf('"csIP":"10.9.8.7"') < 0 || after.indexOf('"csPort":9500') < 0) throw new Error('#42 the keepalive uses the real values ' + after)
+
+    // 48시간: 때가 되면 스스로 꺼지고 방에 알린다
+    const vs = botA.slot.voiceOf(vv)
+    vs.endAt = Date.now() - 1
+    botA.slot.voiceTick(Date.now())
+    await until(() => metas(chat).some((p) => p.content === '{"liveon":false}'), 'off signal at 48 hours')
+    await until(() => sentIn(iV).some((t) => t.indexOf('48시간 켜 둔 뒤 껐어요') >= 0), 'end notice')
+    if (botA.slot.voiceOf(vv)) throw new Error('#42 the finished session is dropped')
+    if (fs.room('voicex1').voice) throw new Error('#42 kakao sees it turned off')
+    await pool.flush()
+    if (store.states.get(iV).voice) throw new Error('#42 the finished session is not kept in room_state')
+    if (!store.logs.some((l) => l.install_id === iV && l.kind === 'voice' && l.detail && l.detail.op === 'off' && l.detail.why === 'expired')) {
+      throw new Error('#42 the end is logged for the panel')
+    }
+
+    // 끝나기 1시간 전 안내는 한 번만
+    say(chat, '6101', '!보룸켜기 밤샘')
+    await until(() => last(iV).indexOf('밤샘') >= 0, 'on again')
+    const warnS = botA.slot.voiceOf(vv)
+    warnS.endAt = Date.now() + 30 * 60 * 1000
+    botA.slot.voiceTick(Date.now())
+    await until(() => sentIn(iV).some((t) => t.indexOf('뒤에 꺼져요') >= 0), 'warning once')
+    const warned = sentIn(iV).filter((t) => t.indexOf('뒤에 꺼져요') >= 0).length
+    botA.slot.voiceTick(Date.now())
+    await sleep(120)
+    if (sentIn(iV).filter((t) => t.indexOf('뒤에 꺼져요') >= 0).length !== warned) throw new Error('#42 the warning is sent once')
+
+    // 방장이 카카오 앱에서 직접 끄면(liveon:false) 우리 기록도 접는다
+    botA.slot.voiceMeta(vv, '{"liveon":false}')
+    if (botA.slot.voiceOf(vv)) throw new Error('#42 kakao closing it drops our session')
+
+    // 「!보룸끄기」: 켠 뒤 끄면 liveon:false, 안 켠 방에서는 조용히 알린다
+    say(chat, '6101', '!보룸끄기')
+    await until(() => last(iV).indexOf('켜 둔 보이스룸이 없어요') >= 0, 'off with nothing on')
+    say(chat, '6101', '!보룸켜기')
+    await until(() => last(iV).indexOf('48시간') >= 0, 'on before off')
+    const beforeOff = metas(chat).length
+    say(chat, '6101', '!보룸끄기')
+    await until(() => metas(chat).length === beforeOff + 1 && metas(chat)[beforeOff].content === '{"liveon":false}', 'off signal')
+    await until(() => last(iV).indexOf('껐어요') >= 0, 'off reply')
+    if (botA.slot.voiceOf(vv)) throw new Error('#42 the session is gone after 보룸끄기')
+
+    // 카카오가 거절하는 방: session 을 남기지 않는다(없는 보이스룸을 48시간 연장하지 않게)
+    fs.room('voicex1').voiceDeny = -801
+    try {
+      say(chat, '6101', '!보룸켜기')
+      await until(() => last(iV).indexOf('-801') >= 0, 'refused reply')
+      if (botA.slot.voiceOf(vv)) throw new Error('#42 a refused signal leaves no session')
+      if (!store.logs.some((l) => l.install_id === iV && l.kind === 'voice' && l.ok === false)) throw new Error('#42 the refusal is logged')
+    } finally {
+      fs.room('voicex1').voiceDeny = 0
+    }
+
+    // HTTP(패널): 켜기·보기·끄기
+    const r1 = await pool.voiceCmd({ install_id: iV }, 'on', { title: '패널방' })
+    if (!r1.ok || !r1.session || r1.session.title !== '패널방') throw new Error('#42 panel turns it on ' + JSON.stringify(r1))
+    const r2 = await pool.voiceCmd({ chat_id: chat }, 'status')
+    if (!r2.on || !(r2.left_ms > 47 * 60 * 60 * 1000)) throw new Error('#42 panel reads the time left ' + JSON.stringify(r2))
+    const r3 = await pool.voiceCmd({ li: rowOf(iV).link_id }, 'off')
+    if (!r3.ok || !r3.was || botA.slot.voiceOf(vv)) throw new Error('#42 panel turns it off ' + JSON.stringify(r3))
+    if (!(await pool.voiceCmd({ chat_id: '404040404' }, 'on')).error) throw new Error('#42 a room the bot is not in')
+    // 봇이 부방장이 아닌 방은 켜지 않는다(방 메타를 바꿀 수 없다)
+    fs.setPerm(chats[2], botA.uid, 2)
+    await until(() => rowOf(iV3).state === 'waiting_host', 'demotion')
+    const r4 = await pool.voiceCmd({ install_id: iV3 }, 'on')
+    if (r4.ok || r4.error !== 'not_active') throw new Error('#42 the bot must be a manager ' + JSON.stringify(r4))
+    // 둘째 방은 그대로 켜져 있다(방마다 따로다)
+    if (!botA.slot.voiceOf(botA.slot.byInstall.get(iV2))) throw new Error('#42 the other room keeps its voice room')
+    await pool.voiceCmd({ install_id: iV2 }, 'off')
+    pacer.botWin.max = prevBotMax
+    ;[iV, iV2, iV3].forEach((id, k) => { pacer.room(String(id)).win.max = prevRoomMax[k] })
   }
 
   // #41(i) 멈출 때의 마지막 저장(BotPool.finalFlush, index.mjs): 새 메시지는 받지 않고, DB 대기열에 묶인 저장을 기다린 뒤

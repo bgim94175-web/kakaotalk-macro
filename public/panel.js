@@ -3329,7 +3329,7 @@
   // /panel/api/bot-room/logs?id= (방 화면이 보일 때 10초). 방 설정 저장은 기존 저장 바로 POST /panel/api/bot-room/settings.
   var PRODUCT_LABEL = { roombot: '방 관리봇', minigame: '미니게임봇' };
   var LOG_KIND = { churn: '들낙 감지', kick: '내보내기', kick_fail: '내보내기 실패', unkick: '내보내기 해제', promo: '홍보 금지', hide: '글 가리기',
-    cover: '글 가리기 (금지어)', perm: '권한 변경', wave: '올킥 감지', state: '방 상태 변경', skip: '처리 건너뜀' };
+    cover: '글 가리기 (금지어)', perm: '권한 변경', wave: '올킥 감지', voice: '보이스룸', state: '방 상태 변경', skip: '처리 건너뜀' };
   var PROFILE_KIND = { name: '닉네임', link: '옾링', status: '상태 메시지' };   // 이 밖의 항목(예전 기록)은 표에 싣지 않는다
   var NOT_ACTIVE = '부방장 지정을 기다리는 중입니다. 방장이 K bot을 부방장으로 지정하면 설정할 수 있습니다.';
   var roomsSt = { timer: null, busy: false, seq: 0, fails: 0, sig: '' };

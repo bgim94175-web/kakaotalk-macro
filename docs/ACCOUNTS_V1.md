@@ -708,6 +708,8 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | GET `/v1/bot/hide?job=` | — | `{ok, state, total, done, failed}` |
 | POST `/v1/bot/unkick` | `{install_id, user_id}` | `{ok}` 또는 `{ok:false, error:'no_roombot'\|'not_active'\|'not_kicked'\|'failed', status?}`. 위와 같은 재확인 + user_id 가 이 방의 `bans` 또는 이 설치의 `room_log` kick·kick_fail 에 있어야 함 |
 | POST `/v1/bot/games-reset` | `{install_id}` | `{ok}` |
+| POST `/v1/bot/voiceroom` | `{install_id\|chat_id\|li, op?:'on'\|'off'\|'status', title?}` | `op` 기본 `on`. `{ok:true, op, session?, status?, already?}` · `{ok:true, op:'off', was}` · `{ok:true, op:'status', on, left_ms}` 또는 `{ok:false, error:'not_joined'\|'need_room'\|'too_many'\|'kakao', count?, max?, status?}` (7.10) |
+| GET `/v1/bot/voicerooms` | — | `{ok, max, count, rooms:[{install_id, chat_id, link_id, room, title, bot, start_at, end_at, left_ms, keeps, fails, call_id}]}` (7.10) |
 | POST `/v1/fake/perm` | `{install_id, perm}` | `SENDER_FAKE=1` 일 때만 존재(9.4) |
 | POST `/v1/fake/event` | `{install_id, kind, user_id?, name?, text?, type?}` | 같음 |
 
@@ -1498,6 +1500,8 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 - `isKickFeed` 는 JSON 피드 6 도 센다. 봇 자신의 강퇴(`ownKicks`, 60초)는 올킥 계산에서 뺀다.
 - 입장·퇴장 안내 문구에 `강퇴` 를 넣지 않는다(selfcheck 단언 유지). 내보내기 문구는 새 안내에만.
 
+- (h) **보이스룸 켜기** — 방장·부방장이 `{앞글자}보룸켜기` 를 치면 그 방의 보이스룸을 켜고 48시간까지 살려 둔다. 켜고 끄는 규칙·문구·수명은 7.10.
+
 ### 7.3 미니게임 (방별)
 
 - `entry.games` 와 `cmdPrefix` 를 읽는다. `cooldownSec × 1000` → 기존 `cooldownMs`. 하루 횟수·쿨타임은 방 어댑터의 `runtime` 에 있으므로 방마다 따로다.
@@ -1614,6 +1618,7 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 | `wave` | 올킥 감지 · {n}명 |
 | `state` | K bot 입장 완료 · 오류({짧은 사유}) · K bot 입장 다시 시도 |
 | `skip` | {K bot 한도 초과로 건너뜀 / 올킥 감지 중이라 건너뜀 / 실패가 이어져 잠시 멈춤 / 늦어져서 건너뜀} · {종류} |
+| `voice` | 보이스룸 켜기 · {제목} (· 실패) / 보이스룸 끄기 · {제목} · {켜 둔 시간} · {48시간 종료 / 카카오에서 끔 / 방 명령어 / 패널} / 보이스룸 내려감 · {제목} · {켜 둔 시간}(7.10) |
 
 ### 7.9 입장 안내 (방에 처음 들어갔을 때 1회)
 
@@ -1626,6 +1631,22 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 - 부방장 지정 대기 방에서 봇 프로필을 오픈프로필로 바꾼 뒤(5.8, 1회): `[K bot]\nK bot 프로필이 「{이름}」(으)로 바뀌었어요.\n방장님이 「{이름}」을(를) 부방장으로 지정하면 방 관리 기능이 시작돼요.`
 - "처음 1회"는 **그 봇 계정이 그 방(chat)에서** 처음일 때다. `room_state.runtime` 에 `welcomed:{chat, by: 봇 device_id, roombot}`·`promoted:{chat, by}` 로 남겨, 다른 봇으로 옮긴 뒤(D17)나 링크를 바꿔 다른 방에 들어간 뒤에는 새 봇이 입장 안내(닉네임)와 부방장 지정 확인을 다시 한다. 미니게임봇으로만 안내한 방에 방 관리봇을 더한 뒤 다시 들어가면 방 관리봇 입장 안내를 한다.
 - 이름(오픈프로필 이름)은 봇마다 달라야 방장이 진짜 봇을 고를 수 있다(D12). 이름을 아직 못 읽었으면 `「…」` 부분을 뺀다.
+
+### 7.10 보이스룸 봇 (`sender/src/voiceroom.mjs`)
+
+방 관리봇을 산 방에서, 봇이 부방장이고 방 상태가 `사용 중` 일 때(`roombotLive`) 방 안 명령어로 그 방의 보이스룸을 켜고 끈다. 순수 함수(명령어 읽기·수명·연장 판단·문구)는 `voiceroom.mjs` 한 곳에 두고, 카카오 신호와 저장은 `botpool.mjs`(`voiceStart`·`voiceKeep`·`voiceStop`·`voiceTick`·`voiceMeta`)가 맡는다. 체험(`lib/demo.js`)도 같은 함수로 답한다.
+
+- **명령어**(7.2 (g) 와 같은 접두사): `{앞글자}보룸켜기 [제목]`(`보이스룸켜기`·`보룸켜`·`보룸시작` 도 같다) · `{앞글자}보룸끄기`(`보룸종료`·`보룸중지`) · `{앞글자}보룸`(`보룸상태`). 켜고 끄기는 방장·부방장만(`보이스룸은 방장·부방장만 켜고 끌 수 있어요.`), 상태 보기는 누구나. 부방장 지정 대기 방에서는 `notLiveReply`. 이름 뒤에 모르는 글자가 붙으면(`!보룸아무말`) 보이스룸 명령어로 보지 않는다(다른 명령어를 가리지 않게).
+- **신호**: `SETMETA` type 16(`LIVE_TALK_INFO`). 켜기 `{"liveon":true,"title":…,"updateTime":…,"startTime":…,"csIP":…,"csIP6":…,"csPort":…,"callId":…,"url":"","blind":false}`, 끄기 `{"liveon":false}`. 오픈채팅은 `li` 포함본을 먼저 보내고 실패하면 `li` 없이 한 번 더 본다. `callId` 는 17자리로 2^53 을 넘으므로 어디서도 Number 로 만들지 않고(본문도 문자열 이어 붙이기로 만든다) 저장·메타 읽기도 정규식으로 문자열로만 다룬다.
+- **48시간 유지**: 한 번 켜면 `MAX_MS`(48시간)까지. 4분(`KEEP_MS`)마다 `updateTime` 만 새로 한 같은 본문을 다시 보내 연장하고(`startTime`·`callId` 는 그대로), 끝나기 1시간(`WARN_MS`) 전에 방에 한 번 알린다(`warned`, 한 번만). 48시간이 되면 `voiceTick` 이 끄기 신호를 보내고 `보이스룸 「…」을 48시간 켜 둔 뒤 껐어요.` 라고 알린다. 남은 시간은 **처음 켠 때부터** 세므로 다시 켜도 늘어나지 않는다(`!보룸켜기` 를 또 치면 `이미 켜져 있어요` + 남은 시간).
+- **한 계정 여러 방**: 방마다 자기 session 을 `room_state.runtime.voice` 에 두고 `tick` 에서 돌아가며 연장한다(방마다 한 번에 하나, `voiceBusy`). 한 봇 계정이 동시에 들 수 있는 수는 `SENDER_VOICE_MAX_ROOMS`(기본 8, 1~50). 한도에 닿으면 `제 계정이 지금 N개 방에서 보이스룸을 들고 있어요(최대 M개).`
+- **session 모양**(`runtime.voice`): `{on, title, by(봇 device_id), chat, startAt, endAt, callId, csIP, csIP6, csPort, url, lastAt, keeps, fails, warned, by_name}`. sender 가 다시 떠도 `restore` 로 남은 시간을 그대로 이어 간다. 꺼짐·모양이 깨짐·다른 방(chat 이 다름) 저장본은 버린다.
+- **카카오가 주인**: `CHGMETA` 로 온 보이스룸 메타의 `callId`·`csIP`·`csIP6`·`csPort` 를 session 에 바꿔 끼워(`adopt`) 다음 연장에 쓴다. 카카오의 `startTime` 이 더 이르면 48시간은 그때부터 센다. `liveon:false` 가 오면(방장이 카카오 앱에서 직접 끔) 우리 기록도 접는다. 연장이 내리 5번(`MAX_FAILS`) 거절되면 내려간 것으로 보고 방에 알린 뒤 접는다.
+- **켜기가 거절되면 아무것도 남기지 않는다**: 첫 신호가 `status ≠ 0` 이면 session 을 만들지 않고 `보이스룸을 켜지 못했어요 (카카오 응답 N)` 라고 답한다(없는 보이스룸을 48시간 연장하지 않게). `room_log` 에 `voice` + `ok:false` 로 남는다.
+- **HTTP**(3.6): `POST /v1/bot/voiceroom {install_id|chat_id|li, op:'on'|'off'|'status', title?}` · `GET /v1/bot/voicerooms`(이 서버의 봇들이 지금 들고 있는 보이스룸 전부).
+- **아직 실측 전**: 봇은 음성 미디어 세션에 들어가지 않는다(말하거나 듣지 않는다). 켜기 신호 본문은 과거 캡처로 조립한 것이라 카카오가 받아 주는지, 받아 준 뒤 배너가 실제로 보이는지는 `DEPLOY.md` 9장 순서로 한 번 확인한다. 응답·메타는 `voice on`·`voice keep`·`voice off`·`voice meta` 로그 줄에 남는다.
+
+---
 
 ---
 
@@ -1864,6 +1885,8 @@ check     기존 목록(그대로) + 위 여섯 개를 차례로
 | `BOT_AVATAR_HOSTS` | `kakaocdn.net,kakao.com,kakao.co.kr,daumcdn.net` | 기록 카드 프로필 사진을 받을 서버(끝이 같은 이름, 쉼표 목록, `none` = 사진을 받지 않음). 로그 `avatar host not allowed: …` 가 보이면 그 서버가 카카오 것인지 확인해 더한다(7.2 (f)) |
 | `BOT_AVATAR_TIMEOUT_MS` `BOT_AVATAR_MAX_BYTES` | 3000 / 1572864 | 프로필 사진 받기 시간 · 크기 상한(넘으면 첫 글자) |
 | `ROOM_LOG_KEEP_DAYS` | 30 | |
+| `SENDER_VOICE_MAX_ROOMS` | 8 | 봇 계정 하나가 동시에 드는 보이스룸 수(1~50, 7.10) |
+| `SENDER_TRACE_VOICE` | — | 실측용(보이스룸 신호만 분당 20줄, 7.10) |
 | `SENDER_TRACE_PUSH` | — | 실측용(오픈프로필 관련 패킷 모양도, 5.3 끝) |
 | `SENDER_FAKE` `FAKE_JOIN_MS` `FAKE_KICK_LEFT` | — | **시험 전용** |
 

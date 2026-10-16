@@ -168,6 +168,8 @@ class FakeServer {
         sent: [],
         deleted: false,
         rateHit: false,
+        voice: '',         // 보이스룸 메타(LIVE_TALK_INFO) 본문. '' = 꺼짐
+        voiceDeny: 0,      // 0 이 아니면 SETMETA(16) 를 이 상태코드로 거절한다
         dropOlu: false,
         dropMember: false,
       }
@@ -255,6 +257,8 @@ class FakeServer {
     if (body && body.pli) row.pli = str(body.pli)
     if (body && body.mid) row.mid = str(body.mid)
     if (body && body.kid) row.kid = str(body.kid)
+    if (body && body.type != null) row.type = Number(body.type)
+    if (body && typeof body.content === 'string') row.content = body.content
     this.packets.push(row)
     if (this.packets.length > 2000) this.packets.splice(0, this.packets.length - 2000)
   }
@@ -499,6 +503,19 @@ class FakeServer {
     }
     if (method === 'WRITE') {
       return resp(method, this.write(me, b.chatId, b.msg, b.extra))
+    }
+    // 보이스룸(LIVE_TALK_INFO): type 16 메타를 방에 적고, 참가자들에게 CHGMETA 로 알린다.
+    // r.voiceDeny 를 0 이 아닌 값으로 두면 카카오가 거절하는 방이 된다(실패 경로 시험용).
+    if (method === 'SETMETA') {
+      const r = this.byChat(b.chatId)
+      if (!r) return resp(method, { status: -324 })
+      if (Number(b.type) !== 16) return resp(method, { status: 0 })
+      if (r.voiceDeny) return resp(method, { status: Number(r.voiceDeny) })
+      const content = String(b.content || '')
+      r.voice = /"liveon"\s*:\s*true/.test(content) ? content : ''
+      this.save()
+      this.pushRoom(r, { method: 'CHGMETA', body: { chatId: L(r.chatId), li: L(r.li), meta: { type: 16, content, authorId: L(me) } } }, str(me))
+      return resp(method, { status: 0 })
     }
     return resp(method, { status: 0 })
   }

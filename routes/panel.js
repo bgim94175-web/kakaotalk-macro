@@ -930,6 +930,8 @@ router.post('/panel/api/bot-room/reinstall', wrap(async (req, res) => {
 // ── 조치 기록 한 줄 (7.8). detail 칸은 sender(작업 3)가 쓴다 — 아래 이름들을 읽는다.
 const KICK_WHY = { churn: '들낙', leave: '퇴장', leaveKick: '퇴장', promo: '홍보', manual: '수동', panel: '수동', command: '방 명령어' };
 const SKIP_WHAT = { send: '발송', notice: '발송', reply: '발송', kick: '내보내기', hide: '글 가리기', rewrite: '글 가리기' };
+// 보이스룸을 끈 까닭(sender 의 detail.why, 7.10)
+const VOICE_WHY = { expired: ' · 48시간 종료', kakao: ' · 카카오에서 끔', command: ' · 방 명령어', panel: ' · 패널' };
 // 건너뛴 까닭(sender 의 detail.note). note 가 없으면 K bot 자체 한도(방·시간·하루)를 넘은 것이다.
 const SKIP_WHY = { wave: '올킥 감지 중이라 건너뜀', paused: '실패가 이어져 잠시 멈춤', stale: '늦어져서 건너뜀' };
 
@@ -997,6 +999,19 @@ function roomLogText(row) {
     if (st === 'error' || (code && st !== 'active')) return '오류(' + shortErr(code) + ')';
     if (st === 'retry' || st === 'queued') return 'K bot 입장 다시 시도';
     return 'K bot 입장 완료';
+  }
+  // 보이스룸 봇: detail = {op:'on'|'off'|'dead', title, why, mins}
+  if (kind === 'voice') {
+    const op = pick(d, ['op']);
+    const title = pick(d, ['title']);
+    const t = typeof title === 'string' && title.length <= 40 ? ' · ' + title : '';
+    const mins = Number(pick(d, ['mins']));
+    const span = Number.isFinite(mins) && mins > 0
+      ? ' · ' + (mins >= 60 ? Math.floor(mins / 60) + '시간' + (mins % 60 ? ' ' + (mins % 60) + '분' : '') : mins + '분')
+      : '';
+    if (op === 'on') return '보이스룸 켜기' + t + (row.ok === false ? ' · 실패' : '');
+    if (op === 'dead') return '보이스룸 내려감' + t + span;
+    return '보이스룸 끄기' + t + span + (VOICE_WHY[pick(d, ['why'])] || '');
   }
   if (kind === 'skip') {
     const what = pick(d, ['what', 'action', 'kind']);
