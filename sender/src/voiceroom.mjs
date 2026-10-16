@@ -284,3 +284,72 @@ export function sessionRow(v, s, now) {
     call_id: String(s.callId || ''),
   }
 }
+
+// ── 진단(SENDER_VOICE_EXPERIMENT 전용) ───────────────────────────────────
+// 카카오가 켜기 신호를 거절했을 때(실측 -203) 그 까닭을 가린다.
+// 같은 방에 SETMETA 를 여러 모양으로 던져 보고, 어디서 갈리는지로 판정한다:
+//   on+li · on-li  진짜 켜기 신호(오픈링크 id 포함·미포함 — 둘 중 하나만 되는지 본다)
+//   off            끄기 신호(무해). 켜기만 막는지, 보이스룸 메타 전체를 막는지
+//   count          type 17(LIVE_TALK_COUNT) — 보이스룸 메타 계열 전체가 막혔는지
+//   unknown        쓰지 않는 type(97) 대조군 — "모르는 타입" 코드가 무엇인지 못박는다
+//   same           지금 방에 있는 메타를 글자 그대로 다시 쓰기(바뀌는 것 없음, 「전체」일 때만)
+//                  → 0 이면 이 봇은 메타를 쓸 수 있다는 뜻이라, 거부가 보이스룸 메타에만 걸린 것이다
+export function metaTypeNum(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (v && typeof v === 'object' && 'low' in v) return Number(v.low)
+  const n = Number(v)
+  return Number.isFinite(n) ? n : NaN
+}
+
+function stOf(rows, tag) {
+  const hit = (rows || []).find((r) => r && r.tag === tag)
+  return hit ? Number(hit.st) : null
+}
+
+/** 진단 결과 한 줄 판정. → {verdict, next} */
+export function diagVerdict(rows) {
+  const on = [stOf(rows, 'on+li'), stOf(rows, 'on-li')].filter((x) => x != null)
+  const onOk = on.some((x) => x === 0)
+  const onSt = on.find((x) => x !== 0)
+  const off = stOf(rows, 'off')
+  const unknown = stOf(rows, 'unknown')
+  const same = stOf(rows, 'same')
+  if (onOk) {
+    return {
+      verdict: '카카오가 켜기 신호를 받았어요. 방에 보이스룸 배너가 보이는지 확인해 주세요.',
+      next: 'banner',
+    }
+  }
+  if (same === 0) {
+    return {
+      verdict: '이 봇은 방 메타를 쓸 수 있는데 보이스룸 메타만 거부돼요. 부방장 권한으로는 켤 수 없고, 음성 서버가 만들어 주는 값이 있어야 합니다.',
+      next: 'server_only',
+    }
+  }
+  if (same != null && same !== 0) {
+    return {
+      verdict: '이 봇은 어떤 방 메타도 쓸 수 없어요. 권한 문제라서, 봇이 방장인 방에서는 될 수 있습니다.',
+      next: 'owner_test',
+    }
+  }
+  if (unknown != null && onSt != null && unknown !== onSt) {
+    return {
+      verdict: `모르는 타입은 ${unknown}, 보이스룸 타입은 ${onSt} — 거부가 보이스룸 메타에만 걸려 있어요.`,
+      next: 'full',
+    }
+  }
+  if (off != null && onSt != null && off === 0) {
+    return { verdict: '끄기는 받고 켜기만 거부돼요. 켜는 값(callId)을 서버가 먼저 만들어 줘야 하는 것으로 보입니다.', next: 'server_only' }
+  }
+  return { verdict: '모르는 타입도 같은 코드라 아직 가릴 수 없어요.', next: 'full' }
+}
+
+/** 방에 보낼 진단 답. rows = [{tag, st}], o = {types, perm, full} */
+export function diagText(rows, o) {
+  const opt = o || {}
+  const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
+  const v = diagVerdict(rows)
+  const head = `보룸 진단 (권한 ${Number(opt.perm)} · 방 메타 ${Array.isArray(opt.types) && opt.types.length ? opt.types.join(',') : '없음'})`
+  const tail = v.next === 'full' && !opt.full ? '\n「보룸진단 전체」로 한 번 더 돌리면 권한인지 가려집니다(방 메타를 같은 값으로 다시 써 봅니다).' : ''
+  return `${head}\n${line}\n→ ${v.verdict}${tail}`
+}

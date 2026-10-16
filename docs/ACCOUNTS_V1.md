@@ -1644,6 +1644,8 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 - **카카오가 주인**: `CHGMETA` 로 온 보이스룸 메타의 `callId`·`csIP`·`csIP6`·`csPort` 를 session 에 바꿔 끼워(`adopt`) 다음 연장에 쓴다. 카카오의 `startTime` 이 더 이르면 48시간은 그때부터 센다. `liveon:false` 가 오면(방장이 카카오 앱에서 직접 끔) 우리 기록도 접는다. 연장이 내리 5번(`MAX_FAILS`) 거절되면 내려간 것으로 보고 방에 알린 뒤 접는다.
 - **켜기가 거절되면 아무것도 남기지 않는다**: 첫 신호가 `status ≠ 0` 이면 session 을 만들지 않고 `보이스룸을 켜지 못했어요 (카카오 응답 N)` 라고 답한다(없는 보이스룸을 48시간 연장하지 않게). `room_log` 에 `voice` + `ok:false` 로 남는다.
 - **HTTP**(3.6): `POST /v1/bot/voiceroom {install_id|chat_id|li, op:'on'|'off'|'status', title?}` · `GET /v1/bot/voicerooms`(이 서버의 봇들이 지금 들고 있는 보이스룸 전부).
+- **실측(2026-10-16)**: 방장이 `!보룸켜기` 를 쳤을 때 카카오가 `status -203` 으로 거절했다(봇은 그 방 부방장, `roombotLive` 통과). `-203` 은 이 저장소가 권한 없음으로 보는 값(9.4 의 가정 값)이다 → **부방장 권한으로는 `LIVE_TALK_INFO` 메타를 쓸 수 없다.** 방장 전용이거나 음성 서버만 쓰는 메타다. 신호를 보내는 자리는 `voiceSignal()` 하나이므로, 진짜 방법을 찾으면 그 함수만 바꾸면 된다.
+- **진단(`SENDER_VOICE_EXPERIMENT=1` 전용, `voiceDiag`·`diagVerdict`)**: 「보룸진단 [전체]」 — 같은 방에 `SETMETA` 를 켜기(`li` 포함·미포함)·끄기·`type 17`·쓰지 않는 `type 97`(대조군)으로 던져 어디서 갈리는지 본다. `전체` 면 `CHATINFO.chatMetas` 의 첫 메타를 **글자 그대로** 한 번 더 쓴다(값은 그대로지만 카카오가 변경 알림을 띄울 수 있어 인자로 받는다). 판정: 켜기가 되면 `banner`(배너 확인) · 같은 값 쓰기가 되는데 보이스룸만 거부면 `server_only` · 아무 메타도 못 쓰면 `owner_test`(방장 방에서 시험) · 아직 못 가리면 `full`.
 - **아직 실측 전**: 봇은 음성 미디어 세션에 들어가지 않는다(말하거나 듣지 않는다). 켜기 신호 본문은 과거 캡처로 조립한 것이라 카카오가 받아 주는지, 받아 준 뒤 배너가 실제로 보이는지는 `DEPLOY.md` 9장 순서로 한 번 확인한다. 응답·메타는 `voice on`·`voice keep`·`voice off`·`voice meta` 로그 줄에 남는다.
 
 ---
