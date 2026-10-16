@@ -1817,8 +1817,12 @@ async function withLog(fn) {
       const brightInMargin = (png) => {
         const { w, h, ch, px } = rgba(png)
         const s = w / LC.CARD_W
-        for (let y = Math.round(130 * s); y < h; y++) {
-          for (let x = Math.round((LC.CARD_W - 40) * s); x < w; x++) {
+        // 맨 가장자리의 겉 테두리(흰 선, FRAME)와 오른쪽 아래 둥근 모서리(FRAME_R)는 빼고 본다
+        const edge = Math.ceil((LC.FRAME + 2) * s)
+        const corner = Math.ceil(LC.FRAME_R * s)
+        for (let y = Math.round(130 * s); y < h - edge; y++) {
+          for (let x = Math.round((LC.CARD_W - 40) * s); x < w - edge; x++) {
+            if (x >= w - corner && y >= h - corner) continue
             const i = (y * w + x) * ch
             if (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11 > 100) return `${x},${y}`
           }

@@ -215,6 +215,8 @@ function initialOf(name) {
 // 기울어진 타원(궤도) 위의 점. a 는 라디안(0 = 오른쪽 끝, π/2 = 앞, π = 왼쪽 끝, 3π/2 = 뒤)
 // K 는 배지와 윗선을 맞춘다(K 위 = 배지 위 = 42).
 const K_H = 82 // 가운데 K 로고 높이
+export const FRAME = 2.5 // 겉 테두리(흰 선) 굵기
+export const FRAME_R = 24 // 겉 테두리 모서리 둥글기
 const SYS = { cx: 604, cy: 42 + K_H / 2, rot: -15, flat: 0.27 }
 const RINGS = [84, 132, 190, 258, 336]
 
@@ -520,7 +522,11 @@ export function logCardSvg(card, opt) {
     `<radialGradient id="av" cx="0.34" cy="0.28" r="0.9"><stop offset="0" stop-color="${S3}"/><stop offset="1" stop-color="${S1}"/></radialGradient>` +
     `<linearGradient id="edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${L3}"/><stop offset="0.5" stop-color="${L2}"/><stop offset="1" stop-color="${L1}"/></linearGradient>` +
     art.defs + `</defs>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}<rect width="${W}" height="${H}" fill="${BG}"/>${art.body}${out.join('')}</svg>`
+  // 겉 테두리: 둥근 카드에 흰 선. 둥근 모서리 밖은 투명이고, 그림·글은 카드 안으로 자른다
+  const frame = `<clipPath id="frame"><rect width="${W}" height="${H}" rx="${FRAME_R}"/></clipPath>`
+  const edge = `<rect x="${FRAME / 2}" y="${FRAME / 2}" width="${W - FRAME}" height="${r1(H - FRAME)}" rx="${FRAME_R - FRAME / 2}" fill="none" stroke="#FFFFFF" stroke-width="${FRAME}"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs.replace('</defs>', frame + '</defs>')}` +
+    `<g clip-path="url(#frame)"><rect width="${W}" height="${H}" fill="${BG}"/>${art.body}${out.join('')}</g>${edge}</svg>`
 }
 
 /** 카드 → PNG Buffer(폭 1440 = 2배). 렌더러가 없거나 실패하면 null */
