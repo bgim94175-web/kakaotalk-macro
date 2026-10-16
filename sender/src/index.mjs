@@ -421,6 +421,23 @@ app.post('/v1/bot/room-profile', botRoute(async (req, res) => {
   return hub.pool.roomProfileCmd(id, how)
 }))
 
+// ── 보이스룸 봇 ───────────────────────────────────────────────────────────────
+// POST /v1/bot/voiceroom { install_id | chat_id | li, op?:'on'|'off'|'status', title? }
+//   op 기본 'on'. 켜면 48시간 동안 봇이 연장 신호를 보내 보이스룸을 살려 둔다. 방은 세 값 중 아무 것으로나 고른다.
+// GET  /v1/bot/voicerooms  이 서버의 봇들이 지금 들고 있는 보이스룸 전부(한 계정 여러 방)
+app.post('/v1/bot/voiceroom', botRoute(async (req, res) => {
+  const b = req.body || {}
+  const sel = { install_id: b.install_id, chat_id: b.chat_id, li: b.li }
+  if ((sel.install_id == null || sel.install_id === '') && !sel.chat_id && !sel.li) {
+    res.status(400).json({ ok: false, error: 'need_room' })
+    return null
+  }
+  const op = b.op === 'off' || b.op === 'status' ? b.op : 'on'
+  return hub.pool.voiceCmd(sel, op, { title: typeof b.title === 'string' ? b.title : '', why: 'panel' })
+}))
+
+app.get('/v1/bot/voicerooms', botRoute(async () => hub.pool.voiceList()))
+
 // ── 보이스룸 실험 전용(A층). SENDER_VOICE_EXPERIMENT=1 일 때만 등록한다 ──────────
 // POST /v1/bot/voice-experiment { install_id | chat_id | li, on? }
 //   on 기본 true(켜기), false 면 끄기. 방은 세 값 중 아무 것으로나 고른다(캡처 로그 값 그대로 OK).

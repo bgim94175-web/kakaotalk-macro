@@ -26,6 +26,7 @@ import { Owner } from './owner.mjs'
 import * as C from './roomcmd.mjs'
 import * as R from './roomfeat.mjs'
 import { open as openPasscode } from './secretbox.mjs'
+import * as VR from './voiceroom.mjs'
 
 const MIN = 60 * 1000
 const HOUR = 60 * MIN
@@ -440,6 +441,21 @@ export class BotPool {
     const got = this.voiceFind(sel)
     if (!got || !got.slot) return { ok: false, error: 'not_joined' }
     return got.slot.voiceSetMeta(got.view, on)
+  }
+
+  // 보이스룸 봇(패널·관리자 HTTP): 방 하나의 보이스룸을 켜고(op 'on')·끄고(op 'off')·본다(op 'status').
+  async voiceCmd(sel, op, o) {
+    const got = this.voiceFind(sel)
+    if (!got || !got.slot) return { ok: false, error: 'not_joined' }
+    return got.slot.voiceCmd(got.view, op, o || {})
+  }
+
+  // 이 서버의 봇들이 지금 들고 있는 보이스룸 전부(한 계정 여러 방을 한눈에 본다)
+  voiceList() {
+    const rows = []
+    for (const slot of this.bots.values()) rows.push(...slot.voiceRows())
+    rows.sort((a, b) => a.start_at - b.start_at)
+    return { ok: true, max: VR.maxRooms(process.env), count: rows.length, rooms: rows }
   }
 
   // 서버 IP 차단(-444): 봇을 내리지 않고 모든 봇의 입장·조회를 멈춘다(5.3 6).
@@ -1359,6 +1375,225 @@ export class BotSlot {
     const standout = results.filter((x) => x.tag === 'CAND' && x.st !== -1 && !fakeCodes.has(x.st)).map((x) => `${x.m}:${x.st}`)
     log(this.id, `voice probe done. REAL[${codeOf('REAL')}] FAKE[${codeOf('FAKE')}] standout[${standout.join(' ') || 'none'}]`)
     return { ok: true, real: codeOf('REAL'), fake: codeOf('FAKE'), standout }
+  }
+
+  // ── 보이스룸 봇 ─────────────────────────────────────────────────────────
+  // 방마다 보이스룸 하나(session)를 들고, KEEP_MS 마다 updateTime 을 올린 LIVE_TALK_INFO 를 다시 보내
+  // 48시간까지 살려 둔다. session 은 room_state.runtime.voice 에 저장해 sender 가 다시 떠도 남은 시간을 이어 간다.
+  // 한 계정이 여러 방의 보이스룸을 동시에 든다 — 방마다 session 이 따로라 서로 섞이지 않고, 동시 개수만 maxRooms 로 막는다.
+
+  // 이 방의 session. runtime(저장본)이 바뀔 때 한 번만 되살린다. 끝난 session 도 그대로 돌려준다(voiceTick 이 끄고 알린다).
+  voiceOf(v) {
+    if (!v || !v.runtime) return null
+    if (v.voiceAt !== v.runtime) {
+      const back = VR.restore(v.runtime.voice, { chat: v.chat_id })
+      if (back) v.runtime.voice = back
+      else if (v.runtime.voice) { delete v.runtime.voice; v.dirty = true }
+      v.voiceAt = v.runtime
+    }
+    const s = v.runtime.voice
+    return s && s.on ? s : null
+  }
+
+  // 이 봇이 지금 들고 있는 보이스룸 수(exceptInstall 은 세지 않는다)
+  voiceCount(exceptInstall) {
+    let n = 0
+    for (const v of this.byInstall.values()) {
+      if (exceptInstall != null && Number(v.install_id) === Number(exceptInstall)) continue
+      if (this.voiceOf(v)) n += 1
+    }
+    return n
+  }
+
+  voiceRows() {
+    const now = this.now()
+    const rows = []
+    for (const v of this.byInstall.values()) {
+      const s = this.voiceOf(v)
+      if (s) rows.push(Object.assign(VR.sessionRow(v, s, now), { bot: this.id }))
+    }
+    return rows
+  }
+
+  // 신호 한 번(켜기·연장·끄기). 오픈채팅은 li 가 더 필요할 수 있어 li 포함본을 먼저 보낸다(voiceSetMeta 와 같은 방식).
+  async voiceSignal(v, content) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, status: -1 }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const attempts = []
+    if (li) attempts.push({ body: { chatId: L(chatId), li: L(li), type: 16, content } })
+    attempts.push({ body: { chatId: L(chatId), type: 16, content } })
+    let last = { ok: false, status: -1 }
+    for (const a of attempts) {
+      const r = await this.raw('SETMETA', a.body)
+      last = { ok: R.locoOk(r), status: R.locoStatus(r) }
+      if (last.ok) break
+    }
+    return last
+  }
+
+  voiceContent(s, now) {
+    return VR.onContent({
+      title: s.title, startSec: VR.startSecOf(s), nowSec: Math.floor(now / 1000),
+      callId: s.callId, csIP: s.csIP, csIP6: s.csIP6, csPort: s.csPort, url: s.url,
+    })
+  }
+
+  // 켜기. 카카오가 받아 주지 않으면 session 을 남기지 않는다(없는 보이스룸을 48시간 연장하지 않게).
+  async voiceStart(v, o) {
+    const now = this.now()
+    const cur = this.voiceOf(v)
+    if (cur && !VR.expired(cur, now)) return { ok: true, op: 'on', already: true, session: cur }
+    // 봇이 부방장이어야 방 메타를 바꿀 수 있다(방 명령어는 앞에서 먼저 보고 더 친절히 답한다. HTTP 는 여기서 막는다)
+    if (!R.roombotLive(v)) return { ok: false, op: 'on', error: v.products && v.products.roombot ? 'not_active' : 'no_roombot' }
+    const max = VR.maxRooms(process.env)
+    const count = this.voiceCount(v.install_id)
+    if (count >= max) return { ok: false, op: 'on', error: 'too_many', count, max }
+    const title = (o && o.title) || (cur && cur.title) || cleanName(v.link_name) || VR.DEFAULT_TITLE
+    const s = VR.newSession({ title, by: this.id, byName: o && o.byName, chat: v.chat_id, now })
+    const r = await this.voiceSignal(v, this.voiceContent(s, now))
+    log(this.id, `voice on install ${v.install_id} chat ${v.chat_id} title ${s.title} callId ${s.callId} rooms ${count + 1}/${max} → status ${r.status}`)
+    this.bg(this.roomLog(v.install_id, 'voice', { ok: r.ok, user_id: o && o.by, name: o && o.byName, detail: { op: 'on', title: s.title, status: r.status, hours: Math.round(VR.MAX_MS / 3600000) } }), 'voice log')
+    if (!r.ok) return { ok: false, op: 'on', error: 'kakao', status: r.status }
+    v.runtime.voice = s
+    v.voiceAt = v.runtime
+    v.dirty = true
+    this.saveSoon(v)
+    return { ok: true, op: 'on', session: s, status: r.status }
+  }
+
+  // 끄기. 신호가 실패해도 기록은 지운다(이미 내려간 보이스룸을 계속 연장하지 않게).
+  async voiceStop(v, why, o) {
+    const s = this.voiceOf(v)
+    if (!s) return { ok: true, op: 'off', was: false }
+    const now = this.now()
+    const r = await this.voiceSignal(v, VR.offContent())
+    const mins = Math.round((now - Number(s.startAt)) / MIN)
+    log(this.id, `voice off install ${v.install_id} why ${why} after ${mins}m keeps ${s.keeps} → status ${r.status}`)
+    if (v.runtime) delete v.runtime.voice
+    v.dirty = true
+    this.saveSoon(v)
+    this.bg(this.roomLog(v.install_id, 'voice', { ok: true, user_id: o && o.by, name: o && o.byName, detail: { op: 'off', why, title: s.title, mins, status: r.status } }), 'voice log')
+    return { ok: true, op: 'off', was: true, status: r.status, session: s }
+  }
+
+  // 연장 한 번. 내리 MAX_FAILS 번 실패하면 카카오에서 내려간 것으로 보고 기록을 접는다.
+  async voiceKeep(v, s) {
+    const r = await this.voiceSignal(v, this.voiceContent(s, this.now()))
+    VR.touch(s, this.now(), r.ok)
+    v.dirty = true
+    this.saveSoon(v)
+    if (!r.ok) log(this.id, `voice keep install ${v.install_id} status ${r.status} fails ${s.fails}`)
+    if (VR.dead(s)) {
+      log(this.id, `voice keep install ${v.install_id} gave up after ${s.fails} fails`)
+      if (v.runtime) delete v.runtime.voice
+      v.dirty = true
+      this.saveSoon(v)
+      this.say(v, VR.deadNotice(s))
+      this.bg(this.roomLog(v.install_id, 'voice', { ok: false, detail: { op: 'dead', title: s.title, status: r.status, mins: Math.round((this.now() - Number(s.startAt)) / MIN) } }), 'voice log')
+    }
+    return r
+  }
+
+  async voiceEnd(v, s) {
+    const r = await this.voiceStop(v, 'expired')
+    this.say(v, VR.endNotice(s))
+    return r
+  }
+
+  // 명령어·HTTP 공통 입구
+  async voiceCmd(v, op, o) {
+    const now = this.now()
+    const s = this.voiceOf(v)
+    if (op === 'status') {
+      const live = s && !VR.expired(s, now) ? s : null
+      return { ok: true, op: 'status', on: !!live, session: live, left_ms: live ? Math.max(0, Number(live.endAt) - now) : 0 }
+    }
+    if (op === 'off') return this.voiceStop(v, (o && o.why) || 'command', o)
+    return this.voiceStart(v, o || {})
+  }
+
+  // 방 안 명령어 처리. 「보룸」(상태)은 누구나, 켜고 끄기는 방장·부방장만.
+  // 봇이 부방장이어야 방 메타를 바꿀 수 있어 방 관리봇이 동작하는 방에서만 켜고 끈다.
+  // → true(방장·부방장의 명령어로 처리를 끝냈다) | false(그 밖 — 부른 쪽이 홍보·금지어 검사를 이어 간다)
+  async voiceChat(v, vc, m, name) {
+    const now = this.now()
+    const cur = this.voiceOf(v)
+    const live = cur && !VR.expired(cur, now) ? cur : null
+    const staff = C.isStaff(await this.permOf(v, m.authorId))
+    if (vc.cmd === 'status') {
+      this.say(v, VR.statusReply(live, now), { what: 'reply' })
+      return staff
+    }
+    if (!staff) {
+      this.say(v, VR.staffOnlyReply(), { what: 'reply' })
+      return false
+    }
+    if (!R.roombotLive(v)) {
+      this.say(v, C.notLiveReply(this.nameIn(v)), { what: 'reply' })
+      return true
+    }
+    const by = { by: m.authorId, byName: name }
+    if (vc.cmd === 'off') {
+      if (!live) this.say(v, VR.offReply(null, now), { what: 'reply' })
+      else {
+        const r = await this.voiceStop(v, 'command', by)
+        this.say(v, VR.offReply(r.session || live, this.now()), { what: 'reply' })
+      }
+      return true
+    }
+    const r = await this.voiceStart(v, Object.assign({ title: vc.title }, by))
+    if (r.already) this.say(v, VR.alreadyReply(r.session, now), { what: 'reply' })
+    else if (r.error === 'too_many') this.say(v, VR.capReply(r.count, r.max), { what: 'reply' })
+    else this.say(v, r.ok ? VR.onReply(r.session) : VR.failReply(r.status), { what: 'reply' })
+    return true
+  }
+
+  // tick 마다(1초): 연장할 방·끝난 방·끝나기 1시간 전 방을 본다. 방마다 한 번에 하나만 보낸다(voiceBusy).
+  // tick 은 봇이 카카오에 붙어 있을 때만 돈다 — 끊긴 동안은 연장을 실패로 세지 않는다.
+  voiceTick(now) {
+    for (const v of this.byInstall.values()) {
+      if (!v.licensed || !v.chat_id || v.state === 'error' || v.loading || v.voiceBusy) continue
+      const s = this.voiceOf(v)
+      if (!s) continue
+      if (VR.expired(s, now)) {
+        v.voiceBusy = true
+        this.bg(this.voiceEnd(v, s).finally(() => { v.voiceBusy = false }), 'voice end')
+        continue
+      }
+      if (VR.dueWarn(s, now)) {
+        s.warned = true
+        v.dirty = true
+        this.saveSoon(v)
+        this.say(v, VR.warnNotice(s, now))
+      }
+      if (VR.dueKeepalive(s, now, VR.KEEP_MS)) {
+        v.voiceBusy = true
+        this.bg(this.voiceKeep(v, s).finally(() => { v.voiceBusy = false }), 'voice keep')
+      }
+    }
+  }
+
+  // 카카오가 보낸 보이스룸 메타(CHGMETA): 진짜 callId·음성서버 값으로 바꿔 끼워 다음 연장에 쓴다.
+  // 방장이 카카오 앱에서 직접 보이스룸을 끄면(liveon:false) 우리 기록도 접는다.
+  voiceMeta(v, content) {
+    const s = this.voiceOf(v)
+    if (!s) return
+    const meta = VR.parseMeta(content)
+    if (!meta) return
+    if (!meta.liveon) {
+      log(this.id, `voice meta install ${v.install_id} liveon=false — kakao closed it, dropping our session`)
+      if (v.runtime) delete v.runtime.voice
+      v.dirty = true
+      this.saveSoon(v)
+      this.bg(this.roomLog(v.install_id, 'voice', { ok: true, detail: { op: 'off', why: 'kakao', title: s.title, mins: Math.round((this.now() - Number(s.startAt)) / MIN) } }), 'voice log')
+      return
+    }
+    if (VR.adopt(s, meta)) {
+      v.dirty = true
+      this.saveSoon(v)
+      log(this.id, `voice meta install ${v.install_id} adopted callId ${s.callId} cs ${s.csIP}:${s.csPort}`)
+    }
   }
 
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
@@ -2391,6 +2626,7 @@ export class BotSlot {
       this.memberFill(v, now)
       if (v.loadFailed && !v.loading && now >= (v.loadRetryAt || 0)) this.bg(this.retryLoad(v), 'room_state retry')
     }
+    this.voiceTick(now)
     for (const [uid, at] of this.ownKicks) if (now - at > MIN) this.ownKicks.delete(uid)
     // 오픈프로필 목록을 주기적으로 다시 읽는다(모르는 상태면 5분마다)
     const every = this.profileState === 'unknown' ? 5 * MIN : this.opts.profileReadMs
@@ -2551,6 +2787,12 @@ export class BotSlot {
       const log0 = b.chatLog || {}
       const chatId = R.idText(b.chatId) || R.idText(log0.chatId) || R.idText(b.c)
       if (chatId) await this.onChatLog(chatId, log0, typeof b.authorNickname === 'string' ? b.authorNickname : '', m)
+      return
+    }
+    if (m === 'CHGMETA') {
+      // 보이스룸 메타(liveon·csIP·callId)만 본다. 다른 메타는 할 일이 없다.
+      const v = this.views.get(R.idText(b.chatId) || R.idText(b.c)) || this.viewByLink(b.li)
+      if (v && v.licensed && v.state !== 'error' && b.meta) this.voiceMeta(v, b.meta.content)
       return
     }
     if (m === 'SYNCMEMT') {
@@ -3117,21 +3359,9 @@ export class BotSlot {
     const text = m.text || ''
     const mentions = R.mentionIds(m.attachment)
     const isCmd = text.trim().startsWith(prefix)
-    // 보이스룸 실험(A층): SENDER_VOICE_EXPERIMENT=1 이고 방장·부방장이 「접두사+보룸실험/보룸중지」를
-    // 쳤을 때만. 봇이 이 방에 SETMETA(16) liveon 신호만 보낸다(서버 할당·음성세션 없음). 결과를 답으로 알린다.
+    // 보이스룸 명령어 찾기(실험): SENDER_VOICE_EXPERIMENT=1 일 때만 남겨 둔 탐색용 명령어.
     if (process.env.SENDER_VOICE_EXPERIMENT === '1' && isCmd) {
       const t = text.trim().slice(prefix.length).trim()
-      if (t === '보룸실험' || t === '보룸켜' || t === '보룸중지' || t === '보룸꺼') {
-        const on = t === '보룸실험' || t === '보룸켜'
-        const n = Number(await this.permOf(v, m.authorId))
-        if (!(Number.isFinite(n) && (n & 5))) {
-          this.say(v, '보룸 실험은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
-          return
-        }
-        const r = await this.voiceSetMeta(v, on)
-        this.say(v, r.ok ? `보룸 신호 ${on ? '켜기' : '끄기'} 보냈어요 (status ${r.status})` : `보룸 신호 실패 (status ${r.status})`, { what: 'reply' })
-        return
-      }
       if (t === '보룸찾기') {
         const n = Number(await this.permOf(v, m.authorId))
         if (!(Number.isFinite(n) && (n & 5))) {
@@ -3157,6 +3387,12 @@ export class BotSlot {
       const line = R.helpLine(v)
       if (line) this.say(v, line, { what: 'reply' })
       return
+    }
+    // 보이스룸 봇(7.10): 「접두사+보룸켜기 [제목]」·「보룸끄기」·「보룸」(남은 시간). 켜고 끄기는 방장·부방장만.
+    // 방장·부방장이 아닌 사람의 명령어 글은 아래 홍보·금지어 검사를 그대로 받는다(roomCommand 와 같은 규칙).
+    if (v.products.roombot && isCmd) {
+      const vc = VR.parseVoiceCommand(text, prefix)
+      if (vc && await this.voiceChat(v, vc, m, name)) return
     }
     if (live && cfg.hide.command) {
       const hc = R.parseHideCommand(text, prefix, mentions)

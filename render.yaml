@@ -92,11 +92,13 @@ services:
       #     BOT_AVATAR_HOSTS          kakaocdn.net,kakao.com,kakao.co.kr,daumcdn.net   그림 카드 프로필 사진을 받을 서버(none = 받지 않음)
       #     BOT_PROFILE_SWITCH_PER_HOUR  6        auto 일 때 봇마다 시간당 바꾸는 방 수
       #     BOT_PROFILE_BLOCK_STATUS  -804        카카오가 오픈프로필 입장을 거부할 때의 status(쉼표 목록). 실측 값으로 고친다
+      #   보이스룸 봇 (DEPLOY.md 9 의 실측을 마친 뒤에만 바꾼다)
+      #     SENDER_VOICE_MAX_ROOMS    8           봇 계정 하나가 동시에 드는 보이스룸 수(1~50). 방장은 「!보룸켜기」로 켠다(48시간 유지)
       #   Google 시험용 덮어쓰기 — 운영에서는 넣지 마라
       #     GOOGLE_REDIRECT_URI       (PURCHASE_BASE/auth/google/callback)
       #     GOOGLE_AUTH_URL / GOOGLE_TOKEN_URL   https 또는 http://localhost·127.0.0.1 만 받는다
       #   시험 전용 — 운영 금지 (켜져 있으면 부팅 로그에 큰 경고)
-      #     SENDER_FAKE · FAKE_JOIN_MS · FAKE_KICK_LEFT · SENDER_TRACE_PUSH(실측용)
+      #     SENDER_FAKE · FAKE_JOIN_MS · FAKE_KICK_LEFT · SENDER_TRACE_PUSH · SENDER_TRACE_VOICE(실측용)
       #   관리자 비밀번호 추측 차단
       #     ADMIN_FAIL_PER_MIN        10    분당 이 횟수 틀리면 그 IP 차단
       #     ADMIN_BLOCK_MS            900000    차단 유지 15분
