@@ -4108,6 +4108,16 @@ async function withLog(fn) {
         fs.room('voicex1').voiceDeny = 0
       }
       await botA.slot.voiceCmd(vv, 'off', {})
+      // 쓰기 시험: 보이스룸이 아닌 타입(제목 3)은 가짜 서버가 받아 준다 → "보이스룸만 막힌 것" 판정
+      fs.room('voicex1').voiceDeny = -203
+      try {
+        const w = await botA.slot.voiceWriteTest(vv)
+        if (!w.ok || w.type !== 3) throw new Error('#42 write test picks a non-voice meta ' + JSON.stringify(w))
+        if (w.next !== 'voice_closed') throw new Error('#42 write test verdict ' + w.next + ' ' + JSON.stringify(w.rows))
+        if (!w.text.includes('닫혔습니다')) throw new Error('#42 write test says it plainly: ' + w.text)
+      } finally {
+        fs.room('voicex1').voiceDeny = 0
+      }
       // 보이스룸 메타가 없는 방에서는 그렇게 알린다
       const vOther = botA.slot.byInstall.get(iV3)
       const m3 = await botA.slot.voiceMirror(vOther)

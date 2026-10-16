@@ -1702,6 +1702,45 @@ export class BotSlot {
     return { ok: true, rows, type, keys, text, next }
   }
 
+  // 보룸 쓰기시험(SENDER_VOICE_EXPERIMENT 전용): SETMETA 가 보이스룸이 아닌 타입으로는 통하는지 본다.
+  // 따라쓰기까지 전부 -203 이라, 우리 바디 모양이 틀린 것인지 type 16 만 막힌 것인지 아직 못 가렸다.
+  // 보이스룸이 아닌 메타가 있으면 그것을 글자 그대로 다시 쓰고(완전 무해), 없으면 type 3(제목)에
+  // **지금 방 이름 그대로**를 쓴다(값이 같아 보이는 것은 그대로다).
+  async voiceWriteTest(v) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const info = await this.raw('CHATINFO', { chatId: L(chatId) })
+    const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
+      .filter((m) => m && typeof m.content === 'string'))
+    const other = metas.find((m) => !VR.isVoiceMetaType(m.type))
+    const type = other ? VR.metaTypeNum(other.type) : 3
+    const content = other ? other.content : (cleanName(v.link_name) || '')
+    if (!content) return { ok: false, error: 'nothing_to_write' }
+    const what = other ? `지금 있는 type ${type} 메타를 글자 그대로` : `type 3(제목)에 지금 방 이름 「${content}」 그대로`
+    log(this.id, `voice writetest ${what} chat ${chatId}`)
+    const rows = []
+    const run = async (tag, body) => {
+      const r = await this.raw('SETMETA', body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice writetest ${tag} type ${body.type} → status ${st} body ${traceText((r && r.body) || {})}`)
+      rows.push({ tag, st })
+      await new Promise((ok) => setTimeout(ok, 400))
+      return st
+    }
+    const base = { chatId: L(chatId), type, content }
+    await run(`type${type}`, base)
+    if (li) await run(`type${type}+li`, Object.assign({}, base, { li: L(li) }))
+    if (other) {
+      const extras = VR.metaExtras(other)
+      if (Object.keys(extras).length) await run(`type${type}+echo`, Object.assign({}, base, extras))
+    }
+    const text = VR.writeTestText(rows, { what })
+    const next = VR.writeTestVerdict(rows).next
+    log(this.id, `voice writetest done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${next}`)
+    return { ok: true, rows, type, text, next }
+  }
+
   // ── DB 쓰기 ─────────────────────────────────────────────────────────────
   async write(installId, fields) {
     return this.store.updateInstall(Number(installId), this.id, fields)
@@ -3478,6 +3517,17 @@ export class BotSlot {
         this.say(v, '보룸 진단 중… 잠시만요(약 5초).', { what: 'reply' })
         const r = await this.voiceDiag(v, !!dm[1])
         this.say(v, r.ok ? r.text : '진단을 돌리지 못했어요.', { what: 'reply' })
+        return
+      }
+      if (t === '보룸쓰기시험' || t === '보룸쓰기') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 쓰기시험은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, '보이스룸이 아닌 메타를 써 보는 중… 잠시만요(약 2초).', { what: 'reply' })
+        const r = await this.voiceWriteTest(v)
+        this.say(v, r.ok ? r.text : '쓸 수 있는 메타를 찾지 못했어요.', { what: 'reply' })
         return
       }
       if (t === '보룸따라') {

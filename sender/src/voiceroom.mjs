@@ -443,3 +443,35 @@ export function mirrorText(rows, o) {
   const keys = Array.isArray(opt.keys) && opt.keys.length ? opt.keys.join(',') : '없음'
   return `보룸 따라쓰기 (type ${opt.type} · 함께 온 칸 ${keys})\n${line}\n→ ${v.verdict}`
 }
+
+// ── 쓰기 시험(write test) ────────────────────────────────────────────────
+// 따라쓰기까지 전부 -203 이었다. 그런데 우리는 SETMETA 가 **어떤 타입으로든** 통하는 것을 아직 본 적이 없다.
+// 그래서 두 가지를 못 가린다:
+//   (A) 우리 SETMETA 바디 모양이 애초에 틀렸다(그러면 모든 타입이 -203 이다)
+//   (B) 바디는 맞는데 type 16 만 클라이언트가 쓸 수 없는 자리다
+// 보이스룸이 아닌 타입 하나를 **지금 값 그대로** 써 보면 갈린다. 0 이 나오면 (B) — 이 길은 닫힌 것이다.
+export function writeTestVerdict(rows) {
+  const list = rows || []
+  const okRow = list.find((r) => Number(r.st) === 0)
+  if (okRow) {
+    return {
+      verdict: `보이스룸이 아닌 메타는 써집니다(${okRow.tag} 0). 바디 모양은 맞고, type 16 만 클라이언트가 쓸 수 없는 자리예요. 신호로 켜는 길은 닫혔습니다.`,
+      next: 'voice_closed',
+    }
+  }
+  if (list.some((r) => Number(r.st) === STATUS_UNKNOWN)) {
+    return { verdict: '그 타입도 모른다고 답해요. 타입 번호부터 다시 봐야 합니다.', next: 'unknown_type' }
+  }
+  return {
+    verdict: 'SETMETA 가 어떤 타입으로도 통하지 않아요. 우리 바디 모양이 틀렸거나, 오픈채팅은 다른 명령어로 메타를 바꾸는 것일 수 있습니다.',
+    next: 'bad_shape',
+  }
+}
+
+/** 방에 보낼 쓰기 시험 답. o = {what} — 무엇을 썼는지 사람 말로 */
+export function writeTestText(rows, o) {
+  const opt = o || {}
+  const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
+  const v = writeTestVerdict(rows)
+  return `보룸 쓰기시험 (${opt.what || '-'})\n${line}\n→ ${v.verdict}`
+}
