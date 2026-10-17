@@ -1070,7 +1070,7 @@ function roomCommandNames(view) {
   if (cfg.cmd.link !== 'off') out.push(p + '옾링')
   if (cfg.profile.enabled && cfg.profile.lookup !== 'off') out.push(p + '프로필조회')
   if (cfg.hide.command) out.push(p + '가리기')
-  out.push(p + '내보내기', p + '설정', p + '보룸켜기')
+  out.push(p + '내보내기', p + '설정', p + '보룸')
   return out
 }
 
@@ -1099,9 +1099,7 @@ export function adminHelp(view) {
     `${p}금지어 추가 · 삭제 단어`,
     `${p}금지어 목록`,
     `${p}올킥감지 켜기 · 끄기`,
-    `${p}보룸켜기 제목 : 보이스룸 켜기(48시간)`,
-    `${p}보룸끄기 : 보이스룸 끄기`,
-    `${p}보룸 : 보이스룸 남은 시간 보기`,
+    `${p}보룸 : 보이스룸이 열려 있는지 보기`,
   )
   return helpCard('방 관리 명령어', [{ lines }], '@닉네임 자리에는 옾링 주소도 쓸 수 있어요. 내보내기·설정은 방장과 부방장만 할 수 있어요.')
 }

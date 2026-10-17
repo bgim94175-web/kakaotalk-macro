@@ -1694,11 +1694,11 @@ async function withLog(fn) {
   {
     const v = view({ products: { roombot: true, minigame: true }, config: { profile: { enabled: true } } })
     const h = RF.helpLine(v)
-    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!') + '\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
+    if (h !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 미니게임\n ▸ !끝말잇기 · !숫자야구\n ▸ !주사위 · !가위바위보 · !퀴즈\n ▸ !힌트 · !정답 · !포기 · !랭킹\n\n' + swordHelp('!') + '\n\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.') throw new Error('#40-2 help ' + JSON.stringify(h))
     const ah = RF.adminHelp(v)
     if (!ah.startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기\n▸ !프로필조회 @닉네임 : 프로필 기록 보기\n▸ !가리기 30 : 최근 글 30개 가리기') || ah.indexOf('\n▸ !내보내기 @닉네임 : 내보내기\n') < 0 || ah.indexOf('\n▸ !금지어 추가 · 삭제 단어\n') < 0) throw new Error('#40-2 admin help ' + JSON.stringify(ah))
     const off = view({ config: { cmd: { link: 'off' }, hide: { command: false } } })
-    if (RF.helpLine(off) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
+    if (RF.helpLine(off) !== '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !내보내기 · !설정 · !보룸\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.' || RF.adminHelp(off).indexOf('!옾링') >= 0 || RF.adminHelp(off).indexOf('!가리기') >= 0) throw new Error('#40-2 help follows the switches ' + JSON.stringify(RF.helpLine(off)))
     const waiting = view({ state: 'waiting_host' })
     if (RF.helpLine(waiting) !== '' || RF.adminHelp(waiting) !== '') throw new Error('#40-2 no room commands while waiting for the host')
     if (!RF.isAdminHelpCommand('!도움 관리', '!') || !RF.isAdminHelpCommand('!도움관리', '!') || RF.isAdminHelpCommand('!도움', '!') || RF.isAdminHelpCommand('!도움 관리자', '!')) throw new Error('#40-2 admin help command')
@@ -2699,7 +2699,7 @@ async function withLog(fn) {
       await waitFor(() => vc.members.get('4014') && vc.members.get('4014').link === 'https://open.kakao.com/o/cloud4014' && vc.memberOkAt > 0, 5000, '#40 member book')
       await sleep(100)
       // 도움말
-      await expect(ask('4012', '바다', '!도움'), '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸켜기\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
+      await expect(ask('4012', '바다', '!도움'), '《 K bot 명령어 》\n━━━━━━━━━━━━\n◆ 방 관리\n ▸ !옾링 · !프로필조회 · !가리기\n ▸ !내보내기 · !설정 · !보룸\n━━━━━━━━━━━━\n「!도움 관리」를 입력하면 방 관리 명령어 설명을 볼 수 있어요.', 'help')
       if (!(await ask('4012', '바다', '!도움 관리')).startsWith('《 방 관리 명령어 》\n━━━━━━━━━━━━\n▸ !옾링 @닉네임 : 옾링 보기')) throw new Error('#40 admin help')
       // !옾링: 기본은 방장·부방장만
       await expect(ask('4012', '바다', '!옾링 구름'), '옾링 조회는 방장과 부방장만 할 수 있어요.', 'link staff only')
@@ -3924,7 +3924,7 @@ async function withLog(fn) {
 
     // 안 켠 방: 「!보룸」은 누구나 볼 수 있고, 켜기는 방장·부방장만
     say(chat, '6102', '!보룸')
-    await until(() => last(iV).indexOf('켜 둔 보이스룸이 없어요') >= 0, 'status before')
+    await until(() => last(iV).indexOf('열려 있는 보이스룸이 없어요') >= 0, 'status before')
     say(chat, '6102', '!보룸켜기')
     await until(() => last(iV) === VR.staffOnlyReply(), 'guests cannot turn it on')
     if (metas(chat).length) throw new Error('#42 a guest command sends no signal')
@@ -4028,7 +4028,7 @@ async function withLog(fn) {
 
     // 「!보룸끄기」: 켠 뒤 끄면 liveon:false, 안 켠 방에서는 조용히 알린다
     say(chat, '6101', '!보룸끄기')
-    await until(() => last(iV).indexOf('켜 둔 보이스룸이 없어요') >= 0, 'off with nothing on')
+    await until(() => last(iV).indexOf('열려 있는 보이스룸이 없어요') >= 0, 'off with nothing on')
     say(chat, '6101', '!보룸켜기')
     await until(() => last(iV).indexOf('48시간') >= 0, 'on before off')
     const beforeOff = metas(chat).length
