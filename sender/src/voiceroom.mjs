@@ -16,6 +16,13 @@ export const WARN_MS = HOUR              // 끝나기 1시간 전에 한 번 알
 export const MAX_FAILS = 5               // 연장이 내리 이만큼 실패하면 꺼진 것으로 본다
 export const DEFAULT_MAX_ROOMS = 8       // 한 계정이 동시에 드는 보이스룸 수
 export const DEFAULT_TITLE = '보이스룸'
+
+// 실측으로 밝혀진 LOCO 상태코드(2026-10-16, 봇이 방장인 시험 방)
+//   -300 = 없는 명령어·모르는 메타 타입   (가짜 명령어 ZZQXNON1·QWEORIZZ9 와 쓰지 않는 type 97 이 모두 -300)
+//   -203 = 있는데 보낸 내용이 틀림        (봇이 잘 쓰는 WRITE 를 빈 바디로 보냈더니 -203)
+// 저장소가 예전에 -203 을 '권한 없음'으로 가정했으나(fake.mjs·9.4) 실측은 그렇지 않다.
+export const STATUS_BAD_REQUEST = -203
+export const STATUS_UNKNOWN = -300
 // 과거 캡처에서 본 음성 서버. 카카오가 진짜 값을 주면 adopt 가 덮어쓴다.
 export const FALLBACK_CS = Object.freeze({ csIP: '211.242.15.98', csIP6: '2404:4600:2:d5:211:242:15:98', csPort: 9000 })
 
@@ -227,12 +234,12 @@ export function onReply(s) {
 }
 
 export function offReply(s, now) {
-  if (!s) return '지금 이 방에 켜 둔 보이스룸이 없어요.'
+  if (!s) return '지금 이 방에 열려 있는 보이스룸이 없어요.'
   return `보이스룸 「${s.title}」을 껐어요. (${spanText(Number(now) - Number(s.startAt))} 켜 뒀어요)`
 }
 
 export function statusReply(s, now) {
-  if (!s || !s.on) return '지금 이 방에 켜 둔 보이스룸이 없어요. 「보룸켜기」로 켤 수 있어요.'
+  if (!s || !s.on) return '지금 이 방에 열려 있는 보이스룸이 없어요.'
   const left = Number(s.endAt) - Number(now)
   return `보이스룸 「${s.title}」 켜져 있어요.\n켠 지 ${spanText(Number(now) - Number(s.startAt))} · 남은 시간 ${spanText(left)}`
 }
@@ -243,6 +250,19 @@ export function capReply(count, max) {
 
 export function staffOnlyReply() {
   return '보이스룸은 방장·부방장만 켜고 끌 수 있어요.'
+}
+
+// 카카오가 보이스룸 메타 쓰기를 막아 둔 것으로 확인된 상태코드(2026-10-17 실측, 7.10).
+// 같은 바디 모양으로 제목(3)은 -500(읽고 시도함)인데 16·17 은 내용을 무엇으로 바꿔도 -203 이다.
+export const BLOCKED_STATUS = Object.freeze([STATUS_BAD_REQUEST])
+
+export function isBlocked(status) {
+  return BLOCKED_STATUS.includes(Number(status))
+}
+
+// 켜지 못했을 때 방에 보일 말. 상태코드를 들이밀지 않고, 무엇을 해야 하는지 알려 준다.
+export function blockedReply() {
+  return '카카오가 봇으로 보이스룸 켜는 것을 막아 두었어요. 방장님이 카카오톡에서 직접 열어 주세요.'
 }
 
 export function failReply(status) {
@@ -294,13 +314,6 @@ export function sessionRow(v, s, now) {
 //   unknown        쓰지 않는 type(97) 대조군 — "모르는 타입" 코드가 무엇인지 못박는다
 //   same           지금 방에 있는 메타를 글자 그대로 다시 쓰기(바뀌는 것 없음, 「전체」일 때만)
 //                  → 0 이면 이 봇은 메타를 쓸 수 있다는 뜻이라, 거부가 보이스룸 메타에만 걸린 것이다
-// 실측으로 밝혀진 LOCO 상태코드(2026-10-16, 봇이 방장인 시험 방)
-//   -300 = 없는 명령어·모르는 메타 타입   (가짜 명령어 ZZQXNON1·QWEORIZZ9 와 쓰지 않는 type 97 이 모두 -300)
-//   -203 = 있는데 보낸 내용이 틀림        (봇이 잘 쓰는 WRITE 를 빈 바디로 보냈더니 -203)
-// 저장소가 예전에 -203 을 '권한 없음'으로 가정했으나(fake.mjs·9.4) 실측은 그렇지 않다.
-export const STATUS_BAD_REQUEST = -203
-export const STATUS_UNKNOWN = -300
-
 export function metaTypeNum(v) {
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (v && typeof v === 'object' && 'low' in v) return Number(v.low)

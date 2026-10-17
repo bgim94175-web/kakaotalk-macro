@@ -1547,7 +1547,9 @@ export class BotSlot {
     const r = await this.voiceStart(v, Object.assign({ title: vc.title }, by))
     if (r.already) this.say(v, VR.alreadyReply(r.session, now), { what: 'reply' })
     else if (r.error === 'too_many') this.say(v, VR.capReply(r.count, r.max), { what: 'reply' })
-    else this.say(v, r.ok ? VR.onReply(r.session) : VR.failReply(r.status), { what: 'reply' })
+    else if (r.ok) this.say(v, VR.onReply(r.session), { what: 'reply' })
+    // 카카오가 막아 둔 것으로 확인된 응답(-203)에는 상태코드 대신 할 일을 알려 준다(7.10)
+    else this.say(v, VR.isBlocked(r.status) ? VR.blockedReply() : VR.failReply(r.status), { what: 'reply' })
     return true
   }
 
