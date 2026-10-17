@@ -1122,9 +1122,40 @@ export class BotSlot {
     }
   }
 
+  // 진단: 봇 계정이 받은 카카오 공식 안내(이용 제한·정지 통지 등)를 로그에 남긴다 — 접속 뒤 한 번.
+  // 오픈채팅방(OM·OD)은 보지 않고, 플러스친구(Plus*) 대화나 이름에 카카오가 들어간 대화만 최근 글 5개를 읽는다(글마다 500자까지).
+  async logNotices() {
+    if (!this.client) return
+    const chats = await withTimeout(this.client.getChats({ all: true }), 15000)
+    const kinds = {}
+    for (const c of chats || []) kinds[c.type] = (kinds[c.type] || 0) + 1
+    log(this.id, `notice scan: chat types ${JSON.stringify(kinds)}`)
+    const official = (chats || []).filter((c) => !/^O[MD]$/.test(String(c.type)) &&
+      (/^Plus/i.test(String(c.type)) || /카카오|kakao/i.test(String(c.title || '') + ' ' + String(c.display_name || ''))))
+    for (const c of official.slice(0, 5)) {
+      let msgs = []
+      try {
+        const r = await withTimeout(this.client.getMessages(c.chat_id, { count: 5 }), 15000)
+        msgs = Array.isArray(r) ? r : (r && r.messages) || []
+      } catch (e) {
+        log(this.id, `notice read failed (${c.type} ${c.title || c.display_name || ''}): ${errText(e)}`)
+        continue
+      }
+      for (const m of msgs.slice(-5)) {
+        const at = m.sent_at ? new Date(Number(m.sent_at) * (Number(m.sent_at) < 1e12 ? 1000 : 1)).toISOString() : '?'
+        // 공식 안내는 글이 비고 첨부(카드형)에만 내용이 있는 경우가 많다
+        const raw = String(m.message || '').trim() || (m.attachment ? JSON.stringify(m.attachment) : '')
+        const text = raw.replace(/\s+/g, ' ').slice(0, 500)
+        log(this.id, `notice [${c.type} ${String(c.title || c.display_name || '').slice(0, 30)}] ${at}: ${text}`)
+      }
+    }
+    if (!official.length) log(this.id, 'notice scan: no official chats')
+  }
+
   // 접속(또는 재접속) 직후: 닉네임을 읽고 bot_accounts 를 고치고, 맡은 방을 2초 간격으로 점검한다(5.4).
   async afterConnect(fresh) {
     this.connects += 1
+    if (this.connects === 1) setTimeout(() => this.logNotices().catch(() => {}), 20000).unref?.()
     let nick = ''
     try {
       const prof = await withTimeout(this.client.getProfile(), 10000)
