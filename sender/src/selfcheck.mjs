@@ -3792,6 +3792,92 @@ async function withLog(fn) {
     if (!cm.ok || cm.type !== 3 || !/^\d+$/.test(cm.link_id)) throw new Error('7.7#23 community link resolves ' + JSON.stringify(cm))
   }
 
+  // #23-2 링크 조회 봇 고르기(운영 실측 2026-10-17: 방이 적은 옛 계정이 오픈채팅 이용 제한 — 보내기 -324, 명부 -805 — 이라
+  //   조회가 늘 그 봇에 가서 "지금은 링크를 확인할 수 없습니다"만 나왔다).
+  //   · 방이 적어도 확정되지 않은 답(-805)을 준 봇은 건너뛰고 다음 봇이 확인한다 · 그 뒤로는 괜찮은 봇에 먼저 맡긴다
+  //   · 보내기가 -324 로 거절된 봇은 restricted — 처음부터 뒤로, 그 봇의 JOININFO -324 는 not_found 가 아니다
+  //   · 믿지 않은 -324 를 다른 봇이 읽으면 그 봇을 restricted 로 적는다 · 답이 없는 봇은 resolveTotalMs 안에서 끊고 다음 봇
+  //   · 실패한 시도는 봇 id·status 로 한 줄씩
+  {
+    const A = botA.slot
+    const keep = { a: A.resolveM.list.slice(), b: botB.slot.resolveM.list.slice(), pause: A.readPauseUntil, total: pool.opts.resolveTotalMs }
+    A.resolveM.list = []
+    A.readPauseUntil = 0
+    A.resolveBadUntil = 0
+    A.limitedAt = 0
+    for (let i = botB.slot.resolveM.count(Date.now()); i < 10; i++) botB.slot.resolveM.add(Date.now())   // 봇 B 는 이 사례에서 빠진다
+    const old = await addBot(7)
+    const O = old.slot
+    const iOld = install('oldbotx1', { bot_device_id: old.id, roombot: false, minigame: true })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iOld).state === 'active', 5000, '#23-2 old bot joins its room')
+    if (!(O.load() < A.load())) throw new Error('#23-2 the old bot has fewer rooms ' + O.load() + ' ' + A.load())
+    const asked = (b) => packets('JOININFO', (p) => p.user === b.uid).length
+    const ou = fs.user(old.uid)
+    await withLog(async (lines) => {
+      // 1) 방이 적은 봇이 속도 제한(-805)이면 봇 A 가 이어서 확인한다
+      ou.joininfoFail = -805
+      let a0 = asked(botA)
+      let o0 = asked(old)
+      const r1 = await pool.resolve(url('movex1'))
+      if (!r1.ok || r1.name !== '테스트방 movex1') throw new Error('#23-2 a rate-limited bot is retried past ' + JSON.stringify(r1))
+      if (asked(old) !== o0 + 1 || asked(botA) !== a0 + 1) throw new Error('#23-2 old bot first, then bot A ' + (asked(old) - o0) + ' ' + (asked(botA) - a0))
+      if (!hasLine(lines, old.id, 'resolve o/movex1 failed', 'status -805')) throw new Error('#23-2 the failed attempt is logged with bot and status')
+      if (O.unwell(Date.now()) !== 'rate_limited') throw new Error('#23-2 -805 on JOININFO pauses the bot ' + O.unwell(Date.now()))
+      // 2) 그 뒤로는 방이 많아도 괜찮은 봇 A 에 먼저 맡긴다
+      o0 = asked(old)
+      const r2 = await pool.resolve(url('movex2'))
+      if (!r2.ok || asked(old) !== o0) throw new Error('#23-2 the healthy bot goes first ' + JSON.stringify(r2))
+      // 3) 보내기가 -324 로 거절되면 restricted. 그 봇만 남으면 JOININFO -324 는 not_found 가 아니라 kakao_error(부모: 확인할 수 없음)
+      O.readPauseUntil = 0
+      ou.joininfoFail = 0
+      ou.writeFail = -324
+      await O.deliver(O.byInstall.get(iOld), { text: '보내기 시험' })
+      if (O.unwell(Date.now()) !== 'restricted' || !hasLine(lines, old.id, 'send refused with status -324')) throw new Error('#23-2 a send refused with -324 marks the bot restricted')
+      ou.joininfoFail = -324
+      const aList = A.resolveM.list.slice()
+      for (let i = A.resolveM.count(Date.now()); i < 10; i++) A.resolveM.add(Date.now())
+      const r3 = await pool.resolve(url('movex3'))
+      if (r3.ok || r3.error !== 'kakao_error' || r3.status !== -324) throw new Error('#23-2 -324 from a restricted bot is not not_found ' + JSON.stringify(r3))
+      if (!hasLine(lines, old.id, 'resolve o/movex3 failed', 'status -324', 'restricted', 'not trusted')) throw new Error('#23-2 the untrusted -324 is logged')
+      A.resolveM.list = aList
+      o0 = asked(old)
+      const r4 = await pool.resolve(url('movex3'))
+      if (!r4.ok || asked(old) !== o0) throw new Error('#23-2 bot A verifies the link, the restricted bot is not asked ' + JSON.stringify(r4))
+      if ((await pool.resolve(url('gonex23'))).error !== 'not_found') throw new Error('#23-2 -324 from a healthy bot is not_found')
+      // 4) 둘 다 미뤄진 봇이면 방 수로 고른다: 옛 봇의 -324 는 믿지 않고 봇 A 가 읽는다 → 옛 봇을 restricted 로 적는다
+      O.limitedAt = 0
+      O.readPauseUntil = Date.now() + 60000
+      A.resolveBadUntil = Date.now() + 60000
+      o0 = asked(old)
+      const r5 = await pool.resolve(url('movex5'))
+      if (!r5.ok || asked(old) !== o0 + 1) throw new Error('#23-2 untrusted -324 is checked by another bot ' + JSON.stringify(r5))
+      if (O.unwell(Date.now()) !== 'restricted' || !hasLine(lines, old.id, 'JOININFO for a link another bot could read refused with status -324')) throw new Error('#23-2 a contradicted -324 marks the bot restricted')
+      // 5) 답이 없는 봇: 전체 시간의 절반에서 끊고 다음 봇이 확인한다(부모 20초 안에)
+      Object.assign(O, { limitedAt: 0, readPauseUntil: 0, resolveBadUntil: 0 })
+      A.resolveBadUntil = 0
+      ou.joininfoFail = 0
+      ou.joininfoHang = true
+      pool.opts.resolveTotalMs = 400
+      o0 = asked(old)
+      const t0 = Date.now()
+      const awake = setInterval(() => {}, 50)   // 패킷 시간 제한 타이머는 unref 라, 기다리는 동안 프로세스가 끝나지 않게
+      const r6 = await pool.resolve(url('movex6')).finally(() => clearInterval(awake))
+      const took = Date.now() - t0
+      fs.releaseHeld()
+      ou.joininfoHang = false
+      pool.opts.resolveTotalMs = keep.total
+      if (!r6.ok || asked(old) !== o0 + 1 || took > 1500) throw new Error('#23-2 a bot with no answer is cut off ' + took + 'ms ' + JSON.stringify(r6))
+      if (!hasLine(lines, old.id, 'resolve o/movex6 failed', 'timeout')) throw new Error('#23-2 the timeout is logged')
+    })
+    ou.writeFail = 0
+    store.installs.get(iOld).phase = 'removed'
+    await pool.detach(old.id)
+    A.resolveM.list = keep.a
+    botB.slot.resolveM.list = keep.b
+    Object.assign(A, { readPauseUntil: keep.pause, resolveBadUntil: 0, limitedAt: 0 })
+  }
+
   // #24 공정 몫: 방 A 발송 대기 100개 + 방 B 1개 → 방 B 가 방 A 의 6개 안에 나간다
   {
     const pc = new RF.Pacer()

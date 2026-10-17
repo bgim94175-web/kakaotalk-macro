@@ -19,6 +19,8 @@
 // 봇 계정(users[id].bot)은 기본으로 오픈프로필 1개를 갖는다(users[id].profiles, /v1/fake/profiles 로 바꿈).
 // SYNCLINK 는 그 오픈프로필(lt 1, /me/ 주소, op 표지) + 걸러져야 할 링크 2개(이 계정이 만든 방 lt 2, 1:1 오픈채팅 /o/)를 준다.
 // users[id].syncFail 이면 SYNCLINK 가 -500. 방 구성원은 ptp(1 기본·2 닉네임·16 오픈프로필)·pli 를 갖는다(없으면 ptp 1).
+// 계정 상태 시험 스위치(users[id]): joininfoFail = status(그 계정의 JOININFO 를 늘 그 status 로 거절 — 이용 제한·속도 제한 계정) ·
+//   joininfoHang(JOININFO 가 releaseHeld() 전까지 답하지 않는다) · writeFail = status(보내기 WRITE·sendMessage 를 그 status 로 거절).
 // 방 멤버 명부 시험 스위치(방 r): r.getmemFail = status(GETMEM 거절) · r.getmemSkip = [id](GETMEM 이 그 사람을 빼고 준다) ·
 //   r.getmemHang / r.memberHang(GETMEM / MEMBER 가 releaseHeld() 전까지 답하지 않는다) · r.keepLeft(나간 사람에게도 MEMBER 가 답한다) ·
 //   r.memberNoPli(MEMBER 가 pli 를 빼고 준다).
@@ -317,6 +319,11 @@ class FakeServer {
         status: 0, chatDatas: page, lastTokenId: next, lastChatId: page.length ? page[page.length - 1].c : 0, eof: next >= all.length,
       })
     }
+    if (method === 'JOININFO') {
+      const u = this.user(me)
+      if (u.joininfoHang) await this.held()
+      if (u.joininfoFail) return resp(method, { status: Number(u.joininfoFail) })
+    }
     if (method === 'JOININFO' && /open\.kakao\.com\/me\//.test(String(b.lu || ''))) {
       // 오픈프로필 링크(관리자가 붙여 넣은 /me/ 주소 확인용)
       for (const [uid, u] of Object.entries(this.users)) {
@@ -506,6 +513,7 @@ class FakeServer {
       return resp(method, { status: 0 })
     }
     if (method === 'WRITE') {
+      if (this.user(me).writeFail) return resp(method, { status: Number(this.user(me).writeFail) })
       return resp(method, this.write(me, b.chatId, b.msg, b.extra))
     }
     // 보이스룸(LIVE_TALK_INFO): type 16 메타를 방에 적고, 참가자들에게 CHGMETA 로 알린다.
@@ -910,6 +918,8 @@ export class FakeKakaoClient {
 
   async sendMessage(chatId, text) {
     await this.acquireSession()
+    const fail = Number(this.server.user(this.userId).writeFail) || 0
+    if (fail) return { success: false, status_code: fail, chat_id: str(chatId) }
     const r = this.server.write(this.userId, chatId, text, '')
     return { success: true, status_code: 0, chat_id: str(chatId), log_id: str(r.logId), sent_at: r.sendAt }
   }
