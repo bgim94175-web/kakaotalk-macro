@@ -1413,3 +1413,234 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
 #inbox .qr-ed .btn.primary { color: var(--inv-fg); }
 #inbox .dc-author, #inbox .dc-author[class*="c"] { color: var(--fg); }
 @media (max-width: 760px) { #inbox .kkt-row.unread::after { display: none; } }
+
+/* ---------- desktop: shared primitives (style.css + panel.css 에 같은 글로 둔다) ---------- */
+/* PC(961px 이상)는 글자·컨트롤을 키운다. 휴대폰·태블릿(960px 이하)은 위 값 그대로다.
+   961~1279px: 본문 15 · 설명 14 · 가장 작은 글자 13. 1280px 이상: 본문 16 · 설명 15 · 보조 14 · 가장 작은 글자 13 */
+@media (min-width: 961px) {
+  :root { --t-11: 13px; --t-12: 13px; --t-13: 14px; --t-14: 15px; --t-16: 17px; --t-18: 19px; --t-24: 26px; }
+  .btn { height: 40px; padding: 0 16px; }
+  .btn.sm { height: 34px; padding: 0 12px; gap: 6px; }
+  .btn.lg { height: 46px; padding: 0 20px; }
+  .spin { width: 14px; height: 14px; }
+  kbd { padding: 1px 6px; }
+  .inp { height: 40px; padding: 0 12px; }
+  .ta { padding: 10px 12px; }
+  .sel select { height: 40px; padding-left: 12px; }
+  .num { height: 38px; }
+  .num button { width: 36px; }
+  .num input { width: 60px; }
+  .seg button { height: 34px; padding: 0 14px; }
+  .chip-acct { height: 22px; padding: 0 7px; font-size: var(--t-11); }
+  .tag { height: 24px; padding: 0 8px; }
+  .badge-n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: var(--t-11); }
+  .demo-tag { height: 24px; }
+  .sq { font-size: var(--t-11); }
+  .av { font-size: 13px; }
+  .bub-meta { font-size: var(--t-11); }
+  .ck { width: 20px; height: 20px; }
+  .sw { width: 38px; height: 22px; border-radius: 11px; }
+  .sw::after { width: 16px; height: 16px; }
+  input:checked + .sw::after, [data-on="true"] > .sw::after { transform: translateX(16px); }
+  .swl > input:checked:active + .sw::after { transform: translateX(16px) scaleX(1.18); }
+}
+@media (min-width: 1280px) {
+  :root { --t-12: 14px; --t-13: 15px; --t-14: 16px; --t-16: 18px; --t-18: 20px; --t-24: 28px; }
+}
+/* 큰 모니터(1680px 이상, 1920x1080 등): 한 단계 더 키운다. 본문 17 · 설명 16 · 보조 15 */
+@media (min-width: 1680px) {
+  :root { --t-12: 15px; --t-13: 16px; --t-14: 17px; --t-16: 19px; --t-18: 21px; --t-24: 30px; }
+}
+/* ---------- desktop: end shared ---------- */
+/* ---------- desktop: CONSOLE (panel.css) — PC 에서 글자·칸을 키우고, 작은 회색 글자를 밝히고, 테두리·작은 딱지를 줄인다 ---------- */
+@media (min-width: 961px) {
+  :root { --top-h: 56px; --col-w: 1080px; }
+  /* 옆 메뉴 */
+  .side { padding: 14px 12px; gap: 10px; }
+  /* 방 메뉴까지 열리면 옆 메뉴가 화면보다 길어진다: 줄이지 말고 스크롤(가는 막대로 알린다) */
+  .side-nav { scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
+  .acct-btn { min-height: 54px; gap: 12px; }
+  .acct-btn .sq { width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
+  .side-search { height: 38px; padding: 0 8px 0 12px; }
+  .nav-a, .nav-cap { flex: none; }
+  .nav-a { height: 36px; gap: 12px; padding: 0 10px 0 12px; }
+  .nav-a > svg { width: 17px; height: 17px; }
+  .nav-a .kb { font-size: var(--t-11); }
+  .nav-a .dirty { line-height: 20px; }
+  .fs { width: 8px; height: 8px; }
+  .nav-cap { padding: 16px 8px 6px 12px; font-size: var(--t-12); color: var(--fg-2); }
+  .nav-cap .mono, #navCapRoomName { max-width: 132px; }
+  .lic { gap: 8px; }
+  .side-foot .links a, .side-foot .links button { height: 36px; }
+  .menu { padding: 8px; }
+  .menu-i { min-height: 42px; padding: 0 10px; }
+  .menu-i .grow.mono { font-size: var(--t-12); }
+  /* 위 막대 · 본문 칸 */
+  .topbar { padding: 0 40px; }
+  .runstate { padding: 12px 40px; }
+  .view > .page { padding: 48px 40px 176px; }
+  .col { gap: 32px; }
+  .ph p { margin-top: 8px; max-width: 720px; color: var(--fg-2); }
+  /* 묶음 제목은 제목답게(작은 회색 → 굵은 흰 글자), 설명 글은 휴대폰처럼 밝게 */
+  .grp { gap: 12px; }
+  .grp-t { font-size: var(--t-18); font-weight: 600; color: var(--fg); letter-spacing: -0.015em; padding: 0 2px; }
+  .grp-t span { font-size: var(--t-13); font-weight: 400; color: var(--fg-3); letter-spacing: normal; }
+  .srow { padding: 20px 24px; gap: 32px; }
+  .srow-l label, .srow-l .lb { font-size: 16px; }
+  .srow.main .srow-l .lb, .srow.main .srow-l label { font-size: 17px; }
+  .srow-l p { margin-top: 4px; max-width: 680px; color: var(--fg-2); }
+  .srow-l p.hint { font-size: var(--t-13); }
+  .off-note { margin: 0 24px 20px; padding: 16px 18px; color: var(--fg-2); }
+  .sec-f { padding: 14px 24px; }
+  .note { padding: 14px 18px; }
+  .banner { padding: 14px 18px; }
+  .rooms { gap: 8px; }
+  .rooms-meta, .chips-meta { margin-top: 10px; }
+  .room { height: 36px; padding: 0 14px 0 12px; gap: 8px; }
+  .room .ck { width: 16px; height: 16px; }
+  .rlist-h { padding: 10px 16px; grid-template-columns: minmax(0, 1fr) 136px; color: var(--fg-2); }
+  .room.row { min-height: 54px; padding: 8px 10px 8px 16px; grid-template-columns: 16px minmax(0, 1fr) auto 136px; }
+  .room.row .mem { color: var(--fg-2); }
+  /* 고른 줄은 면 색(bg-2)만으로 표시한다: 밝은 테두리가 줄 사이에 흰 선으로 겹쳐 보이지 않게 */
+  .room.row:has(> input:checked) { border-color: var(--line); }
+  .room.row > input[type="checkbox"] { right: 148px; }
+  .room.row .cool { width: 88px; height: 36px; }
+  .cool-list > div { padding: 10px 10px 10px 16px; }
+  /* 표 · 목록 */
+  .toolbar { padding: 14px 18px; gap: 10px; }
+  .toolbar .inp { height: 36px; width: 260px; }
+  .toolbar .sel { width: 190px; }
+  .toolbar .sel select { height: 36px; }
+  .toolbar .seg button { height: 30px; padding: 0 12px; }
+  .tbl th { padding: 12px 18px; color: var(--fg-2); }
+  .tbl td { padding: 12px 18px; }
+  /* 순위·횟수 칸: 줄마다 테두리 상자 대신 숫자만(고정폭 숫자로 줄이 맞는다) */
+  .cnt-pill { border: 0; padding: 0; color: var(--fg-2); }
+  /* 내 방 표의 봇 이름: 테두리 딱지 대신 '방 관리봇 · 미니게임봇' 글자로(입금 대기 딱지는 그대로) */
+  #rooms-tbl td[data-l="봇"] .tag.line { height: auto; padding: 0; border: 0; border-radius: 0; background: none; color: var(--fg-2); font-size: var(--t-13); font-weight: 400; }
+  #rooms-tbl td[data-l="봇"] .tag.line + .tag.line::before { content: "·"; color: var(--fg-3); }
+  .cpy { width: 32px; height: 32px; }
+  .tl li { grid-template-columns: 136px 72px minmax(0, 1fr); }
+  .tl .side-i dl { grid-template-columns: 84px minmax(0, 1fr); }
+  .feed li { grid-template-columns: 52px 56px minmax(0, 1fr); padding: 12px 20px; }
+  .alerts li { grid-template-columns: 12px 148px minmax(0, 1fr); padding: 14px 24px; }
+  /* 개요 */
+  .metric { padding: 18px 22px; gap: 10px; align-content: start; }
+  .metric .k { color: var(--fg-2); }
+  /* 개요 숫자 칸: 제목 옆 작은 보조 글('전체 계정' 등)은 빼고, 아래 설명은 잘리지 않게 줄을 바꾼다 */
+  #ov-metrics .metric .k > span { display: none; }
+  .metric .d { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.45; text-wrap: pretty; }
+  .metric .v b { font-size: 30px; }
+  .feat, .feat-h { grid-template-columns: minmax(0, 1.25fr) 88px minmax(0, 1.35fr) 48px 20px; padding-left: 24px; padding-right: 20px; }
+  .feat { padding-top: 15px; padding-bottom: 15px; }
+  .acc-li { grid-template-columns: 32px minmax(0, 1fr) auto; padding: 13px 20px; }
+  .acc-li .sq { width: 32px; height: 32px; border-radius: 8px; }
+  .acct-tbl .who .sq { width: 34px; height: 34px; border-radius: 8px; }
+  /* 방 상태 · 등록 · 봇 옮기기 */
+  .stp .num-c { width: 24px; height: 24px; }
+  .move-f .inp { height: 40px; }
+  .move-pv .pc .inp, #r-reinstall-act .pc .inp, .banner .pc .inp { height: 36px; }
+  .cring .c b { font-size: 30px; }
+  .buy-card h2 { font-size: 22px; }
+  .kvs { grid-template-columns: 132px minmax(0, 1fr); }
+  .fld { gap: 8px; }
+  /* 단어 칩 · 미리 보기 · 규칙 */
+  .chips { gap: 8px; padding: 10px; }
+  .wchip { height: 32px; padding: 0 4px 0 12px; }
+  .wchip button { width: 26px; height: 26px; }
+  .chips input { height: 32px; }
+  .tok { height: 34px; padding: 0 12px; }
+  .img-t .fn, .img-t .fn.sans { font-size: var(--t-11); }
+  .preview-chat { padding: 18px; gap: 8px; }
+  /* 미리 보기 말풍선: 받은 말풍선은 왼쪽에 글 길이만큼(막대처럼 늘어나지 않게), 안내 그림은 PC 에서 읽을 수 있게 크게 */
+  .preview-chat .bub { max-width: min(82%, 560px); }
+  .preview-chat .bub:not(.me) { align-self: flex-start; }
+  .preview-chat .bub-img { max-width: 420px; border-radius: 12px; }
+  .rule-h { padding: 16px 20px 16px 24px; }
+  .rule-form { padding: 4px 24px 24px; gap: 16px 20px; }
+  .kt-strip { height: 68px; }
+  /* 예상 발송 막대: 촘촘한 흰 세로줄이 어지럽다 → 낮고 어둡게(지금 선만 밝게), 시각 글자는 읽히게 */
+  .mviz { gap: 12px; }
+  .mviz-strip { height: 28px; border-color: var(--line); }
+  .mviz-strip i { height: 10px; bottom: 8px; background: var(--fg-4); }
+  .mviz-strip .now { background: var(--fg-2); }
+  .mviz-axis { font-size: var(--t-12); color: var(--fg-2); }
+  /* 빠른 이동 · 알림 */
+  .pal { width: min(680px, 100%); }
+  .pal-in { height: 56px; }
+  .pal-list { max-height: min(560px, 62vh); padding: 8px; }
+  .pal-cap { padding: 12px 10px 6px; color: var(--fg-2); font-size: var(--t-12); }
+  .pal-i { min-height: 44px; }
+  .toast { min-width: 320px; max-width: 420px; padding: 14px 14px 14px 16px; }
+  /* 받은 갠톡 */
+  .ib { grid-template-columns: 360px minmax(0, 1fr); }
+  #inbox .ib-lh { padding: 12px 10px 10px; gap: 10px; }
+  #inbox #chat-search, #inbox #chat-unread { height: 36px; min-height: 36px; }
+  #inbox .fchip { height: 34px; padding: 0 10px; }
+  #inbox .fchip.rail-acct .mono { font-size: var(--t-11); }
+  #inbox .ib-filter { -webkit-mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent); padding-right: 24px; }
+  /* 안 읽은 수: 빨강은 오류에만 쓴다 → 옆 메뉴처럼 흰 동그라미(줄), 거르기 칩 안 숫자는 회색 면 */
+  #inbox .fchip .n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: var(--t-11); background: var(--bg-4); color: var(--fg); }
+  #inbox .ib-rows { padding: 8px 10px; }
+  #inbox .kkt-row { grid-template-columns: 40px minmax(0, 1fr); padding: 10px 10px; }
+  #inbox .kkt-row .av { width: 40px; height: 40px; font-size: 15px; }
+  #inbox .kkt-row .meta { gap: 3px; }
+  #inbox .kkt-bot .pv { font-size: var(--t-12); }
+  #inbox .kkt-acc2 { height: 20px; padding: 0; background: transparent; font-size: var(--t-11); font-weight: 500; }
+  #inbox .kkt-badge { min-width: 20px; height: 20px; padding: 0 6px; font-size: var(--t-11); background: var(--fg); color: var(--inv-fg); }
+  /* 줄 왼쪽 끝 반쪽 표시는 잘린 것처럼 보이고 숫자와 겹친다 → PC 에서는 뺀다 */
+  #inbox .kkt-row.unread::after { display: none; }
+  #inbox .ib-foot { height: 40px; }
+  #inbox .th-h { height: 56px; padding: 0 20px; }
+  #inbox .th-h .av { width: 28px; height: 28px; font-size: 12px; }
+  /* 좁은 PC(1024px 안팎)에서 '○○ 계정으로 답장'이 오른쪽 버튼과 겹치지 않게 줄인다 */
+  #inbox .th-h .who small { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 내 메시지의 '보냄' 표시: 흰 딱지 대신 테두리만(대화에서 가장 눈에 띄지 않게) */
+  #inbox .dc-tag { height: 20px; padding: 0 6px; font-size: var(--t-11); background: transparent; color: var(--fg-3); border: 1px solid var(--line-2); }
+  #inbox .dc-label, #inbox .dc-acc { font-size: var(--t-12); }
+  #inbox .dc-label { line-height: 22px; }
+  #inbox .kkt-line.dc-msg { padding-right: 56px; }
+  #inbox .qr-b, #inbox .qr-edit { height: 36px; }
+  #inbox .comp-box { min-height: 50px; }
+  #inbox #chat-send { height: 36px; min-height: 36px; padding: 0 12px; }
+  .kkt-line .kkt-at, .bub-meta { font-size: var(--t-11); }
+  .qr-row-h .inp { height: 38px; }
+  .qr-row-h .qr-act { width: 38px; }
+  /* 상대 계정이 하나로 걸러져 있으면 줄마다 같은 계정 표시는 빼서 덜 복잡하게 */
+  #inbox:has(.rail-acct[aria-pressed="true"]) .kkt-row .kkt-acc2 { display: none; }
+}
+/* 좁은 PC: 개요 숫자 칸 네 개가 한 줄에 들어가지 않으면 두 줄 두 칸 */
+@media (min-width: 961px) and (max-width: 1180px) {
+  .metrics:not(#visit-metrics) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics:not(#visit-metrics) .metric:nth-child(2) { border-right: 0; }
+  .metrics:not(#visit-metrics) .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+}
+/* 개요 오른쪽 칸: 1181px 이상에서만 두 칸(그보다 좁으면 위 max-width: 1180px 규칙대로 한 칸) */
+@media (min-width: 1181px) {
+  .ov-grid { grid-template-columns: minmax(0, 1fr) 384px; gap: 24px; }
+  .ov-side { gap: 24px; }
+  /* 오른쪽 칸 아래 줄: '전체 보기'·'추가' 버튼은 오른쪽에 두고, 안내 글이 길면 글만 두 줄로 */
+  .ov-side .sec-f { flex-wrap: nowrap; padding: 12px 16px 12px 20px; }
+  .ov-side .sec-f > span { min-width: 0; text-wrap: pretty; }
+  .ov-side .sec-f > .btn { flex: none; }
+}
+@media (min-width: 1280px) {
+  :root { --side-w: 260px; }
+  .srow-l label, .srow-l .lb { font-size: 17px; }
+  .srow.main .srow-l .lb, .srow.main .srow-l label { font-size: 18px; }
+  .metric .v b { font-size: 32px; }
+  .ib { grid-template-columns: 400px minmax(0, 1fr); }
+}
+@media (min-width: 1600px) {
+  :root { --col-w: 1160px; }
+  .ib { grid-template-columns: 440px minmax(0, 1fr); }
+  #inbox .dc-text { max-width: 820px; }
+}
+/* 큰 모니터(1680px 이상): 글자 단계(위 공용 묶음)에 맞춰 옆 메뉴·본문 칸·설정 이름도 한 단계 */
+@media (min-width: 1680px) {
+  :root { --side-w: 280px; --col-w: 1200px; }
+  .nav-a { height: 40px; }
+  .srow-l label, .srow-l .lb { font-size: 18px; }
+  .srow.main .srow-l .lb, .srow.main .srow-l label { font-size: 19px; }
+  .metric .v b { font-size: 34px; }
+}
