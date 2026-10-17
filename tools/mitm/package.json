@@ -1,0 +1,10 @@
+{
+  "name": "vcs-mitm",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "TLS MITM relay to capture Kakao VCS plaintext frames (self-signed cert).",
+  "dependencies": {
+    "selfsigned": "^2.4.1"
+  }
+}
