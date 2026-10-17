@@ -40,13 +40,14 @@ async function main() {
   for (const step of cfg.steps || []) {
     if (step.waitMs) { await new Promise((r) => setTimeout(r, step.waitMs)); continue }
     const body = coerce(step.body || {})
-    const res = await client.send(step.method, body)
-    console.log('[run] step', step.method, '→', res.timeout ? 'TIMEOUT(no reply)' : `status ${res.h?.statusCode}`)
-    if (step.stopOnError && res.h && res.h.statusCode && res.h.statusCode !== 0) {
+    const code = typeof step.code === 'string' ? parseInt(step.code, 16) : step.code
+    const res = await client.send(code, body)
+    console.log('[run] step code', step.code, '→', res.timeout ? 'TIMEOUT(no reply)' : `status ${res.h?.status}`)
+    if (step.stopOnError && res.h && res.h.status && res.h.status !== 0) {
       console.log('[run] stop: non-zero status'); break
     }
   }
-  if (cfg.ping) { client.startPing(cfg.ping.method || 'PING', cfg.ping.everyMs || 30000) }
+  if (cfg.ping) { client.startPing(typeof cfg.ping.code === 'string' ? parseInt(cfg.ping.code, 16) : cfg.ping.code, cfg.ping.everyMs || 30000) }
   if (cfg.holdMs) { console.log(`[run] holding ${cfg.holdMs}ms …`); await new Promise((r) => setTimeout(r, cfg.holdMs)) }
   client.close()
 }

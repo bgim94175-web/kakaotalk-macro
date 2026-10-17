@@ -2,7 +2,7 @@
 // 아직 "탐색용"이다: 핸드셰이크·헤더가 완전히 확정되지 않았으므로, 연결·전송·로깅을 정확히 하고
 // 서버가 돌려주는 것으로 빈칸을 메운다. (tools/frida/FINDINGS.md, tools/vcs/README.md 참고)
 import tls from 'node:tls'
-import { encodeFrame, createFrameReader } from './loco.mjs'
+import { encodeFrame, createFrameReader, randomPacketId } from './loco.mjs'
 
 function hex(b, n = 80) {
   return b.subarray(0, n).toString('hex') + (b.length > n ? `…(${b.length}B)` : ` (${b.length}B)`)
@@ -49,11 +49,11 @@ export class VcsClient {
     })
   }
 
-  // method + BSON body 를 한 프레임으로 보낸다. 응답(같은 packetId)을 기다리는 Promise 반환.
-  send(method, body) {
-    const packetId = ++this.packetId
-    const frame = encodeFrame({ packetId, method, body })
-    this.log('>>', method, 'id', packetId, this.o.logHex ? hex(frame) : JSON.stringify(body))
+  // 숫자 code + BSON body 를 한 프레임으로 보낸다. 응답(같은 packetId)을 기다리는 Promise 반환.
+  send(code, body) {
+    const packetId = randomPacketId()
+    const frame = encodeFrame({ packetId, code, body })
+    this.log('>>', 'code 0x' + Number(code).toString(16), 'id', packetId, this.o.logHex ? hex(frame) : JSON.stringify(body))
     this.sock.write(frame)
     return new Promise((resolve) => {
       const t = setTimeout(() => { this.pending.delete(packetId); resolve({ timeout: true }) }, Number(this.o.replyMs) || 8000)
@@ -63,15 +63,16 @@ export class VcsClient {
 
   _onFrame(h, b, raw) {
     if (!h) { this.log('<< UNPARSED (header guess wrong?)', hex(raw)); return }
-    this.log('<<', h.method || '(no-method)', 'id', h.packetId, 'status', h.statusCode, 'body', JSON.stringify(b))
+    this.log('<<', 'code 0x' + Number(h.code).toString(16), 'id', h.packetId, 'status', h.status, 'body', JSON.stringify(b))
     const p = this.pending.get(h.packetId)
     if (p) { this.pending.delete(h.packetId); p({ h, b }) }
     if (typeof this.o.onPacket === 'function') { try { this.o.onPacket(h, b) } catch (e) { this.log('onPacket err', e) } }
   }
 
-  // keepalive: PING 을 주기적으로. (문서 §1.8 — 서버가 응답 없으면 끊는다)
-  startPing(method = 'PING', everyMs = 30000) {
-    this._ping = setInterval(() => { try { this.send(method, {}) } catch (e) {} }, everyMs)
+  // keepalive: 숫자 code 를 주기적으로(어느 code 가 keepalive 인지 미확정이라 명시할 때만).
+  startPing(code, everyMs = 30000) {
+    if (!code) return
+    this._ping = setInterval(() => { try { this.send(code, {}) } catch (e) {} }, everyMs)
   }
 
   close() { if (this._ping) clearInterval(this._ping); if (this.sock) this.sock.destroy() }

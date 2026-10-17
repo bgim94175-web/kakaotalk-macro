@@ -50,3 +50,12 @@ node run.mjs config.json
 - `vcs.mjs` — TLS 접속·송수신·PING·로깅.
 - `run.mjs` — config 대로 step 실행.
 - `config.example.json` — 채울 틀(추정 스키마 포함).
+
+---
+
+## UPDATE (Ghidra 디컴파일 반영)
+프레임은 **method 문자열이 아니라 숫자 code** 였다(LOCO 아님). `loco.mjs` 를 그 모델로 교체:
+- 헤더(추정, LE 13B): `[packetId u32][status u16][code u16][type u8][bsonLen u32]` → `writeHeader` 에서 조정 가능
+- BSON 바디엔 method 없음. code 로 명령 구분. 주요 code: MakeVoiceRoomCall=0x272c, QueryCallable=0x7530, GetConf=0x7531
+- `config.json` steps 는 `code`(16진 문자열) + `body`(BSON). 전체 모델은 `../frida/FINDINGS.md` 참고.
+- 유일한 미확정 = 헤더 바이트 순서. 서버 응답이 `UNPARSED`/reset 이면 `writeHeader`/`readHeader` 만 바꿔가며 맞춘다.
