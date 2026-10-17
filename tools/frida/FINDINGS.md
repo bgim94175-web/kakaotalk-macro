@@ -183,3 +183,12 @@ ICE/net:   ICEType · candidateType · NetWorkType · netType · mobileNetType �
 Node: TLS 소켓(CallServer:5242, SNI/Cert 는 /c/voiceroom/user 응답) → LOCO식 [헤더][BSON] 프레이밍
  → ConnectVcs/GetConf/MakeVoiceRoomCall(method+BSON, SDP 포함) → 응답 파싱 → werift 로 DTLS-SRTP 미디어.
 암호 벽 없음. 남은 건 헤더·키 확정 + 핸드셰이크 + 구현/테스트.
+
+---
+
+## VCS TLS 접속 실측 (2026-10-17, PowerShell SslStream)
+CallServer csIP:5242 로 직접 TLS 접속 테스트한 결과:
+- TLS1.2 / AES128 핸드셰이크 **성공**
+- 서버 인증서 = 공개 정상 인증서: `CN=kakao.com, O=Kakao Corp.` / issuer `Thawte TLS RSA CA G1`(DigiCert). → 봇은 공개 루트로 검증 가능(SNI = 실제 kakao 호스트명 필요; IP 접속은 name-mismatch 정상).
+- **mTLS 아님** — 클라이언트 인증서 없이 핸드셰이크 성공. (descriptor 의 "Cert" 는 서버 검증용으로 추정)
+- **서버가 먼저 보내지 않음** → 접속 직후 **클라이언트가 first-speak**. 즉 로그인/핸드셰이크 패킷을 클라가 보내야 하고, 여기에 SetVConfig 의 토큰(64hex·긴토큰)이 들어갈 것으로 보인다. ← 다음 확정 대상.
