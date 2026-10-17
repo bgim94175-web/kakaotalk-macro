@@ -1700,6 +1700,45 @@ export class BotSlot {
     return { ok: true, rows, type, keys, shape: shape.tag, text, next }
   }
 
+  // 보룸 켜기시험(SENDER_VOICE_EXPERIMENT 전용): 지금껏 켜기는 전부 SETMETA 로 보냈다. 카카오가 이 메타를
+  // 우리에게 알려 줄 땐 CHGMETA 를 쓴다 — 나가는 method 를 CHGMETA 로 바꾸는 것이 아직 안 해 본 마지막 변수다.
+  // 바디 모양은 서버에 닿은 것이 확인된 c+li 로 고정하고, type 16 을 켠 모양으로 CHGMETA 로 친다.
+  async voiceChgSend(v) {
+    const chatId = v && v.chat_id ? String(v.chat_id) : ''
+    if (!chatId) return { ok: false, error: 'no_chat' }
+    const li = v && v.link_id ? String(v.link_id) : ''
+    const info = await this.raw('CHATINFO', { chatId: L(chatId) })
+    const metas = (((info && info.body && info.body.chatInfo && info.body.chatInfo.chatMetas) || [])
+      .filter((m) => m && typeof m.content === 'string'))
+    const mine = metas.find((m) => VR.metaTypeNum(m.type) === 16)
+    const other = metas.find((m) => !VR.isVoiceMetaType(m.type))
+    const extras = mine ? VR.metaExtras(mine) : {}
+    const keys = Object.keys(extras)
+    const shape = VR.SHAPES.find((x) => x.tag === (li ? 'c+li' : 'c'))
+    const nowSec = Math.floor(this.now() / 1000)
+    // 켠 모양 내용: 카카오가 써 둔 메타가 있으면 그것을 켠 모양으로, 없으면 새로 만든다
+    const onC = mine ? VR.turnOn(mine.content, nowSec) : VR.onContent({ title: cleanName(v.link_name), startSec: nowSec, nowSec })
+    log(this.id, `voice chgsend shape ${shape.tag} keys ${keys.join(',') || '-'} content ${VR.maskMeta(onC)}`)
+    const rows = []
+    const run = async (tag, method, body) => {
+      const r = await this.raw(method, body)
+      const st = R.locoStatus(r)
+      log(this.id, `voice chgsend ${tag} method ${method} body ${traceText(body)} → status ${st} body ${traceText((r && r.body) || {})}`)
+      rows.push({ tag, st })
+      await new Promise((ok) => setTimeout(ok, 400))
+      return st
+    }
+    const vals = (t, content) => ({ chatId: L(chatId), li: li ? L(li) : null, type: t, typeLong: L(String(t)), content })
+    await run('chg16', 'CHGMETA', VR.shapeBody(shape, vals(16, onC)))
+    await run('chg16+rev', 'CHGMETA', Object.assign(VR.shapeBody(shape, vals(16, onC)), extras))
+    await run('set16', 'SETMETA', VR.shapeBody(shape, vals(16, onC)))          // 대조군: 같은 내용을 옛 method 로
+    if (other) await run('chg-ctrl', 'CHGMETA', VR.shapeBody(shape, vals(VR.metaTypeNum(other.type), other.content)))
+    const text = VR.chgSendText(rows, { shape: shape.tag, keys })
+    const next = VR.chgSendVerdict(rows).next
+    log(this.id, `voice chgsend done ${rows.map((r) => r.tag + ':' + r.st).join(' ')} → ${next}`)
+    return { ok: true, rows, shape: shape.tag, keys, text, next }
+  }
+
   // 보룸 쓰기시험(SENDER_VOICE_EXPERIMENT 전용): SETMETA 가 보이스룸이 아닌 타입으로는 통하는지 본다.
   // 따라쓰기까지 전부 -203 이라, 우리 바디 모양이 틀린 것인지 type 16 만 막힌 것인지 아직 못 가렸다.
   // 보이스룸이 아닌 메타가 있으면 그것을 글자 그대로 다시 쓰고(완전 무해), 없으면 type 3(제목)에
@@ -3584,6 +3623,17 @@ export class BotSlot {
         this.say(v, '보이스룸이 아닌 메타를 써 보는 중… 잠시만요(약 2초).', { what: 'reply' })
         const r = await this.voiceWriteTest(v)
         this.say(v, r.ok ? r.text : '쓸 수 있는 메타를 찾지 못했어요.', { what: 'reply' })
+        return
+      }
+      if (t === '보룸켜기시험' || t === '보룸켜기시도') {
+        const n = Number(await this.permOf(v, m.authorId))
+        if (!(Number.isFinite(n) && (n & 5))) {
+          this.say(v, '보룸 켜기시험은 방장·부방장만 쓸 수 있어요.', { what: 'reply' })
+          return
+        }
+        this.say(v, 'method 를 CHGMETA 로 바꿔 켜기를 보내 보는 중… 잠시만요(약 2초).', { what: 'reply' })
+        const r = await this.voiceChgSend(v)
+        this.say(v, r.ok ? r.text : '켜기시험을 돌리지 못했어요.', { what: 'reply' })
         return
       }
       if (t === '보룸따라') {
