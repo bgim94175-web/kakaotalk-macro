@@ -411,6 +411,8 @@ async function orderRooms(items) {
     label: x.view.label,
     detail: x.view.detail,
     bot: x.view.bot,
+    member_count: x.view.member_count,
+    member_limit: x.view.member_limit,
   }));
 }
 

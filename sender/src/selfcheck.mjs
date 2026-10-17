@@ -2136,6 +2136,174 @@ async function withLog(fn) {
     if (!rows.some((r) => r.changes.some((c) => c.kind === 'link' && c.to === 'https://open.kakao.com/o/b711'))) throw new Error('#28-2 the panel log has the link change ' + JSON.stringify(rows))
   }
 
+  // #45 방 멤버 수(봇 포함): 입장 직후 CHATINFO 1번 · 최대 인원은 JOININFO·INFOLINK 의 ml · 입장·퇴장·내보내기 피드 ±(같은 피드는 한 번,
+  //   마지막 읽기 전에 생긴 일은 세지 않음) · 부방장 대기 방은 activeCheckMs 마다 CHATINFO · 사용 중인 방은 점검의 getChat ·
+  //   room_state(runtime.mc)에 저장 · /v1/bot/room live.members · 방에서 나오면 보이지 않는다. 나간 사람이 남는 명부(v.members)는 쓰지 않는다.
+  {
+    const code = 'countx45'
+    const room0 = fs.room(code)
+    for (const uid of ['801', '802', '803']) room0.members[uid] = { mt: 2, nick: '멤버' + uid, ptp: 1, pli: null, photo: '', status: null }
+    const iCount = install(code, { config: { visit: { enabled: false }, profile: { enabled: false } } })
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iCount).state === 'waiting_host', 5000, '#45 join')
+    const chat = rowOf(iCount).chat_id
+    const vc = botA.slot.byInstall.get(iCount)
+    const infos = () => packets('CHATINFO', (p) => p.chat === chat).length
+    await waitFor(() => vc.mc && vc.mc.n === 4 && vc.mc.max === 1500, 3000, '#45 count right after the join (3 people + the bot, limit 1500)')
+    if (infos() !== 1) throw new Error('#45 one CHATINFO after the join ' + infos())
+    let lv = await pool.room(iCount)
+    if (!lv.live.members || lv.live.members.n !== 4 || lv.live.members.max !== 1500 || !(lv.live.members.at > 0)) throw new Error('#45 /v1/bot/room live.members ' + JSON.stringify(lv.live))
+    await pool.flush()
+    let st = await store.loadRoomState(iCount)
+    if (!st.mc || st.mc.n !== 4 || st.mc.max !== 1500 || st.mc.chat !== chat || !(st.mc.at > 0)) throw new Error('#45 runtime.mc saved ' + JSON.stringify(st.mc))
+    // 부방장 대기 방은 권한 점검(150ms)마다 CHATINFO 를 보내지 않는다
+    await sleep(500)
+    if (infos() !== 1) throw new Error('#45 no CHATINFO on every perm poll ' + infos())
+    // 들어옴 +1, 같은 피드(같은 logId)가 다시 와도 한 번, 나감 −1
+    const j = fs.event(chat, botA.uid, { kind: 'join', user_id: '804', name: '새멤버' })
+    await waitFor(() => vc.mc.n === 5, 3000, '#45 join feed +1')
+    fs.event(chat, botA.uid, { kind: 'join', user_id: '804', name: '새멤버', log_id: j.log_id })
+    await sleep(200)
+    if (vc.mc.n !== 5) throw new Error('#45 the same feed is counted once ' + vc.mc.n)
+    fs.event(chat, botA.uid, { kind: 'leave', user_id: '801', name: '멤버801' })
+    await waitFor(() => vc.mc.n === 4, 3000, '#45 leave feed −1')
+    // 마지막 CHATINFO 를 보내기 전에 생긴 입장은 이미 수에 들어 있다고 본다(세지 않음)
+    fs.event(chat, botA.uid, { kind: 'join', user_id: '805', name: '예전입장', at: Math.floor((vc.mc.from - 5000) / 1000) })
+    await sleep(200)
+    if (vc.mc.n !== 4) throw new Error('#45 a join from before the last read is not counted ' + vc.mc.n)
+    // 수가 오래되면 부방장 대기 방도 CHATINFO 로 다시 읽는다(진짜 수 5: 802·803·804·805 + 봇)
+    vc.mc.from = Date.now() - 700000
+    vc.mcTryAt = 0
+    await waitFor(() => vc.mc.n === 5 && infos() === 2, 3000, '#45 waiting room re-reads the count with CHATINFO')
+    // 피드로 바뀐 수는 1분에 한 번까지 저장한다(남은 것은 tick 이 저장)
+    vc.mcSavedAt = Date.now()
+    fs.event(chat, botA.uid, { kind: 'leave', user_id: '805', name: '예전입장' })
+    await waitFor(() => vc.mc.n === 4, 3000, '#45 second leave')
+    if (!vc.mcUnsaved || vc.runtime.mc.n !== 5) throw new Error('#45 a feed change right after a save waits ' + JSON.stringify({ u: vc.mcUnsaved, mc: vc.runtime.mc }))
+    vc.mcSavedAt = Date.now() - 61000
+    await waitFor(() => !vc.mcUnsaved && vc.runtime.mc.n === 4, 2000, '#45 tick saves the waiting feed change')
+    // 사용 중인 방: 점검(getChat)이 수를, INFOLINK 가 최대 인원(ml)을 다시 읽는다. 내보내기 피드(6)는 −
+    fs.setPerm(chat, botA.uid, 4)
+    await waitFor(() => rowOf(iCount).state === 'active', 3000, '#45 promotion')
+    room0.members['806'] = { mt: 2, nick: '조용히', ptp: 1, pli: null, photo: '', status: null }
+    room0.ml = 300
+    vc.nextCheckAt = Date.now()
+    await waitFor(() => vc.mc.n === 5 && vc.mc.max === 300, 3000, '#45 active check reads the count and the limit')
+    delete room0.members['806']
+    fs.event(chat, botA.uid, { kind: 'message', user_id: '', type: 0, text: '{"feedType":6,"members":[{"userId":806,"nickName":"조용히"}]}' })
+    await waitFor(() => vc.mc.n === 4, 3000, '#45 kick feed −1')
+    lv = await pool.room(iCount)
+    if (lv.live.members.n !== 4 || lv.live.members.max !== 300) throw new Error('#45 live.members follows ' + JSON.stringify(lv.live.members))
+    // 봇에 뷰가 없는 방(저장본만)도 같은 방(chat)의 수면 보인다. 다른 방(옮기기 전)의 수·하루 넘게 다시 읽지 못한 수는 버린다
+    await botA.slot.dropView(iCount)
+    lv = await pool.room(iCount)
+    if (!lv.live.members || lv.live.members.n !== 4 || lv.live.members.max !== 300) throw new Error('#45 saved count without a view ' + JSON.stringify(lv.live))
+    const keep = await store.loadRoomState(iCount)
+    await store.saveRoomState(iCount, Object.assign({}, keep, { mc: Object.assign({}, keep.mc, { chat: '1' }) }))
+    if ((await pool.room(iCount)).live.members) throw new Error('#45 a count of another chat is dropped')
+    await store.saveRoomState(iCount, Object.assign({}, keep, { mc: Object.assign({}, keep.mc, { at: Date.now() - 2 * 86400000 }) }))
+    if ((await pool.room(iCount)).live.members) throw new Error('#45 a count not read for a day is dropped')
+    await store.saveRoomState(iCount, keep)
+    await pool.reconcile(null)
+    await waitFor(() => botA.slot.byInstall.get(iCount), 3000, '#45 view back')
+    lv = await pool.room(iCount)
+    if (!lv.live.members || lv.live.members.n !== 4) throw new Error('#45 new view shows the saved count ' + JSON.stringify(lv.live))
+    // 봇이 내보내지면 수를 보이지 않는다
+    fs.event(chat, botA.uid, { kind: 'kicked' })
+    await waitFor(() => rowOf(iCount).state === 'error', 3000, '#45 bot kicked')
+    lv = await pool.room(iCount)
+    if (lv.live && lv.live.members) throw new Error('#45 no count once the bot is out ' + JSON.stringify(lv.live))
+  }
+
+  // #46 멤버 수의 최대 인원·다시 입장:
+  //   (a) JOINLINK 응답이 유실돼 방 목록으로 입장을 확인해도 앞서 읽은 JOININFO 의 ml 을 쓴다
+  //   (b) 부방장 대기 방은 activeCheckMs 마다 CHATINFO 와 함께 INFOLINK 로 최대 인원도 다시 읽는다(기다리는 동안 방장이 늘릴 수 있다).
+  //       피드 ± 는 알고 있던(옛) 최대 인원으로 자르지 않는다
+  //   (c) 내보내진 뒤 같은 방에 다시 들어가면 그 전의 수를 버린다 — room_state 를 못 읽은 채 들어가도(다시 읽기에서 옛 저장본이 이기지 않는다)
+  {
+    // 이 시험의 입장은 봇 A 의 시간당·하루 입장 한도에 남기지 않는다(뒤 시험의 입장이 밀리지 않게)
+    const jm46 = [botA.slot.joinH.list.length, botA.slot.joinD.list.length]
+    const quiet = { config: { visit: { enabled: false }, profile: { enabled: false } } }
+    const person = (nick) => ({ mt: 2, nick, ptp: 1, pli: null, photo: '', status: null })
+    // (a)
+    const rLost = fs.room('lostcntx46')
+    rLost.ml = 700
+    for (const uid of ['811', '812']) rLost.members[uid] = person('멤버' + uid)
+    const iLost = install('lostcntx46', quiet)
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iLost).state === 'waiting_host', 5000, '#46a join with a lost JOINLINK response')
+    const vLost = botA.slot.byInstall.get(iLost)
+    await waitFor(() => vLost.mc && vLost.mc.n === 3 && vLost.mc.max === 700, 3000, '#46a limit from JOININFO after a lost response ' + JSON.stringify(vLost.mc))
+    // (b)
+    const rWait = fs.room('mlcntx46')
+    rWait.ml = 5
+    for (const uid of ['821', '822', '823']) rWait.members[uid] = person('멤버' + uid)
+    const iWait = install('mlcntx46', quiet)
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iWait).state === 'waiting_host', 5000, '#46b join')
+    const vWait = botA.slot.byInstall.get(iWait)
+    const cWait = rowOf(iWait).chat_id
+    await waitFor(() => vWait.mc && vWait.mc.n === 4 && vWait.mc.max === 5, 3000, '#46b count 4 / 5')
+    rWait.ml = 10
+    fs.event(cWait, botA.uid, { kind: 'join', user_id: '824', name: '새멤버824' })
+    await waitFor(() => vWait.mc.n === 5, 3000, '#46b join feed +1')
+    fs.event(cWait, botA.uid, { kind: 'join', user_id: '825', name: '새멤버825' })
+    await waitFor(() => vWait.mc.n === 6, 3000, '#46b a feed is not capped at the old limit ' + JSON.stringify(vWait.mc))
+    const t0 = Date.now()
+    vWait.mc.from = Date.now() - 700000
+    vWait.mcTryAt = 0
+    await waitFor(() => vWait.mc.n === 6 && vWait.mc.max === 10, 3000, '#46b waiting room re-reads the limit with INFOLINK ' + JSON.stringify(vWait.mc))
+    if (!packets('INFOLINK', (p) => p.at >= t0 && p.user === botA.uid).length) throw new Error('#46b INFOLINK sent for the waiting room')
+    if (rowOf(iWait).state !== 'waiting_host') throw new Error('#46b still waiting ' + rowOf(iWait).state)
+    // (c)
+    const rRe = fs.room('rjcntx46')
+    for (const uid of ['831', '832', '833']) rRe.members[uid] = person('멤버' + uid)
+    const iRe = install('rjcntx46', Object.assign({ roombot: false, minigame: true }, quiet))
+    await pool.reconcile(null)
+    await waitFor(() => rowOf(iRe).state === 'active', 5000, '#46c join')
+    const cRe = rowOf(iRe).chat_id
+    let vRe = botA.slot.byInstall.get(iRe)
+    await waitFor(() => vRe.mc && vRe.mc.n === 4, 3000, '#46c count 4')
+    await pool.flush()
+    if (store.states.get(iRe).mc.n !== 4) throw new Error('#46c saved 4 ' + JSON.stringify(store.states.get(iRe).mc))
+    fs.event(cRe, botA.uid, { kind: 'kicked' })
+    await waitFor(() => rowOf(iRe).state === 'error', 3000, '#46c kicked')
+    for (let k = 834; k <= 840; k++) rRe.members[String(k)] = person('멤버' + k)
+    fs.event(cRe, botA.uid, { kind: 'unban' })
+    const load0 = store.loadRoomState
+    store.loadRoomState = async function (id) {
+      if (Number(id) === iRe) throw new Error('connection terminated unexpectedly')
+      return load0.call(this, id)
+    }
+    try {
+      // 부모의 다시 시도(chat_id 를 그대로 둔다)
+      Object.assign(rowOf(iRe), { state: 'queued', error_code: null, error_detail: null, next_try_at: null, perm: null, perm_at: null })
+      await pool.reconcile(null)
+      await waitFor(() => rowOf(iRe).state === 'active' && rowOf(iRe).chat_id === cRe, 5000, '#46c rejoined the same chat')
+      vRe = botA.slot.byInstall.get(iRe)
+      await waitFor(() => vRe.mc && vRe.mc.n === 11, 3000, '#46c fresh count 11')
+      if (!vRe.loadFailed) throw new Error('#46c the read failed')
+      const lv = await pool.room(iRe)
+      if (!lv.live.members || lv.live.members.n !== 11) throw new Error('#46c live shows the fresh count ' + JSON.stringify(lv.live))
+      // 저장본에는 아직 옛 수가 남아 있지만 입장(joined_at) 전에 읽은 것이라 부모(memberCountOf)가 보이지 않는다
+      const old = store.states.get(iRe).mc
+      if (!old || !(Number(old.at) < Number(rowOf(iRe).joined_at))) throw new Error('#46c the old saved count predates the join ' + JSON.stringify({ old, j: rowOf(iRe).joined_at }))
+    } finally {
+      store.loadRoomState = load0
+    }
+    vRe.loadRetryAt = 0
+    await waitFor(() => !vRe.loadFailed, 3000, '#46c read again')
+    await pool.flush()
+    if (!vRe.runtime.mc || vRe.runtime.mc.n !== 11) throw new Error('#46c the fresh count wins over the old saved one ' + JSON.stringify(vRe.runtime.mc))
+    await waitFor(() => store.states.get(iRe).mc && store.states.get(iRe).mc.n === 11, 3000, '#46c fresh count saved ' + JSON.stringify(store.states.get(iRe).mc))
+    if ((await pool.room(iRe)).live.members.n !== 11) throw new Error('#46c live after the read')
+    // 정리: 부방장 대기 방은 권한을 계속 읽으므로 봇을 내보낸다(뒤 시험의 패킷 기록을 채우지 않게)
+    for (const i of [iLost, iWait, iRe]) fs.event(rowOf(i).chat_id, botA.uid, { kind: 'kicked' })
+    await waitFor(() => [iLost, iWait, iRe].every((i) => rowOf(i).state === 'error'), 3000, '#46 cleanup')
+    botA.slot.joinH.list.splice(jm46[0])
+    botA.slot.joinD.list.splice(jm46[1])
+  }
+
   // 로그 줄을 모은다(그대로 내보내면서). 명부 시험(#28-3~6)이 남기는 한 줄 로그를 확인한다.
   async function withLog(fn) {
     const lines = []

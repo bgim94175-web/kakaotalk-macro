@@ -24,9 +24,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/panel.css?v=21">
+<link rel="stylesheet" href="/panel.css?v=22">
 <script src="/support.js?v=1" defer></script>
-<script src="/panel.js?v=29" defer></script>
+<script src="/panel.js?v=30" defer></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -605,7 +605,7 @@
 <section class="page" data-route="room" id="page-room" aria-labelledby="room-title" hidden>
  <div class="col">
   <div class="ph"><div><h1 id="room-title" tabindex="-1">방 상태</h1>
-      <p class="room-sub"><span class="mono" id="room-link"></span><span id="room-bot"></span></p></div>
+      <p class="room-sub"><span class="mono" id="room-link"></span><span class="mem" id="room-mem" hidden><svg class="ic" width="13" height="13" aria-hidden="true"><use href="#i-user"></use></svg><span id="room-mem-t"></span></span><span id="room-bot"></span></p></div>
     <div class="ph-r"><span class="state" id="room-state" data-state=""></span><a class="btn" href="#rooms"><svg class="ic" width="14" height="14" aria-hidden="true"><use href="#i-back"></use></svg>목록</a></div></div>
   <div class="sec gate" data-gate hidden><div class="off-note"><span data-gate-t></span><a class="btn sm" data-gate-btn href="#rooms"></a></div></div>
   <div class="banner" id="room-err" role="status" hidden><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-alert"></use></svg><span class="grow" id="room-err-t"></span>
