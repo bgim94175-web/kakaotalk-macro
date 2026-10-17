@@ -192,3 +192,13 @@ CallServer csIP:5242 로 직접 TLS 접속 테스트한 결과:
 - 서버 인증서 = 공개 정상 인증서: `CN=kakao.com, O=Kakao Corp.` / issuer `Thawte TLS RSA CA G1`(DigiCert). → 봇은 공개 루트로 검증 가능(SNI = 실제 kakao 호스트명 필요; IP 접속은 name-mismatch 정상).
 - **mTLS 아님** — 클라이언트 인증서 없이 핸드셰이크 성공. (descriptor 의 "Cert" 는 서버 검증용으로 추정)
 - **서버가 먼저 보내지 않음** → 접속 직후 **클라이언트가 first-speak**. 즉 로그인/핸드셰이크 패킷을 클라가 보내야 하고, 여기에 SetVConfig 의 토큰(64hex·긴토큰)이 들어갈 것으로 보인다. ← 다음 확정 대상.
+
+---
+
+## VCS 첫 패킷 실측 (2026-10-17): LOCO-22B 헤더는 거부됨
+TLS 접속 후 `[22B LOCO 헤더][빈 BSON]`(method="GetConf")를 1개 보냄 → 서버가 **즉시 연결 reset**.
+- 서버가 바이트를 받고 능동 거부(무시 아님).
+- method 가 BSON 바디에 있으므로(이름이 11B 초과) VCS 헤더는 LOCO 11B-method 형식이 아니다.
+  → 프레임은 `[u32 len]+BSON` 또는 raw BSON 쪽이 유력. (미확정)
+- reset 만으로는 "프레임 오류" vs "로그인 선행 필요" 를 구분 불가. 추측 전송 반복은 계정 위험.
+- 결론: 프레임 포맷 + 로그인 패킷은 **정적 RE로 확정**해야 안전(가상호출 많아 느림). 또는 소수의 신중한 탐색.
