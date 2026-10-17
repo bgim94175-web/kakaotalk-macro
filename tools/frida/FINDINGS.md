@@ -89,3 +89,32 @@ VRCInviteAsModerator / VRCRevokeSpeakerPermission ... → 발언자·진행자 �
 ## 두 갈래 길
 - 실용(1계정): frida 로 앱의 VoxCore 를 직접 호출해 방을 켠다(VCS 재구현 불필요). 앱 상주 필요, 동시 1방.
 - 완전(standalone): VCS 와이어 리버싱 후 Node 로 재구현. 다중방 가능, 대신 큰 작업(문서 2~3개월 추정).
+
+---
+
+## B1 정적분석 결과 (libVoxCore.so 디스어셈블, 2026-10-17)
+
+### 암호 미스터리 해소 — 커스텀 레이어 없음
+- `depack_do_frame_*` / `ssl/quic/quic_rx_depack.c` 는 전부 **OpenSSL 3.3 QUIC** 표준 코드였다.
+  문서 §4.4/§5가 "pack 레이어 = 커스텀 암호"로 본 것은 오독. **커스텀 암호·프레이밍 레이어는 없다.**
+- VCS 신호 전송 = pjsip `ssl_sock_ossl.c` + 정적 OpenSSL 3.3.6 → **와이어 암호는 표준 TLS뿐.** 깰 암호 없음.
+- 미디어 = 표준 DTLS-SRTP(`SRTP_AES128_CM_SHA1_80` 등) / libwebrtc m130 → werift 로 재현 가능.
+
+### 접속 서술자(JSON) — 봇 TLS 접속에 필요
+바이너리 .rodata 의 JSON 키: `CallServer/CallServer4/CallServer6`, `SessionServer/4/6`, `AltPorts`,
+`SNI`, `Cert`, `ConnectInfos`, `RetryConfig`, `ConnectionTimeoutSec`, `VoxProtocolVer` …
+→ 서버 IP·포트·SNI·인증서·재시도 설정이 JSON 으로 내려온다(출처는 `/c/voiceroom/user` 로 추정).
+
+### VCS 메서드 사전 (C++ job 클래스)
+`VoxJobMakeVoiceRoomCall`, `VoxJobJoinVoiceRoomCall`, `VoxJobVRCInviteAsSpeaker/AsModerator`,
+`VoxJobVRCRequest/Authorize/Revoke/CancelSpeakerPermission`, `VoiceRoomMemberTable`,
+결과 콜백 `OnVRC*Result` … → 요청/응답 RPC, 메서드명이 곧 이 이름들.
+
+### 남은 벽 = 와이어 메시지 바이트 포맷 (정적 RE 필요)
+- 동적(SSL_read/write 평문)은 **Houdini 가 arm64 를 x86 번역·실행**해서 HW 브레이크포인트조차 안 걸림 → 불가.
+- JNI `MakeVoiceRoomCall`(0x30dc54) → `sub_318f24`(스트립) → VoxJob → state → serializer → ssl_sock send.
+  와이어 포맷은 이 스트립된 C++ 체인을 따라 디스어셈블해야 나온다(깊고 느린 작업, 암호 벽은 없음).
+
+### 결론
+암호 벽은 사라졌지만, 와이어 포맷 복원은 스트립된 C++ 호출 체인을 정적으로 뜯는 큰 작업이다.
+pragmatic 대안(frida 로 앱의 MakeVoiceRoomCall 직접 구동)은 1계정·동시1방 한계로 바로 동작 가능.
