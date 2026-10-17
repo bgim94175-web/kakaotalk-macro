@@ -938,3 +938,79 @@ html:not([data-support="chat"]):not([data-support="contact"]) [data-support] { d
   .how-fig .pk { display: none; }
   .kkt-line.enter, .kkt-row.in, .tbl tr.in, .feed li.in, .alerts li.in, .rule.new, .room.pop, .wchip.new, .img-t, .spark rect, .kt-k, .mviz-strip i, .pass-code span { animation: none !important; }
 }
+
+/* ---------- desktop: shared primitives (style.css + panel.css 에 같은 글로 둔다) ---------- */
+/* PC(961px 이상)는 글자·컨트롤을 키운다. 휴대폰·태블릿(960px 이하)은 위 값 그대로다.
+   961~1279px: 본문 15 · 설명 14 · 가장 작은 글자 13. 1280px 이상: 본문 16 · 설명 15 · 보조 14 · 가장 작은 글자 13 */
+@media (min-width: 961px) {
+  :root { --t-11: 13px; --t-12: 13px; --t-13: 14px; --t-14: 15px; --t-16: 17px; --t-18: 19px; --t-24: 26px; }
+  .btn { height: 40px; padding: 0 16px; }
+  .btn.sm { height: 34px; padding: 0 12px; gap: 6px; }
+  .btn.lg { height: 46px; padding: 0 20px; }
+  .spin { width: 14px; height: 14px; }
+  kbd { padding: 1px 6px; }
+  .inp { height: 40px; padding: 0 12px; }
+  .ta { padding: 10px 12px; }
+  .sel select { height: 40px; padding-left: 12px; }
+  .num { height: 38px; }
+  .num button { width: 36px; }
+  .num input { width: 60px; }
+  .seg button { height: 34px; padding: 0 14px; }
+  .chip-acct { height: 22px; padding: 0 7px; font-size: var(--t-11); }
+  .tag { height: 24px; padding: 0 8px; }
+  .badge-n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: var(--t-11); }
+  .demo-tag { height: 24px; }
+  .sq { font-size: var(--t-11); }
+  .av { font-size: 13px; }
+  .bub-meta { font-size: var(--t-11); }
+  .ck { width: 20px; height: 20px; }
+  .sw { width: 38px; height: 22px; border-radius: 11px; }
+  .sw::after { width: 16px; height: 16px; }
+  input:checked + .sw::after, [data-on="true"] > .sw::after { transform: translateX(16px); }
+  .swl > input:checked:active + .sw::after { transform: translateX(16px) scaleX(1.18); }
+}
+@media (min-width: 1280px) {
+  :root { --t-12: 14px; --t-13: 15px; --t-14: 16px; --t-16: 18px; --t-18: 20px; --t-24: 28px; }
+}
+/* 큰 모니터(1680px 이상, 1920x1080 등): 한 단계 더 키운다. 본문 17 · 설명 16 · 보조 15 */
+@media (min-width: 1680px) {
+  :root { --t-12: 15px; --t-13: 16px; --t-14: 17px; --t-16: 19px; --t-18: 21px; --t-24: 30px; }
+}
+/* ---------- desktop: end shared ---------- */
+/* ---------- desktop: SITE (style.css) — 공개 페이지 · 판매 관리 ---------- */
+@media (min-width: 961px) {
+  .lnav-in { height: 64px; }
+  .lnav-links a { height: 36px; padding: 0 12px; }
+  .pub-head { margin-bottom: 36px; }
+  .pub-head .lead { max-width: 680px; }
+  .card { padding: 24px 26px; }
+  .card + .card { margin-top: 14px; }
+  .prods { gap: 14px; }
+  .prods .card.prod { padding: 22px 26px; }
+  .prod h3 { font-size: var(--t-16); }
+  .prod .price .amt { font-size: 24px; }
+  .prod .price .amt .sans { font-size: 16px; }
+  .fsec > * { padding: 20px 24px; }
+  .step .sn { width: 24px; height: 24px; font-size: 13px; }
+  .fsec-h .hint { padding-left: 34px; }
+  .chk { min-height: 52px; padding: 14px 16px; }
+  .chk .box { width: 20px; height: 20px; }
+  .seg label span { height: 34px; padding: 0 16px; }
+  .kv .r { grid-template-columns: 132px minmax(0, 1fr); padding: 12px 0; }
+  .note { padding: 16px 18px; }
+  .note > .ic { width: 20px; height: 20px; font-size: 13px; }
+  .sum { padding: 20px 24px; }
+  .big { padding: 18px 20px; }
+  /* 카드 안의 테두리 상자·테두리 딱지를 면 색으로: 상자 속 상자를 줄인다(강조 .hi 와 빨간 .bad 는 테두리 유지) */
+  .card .big:not(.hi) { border-color: transparent; background: var(--bg-2); }
+  .chip { height: 24px; padding: 0 9px; border-color: transparent; background: var(--bg-2); }
+  .tag.line { border-color: transparent; background: var(--bg-2); }
+  .lrow { padding: 16px 0; }
+  .orow { margin-inline: -26px; padding-inline: 26px; }
+  .xbtn, .auth-foot a, .foot .links a, .foot .links button { min-height: 36px; }
+  .auth { width: min(440px, 100%); }
+  .support-wrap { max-width: 720px; }
+}
+@media (min-width: 1280px) {
+  .pub-grid { grid-template-columns: minmax(0, 1fr) 380px; gap: 28px; }
+}
