@@ -7,18 +7,28 @@ type-16 `liveon` 메타는 서버가 켜고 나서 뿌리는 **결과물**이지
 서버가 그걸 메타로 뿌린다. 그래서 떠야 하는 건 그 HTTP 요청 **하나**다. 그게 손에 들어오면
 `sender` 의 켜기 lifecycle(48h·keepalive·다중방)은 이미 준비돼 있어 바로 붙는다.
 
-## 준비물
-- frida 설치된 PC + BlueStacks(카톡 로그인된 상태) + `frida-server`(BlueStacks 안에서 실행 중)
-- USB/네트워크로 `frida -U` 가 BlueStacks 를 잡을 수 있어야 함(`frida-ps -U` 로 확인)
+## 가장 편한 길 — 원클릭 (Windows + BlueStacks)
+한 번만: BlueStacks 설정 > 고급 > **ADB 켜기**(+루트), 그리고 PC 에 `pip install frida-tools`.
 
-## 실행
-```bash
-# 새로 띄우며 붙기(권장 — 초기 요청까지 놓치지 않음)
-frida -U -f com.kakao.talk -l capture-voiceroom.js --no-pause
-
-# 이미 떠 있는 앱에 붙기
-frida -U -n KakaoTalk -l capture-voiceroom.js
+그다음 PowerShell 에서 이 폴더로 `cd` 한 뒤:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\capture.ps1
 ```
+`capture.ps1` 이 adb 연결 → frida-server **자동 다운로드(버전 자동 일치)·설치·실행** → 카톡 띄워 캡처까지 한 방에 한다.
+창이 뜨면 방에서 **보이스룸 켜기 한 번** → `★` 블록 복사.
+
+## 직접 실행(수동)
+- frida 설치된 PC + BlueStacks(카톡 로그인) + `frida-server`(BlueStacks 안에서 실행 중, **android-x86_64**, PC frida 와 **같은 버전**)
+- `frida-ps -U` 로 기기가 잡히는지 확인
+```bash
+frida -U -f com.kakao.talk -l capture-voiceroom.js --no-pause   # 새로 띄우며 붙기
+frida -U -n KakaoTalk -l capture-voiceroom.js                   # 이미 떠 있는 앱
+```
+
+## frida 없이 가고 싶으면 — HTTP Toolkit
+[HTTP Toolkit](https://httptoolkit.com)(무료) 의 "Android device via ADB" 는 루트 기기에서 인증서 주입 + 핀 우회를
+거의 자동으로 한다. 붙은 뒤 보룸 켜기를 누르면 요청이 목록에 뜬다. 단, 카카오의 핀을 못 뚫으면
+HTTPS 내용이 안 보일 수 있다 — 그럴 땐 위 OkHttp 훅(TLS 위 계층이라 핀과 무관)이 더 확실하다.
 
 ## 캡처 순서
 1. `[cap] capture armed` 가 뜰 때까지 기다린다.
