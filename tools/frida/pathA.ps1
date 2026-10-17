@@ -89,4 +89,7 @@ Write-Host "   멈추려면 이 창에서 Ctrl+C"
 Write-Host "==================================================================="
 Write-Host ""
 
-& frida -U -f $pkg -l $script --no-pause
+$logFile = Join-Path $work 'pathA-log.txt'
+Write-Host "로그가 이 파일에도 저장됩니다: $logFile"
+Write-Host ""
+& frida -U -f $pkg -l $script --no-pause 2>&1 | Tee-Object -FilePath $logFile
