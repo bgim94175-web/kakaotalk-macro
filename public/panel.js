@@ -895,7 +895,7 @@
     ck.setAttribute('aria-hidden', 'true');
     ck.innerHTML = ic('check', 10);
     var name = el('span', 'nm', room.name || '대화방');
-    var mem = el('span', 'mem', room.members ? room.members + '명' : '');
+    var mem = el('span', 'mem', room.members ? fmtNum(room.members) + '명' : '');
     var wrap = el('span', 'coolw');
     var input = document.createElement('input');
     input.type = 'text';
@@ -931,7 +931,7 @@
     row.appendChild(box);
     row.appendChild(ck);
     row.appendChild(el('span', 'nm', room.name || '대화방'));
-    if (room.members) row.appendChild(el('span', 'mem', room.members + '명'));
+    if (room.members) row.appendChild(el('span', 'mem', fmtNum(room.members) + '명'));
     return row;
   }
 
@@ -1247,7 +1247,7 @@
       var open = !!openRules[i];
       var chosen = t.rooms || [];
       var picks = choices.length ? '<div class="rooms" role="group" aria-label="감지할 방">' + choices.map(function (r) {
-        return '<label class="room"><input type="checkbox" data-rule-room="' + i + '" data-key="' + esc(r.key) + '"' + (chosen.indexOf(r.key) >= 0 ? ' checked' : '') + '><span class="ck" aria-hidden="true">' + ic('check', 10) + '</span><span class="nm">' + esc(r.name || '대화방') + '</span>' + (r.members ? '<span class="mem">' + r.members + '명</span>' : '') + '</label>';
+        return '<label class="room"><input type="checkbox" data-rule-room="' + i + '" data-key="' + esc(r.key) + '"' + (chosen.indexOf(r.key) >= 0 ? ' checked' : '') + '><span class="ck" aria-hidden="true">' + ic('check', 10) + '</span><span class="nm">' + esc(r.name || '대화방') + '</span>' + (r.members ? '<span class="mem">' + fmtNum(r.members) + '명</span>' : '') + '</label>';
       }).join('') + '</div>' : '<p class="rooms-none">불러온 대화방이 없습니다. [대화방 불러오기]를 눌러 주세요.</p>';
       return '<div class="rule' + (t.enabled === false ? ' off' : '') + (open ? ' open' : '') + (i === newIdx ? ' new' : '') + '" data-ri="' + i + '">' +
         '<div class="rule-h" role="button" tabindex="0" aria-expanded="' + open + '"><div class="t"><b>' + esc(t.name || '이름 없는 규칙') + '</b><div class="meta">' + ruleMeta(t) + '</div></div>' +
@@ -3164,7 +3164,7 @@
       return '<button type="button" class="acc-li" data-room-go="' + v.id + '">' +
         '<span class="sq">' + ic('link', 13) + '</span>' +
         '<span class="meta"><b>' + esc(roomName(v)) + '</b><small>' + esc(productsText(v)) + '</small></span>' +
-        stateHtmlRoom(v) + '</button>';
+        stateMemHtml(v) + '</button>';
     }).join('') : '<div class="empty">봇을 설치한 방이 없습니다. 방 관리봇·미니게임봇은 구매한 방에만 들어갑니다.<div class="acts-c"><a class="btn primary" href="/buy?p=roombot">방 관리봇 구매하기</a></div></div>';
   }
   // 개요 지표 4칸(6.9): 안 읽은 갠톡 · 매크로 · 사용 중인 방 · 확인 필요
@@ -3356,6 +3356,33 @@
     return v && roomById(v) ? v : '';
   }
   function roomName(v) { return (v && v.link_name) || '이름 확인 전'; }
+  // 방 멤버 수(봇 포함): 최대 인원까지 알면 '778 / 1,500명', 수만 알면 '멤버 778명', 최대 인원만 알면 '최대 1,500명', 모르면 ''.
+  // 수가 최대 인원보다 크면 최대 인원이 옛 값(방장이 늘린 뒤 아직 다시 읽지 못함)이라 수만 보인다
+  function memText(n, max) {
+    var c = Number(n) >= 1 ? Math.floor(Number(n)) : 0;
+    var m = Number(max) >= 1 ? Math.floor(Number(max)) : 0;
+    if (c && m && c <= m) return fmtNum(c) + ' / ' + fmtNum(m) + '명';
+    if (c) return '멤버 ' + fmtNum(c) + '명';
+    if (m) return '최대 ' + fmtNum(m) + '명';
+    return '';
+  }
+  // 지금 열어 둔 방 화면(10초마다 읽는 중)은 sender 의 지금 값(live.members — 입장·퇴장이 바로 반영된다)을 쓰되, 목록의 저장값
+  // (RoomView member_count·member_limit, member_at)이 더 새것이면 그것. 방 화면을 떠나면 live 는 더 읽지 않으므로 목록 값만 쓴다.
+  // K bot 이 방에 들어가 있을 때(사용 중·부방장 지정 대기)만 — 내보내진 방·입장 전에는 지난 수를 보이지 않는다
+  function memOf(v) {
+    if (!v || (v.display !== 'active' && v.display !== 'waiting')) return '';
+    var onRoom = ROUTES[route] && ROUTES[route].room && Number(roomSt.id) === Number(v.id);
+    var lm = onRoom && roomSt.live && roomSt.live.members;
+    if (lm && (lm.n || lm.max) && (Number(lm.at) || 0) >= (Number(v.member_at) || 0)) return memText(lm.n, lm.max);
+    return memText(v.member_count, v.member_limit);
+  }
+  // 화면 낭독용 '멤버' 머리말('778 / 1,500명' 앞에만)
+  function memHtml(t) { return t ? (t.indexOf('멤버') === 0 ? '' : '<span class="sr">멤버 </span>') + esc(t) : ''; }
+  // 상태 + 그 아래 멤버 수(개요 내 방 · 내 방 표 — 줄마다 같은 자리). 수를 모르면 상태만
+  function stateMemHtml(v) {
+    var t = memOf(v);
+    return t ? '<span class="st-mem">' + stateHtmlRoom(v) + '<span class="mem">' + ic('user', 11) + '<span>' + memHtml(t) + '</span></span></span>' : stateHtmlRoom(v);
+  }
   function dotOf(display) { return display === 'active' ? 'live' : display === 'error' ? 'crit' : 'warn'; }
   function stateHtmlRoom(v) {
     return '<span class="state" data-state="' + esc(v.display) + '"><i class="dot ' + dotOf(v.display) + '"></i>' + esc(v.label) + '</span>';
@@ -3511,7 +3538,7 @@
       return '<tr class="rowx' + (stagger ? ' in' : '') + '" style="--i:' + Math.min(i, 14) + '" data-room="' + v.id + '" tabindex="0" role="link" aria-label="' + esc(nm) + ' 방 상태 열기">' +
         '<td data-l="대화방"><b>' + esc(nm) + '</b> <span class="mono dim">' + esc(linkText(v.link_url)) + '</span></td>' +
         '<td data-l="봇">' + productTags(v) + '</td>' +
-        '<td data-l="상태">' + stateHtmlRoom(v) + '</td>' +
+        '<td data-l="상태">' + stateMemHtml(v) + '</td>' +
         '<td data-l="K bot">' + nickHtml(v) + '</td>' +
         '<td class="go">' + ic('right') + '</td></tr>';
     }).join('');
@@ -4158,6 +4185,9 @@
     $('room-title').textContent = roomName(v);
     $('row-r-cmds').hidden = !v.products.roombot;
     $('room-link').textContent = linkText(v.link_url);
+    var mt = memOf(v);
+    $('room-mem').hidden = !mt;
+    $('room-mem-t').innerHTML = memHtml(mt);
     // 닉네임이 없으면 서버가 'K bot 계정' 을 채워 준다 → 「K bot 계정」 을 겹쳐 쓰지 않는다
     var bn = v.bot && v.bot.nickname && v.bot.nickname !== 'K bot 계정' && v.bot.nickname !== 'K bot' ? v.bot.nickname : '';
     $('room-bot').textContent = v.bot ? 'K bot' + (bn ? ' 「' + bn + '」' : '') : 'K bot 입장 전';
@@ -4635,9 +4665,12 @@
     var name = (pv.room && pv.room.name) || '';
     moveSt.link = text;
     moveSt.same = same;
+    // 멤버 수: 같은 방이면 지금 방의 수, 새 방은 카카오가 최대 인원만 알려 준다(들어가기 전에는 지금 수를 모른다)
+    var mt = same ? memOf(v) : memText(pv.room && pv.room.member_count, pv.room && pv.room.max_users);
+    var mtx = mt ? '(' + mt + ')' : '';
     $('r-move-q').textContent = same
-      ? '지금 방과 같은 방입니다. 이 링크로 바꾸고 K bot이 같은 방에 다시 들어갑니다.'
-      : (name ? '「' + name + '」 방으로' : '이 방으로') + ' 옮깁니다. K bot은 지금 방에서 나갑니다.' +
+      ? '지금 방과 같은 방입니다' + mtx + '. 이 링크로 바꾸고 K bot이 같은 방에 다시 들어갑니다.'
+      : (name ? '「' + name + '」 방' + mtx + '으로' : '이 방' + mtx + '으로') + ' 옮깁니다. K bot은 지금 방에서 나갑니다.' +
         (v.products && v.products.roombot ? ' 새 방에서 K bot을 부방장으로 다시 지정해야 방 관리 기능이 동작합니다.' : '');
     $('r-move-yes-t').textContent = same ? '다시 설치' : '옮기기';
     var needPc = !!(pv.room && pv.room.needs_passcode);

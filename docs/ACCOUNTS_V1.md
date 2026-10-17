@@ -480,12 +480,13 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 ```json
 { "ok": true, "verified": true,
-  "room": { "link_url": "https://open.kakao.com/o/gAbCdEf", "link_id": "123456789", "name": "동네모임", "needs_passcode": false, "profile_only": false, "max_users": 1500 },
+  "room": { "link_url": "https://open.kakao.com/o/gAbCdEf", "link_id": "123456789", "name": "동네모임", "needs_passcode": false, "profile_only": false, "max_users": 1500, "member_count": 778 },
   "mine": { "install_id": 12, "products": { "roombot": true, "minigame": false }, "display": "active", "label": "사용 중" },
   "available": { "roombot": false, "minigame": true } }
 ```
 
 - `mine` 은 이 회원의 살아 있는 설치(같은 link_id 또는 링크 주소, `phase` installed·pending_payment)가 있을 때만. `available.X=false` 이유: 이미 설치됨 또는 이 회원의 처리 대기 주문(`status IN ('pending','paid')`)에 들어 있음.
+- `max_users` = JOININFO `ol.ml`(방 최대 인원, 모르면 null). `member_count` = 지금 멤버 수(봇 포함) — K bot 이 이미 들어가 있는 **내 방**(`mine`, RoomView `member_count`)일 때만, 아니면 null. 카카오는 들어가지 않은 방의 지금 인원을 알려 주지 않는다(실측한 JOININFO `ol` 칸 `li,otk,ln,lu,liu,lcu,olu,vt,lt,desc,ml,pa,ac,sc,pv,ex,omt,ca` 에 인원 수가 없다, 10.1 #1). 화면(구매 미리 보기·다른 방으로 옮기기 확인)은 `778 / 1,500명` · `최대 1,500명` 으로 보인다.
 - `profile_only` 는 호환용으로 남기고 **늘 `false`** 다. K bot 은 방의 프로필 설정(`ol.pv & 32`)과 관계없이 오픈프로필로 입장한다(D12). sender `/v1/bot/resolve` 는 원래 값(`!(ol.pv & 32)`)을 그대로 주지만 부모 미리 보기가 `false` 로 내보내 옛 `.hint`(닉네임 프로필 입장 안내)가 나오지 않게 한다.
 - 실패: 404 `not_found` `링크가 만료되었거나 없는 방입니다.`, 422 `not_group` `1:1 오픈채팅방 링크입니다. 그룹 오픈채팅방이나 커뮤니티 방의 링크를 붙여 넣어 주세요.`(JOININFO `lt` 가 1 일 때만), 409 `taken` `이 방에는 다른 회원이 설치한 K bot이 있습니다. 방장이라면 K bot 계정을 방에서 내보낸 뒤 다시 확인하거나 문의하십시오.`
 - `taken` 은 **다른 회원의 결제된 설치**(`phase='installed'`, `error_code` 가 `kicked` 아님)가 같은 link_id·링크 주소에 있을 때만이다. 다른 회원의 미입금 주문은 막지 않는다(D9).
@@ -540,7 +541,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 #### `GET /api/order/:id` (토큰 `?t=` **또는** 주문 주인 회원)
 
-지금 응답에 더해 `kind`, `items`(공개 줄), `applied`(done 일 때), `can_cancel`(주인 회원이고 `pending`), `accounts_n`(보는 사람이 주인 회원일 때 그 회원의 카카오 계정 수, 아니면 null — 완료 버튼 선택용, 6.7), `rooms:[{install_id, link_url, link_name, display, label, detail, bot:{nickname}|null}]`(이 주문의 방들 현재 상태, RoomView 와 같은 `detail`·봇 닉네임 — 방장에게 어느 계정을 부방장으로 지정할지 알려 준다). `issued_key` 는 예전 주문에만 있다. 남의 주문은 토큰 없이는 404.
+지금 응답에 더해 `kind`, `items`(공개 줄), `applied`(done 일 때), `can_cancel`(주인 회원이고 `pending`), `accounts_n`(보는 사람이 주인 회원일 때 그 회원의 카카오 계정 수, 아니면 null — 완료 버튼 선택용, 6.7), `rooms:[{install_id, link_url, link_name, display, label, detail, bot:{nickname}|null, member_count, member_limit}]`(이 주문의 방들 현재 상태, RoomView 와 같은 `detail`·봇 닉네임 — 방장에게 어느 계정을 부방장으로 지정할지 알려 준다. 멤버 수·최대 인원은 RoomView 와 같다, 모르면 null). `issued_key` 는 예전 주문에만 있다. 남의 주문은 토큰 없이는 404.
 
 #### `GET /api/my/orders` (회원)
 
@@ -602,6 +603,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
   "on_count": 0,
   "order": null,
   "perm": 2, "joined_at": 0, "state_at": 0, "config_rev": 3,
+  "member_count": 778, "member_limit": 1500, "member_at": 1791936000000,
   "can_move": true, "move_after": 0, "move_note": "",
   "can_reinstall": true, "reinstall_after": 0, "reinstall_note": "",
   "self_rule": "옮기기와 다시 설치는 무료입니다. 다른 방으로 옮기기는 방마다 24시간에 한 번, 다시 설치는 30분에 한 번 할 수 있습니다." }
@@ -609,6 +611,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 
 - `pending_products` = 이 설치를 가리키는 처리 대기 주문 줄(`pending`·`paid`). 콘솔은 상품 칩 옆에 `입금 대기` 를 붙인다.
 - `bot.nickname` 이 비어 있으면 `K bot`. 고객 화면에는 봇의 카카오 계정 이메일·device_id 를 절대 내보내지 않는다.
+- `member_count`·`member_limit`·`member_at` = 방 멤버 수(봇 포함)·최대 인원·그 수를 읽은 때(ms). sender 가 남긴 `room_state.runtime.mc`(5.7 끝) 가운데 지금 방(`chat_id`)의 것만, `phase='installed'` 이고 `state` 가 `active`·`waiting_host` 일 때만, 하루 넘게 다시 읽지 못했거나 이번 입장(`joined_at`) 전에 읽은 수(내보내진 뒤 같은 방에 다시 들어가면 `chat` 이 같다)면 모두 null(`installs.memberCountOf`). 모르면 null 이고 화면은 아무것도 보이지 않는다. 멤버 명부(`room_members`)는 나간 사람도 남기므로 수로 쓰지 않는다. 콘솔은 개요 내 방 · 내 방 표(둘 다 상태 아래 줄, 표에 칸을 더하지 않는다 — 961~1100px 에서 표가 넘치지 않게) · 방 상태 머리 · 옮기기 확인에, 사이트는 구매 미리 보기(`?add=`)·주문 화면에 `778 / 1,500명`(최대 인원을 모르면 `멤버 778명`, 수를 모르면 `최대 1,500명`, 수가 최대 인원보다 크면 최대 인원이 옛 값이라 `멤버 778명`)으로 보인다. 지금 열어 둔 방 화면에서만 `/panel/api/bot-room` 의 `live.members`(입장·퇴장이 바로 반영된 값)를 쓰고, 그것도 목록의 `member_at` 보다 새것일 때만이다(방 화면을 떠나면 live 는 더 읽지 않으므로 목록 값).
 - `on_count` = 켜진 방 관리 기능 수(`visit churn leaveKick profile promo cover guard` 의 `enabled`, 방 관리봇이 없으면 0). `display==='active'` 이고 방 관리봇이 있는데 0 이면 `label` = `사용 중 · 켜진 기능 없음`, `detail` = `방 관리 기능이 모두 꺼져 있습니다. 필요한 기능을 켜 주세요.`(D15).
 - `order` = `phase='pending_payment'` 일 때 `{id, url}`(토큰 포함 주문 화면 주소), 그 밖에는 null. 콘솔은 `입금 안내` 링크로 보인다.
 - `can_move`·`can_reinstall` = 고객이 이 설치를 다른 방으로 옮기거나 같은 방에 다시 설치할 수 있는가(3.4.3, `installs.selfView`). 간격 때문에 기다릴 때도 true 이고 `move_after`·`reinstall_after` 에 그 시각(ms, 0 이면 지금)이 온다. `move_note`·`reinstall_note` = 지금 못 하는 까닭(간격이면 `… {M월 D일} HH:MM 이후에 다시 시도해 주세요.`), 화면은 이 문구를 그대로 쓴다. `self_rule` = 간격 안내 한 줄(환경변수 값으로 만든다).
@@ -619,7 +622,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | 메서드·경로 | 요청 | 응답 | 오류 |
 |---|---|---|---|
 | GET `/panel/api/bot-rooms` | — | `{ok, rooms:[RoomView]}` (`phase` installed·pending_payment, 최근순) | — |
-| GET `/panel/api/bot-room?id=` | — | `{ok, room:RoomView, config:presentRoomConfig, ranking:[{name,score}]\|null, live:{connected, perm}\|null, sender_up}` (`ranking`·`live` 는 sender 가 있을 때만) | 404 `없는 방입니다.` |
+| GET `/panel/api/bot-room?id=` | — | `{ok, room:RoomView, config:presentRoomConfig, ranking:[{name,score}]\|null, live:{connected, perm, members?:{n, max, at}}\|null, sender_up}` (`ranking`·`live` 는 sender 가 있을 때만, `live` 는 sender `/v1/bot/room` 그대로) | 404 `없는 방입니다.` |
 | POST `/panel/api/bot-room/settings` | `{id, rev?, cmdPrefix?, exempt?, visit?, churn?, leaveKick?, profile?, promo?, cover?, hide?, guard?, games?}` — 온 부분만 바꾼다 | `{ok, room, config}` | 403 `no_roombot` `이 방에는 방 관리봇이 설치되어 있지 않습니다.` / `no_minigame` `이 방에는 미니게임봇이 설치되어 있지 않습니다.`, 409 `not_active` `부방장 지정을 기다리는 중입니다. 방장이 K bot 계정을 부방장으로 지정하면 설정할 수 있습니다.`, 409 `stale` (`rev` 가 있고 `config_rev` 와 다름) `다른 화면에서 설정이 바뀌었습니다. 새로 불러온 뒤 다시 저장하십시오.`, 400 검증 문구(7장) |
 | POST `/panel/api/bot-room/move` | `{id, link, passcode?}` — 봇 옮기기(무료). kind `preview`(IP 분당 20) + 회원당 시간 20번 | `{ok, kind:'move'\|'reinstall', same_room, held, room}` — `link` 가 지금 방과 같은 방(같은 `link_id`, 또는 같은 주소)이면 `kind:'reinstall'`(나가지 않고 링크만 바꿔 다시 입장) | 400 `bad_link`·`profile_link`·`post_link`·`bad_passcode`, 404 `not_found`(남의 방·없는 방 또는 링크 만료), 422 `not_group`, 503 `not_verified` `지금은 링크를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.`, 403 `blocked_room`, 409 `not_installed`(입금 대기) · `held`(관리자 확인 대기) · `room_taken`(다른 회원의 K bot) · `own_room` `이 방에는 이미 내 K bot이 있습니다. 두 방을 합치려면 문의해 주세요.` · `pending_exists` · `order_pending`(이 설치에 상품을 더하는 입금 대기 주문) · `need_support` · `bot_check`, 403 `admin_only`, 429 `too_soon`(`retry_after` + `Retry-After`), 429 `rate_limited` |
 | POST `/panel/api/bot-room/reinstall` | `{id, passcode?}` — 같은 방에 다시 설치(무료). kind `panel` | `{ok, kind:'reinstall', same_room:true, held:false, room}` | 404, 409 `not_installed`·`held`·`joining` `K bot이 지금 이 방에 들어가고 있습니다. 입장이 끝난 뒤에 다시 설치할 수 있습니다.`·`need_link` `지금 링크로는 들어갈 수 없습니다. [다른 방으로 옮기기]에 방 링크를 입력해 주세요.`·`need_support`(5.6 의 그 코드 문구)·`bot_check` `K bot을 점검하고 있습니다. 복구되면 자동으로 다시 동작합니다.`·`room_taken`, 403 `admin_only`, 429 `too_soon` |
@@ -701,7 +704,7 @@ B6 시험용 가짜 Google(작업 1 의 `e2e-auth.js` 안, 같은 파일을 최�
 | POST `/v1/bot/room-profile` | `{install_id, how}` | 봇의 작업 줄에 프로필 바꾸기(`switch`)·다시 입장(`rejoin`)을 넣는다 → `{ok, queued}` 또는 `{ok:false, error}` (5.8) |
 | POST `/v1/bot/sync` | `{install_id?}` | `{ok}`. 없으면 전체 재조정. DB 에서 설치·나가기 대기열을 다시 읽어 반영(5.2) |
 | GET `/v1/bot/status` | — | `{ok, bots:[{device_id, connected, nickname, rooms:n, budget:{join_h, join_d, resolve_m, switch_h}, open_profile:{li,name,url}\|null, open_profile_state, open_profiles, open_profile_read_at, profile_rooms:{open,main,other,failed,unknown}, profile_convert:'off'\|'auto'}], rooms:[{install_id, connected, perm, state, profile:'open'\|'main'\|'other'\|'failed'\|'unknown'\|null}], join_paused_until}` |
-| GET `/v1/bot/room?install_id=` | — | `{ok, live:{connected, perm, profile?:{state, name, fail, fail_at, switched_at, queued, target, convert}}, ranking:[{name, score}]}` |
+| GET `/v1/bot/room?install_id=` | — | `{ok, live:{connected, perm, profile?:{state, name, fail, fail_at, switched_at, queued, target, convert}, members?:{n, max, at}}, ranking:[{name, score}]}` (`members` = 방 멤버 수(봇 포함, 모르면 n null)·최대 인원(모르면 null)·읽은 때. 사용 중·부방장 대기 방만, 하루 넘게 다시 읽지 못했으면 칸이 없다, 5.7 끝) |
 | GET `/v1/bot/logs?install_id=` | — | `{ok, visit, profile, guard}` (지금 `logsView` 모양, 그 방만. 방 관리봇이 없으면 빈 배열) |
 | GET `/v1/bot/people?install_id=` | — | `{ok, people:[{user_id, name, count}]}` 또는 `{ok:false, error:'no_roombot'\|'not_active'}` |
 | POST `/v1/bot/hide` | `{install_id, last?, user_id?, by}` | `{ok, job}` 또는 `{ok:false, error:'no_roombot'\|'not_active'\|'busy'\|'cooldown', retry_at?}`. sender 가 `v.products.roombot && (v.perm & 5) && v.state==='active'` 를 다시 확인한다 |
@@ -1427,6 +1430,7 @@ sender 기본값(`roomfeat.DEFAULTS`)은 이 표(`room-config.DEFAULTS`)와 글�
 - **방 안내 모양(관리자 지정, 최대한 간단하게)**: `[제목]` / `이름 : @{닉네임}`(멘션 @ 는 글에 하나) / 값 줄 / 맨 아래 시각 `{오전|오후 h:mm}`(`kstClock`, 한국 시간). 기호·접기([전체보기])는 쓰지 않는다. 들낙 감지·재입장 차단·홍보 금지도 맨 아래에 같은 시각 줄. 입장·퇴장·프로필 변경은 시각 줄 대신 시각만 적은 기록(`recordLines`): `{입장|퇴장|변경} 기록 : N회` / 최근 시각 5개 `{MM.DD 오전|오후 h:mm}`(`kstWhen`, 옛 → 새, 마지막 줄이 이번, 가장 최근과 해가 다르면 앞에 `YYYY.`).
 - 프로필 변경 안내: `[프로필 변경 감지]` / `변경전 : ＠{옛 닉네임}`(전각 ＠ — 멘션 아님) / `변경후 : @{지금 닉네임}`(멘션) / `옾링 : {링크|없음|확인 못 함}` / 변경 기록. 닉네임이 그대로면 `이름 : @{닉네임}`. 옾링·상태 메시지가 바뀌었으면 `옾링 변경전 : …` / `옾링 변경후 : …`(이때 `옾링 :` 줄은 없다). 바뀔 때마다 알린다(같은 사람이 연달아 바꿔도 매번). 변경 기록의 횟수는 바뀐 때의 수(한 번에 여러 칸이 바뀌면 한 번).
 - **방 멤버 명부(room_members)**: 봇이 방에 들어가 사용 중이 되면 GETMEM 으로 모든 멤버의 닉네임·pli·사진 주소(기록 카드 동그라미, 아래)를 읽고, pli 는 INFOLINK(20개씩, 봇마다 메모리 캐시)로 옾링 주소를 얻는다. 10분마다 다시 읽고(BOT_MEMBER_SYNC_MS), 들어온 사람은 카드(MEMBER)로, 메시지 닉네임이 다르면 카드를 다시 읽어 합친다. GETMEM 이 빠뜨린 사람이 글을 쓰면 이름만 적어 두고 위의 카드 채우기가 읽는다. 아는 사람의 닉네임·옾링(pli 바뀜)이 바뀌면 프로필 변경 안내(profileChange). 옾링은 pli 가 바뀔 때만 바뀐 것으로 본다 → 비어 있던 옾링('')을 같은 pli 로 다시 읽어 채워도 안내하지 않는다. 퇴장 안내는 명부의 옾링을 쓴다 → 봇보다 먼저 있던 사람도 옾링이 나온다. 명부에 없는 사람이 나가면 로그 한 줄을 남기고, 안내를 만들기 전에 MEMBER 를 한 번 읽어 본다(방마다 10초에 1회, 2초까지. 나간 사람에게도 답하는지는 실측 전). 명부 일(동기화·채우기·다시 읽기)은 방 점검과 따로 봇마다 한 줄로 하고, 하나가 BOT_MEMBER_JOB_MS(2분)를 넘기면 다음 일로 넘어간다. GETMEM·MEMBER·INFOLINK 는 status 를 확인한다: 실패하면 로그 한 줄을 남기고 명부를 바꾸지 않으며, 읽지 못한 옾링은 '없음'이 아니라 모름(null)으로 두고 다음 동기화가 다시 읽는다. INFOLINK 가 속도 제한(-312·-805·-819)이면 그 읽기를 멈추고 BOT_RATE_WAIT_MS 첫 값 동안 옾링을 읽지 않는다. 동기화마다 숫자만 적힌 로그 한 줄(멤버 수·pli 있는 수·옾링 있는 수·걸린 시간). 명부는 (install_id, user_id) 행으로 저장하고 방(chat_id)이 바뀌면 그 방 것만 읽는다. 90일 못 본 사람·해제된 설치의 행은 부모의 하루 정리가 지운다.
+- **방 멤버 수(`room_state.runtime.mc = {n, max, at, chat}`)**: 지금 방에 있는 사람 수(봇 포함)와 최대 인원. 기준은 CHATINFO `chatInfo.activeMembersCount` — 사용 중인 방은 점검(10분, 재접속 직후)의 `getChat` 이 이미 읽으므로 패킷이 늘지 않는다. 입장하자마자 CHATINFO 1번(입장 전의 수는 상태를 쓰기 전에 버리고, 그 전에 읽은 저장본은 room_state 다시 읽기에서도 쓰지 않는다 — `mcFloor`), 부방장 지정 대기 방은 점검에 `getChat`·INFOLINK 가 없으므로 `BOT_ACTIVE_CHECK_MS` 마다 CHATINFO 1번과 INFOLINK 1번(기다리는 동안 방장이 최대 인원을 바꿀 수 있다, 링크가 없다는 답으로 방을 나가지는 않는다). 최대 인원은 JOININFO `ol.ml`(입장 때 — 응답 유실로 방 목록에서 입장을 확인해도 앞서 읽은 값)·INFOLINK `ols[].ml`(점검 때, 없으면 지난 값; JOININFO 없이 사전 확인으로 끝난 입장은 바로 INFOLINK 1번). 입장(피드 1·4)·퇴장(2·3)·내보내기(6) 피드는 다음 읽기까지 메모리의 수를 ±한다: 같은 피드(MSG·NEWMEM 이 같은 `logId`)는 한 번만, 마지막 CHATINFO 를 보내기 전에 생긴 일(`sendAt`)은 이미 들어 있으니 세지 않고, 봇 자신은 세지 않는다. 최대 인원으로 자르지 않는다(옛 값일 수 있다). GETMEM 은 사람을 빠뜨릴 때가 있어(위) 수로 쓰지 않고, 명부(나간 사람도 남음)도 쓰지 않는다. 1~100,000 정수만 받는다. 저장은 수·최대 인원이 바뀌었을 때와 1시간마다(같은 수라도 읽은 때를 새로), 피드로 바뀐 수는 1분에 한 번까지(남은 것은 tick·뷰를 내릴 때·멈출 때 저장). 다른 방(`chat`)의 기록은 버린다(옮기기). `/v1/bot/room` `live.members` 는 메모리 값, 부모 RoomView `member_count` 는 저장값(3.4.2).
 - **옾링 값**: 주소 / `없음`(오픈프로필이 아님, 또는 INFOLINK 가 없다고 답함) / `확인 못 함`(오픈프로필인데 옾링을 읽지 못함). 입장·퇴장·프로필 변경 안내를 보내기 전에 명부에서 옾링을 모르는 사람은 INFOLINK 를 혼자 한 번(실패하면 한 번 더) 읽는다(동기화 한 번에 20명까지, 퇴장의 옾링만 읽기는 방마다 10초 간격 없이). 묶음 읽기에서 혼자서도 실패한 pli 는 '없음'으로 두지 않고 30분 동안 묶음 읽기에서 뺀다. 저장된 `link ''`(pli 있음)는 예전 읽기 실패일 수 있어 모름으로 읽어 다시 확인한다.
 - **멤버 프로필 사진은 기록 카드 동그라미에만 쓴다**(7.2 (f)): 명부는 GETMEM·MEMBER 가 주는 사진 주소(작은 사진 `pi` → `fpi` → `opi`)를 `room_members.photo` 에 주소로만 적는다(그림 바이트는 어디에도 저장하지 않는다. 사진 칸이 없는 읽기는 예전 주소를 지우지 않는다). 글 안내 · 멘션 한 줄 · 프로필 기록(`runtime.profile`) · 패널 · 관리자 화면에는 싣지 않는다. 사진만 바뀐 것은 안내하지 않는다(명부 주소만 조용히 바꾼다). 저장된 설정·저장 요청의 `profile.photo` 는 오류 없이 버린다. 예전 `changes` 의 `kind:'photo'` 는 화면·조회에 싣지 않는다.
 - 입장·퇴장 안내: `[입장 안내]`|`[퇴장 안내]` / `이름 : @{닉네임}` / `옾링 : {링크|없음|확인 못 함}` / 입장(퇴장) 기록. 기록은 14일 안의 입장(퇴장) 시각이고, 머문 시간·예전 프로필은 기록(관리 화면)에만 남는다.
@@ -1925,7 +1929,7 @@ DEPLOY.md 의 30,000원 같은 옛 가격 문장(92·130 줄)과 키 중심 설�
 
 `SENDER_TRACE_PUSH=1` 로 아래를 기록하고 결과에 맞춰 5.3·5.4·7.2 의 상수만 고친다(구조는 바꾸지 않는다).
 
-1. JOININFO `ol` 전체(인원 수 칸 유무), 태블릿 서브 기기에서 JOINLINK 허용 여부.
+1. JOININFO `ol` 전체(인원 수 칸 유무), 태블릿 서브 기기에서 JOINLINK 허용 여부. — 실측: `ol` 칸은 `li,otk,ln,lu,liu,lcu,olu,vt,lt,desc,ml,pa,ac,sc,pv,ex,omt,ca`. `ml` = 최대 인원, **지금 인원 수 칸은 없다**(들어가지 않은 방의 지금 수는 모른다, 3.3 미리 보기). 들어간 방의 수는 CHATINFO `activeMembersCount`(5.7 끝). INFOLINK `ols[].ml` 이 JOININFO 와 같은 값인지는 아직 확인하지 않았다(없으면 JOININFO 값을 둔다).
 2. CHECKJOIN 틀린 코드 status, 가득 찬 방·이미 들어간 방·내보내진 뒤 JOINLINK status.
 3. JOINLINK 뒤 그 세션이 받는 푸시(SYNCJOIN·SYNCLINKCR), 부방장 지정·해제 때 SYNCMEMT·피드 11/12 모양.
 4. MEMBER(self) `mt` 부방장 전후, LINKKICKED 모양, 강퇴 후 재입장 status.

@@ -59,10 +59,33 @@ const SAVE_SOON_MS = 300              // 게임 답이 나간 방은 이만큼 �
 const PHOTO_LATE_MAX_MS = 2 * MIN     // 기다림을 넘긴 사진 올리기를 PHOTO_MAX 에 세고 그 방의 다음 글을 붙잡아 두는 최대 시간
 // 다시 읽기(loadRuntime)에서 저장본보다 실패한 동안의 임시본을 쓰는 칸: 이 봇이 이 방에서 남긴 기록(프로필·안내 표시)
 const OWN_KEYS = ['prof', 'welcomed', 'promoted']
+// 방 멤버 수(runtime.mc): 이보다 큰 수는 잘못 읽은 것으로 본다 · 수가 같아도 이만큼 지나면 다시 저장(읽은 때를 새로) ·
+// 입장·퇴장 피드로 바뀐 수는 이 간격으로만 저장 · 같은 피드를 두 번 세지 않게 기억하는 logId 수
+const COUNT_MAX = 100000
+const COUNT_REFRESH_MS = HOUR
+const COUNT_FEED_SAVE_MS = MIN
+const COUNT_SEEN_MAX = 64
+// 이보다 오래 다시 읽지 못한 수는 보이지 않는다(봇이 멈춘 동안 등). 부모(lib/installs.js MEMBER_COUNT_MAX_AGE_MS)와 같다
+const COUNT_SHOW_MS = DAY
 
 // 카드를 더 읽어야 하는 사람: 카드를 읽은 적이 없거나(pli 모름), pli 는 있는데 옾링을 모른다
 function needsCard(m) {
   return !m || m.pli == null || (!!m.pli && m.link == null)
+}
+
+// 패킷의 수 칸(int32 또는 Long) → 1~COUNT_MAX 정수 | null
+function countNum(x) {
+  const n = x && typeof x === 'object' && typeof x.toNumber === 'function' ? x.toNumber() : Number(x)
+  return Number.isInteger(n) && n >= 1 && n <= COUNT_MAX ? n : null
+}
+
+// 지금 방의 멤버 수 기록 {n, max, at, chat} | null. 메모리(v.mc, 피드 반영) → 저장본(runtime.mc). 다른 방(옮기기 전) 것은 버린다.
+// 명부(v.members)는 나간 사람도 남기므로 수로 쓰지 않는다.
+function countOf(v) {
+  if (!v || !v.chat_id) return null
+  if (v.mc && v.mc.chat === v.chat_id) return v.mc
+  const mc = v.runtime && v.runtime.mc
+  return mc && typeof mc === 'object' && mc.chat === v.chat_id && !((Number(mc.at) || 0) < (v.mcFloor || 0)) ? mc : null
 }
 
 // 멤버의 프로필 사진 주소(기록 카드 동그라미): 작은 사진(pi) → 큰 사진(fpi) → 원본(opi). 라이브러리 모양(profile_image_url …)과
@@ -789,6 +812,9 @@ export class BotPool {
     const v = got.view
     const live = { connected: !!(got.slot && got.slot.live() && v.chat_id && v.state !== 'error'), perm: v.perm == null ? null : Number(v.perm) }
     if (got.slot && v.chat_id && v.state !== 'error') live.profile = got.slot.roomProfileView(v)
+    // 멤버 수(봇 포함)·최대 인원. 들어가 있는 방(사용 중·부방장 대기)만, 모르면 칸이 없다
+    const mc = v.state === 'active' || v.state === 'waiting_host' ? countOf(v) : null
+    if (mc && this.now() - (Number(mc.at) || 0) < COUNT_SHOW_MS && (countNum(mc.n) || countNum(mc.max))) live.members = { n: countNum(mc.n), max: countNum(mc.max), at: Number(mc.at) || 0 }
     return {
       ok: true,
       live,
@@ -2100,6 +2126,13 @@ export class BotSlot {
       memberLogAt: 0,
       memberFailLogAt: 0,
       leaveReadAt: 0,
+      // 멤버 수 {n, max, at, from(그 수를 읽으려고 CHATINFO 를 보낸 때, 0 = 이 프로세스에서 읽은 적 없음), chat} · 센 피드 logId
+      mc: null,
+      mcSeen: new Set(),
+      mcTryAt: 0,
+      mcSavedAt: 0,
+      mcUnsaved: false,
+      mcFloor: 0,                 // 마지막 입장 때(그 전에 읽은 저장된 수는 쓰지 않는다, dropCount)
       nextCheckAt: 0,
       checkFull: false,
       checking: false,
@@ -2233,6 +2266,10 @@ export class BotSlot {
       } else if (OWN_KEYS.includes(k) && this.ownRecord(v, tmp[k]) && !this.ownRecord(v, base[k])) {
         base[k] = tmp[k]
         moved = true
+      } else if (k === 'mc' && this.newerCount(v, tmp.mc, base.mc)) {
+        // 멤버 수: 실패한 동안 읽은 지금 방의 수가 저장본보다 새것이면(다시 입장한 뒤 등) 그것을 쓴다
+        base.mc = tmp.mc
+        moved = true
       } else if (k === 'bans' && tmp.bans && typeof tmp.bans === 'object') {
         if (!base.bans || typeof base.bans !== 'object') base.bans = {}
         for (const [uid, b] of Object.entries(tmp.bans)) {
@@ -2243,6 +2280,11 @@ export class BotSlot {
         }
         R.pruneBans(base, this.now())
       }
+    }
+    // 실패한 동안 다시 입장했으면(mcFloor) 그 전의 저장된 수는 버린다
+    if (base.mc && v.mcFloor && (Number(base.mc.at) || 0) < v.mcFloor) {
+      delete base.mc
+      moved = true
     }
     v.runtime = base
     v.dirty = moved
@@ -2255,6 +2297,13 @@ export class BotSlot {
     if (v.joinPending) this.bg(this.joinNotices(v), 'join notice')
     if (v.addedPending) this.soon(v)
     return true
+  }
+
+  // 다시 읽기의 멤버 수 고르기: a(임시본)가 지금 방의 수이고 b(저장본)가 없거나 다른 방·더 오래된 수인가
+  newerCount(v, a, b) {
+    if (!a || typeof a !== 'object' || a.chat !== v.chat_id) return false
+    if (!b || typeof b !== 'object' || b.chat !== v.chat_id) return true
+    return (Number(a.at) || 0) > (Number(b.at) || 0)
   }
 
   // 이 봇이 이 방(지금 chat)에서 남긴 기록인가(noticed·profOf 와 같은 기준)
@@ -2278,6 +2327,8 @@ export class BotSlot {
     if (!v) return
     if (v.saveTimer) clearTimeout(v.saveTimer)
     v.saveTimer = null
+    // 피드로 바뀌고 아직 저장하지 않은 멤버 수도 남긴다
+    if (v.mcUnsaved) this.keepCount(v, false)
     await this.flushView(v)
     if (v.chat_id && this.views.get(v.chat_id) === v) this.views.delete(v.chat_id)
     this.byInstall.delete(Number(installId))
@@ -2286,6 +2337,8 @@ export class BotSlot {
 
   async flushView(v) {
     await this.flushMembers(v)
+    // 멈출 때는 피드로 바뀌고 아직 저장하지 않은 멤버 수도 남긴다(평소에는 1분 간격, keepCount)
+    if (v.mcUnsaved && (this.closing || this.stopped)) this.keepCount(v, false)
     // 앞선 저장이 끝나기를 기다린 뒤 본다. 저장 중에는 dirty 가 이미 내려가 있어서, 기다리지 않으면 멈출 때의 마지막 저장이
     // 아직 DB 에 닿지 않은 저장(pg 대기열)을 '저장됨'으로 보고 건너뛴 채 끝난다
     while (v.saving) await v.saving
@@ -2555,7 +2608,7 @@ export class BotSlot {
       }
       const ch = await this.chatByLink(li)
       if (ch) {
-        await this.joined(row, ch, null)
+        await this.joined(row, Object.assign(ch, { ml: ol.ml }), null)
         return true
       }
     } else if (String(row.link_id) !== li) {
@@ -2601,13 +2654,13 @@ export class BotSlot {
       const room = jr.body && jr.body.chatRoom
       const chatId = R.idText(room && (room.chatId != null ? room.chatId : room.c)) || R.idText(jr.body && jr.body.chatId)
       if (chatId) {
-        await this.joined(row, { chat_id: chatId, link_id: li, pv }, jr.body.olu, prof)
+        await this.joined(row, { chat_id: chatId, link_id: li, pv, ml: ol.ml }, jr.body.olu, prof)
         return true
       }
-      await this.joinFail(row, -1, { step: 'join', res: jr, li, ptp: body.ptp, prof })
+      await this.joinFail(row, -1, { step: 'join', res: jr, li, ptp: body.ptp, prof, ml: ol.ml })
       return true
     }
-    await this.joinFail(row, jst, { step: 'join', res: jr, li, ptp: body.ptp, prof })
+    await this.joinFail(row, jst, { step: 'join', res: jr, li, ptp: body.ptp, prof, ml: ol.ml })
     return true
   }
 
@@ -2677,7 +2730,8 @@ export class BotSlot {
     // 응답 유실·알 수 없는 status: 다시 접속하지 않는다. 지금 세션의 방 목록에서 같은 li 의 방을 찾는다.
     const ch = ctx.li ? await this.chatByLink(ctx.li) : null
     if (ch) {
-      await this.joined(row, ch, null, ctx.prof || null)
+      // 최대 인원은 앞서 읽은 JOININFO 의 ml
+      await this.joined(row, Object.assign(ch, { ml: ctx.ml }), null, ctx.prof || null)
       return
     }
     await this.fail(row, 'kakao_error', why(status))
@@ -2716,12 +2770,16 @@ export class BotSlot {
   }
 
   // 5. 입장 성공(또는 이미 들어가 있음). sentProf = 이번 JOINLINK 에 실은 오픈프로필(사전 확인으로 끝났으면 null)
+  // ch.ml = JOININFO 의 최대 인원(사전 확인으로 끝났으면 없음 — 그때는 INFOLINK 로 따로 읽는다)
   async joined(row, ch, joinOlu, sentProf) {
     const now = this.now()
     const chatId = String(ch.chat_id)
     const li = String(ch.link_id || row.link_id || '')
     this.rejoinIds.delete(Number(row.id))
     this.profileWait.delete(Number(row.id))
+    // 입장 전의 수(내보내지기 전 등)는 상태를 쓰기 전에 버린다 — 쓰는 사이에 같은 방(chat)의 옛 수가 지금 수로 보이지 않게
+    const was = this.byInstall.get(Number(row.id))
+    if (was) this.dropCount(was, now)
     const self = await this.readSelf(chatId, joinOlu, true)
     if (self.open == null && sentProf) Object.assign(self, { open: true, pli: sentProf.li, nn: self.nn || sentProf.name })
     if (self.open && !self.nn && sentProf && self.pli === sentProf.li) self.nn = sentProf.name
@@ -2755,7 +2813,14 @@ export class BotSlot {
     // 이 방에서 봇이 어떤 프로필로 보이는지 남긴다(오픈프로필이 아니면 관리자 화면에 바꾸기 대상으로 보인다).
     // 바로 저장한다: 부모는 이 기록이 없는 입장 완료 방을 v6 때 기본 프로필로 들어간 방으로 본다(installs.BOT_NAME_SQL)
     this.noteSelf(v, self)
+    // 입장 전의 수(내보내지기 전 등)는 버린다(새로 만든 뷰는 방금 읽은 저장본의 것). 최대 인원은 JOININFO 에서(모르면 INFOLINK 1번),
+    // 멤버 수는 바로 CHATINFO 1번으로(다음 점검은 10분 뒤라)
+    this.dropCount(v, now)
+    const ml = countNum(ch.ml)
+    this.noteCount(v, null, ml)
     await this.flushView(v)
+    this.bg(this.readCount(v), 'member count')
+    if (ml == null) this.bg(this.readLimit(v), 'member limit')
     await this.joinNotices(v)
   }
 
@@ -2902,6 +2967,114 @@ export class BotSlot {
     if (!(opt && opt.noQueue)) this.considerSwitch(v)
   }
 
+  // ── 방 멤버 수(지금 방에 있는 사람 수, 봇 포함) ───────────────────────────
+  // 기준은 CHATINFO 의 activeMembersCount 다(사용 중인 방은 점검마다 getChat 으로 이미 읽는다). 최대 인원(max)은 JOININFO·INFOLINK 의 ml.
+  // GETMEM 은 사람을 빠뜨릴 때가 있어 수로 쓰지 않는다. 입장·퇴장 피드는 다음 읽기까지 ±만 한다(feedCount).
+  // n·max 는 1~COUNT_MAX 정수만 받고, 아니면 그 칸은 지난 값을 둔다(모르면 null — 화면에 보이지 않는다).
+  noteCount(v, n, max, from) {
+    if (!v || !v.chat_id || (n == null && max == null)) return
+    const now = this.now()
+    const cur = v.mc && v.mc.chat === v.chat_id ? v.mc : null
+    const old = countOf(v)
+    v.mc = {
+      n: n != null ? n : (old ? countNum(old.n) : null),
+      max: max != null ? max : (old ? countNum(old.max) : null),
+      at: n != null ? now : (old ? Number(old.at) || 0 : 0),
+      from: n != null ? (from || now) : (cur ? cur.from : 0),
+      chat: v.chat_id,
+    }
+    this.keepCount(v, false)
+  }
+
+  // 수를 room_state(runtime.mc)에 남긴다 — 부모가 내 방 목록에 보인다. 바뀌었을 때·1시간마다만(점검마다 저장하지 않게),
+  // 피드로 바뀐 수(soft)는 1분에 한 번까지(남은 것은 tick 이 저장한다)
+  keepCount(v, soft) {
+    const mc = v.mc
+    if (!mc || mc.chat !== v.chat_id) return
+    const now = this.now()
+    const saved = v.runtime.mc
+    const same = !v.mcUnsaved && saved && saved.chat === mc.chat && saved.n === mc.n && saved.max === mc.max
+    if (same && now - (Number(saved.at) || 0) < COUNT_REFRESH_MS) return
+    if (soft && now - v.mcSavedAt < COUNT_FEED_SAVE_MS) {
+      v.mcUnsaved = true
+      return
+    }
+    v.runtime.mc = { n: mc.n, max: mc.max, at: mc.at || now, chat: mc.chat }
+    v.mcSavedAt = now
+    v.mcUnsaved = false
+    v.dirty = true
+  }
+
+  // 입장·퇴장·내보내기 피드 하나 → 수 ±. 같은 피드가 MSG·NEWMEM 으로 두 번 와도 logId 로 한 번만 센다.
+  // 이 프로세스에서 CHATINFO 로 읽은 수가 있을 때만, 그 읽기를 보내기 전에 생긴 일(sendAt 초 단위)은 이미 들어 있으니 세지 않는다.
+  feedCount(v, ev, feed) {
+    const mc = v.mc
+    if (!mc || mc.chat !== v.chat_id || mc.n == null || !mc.from || !ev.logId || v.mcSeen.has(ev.logId)) return
+    const ft = feed.feedType
+    let d = 0
+    if (ft === 6) {
+      d = -feed.members.filter((m) => m.userId !== this.userId).length
+    } else if (ft >= 1 && ft <= 4) {
+      for (const e of visitEventsFromMessage({ message: ev.text, message_type: 0, author_id: ev.authorId, attachment: ev.attachment })) {
+        if (e.authorId && e.authorId === this.userId) continue
+        if (e.kind === 'join') d += 1
+        else if (e.kind === 'leave') d -= 1
+      }
+    }
+    if (!d) return
+    v.mcSeen.add(ev.logId)
+    if (v.mcSeen.size > COUNT_SEEN_MAX) v.mcSeen.delete(v.mcSeen.values().next().value)
+    if (ev.at && ev.at + 1000 <= mc.from) return
+    // 최대 인원으로 자르지 않는다(기다리는 동안 방장이 늘렸을 수 있다 — 다음 읽기에서 함께 고쳐진다)
+    const n = Math.max(1, Math.min(COUNT_MAX, mc.n + d))
+    if (n === mc.n) return
+    v.mc = Object.assign({}, mc, { n, at: this.now() })
+    this.keepCount(v, true)
+  }
+
+  // CHATINFO 1번으로 멤버 수만 읽는다(입장 직후·부방장 대기 방). getChat 은 제목 메타가 없으면 INFOLINK 를 더 보내서 원시 패킷으로.
+  async readCount(v) {
+    if (!this.live() || !v.chat_id || this.byInstall.get(v.install_id) !== v) return
+    const chat = v.chat_id
+    const from = this.now()
+    v.mcTryAt = from
+    const r = await this.raw('CHATINFO', { chatId: L(chat) })
+    if (!R.locoOk(r) || this.byInstall.get(v.install_id) !== v || v.chat_id !== chat) return
+    const info = r.body && r.body.chatInfo
+    if (!info || typeof info !== 'object' || info.left === true || R.idText(info.chatId) !== chat) return
+    this.noteCount(v, countNum(info.activeMembersCount), null, from)
+  }
+
+  // INFOLINK 1번으로 최대 인원(ml)만 읽는다(사전 확인·응답 유실로 JOININFO 없이 들어간 방 · 부방장 대기 방).
+  // 링크가 없다는 응답으로 방을 나가지 않는다(그 판단은 정기 점검 checkRoom 이 두 번 연속일 때만 한다)
+  async readLimit(v) {
+    if (!this.live() || !v.chat_id || !v.link_id || this.byInstall.get(v.install_id) !== v) return
+    const chat = v.chat_id
+    const li = v.link_id
+    const r = await this.raw('INFOLINK', { lis: [L(li)] })
+    if (!R.locoOk(r) || this.byInstall.get(v.install_id) !== v || v.chat_id !== chat || v.link_id !== li) return
+    const ols = (r.body && Array.isArray(r.body.ols)) ? r.body.ols : []
+    const ol = ols.find((o) => R.idText(o && o.li) === li)
+    if (ol) this.noteCount(v, null, countNum(ol.ml))
+  }
+
+  // 들어가기 전(내보내지기 전 등)의 수를 버린다. mcFloor 보다 앞서 읽은 저장본의 수는 다시 읽기(loadRuntime)에서도 쓰지 않는다
+  dropCount(v, at) {
+    v.mc = null
+    v.mcUnsaved = false
+    v.mcFloor = at
+    if (v.runtime && v.runtime.mc) {
+      delete v.runtime.mc
+      v.dirty = true
+    }
+  }
+
+  // 부방장 대기 방(점검에 getChat 이 없음)의 수 읽기 차례: 이 프로세스에서 읽은 적이 없거나, 마지막 읽기·시도가 activeCheckMs 전
+  countDue(v, now) {
+    const mc = v.mc && v.mc.chat === v.chat_id ? v.mc : null
+    return now - Math.max(mc ? mc.from : 0, v.mcTryAt || 0) >= this.opts.activeCheckMs
+  }
+
   considerSwitch(v) {
     if (this.opts.profileConvert !== 'auto') return
     this.queueSwitch(v, 'switch', false)
@@ -3028,6 +3201,7 @@ export class BotSlot {
     for (const v of this.byInstall.values()) {
       this.memberSync(v, now)
       this.memberFill(v, now)
+      if (v.mcUnsaved && now - v.mcSavedAt >= COUNT_FEED_SAVE_MS) this.keepCount(v, false)
       if (v.loadFailed && !v.loading && now >= (v.loadRetryAt || 0)) this.bg(this.retryLoad(v), 'room_state retry')
     }
     this.voiceTick(now)
@@ -3046,8 +3220,9 @@ export class BotSlot {
     v.checkFull = false
     v.recheck = false
     if (full) {
+      let chat
       try {
-        await this.client.getChat(v.chat_id)
+        chat = await this.client.getChat(v.chat_id)
       } catch (e) {
         if (e && e.getChatFailureReason === 'chat_info_absent') {
           await this.roomGone(v, 'kicked')
@@ -3056,6 +3231,8 @@ export class BotSlot {
         v.nextCheckAt = now + MIN
         return
       }
+      // 멤버 수: getChat 이 이미 읽은 CHATINFO activeMembersCount(봇 포함)
+      this.noteCount(v, countNum(chat && chat.active_members), null, now)
       // INFOLINK 에 링크가 없으면 방 삭제(5.4). 한 번의 빈 응답으로 방을 나가지 않게 두 번 연속일 때만.
       if (v.link_id) {
         const r = await this.raw('INFOLINK', { lis: [L(v.link_id)] })
@@ -3066,6 +3243,8 @@ export class BotSlot {
             v.linkMiss = 0
             // 방의 pv(32 = 기본 프로필 참여 허용, 8 = PROFILE_EDITABLE)를 프로필 바꾸기 기록에 함께 남긴다(실측)
             if (ol.pv != null && Number.isFinite(Number(ol.pv))) v.linkPv = Number(ol.pv)
+            // 최대 인원(ml, JOININFO 와 같은 오픈링크 칸). 없으면 지난 값을 둔다
+            this.noteCount(v, null, countNum(ol.ml))
           } else {
             v.linkMiss = (v.linkMiss || 0) + 1
             if (v.linkMiss >= 2) {
@@ -3078,6 +3257,13 @@ export class BotSlot {
           }
         }
       }
+    } else if (this.countDue(v, now)) {
+      // 부방장 대기 방은 getChat·INFOLINK 를 하지 않으므로 멤버 수(CHATINFO)와 최대 인원(INFOLINK)만 읽는다(activeCheckMs 마다 1번).
+      // 기다리는 동안 방장이 최대 인원을 바꿀 수 있어 늘 함께 읽는다
+      await this.readCount(v)
+      if (!this.byInstall.has(v.install_id)) return
+      await this.readLimit(v)
+      if (!this.byInstall.has(v.install_id)) return
     }
     // 방 관리봇 방은 점검마다 권한을 읽는다(CHATONROOM 의 olu 에 프로필도 함께 온다).
     // 미니게임만 있는 방은 이 봇의 프로필을 아직 모를 때만 한 번 읽는다(D12 오픈프로필 확인).
@@ -3277,6 +3463,8 @@ export class BotSlot {
     const feed = R.feedOf(ev.text)
     const now = this.now()
     if (feed) {
+      // 멤버 수 ±(미니게임만 있는 방·부방장 대기 방도 센다)
+      this.feedCount(v, ev, feed)
       const ft = feed.feedType
       if (ft === 11 || ft === 12 || ft === 15) {
         for (const m of feed.members) {

@@ -375,7 +375,7 @@ class FakeServer {
       const pv = (r.passcode ? 64 : 0) | (has(code, 'noprof') || has(code, 'noanon') ? 0 : 32)
       return resp(method, {
         status: 0,
-        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : has(code, 'comm') ? 3 : 2, pv, ml: 1500 },
+        ol: { li: L(r.li), ln: r.ln, lu: r.lu, lt: has(code, 'dm') ? 1 : has(code, 'comm') ? 3 : 2, pv, ml: r.ml != null ? r.ml : 1500 },
       })
     }
     if (method === 'CHECKJOIN') {
@@ -445,12 +445,13 @@ class FakeServer {
     if (method === 'CHATINFO') {
       const r = this.byChat(b.chatId)
       const cust = CUSTOMER_ROOMS.find((x) => x.chat_id === str(b.chatId))
-      if (cust) return resp(method, { status: 0, chatInfo: { chatId: L(cust.chat_id), type: 'OM', li: L(cust.link_id), a: cust.members } })
+      // 멤버 수 칸 이름은 진짜와 같이 activeMembersCount(봇 포함, agent-messenger channelInfoToChatData)
+      if (cust) return resp(method, { status: 0, chatInfo: { chatId: L(cust.chat_id), type: 'OM', li: L(cust.link_id), activeMembersCount: cust.members } })
       if (!r) return resp(method, { status: -403 })
       return resp(method, {
         status: 0,
         chatInfo: {
-          chatId: L(r.chatId), type: 'OM', li: L(r.li), a: Object.keys(r.members).length, left: !this.isMember(r, me),
+          chatId: L(r.chatId), type: 'OM', li: L(r.li), activeMembersCount: Object.keys(r.members).length, left: !this.isMember(r, me),
           lastLogId: r.msgs.length ? L(r.msgs[r.msgs.length - 1].logId) : undefined,
           // 방 메타: 제목(type 3)은 늘, 보이스룸(type 16)은 켜져 있을 때만
           chatMetas: [{ type: 3, content: r.ln, revision: L(1), authorId: L('1'), updatedAt: sec() }]
@@ -472,7 +473,7 @@ class FakeServer {
         }
         const r = this.byLi(s)
         if (r && !r.deleted) {
-          ols.push({ li: L(r.li), ln: r.ln, lu: r.lu, lt: 2, pv: L(String((r.passcode ? 64 : 0) | (has(r.code, 'noprof') || has(r.code, 'noanon') ? 0 : 32))) })
+          ols.push({ li: L(r.li), ln: r.ln, lu: r.lu, lt: 2, pv: L(String((r.passcode ? 64 : 0) | (has(r.code, 'noprof') || has(r.code, 'noanon') ? 0 : 32))), ml: r.ml != null ? r.ml : 1500 })
           continue
         }
         // 오픈프로필 링크(방 구성원 pli → 1:1 링크, 입장 로그)

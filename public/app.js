@@ -263,6 +263,17 @@
     return normLink(text) || (/open\.kakao\.com\//i.test(String(text || '')) ? str(text) : '');
   }
   function shortLink(u) { return String(u || '').replace(/^https?:\/\//i, ''); }
+  /* 방 멤버 수(봇 포함, 콘솔 panel.js memText 와 같은 글): '778 / 1,500명' · '멤버 778명' · '최대 1,500명' · 모르면 ''.
+     수가 최대 인원보다 크면 최대 인원이 옛 값이라 수만 */
+  function memText(n, max) {
+    var c = Number(n) >= 1 ? Math.floor(Number(n)) : 0;
+    var m = Number(max) >= 1 ? Math.floor(Number(max)) : 0;
+    if (c && m && c <= m) return comma(c) + ' / ' + comma(m) + '명';
+    if (c) return '멤버 ' + comma(c) + '명';
+    if (m) return '최대 ' + comma(m) + '명';
+    return '';
+  }
+  function memSpan(t) { return t ? el('span', { cls: 'dim tnum', text: t }) : null; }
 
   function qs() { return new URLSearchParams(location.search); }
 
@@ -1119,6 +1130,9 @@
       } else {
         if (p.mine) r.pv.appendChild(el('span', { cls: 'tag line', text: '내 방 · ' + (str(p.mine.label) || '설치됨') }));
         r.pv.appendChild(el('b', { text: str(room.name) || '이름 확인 전' }));
+        // 들어가지 않은 방은 카카오가 최대 인원만 알려 준다. 이미 K bot 이 있는 내 방이면 지금 멤버 수도
+        var mt = memSpan(memText(room.member_count, room.max_users));
+        if (mt) r.pv.appendChild(mt);
         r.pv.appendChild(el('span', { cls: 'mono', text: shortLink(room.link_url) }));
         if (room.profile_only) r.pv.appendChild(el('p', { cls: 'hint', text: MSG_PROFILE_ONLY }));
       }
@@ -1169,6 +1183,8 @@
       r.codeFld.hidden = true;
       r.pv.appendChild(el('span', { cls: 'tag line', text: '내 방 · ' + (str(v.label) || '설치됨') }));
       r.pv.appendChild(el('b', { text: str(v.link_name) || '이름 확인 전' }));
+      var mt = memSpan(memText(v.member_count, v.member_limit));
+      if (mt) r.pv.appendChild(mt);
       r.pv.appendChild(el('span', { cls: 'mono', text: shortLink(v.link_url) }));
       ROOM_PRODUCTS.forEach(function (k) {
         var x = r.prod[k];
@@ -1888,7 +1904,7 @@
           el('dd', null, [
             el('div', { cls: 'room-st' }, [
               disp ? el('i', { cls: 'dot ' + dotCls(disp), 'aria-hidden': 'true' }) : null,
-              el('span', { text: rm.products.map(featName).join(' · ') + ' · ' + label })
+              el('span', { text: rm.products.map(featName).join(' · ') + ' · ' + label + (v && memText(v.member_count, v.member_limit) ? ' · ' + memText(v.member_count, v.member_limit) : '') })
             ]),
             el('div', { cls: 'mono dim tiny', text: shortLink(rm.link_url) }),
             showDetail ? el('div', { cls: 'dim tiny room-d', text: v.detail }) : null,
