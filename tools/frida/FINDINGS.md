@@ -150,3 +150,36 @@ SendMediaDescription/SendICEDescription 로 미디어 협상 → HandleCallEstab
 ### 다음(미완): 와이어 바이트 포맷
 id/name 은 내부 이벤트 번호다. 실제 TLS 로 나가는 프레임(헤더+바디 인코딩)은
 요청 객체의 serialize 경로를 더 따라가야 확정된다. (암호는 없음 — TLS 평문 구조)
+
+---
+
+## ★ VCS 와이어 = BSON (해독, 2026-10-17)
+`VBsonEnc`/`VBsonDec` (RTTI) + `"%s(method %s) bson error)"` + `"no method specified"` 확인.
+→ **VCS 신호 바디 = BSON 문서**, 각 메시지에 문자열 `method` 필드. LOCO 채팅과 같은 BSON 계열.
+   전송 = pjsip TLS 소켓(CallServer:5242) → 커스텀 암호 없음, 평문 BSON(TLS 안).
+
+### BSON append 헬퍼 (VBsonEnc 메서드)
+- `sub_0x365fdc` = append(key, int/enum) — 254 호출부
+- `sub_0x365f6c` = append(key, str/long) — 90
+- `sub_0x365f8c` / `sub_0x365f94` = append 변종 — 47/47
+- `sub_0x365efc` = method/sub-doc 설정 — 91 (값이 명령 이름: SendGetConfRequest, SendMediaDescription, SendICEDescription, UpdateMedia, AddMember, QueryCallable …)
+
+### BSON 키 사전 (append 호출부에서 수집, adrp-문자열만이라 일부 누락)
+식별/통화: method(명령명) · userId · destId · sdpUserId · appUserId · title · titleMode · MID · Desc(=SDP로 추정)
+          isMultiChat · callable · completed · control · remainTime · reason · resCode · status · count
+미디어:    mediaType · audioState · videoState · sdpType · sdpMLineIndex · MLineIdx · voiceFilter · audioFilter
+          videoFEmo · videoBEmo · videoAlt · defaultMicOnOff · defaultCamOnOff · shareMode · recordCount
+ICE/net:   ICEType · candidateType · NetWorkType · netType · mobileNetType · isRoaming · remote
+          cs4Port · cs6Port · iceInactiveTimeout · iceUnwritableTimeout · iceUnwritableMinChecks
+디바이스:  devType · devSubType · userType · serviceType · feature · voxVer · coreSystemInfo · appData · appDetailInfo
+핸즈업/권한: handsUp · (+ VRC* 메서드들)
+
+### 남은 것 (구현 전 확정 필요)
+1. 패킷 헤더 바이트(길이 프리픽스 형식) — LOCO 와 동일 추정(agent-messenger 코덱 재사용 가능성).
+2. 핵심 키 일부(chatId·callId·sdp 정확한 키명) — 레지스터 로드라 adrp 수집에 안 잡힘. MakeVoiceRoomCall 빌더 직접 디스어셈블로 확정.
+3. VCS 핸드셰이크/인증 — SetVConfig 의 두 토큰(64hex, 긴 토큰)이 TLS/VCS 세션을 어떻게 인증하는지.
+
+### 구현 경로 (B)
+Node: TLS 소켓(CallServer:5242, SNI/Cert 는 /c/voiceroom/user 응답) → LOCO식 [헤더][BSON] 프레이밍
+ → ConnectVcs/GetConf/MakeVoiceRoomCall(method+BSON, SDP 포함) → 응답 파싱 → werift 로 DTLS-SRTP 미디어.
+암호 벽 없음. 남은 건 헤더·키 확정 + 핸드셰이크 + 구현/테스트.
