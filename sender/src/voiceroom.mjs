@@ -595,3 +595,40 @@ export function shapeText(rows, o) {
   const v = shapeVerdict(rows, opt)
   return `보룸 모양찾기 (${opt.what || '-'})\n${line}\n→ ${v.verdict}`
 }
+
+// ── 켜기 시험 — method 를 CHGMETA 로(send test) ───────────────────────────
+// 지금껏 켜기는 전부 `SETMETA` 로 보냈다(type 3 은 -500 으로 서버에 닿았으니 바디 모양은 맞다).
+// 그런데 카카오가 보이스룸 메타를 **우리에게 알려 줄 때**는 `CHGMETA` 를 쓴다(botpool 수신부). 또 라이브러리에
+// META 명령이 따로 없어 `SETMETA` 는 이 저장소가 스스로 고른 이름일 뿐이다. 그래서 나가는 method 를
+// `CHGMETA` 로 바꾸는 것이 — 연구 문서 §2.4 가 가리키는 — 아직 한 번도 안 해 본 마지막 변수다.
+//   chg16·chg16+rev  CHGMETA 로 type 16 켜기(바디는 c+li, 내용은 켠 모양 / revision·extras 포함)
+//   set16            같은 내용을 SETMETA 로(대조군 — 전과 같이 -203 이어야 method 만 변수임이 드러난다)
+//   chg-ctrl         CHGMETA 로 보이스룸이 아닌 메타를 글자 그대로(이 method 로 쓰기 자체가 되는지)
+export function chgSendVerdict(rows) {
+  const list = (rows || []).filter((r) => r && r.tag)
+  const st = (tag) => { const h = list.find((r) => r.tag === tag); return h ? Number(h.st) : null }
+  const chg = [st('chg16'), st('chg16+rev')].filter((x) => x != null)
+  if (chg.some((x) => x === 0)) {
+    return { verdict: 'CHGMETA 로 보이스룸 메타가 써졌어요! 방에 보이스룸 배너가 보이는지 확인해 주세요. 보이면 이 길로 켤 수 있습니다.', next: 'voice_on' }
+  }
+  if (chg.some((x) => x === -500)) {
+    return { verdict: 'CHGMETA 로는 카카오가 바디를 읽었어요(-500 = 읽고 나서 못 함). SETMETA 와 달라요 — 막힌 건 그다음(진짜 통화 할당)으로 좁혀집니다.', next: 'reached' }
+  }
+  const ctrl = st('chg-ctrl')
+  if (ctrl === 0 && chg.length) {
+    return { verdict: `CHGMETA 로 다른 메타는 써지는데(chg-ctrl 0) 보이스룸만 거부돼요(${chg[0]}). 보이스룸 자리만 서버 전용입니다.`, next: 'voice_closed' }
+  }
+  if (chg.some((x) => x === STATUS_UNKNOWN)) {
+    return { verdict: '카카오가 CHGMETA 를 클라이언트 명령으로 받지 않아요(-300 = 모르는 명령어 · 서버→클라 전용). SETMETA 가 맞고, 켜기는 앱의 HTTP 개설 요청을 떠야 풀립니다.', next: 'server_only' }
+  }
+  return { verdict: 'method 를 CHGMETA 로 바꿔도 -203 이에요. 메서드는 변수가 아니었습니다 — 켜기는 LOCO 메타가 아니라 앱이 쓰는 HTTP 개설 요청을 떠야 풀립니다.', next: 'server_only' }
+}
+
+/** 방에 보낼 켜기 시험 답. o = {shape, keys} */
+export function chgSendText(rows, o) {
+  const opt = o || {}
+  const line = (rows || []).map((r) => `${r.tag} ${r.st}`).join(' · ')
+  const v = chgSendVerdict(rows)
+  const keys = Array.isArray(opt.keys) && opt.keys.length ? opt.keys.join(',') : '없음'
+  return `보룸 켜기시험 (method CHGMETA · 모양 ${opt.shape || 'c+li'} · 함께 온 칸 ${keys})\n${line}\n→ ${v.verdict}`
+}
