@@ -84,9 +84,12 @@ if (-not $running) {
 Write-Host ""
 Write-Host "==================================================================="
 Write-Host " 카톡을 띄워 캡처를 시작합니다. 창이 뜨면:"
-Write-Host "   오픈채팅방 > 보이스룸 켜기 한 번 > ★ 가 붙은 [REQ]/[RES] 블록 복사"
+Write-Host "   봇계정이 방장인 오픈채팅방 > 보이스룸 켜기 끝까지 1번"
+Write-Host "   뜨는 [REQ]/[RES] 전부(하나만 말고) 복사 — 특히 POST / voiceroom 들어간 줄"
 Write-Host "   멈추려면 이 창에서 Ctrl+C"
 Write-Host "==================================================================="
+$logFile = Join-Path $work 'capture-log.txt'
+Write-Host "로그가 이 파일에도 저장됩니다(이거 보내면 됨): $logFile"
 Write-Host ""
 
-& frida -U -f $pkg -l $script --no-pause
+& frida -U -f $pkg -l $script --no-pause 2>&1 | Tee-Object -FilePath $logFile
