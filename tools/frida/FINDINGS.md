@@ -118,3 +118,35 @@ VRCInviteAsModerator / VRCRevokeSpeakerPermission ... → 발언자·진행자 �
 ### 결론
 암호 벽은 사라졌지만, 와이어 포맷 복원은 스트립된 C++ 호출 체인을 정적으로 뜯는 큰 작업이다.
 pragmatic 대안(frida 로 앱의 MakeVoiceRoomCall 직접 구동)은 1계정·동시1방 한계로 바로 동작 가능.
+
+---
+
+## VCS 프로토콜 명령/이벤트 지도 (libVoxCore 정적분석, 2026-10-17)
+공용 베이스 생성자 `sub_0x336324(this, name, id, ...)` 의 55개 호출부에서 (id, name) 추출.
+요청(Job)·상태이벤트·응답처리기가 한 체계로 번호 매겨져 있어 프로토콜 전 흐름이 드러난다.
+
+접속/세션:   0x7fa ConnectVcs · 0x809 ConnectVss · 0x819 Disconnect · 0x830 Init
+             0x1199 OnConnected · 0x11aa OnReConnected
+통화 생성:   0x200 MakeVoiceRoomCall · 0x22f JoinVoiceRoomCall · 0x24b Answer
+             0x16d MakeGroupCall · 0xd1 VCall · 0x962 MakeVoiceRoomCall(상태층)
+협상/미디어: 0xb01 SendGetConfRequest · 0x2e2 SendMediaDescription · 0x341 SendICEDescription
+             0x29e UpdateMedia · 0x3c7 SendVideoACCInfo · 0x2be AddMember
+앱스트림:    0x594 CreateAppStream · 0x5b8 UpdateAppStream · 0x5e1 DeleteAppStream
+             0x5f9 UpdateAppMediaStream · 0x60e AddAppMediaControl
+응답/알림:   0xb8c ProcessInviteResponse · 0xc07 ProcessJoinResponse · 0xc4b ProcessJoinNotification
+             0xca1 ProcessEndNotification · 0xe05 ProcessHangupResponse · 0xe10 ProcessCallableResponse
+             0xe91 ProcessGetConfResponse · 0xea3 ProcessAddMemberResponse
+             0xec7 ProcessChangeMediaNotification · 0xee8 ProcessChangeMediaResponse
+             0xd0e ProcessUpdateResponse · 0xd27 ProcessProgressResponse
+상태머신:    0x11fc HandleCallInvited · 0x1211 HandleCallEstablished · 0x124d HandleCallEnded
+             0x1273 HandleCallEndedByRemote · 0x129f HandleCallValidated · 0x12b2 HandleCallUpdatedBeforeAnswer
+에러/네트워크: 0x770 RequestHangUpByError · 0x75c RequestAppStreamError · 0x64c OnNetworkEvent · 0x714 NetworkEventHandler
+
+해석: 클라가 ConnectVcs/Vss 로 TLS 접속 → SendGetConfRequest 로 방 설정 받고 →
+MakeVoiceRoomCall(SDP 포함) 전송 → ProcessInvite/JoinResponse 로 응답 →
+SendMediaDescription/SendICEDescription 로 미디어 협상 → HandleCallEstablished.
+종료는 HangUp → ProcessHangupResponse / ProcessEndNotification.
+
+### 다음(미완): 와이어 바이트 포맷
+id/name 은 내부 이벤트 번호다. 실제 TLS 로 나가는 프레임(헤더+바디 인코딩)은
+요청 객체의 serialize 경로를 더 따라가야 확정된다. (암호는 없음 — TLS 평문 구조)
