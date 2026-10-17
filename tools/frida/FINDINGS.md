@@ -202,3 +202,53 @@ TLS 접속 후 `[22B LOCO 헤더][빈 BSON]`(method="GetConf")를 1개 보냄 �
   → 프레임은 `[u32 len]+BSON` 또는 raw BSON 쪽이 유력. (미확정)
 - reset 만으로는 "프레임 오류" vs "로그인 선행 필요" 를 구분 불가. 추측 전송 반복은 계정 위험.
 - 결론: 프레임 포맷 + 로그인 패킷은 **정적 RE로 확정**해야 안전(가상호출 많아 느림). 또는 소수의 신중한 탐색.
+
+---
+
+## ★★ VCS 프로토콜 — Ghidra 디컴파일로 확정 (2026-10-17)
+libVoxCore 를 Ghidra 로 디컴파일해 와이어 모델을 복원했다.
+
+### 프레임 = [헤더(숫자 명령코드)] + [BSON 바디]
+LOCO 11바이트 method **문자열이 아니라 숫자 명령코드**가 헤더에 들어간다.
+→ 그래서 앞서 LOCO-22B(문자열 method)·raw-BSON 둘 다 서버가 reset 한 것.
+
+### 패킷 객체 (SendRequest FUN_0x439110 → 생성자 FUN_0x4603b8, 0x40바이트)
+```
++0x00  vtable
++0x08  packetId   u32   (rand()%0x7ffffffe, 요청마다)
++0x0c  statusCode u16   (요청=0)
++0x0e  command    u16   (숫자 명령코드, 아래 맵)
++0x18  bson ptr / +0x20 bson len   (BSON 바디 복사본)
++0x38  type       u8    (=1)
+```
+전송: `SendRequest(this, code, bsonEnc)` → 패킷 생성 → `transport(this+0xcf0)->vtable[0x30](pkt)` 가 TLS 소켓으로 직렬화.
+(직렬화 함수 자체 = transport vtable+0x30, 간접호출 뒤라 바이트 순서는 미확정 — 유일한 남은 빈칸.)
+
+### BSON 바디 = 타입별 key/value (method 필드 없음)
+BSON 인코더: init FUN_0x465efc(buf,0x4000) · append long FUN_0x46601c(k,v) · append int FUN_0x465fdc(k,v) · buf ptr/len FUN_0x465f94/f8c.
+예(UpdateMedia, code 0x2731): `{userId:long, devType:int, mediaType:int, callId:long, videoState:int}` — method 없음.
+
+### 와이어 명령코드 맵 (SendRequest 호출부 45개에서 추출)
+```
+0x272c MakeVoiceRoomCall   ← 보룸 개설 (핵심)
+0x2722 MakeGroupCall       0x272a AddMember
+0x2730 SendMediaDescription  0x2724/0x272d SendICEDescription  0x2731 UpdateMedia
+0x2743 CreateAppStream 0x2745 AddAppMediaControl 0x2747 DeleteAppStream 0x2749/0x274b UpdateApp*Stream
+0x2b04~0x2b29  VRC* (발언자/진행자 제어군)
+0x7530 QueryCallable       0x7531 SendGetConfRequest
+```
+(문서의 "0x7530 out 304B" 캡처가 QueryCallable 과 일치 — 코드 체계 검증됨.)
+
+### 접속 흐름 (확정)
+```
+TLS connect(CallServer:5242, 표준 cert, mTLS 아님, 커스텀 암호 없음)
+  → QueryCallable(0x7530) → SendGetConfRequest(0x7531)  [방 설정 수신]
+  → MakeVoiceRoomCall(0x272c, BSON: userId/chatId/title/SDP/cs.. )
+  → ProcessInvite/JoinResponse → SendMediaDescription(0x2730)/SendICEDescription(0x2724)
+  → HandleCallEstablished → (미디어: DTLS-SRTP/libwebrtc) → HangUp
+```
+
+### 남은 단 하나: 와이어 헤더 바이트 순서
+packetId/status/code/type/bsonLen 가 와이어에 어떤 순서·엔디안으로 나가는지(transport 직렬화). LE 추정:
+`[packetId u32][status u16][code u16][type u8][bsonLen u32][bson]`(13B 헤더) — 서버 응답으로 확정 필요.
+나머지(명령코드·BSON 스키마·흐름·접속)는 전부 확정.
