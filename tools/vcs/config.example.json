@@ -1,0 +1,43 @@
+{
+  "_note": "frida 캡처값으로 채운 뒤 config.json 으로 복사해 사용. 큰 수는 {\"$long\":\"...\"}. 스키마는 추정이라 README의 TODO 참고.",
+  "logHex": true,
+  "replyMs": 8000,
+  "idleMs": 60000,
+  "afterConnectWaitMs": 2000,
+  "holdMs": 20000,
+  "server": {
+    "_comment": "CallServer = MakeVoiceRoomCall 1번째 인자(csIP). QOS의 ConnectedIp 가 실제 접속 대상. sni/cert 는 /c/voiceroom/user 응답에서.",
+    "host": "203.133.189.66",
+    "port": 5242,
+    "sni": "TODO-from-/c/voiceroom/user-response",
+    "caCertPath": null,
+    "clientCertPath": null,
+    "clientKeyPath": null
+  },
+  "steps": [
+    {
+      "_comment": "먼저 가벼운 요청으로 헤더/연결이 맞는지 본다. 서버가 -xxx 로 거부해도 응답 바이트가 헤더 포맷을 알려준다.",
+      "method": "GetConf",
+      "body": { "method": "GetConf" }
+    },
+    {
+      "_comment": "핵심: 보룸 개설. 키 이름은 추정(README TODO). userId/chatId 는 Long. SDP 는 werift 등으로 만든 offer 문자열.",
+      "method": "MakeVoiceRoomCall",
+      "stopOnError": false,
+      "body": {
+        "method": "MakeVoiceRoomCall",
+        "userId": { "$long": "378667672" },
+        "chatId": { "$long": "18496926874912371" },
+        "title": "보이스룸",
+        "Desc": "<SDP offer 문자열 — werift 로 생성>",
+        "sdpType": 0,
+        "cs4Port": 5242,
+        "cs6Port": 5242,
+        "mediaType": 1,
+        "devType": 1,
+        "voxVer": 6
+      }
+    }
+  ],
+  "ping": { "method": "PING", "everyMs": 30000 }
+}

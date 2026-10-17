@@ -1,0 +1,13 @@
+{
+  "name": "vcs-probe",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Experimental standalone VCS (Kakao voice-room signaling) client — reverse-engineered from libVoxCore.",
+  "scripts": {
+    "start": "node run.mjs config.json"
+  },
+  "dependencies": {
+    "bson": "^6.10.3"
+  }
+}
