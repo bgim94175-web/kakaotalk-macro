@@ -1,37 +1,40 @@
-// VCS 패킷 코덱 — libVoxCore Ghidra 디컴파일로 확정한 모델(tools/frida/FINDINGS.md).
-// 프레임 = [헤더(숫자 명령코드)] + [BSON 바디].  ★ LOCO 처럼 method 문자열이 아니라 숫자 code 다.
+// VCS 패킷 코덱 — libVoxCore Ghidra+capstone 정적분석 모델(tools/frida/FINDINGS.md, STATIC RE UPDATE 2).
 //
-// 디컴파일로 확정한 패킷 필드(생성자 FUN_0x4603b8):
-//   packetId  u32  (요청마다 rand()%0x7ffffffe)
-//   status    u16  (요청=0)
-//   code      u16  (숫자 명령코드: MakeVoiceRoomCall=0x272c, QueryCallable=0x7530, GetConf=0x7531 …)
-//   type      u8   (=1)
-//   bson           (표준 BSON, method 필드 없음)
+// ★★ 중요 정정: 와이어는 **빅엔디안(네트워크 바이트순서)** 이고, 바디는 **표준 BSON 이 아니라 VoxCore 자체
+//    빅엔디안 TLV** 다. (값 역직렬화가 전부 ntohs/ntohl: FUN_4726b0=ntohs, FUN_4726c8=ntohl 로 확정.)
+//    따라서 아래는 "LE/BSON" 이 아니라 BE 로 바꾼 **최선의 가설**이며, 실측 전까지 UNVALIDATED 다.
 //
-// ★ 유일한 미확정: 위 필드들이 와이어에 나가는 정확한 바이트 순서·엔디안(transport 직렬화 = 간접호출이라
-//   정적으로 못 떴다). 아래 HEADER 는 가장 유력한 추정(LE, 13바이트). 실서버 응답으로 확정하면
-//   writeHeader/readHeader 두 곳만 고치면 된다.
-import { serialize, deserialize } from 'bson'
+// 디컴파일로 확정한 사실:
+//   - 송신 패킷 객체(FUN_0x4603b8, 0x40B): +8 packetId u32 · +0xc status u16 · +0xe code u16 ·
+//       +0x18/+0x20 bodyPtr/Len · +0x38 type u8.  (패킷 vtable=소멸자뿐, 직렬화는 transport 간접호출 → 정적 복원 불가)
+//   - 수신 메시지(FUN_0x479f28): 12B BE 헤더 = [msgId u16][status/flags u16][cnt1..cnt4 u16] + 바디.
+//       응답은 code 가 아니라 **msgId** 로 요청과 매칭(FUN_0x47935c). status = flags & 0xf.
+//   - 바디 = VoxCore BE-TLV(FINDINGS §C). ← 이 코덱은 아직 Node 로 미구현(캡처로 확정 후 작성).
+//
+// ☞ 확정 방법: arm64 후킹 환경에서 tools/frida/capture-vcs-arm64.js 로 SSL_write/SSL_read 평문 1회 캡처.
+//    그 hex 가 송신 프레임 실제 바이트 순서 + 로그인 패킷을 한 번에 닫는다. (BlueStacks 는 Houdini 로 불가.)
+import { serialize, deserialize } from 'bson' // ⚠ 임시: 바디는 실제론 VoxCore BE-TLV. 캡처 후 교체 예정.
 
-// ── 와이어 헤더(추정) ──────────────────────────────────────────────────────
-// [packetId u32 LE][status u16 LE][code u16 LE][type u8][bsonLen u32 LE]  = 13 bytes
+// ── 와이어 헤더(BE 가설, UNVALIDATED) ───────────────────────────────────────
+// [packetId u32 BE][status u16 BE][code u16 BE][type u8][bodyLen u32 BE]  = 13 bytes
+// (수신 모델은 12B 6×u16 형태라 이 송신 가설과 다를 수 있음 — 캡처로 확정.)
 export const HEADER_LEN = 13
-export function writeHeader(h, bsonLen) {
+export function writeHeader(h, bodyLen) {
   const b = Buffer.alloc(HEADER_LEN)
-  b.writeUInt32LE((h.packetId >>> 0), 0)
-  b.writeUInt16LE((h.status || 0) & 0xffff, 4)
-  b.writeUInt16LE((h.code || 0) & 0xffff, 6)
+  b.writeUInt32BE((h.packetId >>> 0), 0)
+  b.writeUInt16BE((h.status || 0) & 0xffff, 4)
+  b.writeUInt16BE((h.code || 0) & 0xffff, 6)
   b.writeUInt8((h.type == null ? 1 : h.type) & 0xff, 8)
-  b.writeUInt32LE(bsonLen >>> 0, 9)
+  b.writeUInt32BE(bodyLen >>> 0, 9)
   return b
 }
 export function readHeader(buf) {
   return {
-    packetId: buf.readUInt32LE(0),
-    status: buf.readUInt16LE(4),
-    code: buf.readUInt16LE(6),
+    packetId: buf.readUInt32BE(0),
+    status: buf.readUInt16BE(4),
+    code: buf.readUInt16BE(6),
     type: buf.readUInt8(8),
-    bsonLen: buf.readUInt32LE(9),
+    bsonLen: buf.readUInt32BE(9),
   }
 }
 

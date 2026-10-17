@@ -252,3 +252,61 @@ TLS connect(CallServer:5242, 표준 cert, mTLS 아님, 커스텀 암호 없음)
 packetId/status/code/type/bsonLen 가 와이어에 어떤 순서·엔디안으로 나가는지(transport 직렬화). LE 추정:
 `[packetId u32][status u16][code u16][type u8][bsonLen u32][bson]`(13B 헤더) — 서버 응답으로 확정 필요.
 나머지(명령코드·BSON 스키마·흐름·접속)는 전부 확정.
+
+---
+
+## STATIC RE UPDATE 2 (Ghidra+capstone, 이번 세션) — 와이어는 BIG-ENDIAN, BSON 아님
+
+정적분석으로 와이어 포맷을 더 떴다. **두 가지가 바뀐다:**
+
+### A. 와이어는 네트워크 바이트순서(빅엔디안). BSON(LE) 아님.
+값 역직렬화가 전부 ntohs/ntohl 로 읽는다 — 디컴파일로 확정:
+- `FUN_4726b0` = ntohs : `rev w8,w0; lsr w0,w8,#0x10; ret`
+- `FUN_4726c8` = ntohl : `rev w0,w0; ret`
+→ loco.mjs 의 "LE BSON 바디" 가정은 **틀렸다**. 바디는 VoxCore 자체 빅엔디안 TLV(아래)다.
+
+### B. 수신 메시지 구조 (FUN_0x479f28 파서 + FUN_0x47935c 디스패치)
+수신 버퍼를 파싱하는 함수 `FUN_00479f28` (호출부 유일: 수신·디스패치 `FUN_0047935c`):
+```
+최소 12바이트 헤더, 전부 BE u16:
+  +0  u16 msgId      (요청↔응답 상관 id. 디스패처가 보류요청표와 매칭)
+  +2  u16 status/flags(하위니블 &0xf = 상태/에러. err = 0x4e232 + (flags&0xf))
+  +4  u16 cnt1       (이름부 노드 수; 각 0x18B = {len-prefixed name, u16, u16})
+  +6  u16 cnt2       (variant 노드 수; 각 0x40B, FUN_0x47a254 로 파싱)
+  +8  u16 cnt3       (variant 노드 수; 0x40B)
+  +10 u16 cnt4       (variant 노드 수; 0x40B)
+  +12 body: cnt1×(이름부) 다음 cnt2/3/4×(variant)
+```
+디스패처 `FUN_0047935c`: msgId 를 보류요청표(ctx+0x1aa0, stride 0x58, id@+0x40)와 맞춰
+그 요청의 완료콜백 `(*(ctx_req+0x130))(arg, err, parsedMsg)` 을 호출. ← 응답 매칭은 code 가 아니라 **msgId**.
+
+### C. variant/값 코덱 (FUN_0x47a254, 노드 0x40B, 전부 BE)
+```
+  wire[0:2] u16 type  (1,2,5=스칼라 / 0xc=중첩메시지 / 0x1c=u64 2개 / 0x21=u16 3개+중첩 / 그외=len-prefixed blob)
+  wire[2:4] u16 flags (==1 특수)
+  wire[4:8] u32 id/key
+  wire[8:10]u16 len   (payload 길이, memcpy·bound 체크)
+  wire[10:] payload (type 별)
+```
+
+### D. 송신 패킷 객체 (FUN_0x4603b8, 0x40B) — 레이아웃만 확정, 직렬화는 못 뜸
+```
+  +0x00 vtable(0x770f78)  +0x08 packetId u32  +0x0c status u16  +0x0e code u16
+  +0x18/+0x20 bson(=VoxCore TLV) ptr/len      +0x38 type u8
+```
+패킷 vtable 0x770f78 = **소멸자 2개뿐**(serialize 메서드 없음). 직렬화는 transport(session+0xcf0)의
+`vtable[0x30]` 가 수행 → **간접호출 + session+0xcf0 에 대한 정적 store 가 없음**(런타임 설치) →
+**송신 프레임의 정확한 바이트 순서는 정적으로 복원 불가**. (수신 B/C 로 강한 추정은 가능: 전부 BE.)
+
+### E. ★ 캡처 경로 확정 — OpenSSL 이 export 돼 있다
+libVoxCore 가 OpenSSL 전체를 export(`SSL_write`/`SSL_read`/`SSL_get_fd`/`SSL_do_handshake` …, dynsym 10725개).
+→ **arm64 에서 frida 후킹 가능한 환경이면** `SSL_write`/`SSL_read` 를 이름으로 후킹해 VCS 평문을
+   한 방에 캡처할 수 있다(로그인 + MakeVoiceRoomCall 포함). 스크립트: `capture-vcs-arm64.js`.
+   (LOCO 5223 은 앱 자체 암호라 libVoxCore SSL 에 안 잡힘 → 여기 잡히는 건 전부 VCS 음성 5242.)
+
+### 벽 (정직하게)
+- BlueStacks = x86 + Houdini 로 arm64 번역 → arm64 libVoxCore(및 그 SSL) 를 x86 frida 로 후킹 불가 →
+  **이 머신에선 평문 캡처가 구조적으로 막힘**(connect 리다이렉트도 커널 NAT 없음/IP 직결로 hosts·DNS 무력).
+- 남은 미확정 2개(① 송신 프레임 실제 바이트 ② 로그인/핸드셰이크 패킷)는 ** (a) arm64 후킹 환경 1회 캡처
+  (capture-vcs-arm64.js, ~5분) 또는 (b) 실서버 probe(probe-header.mjs, 단 동적 세션토큰 필요)** 로만 닫힌다.
+  동적 세션토큰(SetVConfig 64hex·긴토큰)은 어차피 `/c/voiceroom/user` HTTP(이미 Java 레벨로 캡처됨)로 매번 받아야 한다.
