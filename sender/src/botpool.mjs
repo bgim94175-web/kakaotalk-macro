@@ -34,6 +34,11 @@ const DAY = 24 * HOUR
 
 const RATE_STATUS = new Set([-312, -805, -819])
 const GONE_STATUS = new Set([-324])
+// 보내기(WRITE, 본문 status 까지 본 답)가 이 답이면 계정이 오픈채팅 이용 제한에 걸린 것으로 본다(오래된 계정 실측: 보내기 -324).
+// 그 봇에는 링크 조회를 나중에 맡기고, 그 봇의 JOININFO -324 를 "링크 없음"으로 믿지 않는다. 시간으로 내리지 않고, 본문 status 까지 본
+// 보내기가 다시 성공해야 내린다(재시작하면 0 — 그래서 -324 는 물어볼 봇이 더 있으면 늘 한 봇에 더 확인한다)
+const LIMIT_STATUS = new Set([-324, -997])
+const RESOLVE_TRIES = 3               // 링크 조회(/v1/bot/resolve) 한 번에 JOININFO 를 보내 보는 봇 수(확정되지 않은 답·-324 확인이면 다음 봇)
 const DEAD_CODES = new Set(['invalid_access_token', 'login_rejected', 'kicked', 'reauth'])
 // 방 멤버 명부: 카드 채우기는 방마다 60초에 20명까지, 명부에 없는 사람이 나가면 방마다 10초에 한 번 2초까지만 읽어 본다
 const MEMBER_FILL_MAX = 20
@@ -147,6 +152,8 @@ export function poolOptions(over) {
     joinPerDay: envNum('BOT_JOIN_PER_DAY', 80),
     resolvePerMin: envNum('BOT_RESOLVE_PER_MIN', 10),
     resolvePerDay: envNum('BOT_RESOLVE_PER_DAY', 300),
+    // 링크 조회 한 번(여러 봇에 물어보는 것까지)의 최대 시간. 부모(installs.resolveLink)가 20초에 끊으므로 그보다 짧게
+    resolveTotalMs: envNum('BOT_RESOLVE_TOTAL_MS', 15000),
     // 속도 제한(-312·-805·-819) 뒤 다시 시도까지 [1번째, 2번째, 3번째 이후](5.3 6)
     rateWaits: envList('BOT_RATE_WAIT_MS', [10 * MIN, 30 * MIN, 2 * HOUR]),
     // 서버 IP 차단(-444) 뒤 모든 입장·조회 정지 [연속 1, 2, 3번 이상]
@@ -294,6 +301,44 @@ function log(id, msg) {
 
 function errText(e) {
   return e && e.message ? e.message : String(e)
+}
+
+// 로그에 남길 오픈채팅 링크 코드(open.kakao.com/o/<코드> 의 코드만)
+function linkCode(url) {
+  const m = /open\.kakao\.com\/(o|me)\/([A-Za-z0-9_-]{1,40})/.exec(String(url || ''))
+  return m ? m[1] + '/' + m[2] : '?'
+}
+
+// 라이브러리 보내기 결과의 log_id 가 진짜 글 번호인가(0 이 아닌 정수). 본문에 logId 가 없으면(본문 status 로 거절) 라이브러리는 '0' 을 준다
+function hasLogId(v) {
+  const s = typeof v === 'bigint' || typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : ''
+  return /^[1-9][0-9]*$/.test(s)
+}
+
+// /v1/bot/resolve: 성공한 JOININFO 답 → 조회 결과({ok:true,…} | not_group). 링크(ol·li)가 없는 답이면 null
+function resolvedLink(r, url) {
+  const ol = r.body && r.body.ol
+  if (!ol || typeof ol !== 'object') return null
+  // 2(그룹방)가 아닌 종류는 로그에 남긴다(커뮤니티 방 등이 실제로 어떤 값을 보내는지 보려고)
+  if (Number(ol.lt) !== 2) {
+    log('pool', `resolve JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
+      `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv}): ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
+  }
+  if (!R.groupLinkType(ol.lt)) return { ok: false, error: 'not_group' }
+  const li = R.idText(ol.li)
+  if (!li) return null
+  const pv = Number(ol.pv) || 0
+  const maxUsers = ol.ml != null ? Number(ol.ml) : (ol.mu != null ? Number(ol.mu) : null)
+  return {
+    ok: true,
+    link_id: li,
+    name: typeof ol.ln === 'string' ? ol.ln : '',
+    url: typeof ol.lu === 'string' && ol.lu ? ol.lu : String(url),
+    type: Number(ol.lt),
+    needs_passcode: (pv & 64) !== 0,
+    profile_only: (pv & 32) === 0,
+    max_users: Number.isFinite(maxUsers) ? maxUsers : null,
+  }
 }
 
 function L(v) {
@@ -558,48 +603,105 @@ export class BotPool {
   }
 
   // ── /v1/bot/resolve ─────────────────────────────────────────────────────
-  // 조회는 맡은 방이 가장 적은 연결된 봇이 한다. 예산이 없으면 budget, 봇이 없으면 no_bot.
+  // 조회는 연결된 봇 가운데 괜찮은 봇(unwell 이 아닌 봇)을 먼저 — 잠시 미룬 봇(속도 제한·방금 확정되지 않은 답) 다음, 이용 제한으로
+  // 보이는 봇은 맨 뒤 — 그 안에서는 맡은 방이 적은 봇이 한다.
+  // 확정되지 않은 답(속도 제한·카카오 오류·응답 없음·세션 없음)이면 다음 봇에 물어본다(RESOLVE_TRIES 개까지, resolveTotalMs 안에서).
+  // -324(링크 없음): 이용 제한으로 보이는 봇('restricted')의 -324 는 믿지 않는다 — 그런 계정은 있는 방에도 -324 를 준다.
+  // 다른 봇의 -324 도 이용 제한이 아닌 봇이 더 있으면 그 봇에 한 번 더 확인한다(재시작 뒤에는 어느 봇이 제한된 계정인지 모른다). 두 봇이
+  // -324 이거나, 확인할 봇이 없거나, 확인하던 봇이 확정된 답을 못 주면 not_found. 다른 봇이 그 링크를 읽으면 -324 를 준 봇을 이용 제한으로 적는다.
+  // 예산이 없으면 budget, 봇이 없으면 no_bot. 실패한 시도는 봇마다 한 줄 남긴다(링크는 코드만).
   async resolve(url) {
     const now = this.now()
+    const code = linkCode(url)
     const live = [...this.bots.values()].filter((s) => s.live())
-    if (!live.length) return { ok: false, error: 'no_bot' }
-    if (this.joinPausedUntil > now) return { ok: false, error: 'budget' }
-    const cands = live.filter((s) => s.resolveM.ok(now) && s.resolveD.ok(now)).sort((a, b) => a.load() - b.load())
-    if (!cands.length) return { ok: false, error: 'budget' }
-    const s = cands[0]
-    s.resolveM.add(now)
-    s.resolveD.add(now)
-    const r = await s.raw('JOININFO', { lu: String(url), ref: 'EW' })
-    const st = R.locoStatus(r)
-    if (r && r.noSession) return { ok: false, error: 'no_bot' }
-    if (GONE_STATUS.has(st)) return { ok: false, error: 'not_found', status: st }
-    if (st === -444) {
-      this.ipBlocked(now)
+    if (!live.length) {
+      log('pool', `resolve ${code}: no connected bot`)
+      return { ok: false, error: 'no_bot' }
+    }
+    if (this.joinPausedUntil > now) {
+      log('pool', `resolve ${code}: paused until ${new Date(this.joinPausedUntil).toISOString()} (server IP blocked)`)
       return { ok: false, error: 'budget' }
     }
-    if (st !== 0) return { ok: false, error: 'kakao_error', status: st }
-    const ol = r.body && r.body.ol
-    if (!ol || typeof ol !== 'object') return { ok: false, error: 'kakao_error', status: 0 }
-    // 2(그룹방)가 아닌 종류는 로그에 남긴다(커뮤니티 방 등이 실제로 어떤 값을 보내는지 보려고)
-    if (Number(ol.lt) !== 2) {
-      log('pool', `resolve JOININFO link type ${ol.lt} ${R.groupLinkType(ol.lt) ? 'treated as a group room' : '-> not_group'} ` +
-        `(keys ${Object.keys(ol).join(',')}, pv ${ol.pv}): ${typeof ol.ln === 'string' ? ol.ln.slice(0, 40) : ''}`)
+    const can = (s, t) => s.live() && s.resolveM.ok(t) && s.resolveD.ok(t)
+    const rank = (why) => (why === 'restricted' ? 2 : why ? 1 : 0)
+    const cands = live.filter((s) => can(s, now))
+      .map((s) => ({ s, bad: rank(s.unwell(now)), load: s.load() }))
+      .sort((a, b) => a.bad - b.bad || a.load - b.load)
+      .map((x) => x.s)
+      .slice(0, RESOLVE_TRIES)
+    if (!cands.length) {
+      log('pool', `resolve ${code}: no bot has resolve budget left`)
+      return { ok: false, error: 'budget' }
     }
-    if (!R.groupLinkType(ol.lt)) return { ok: false, error: 'not_group' }
-    const li = R.idText(ol.li)
-    if (!li) return { ok: false, error: 'kakao_error', status: 0 }
-    const pv = Number(ol.pv) || 0
-    const maxUsers = ol.ml != null ? Number(ol.ml) : (ol.mu != null ? Number(ol.mu) : null)
-    return {
-      ok: true,
-      link_id: li,
-      name: typeof ol.ln === 'string' ? ol.ln : '',
-      url: typeof ol.lu === 'string' && ol.lu ? ol.lu : String(url),
-      type: Number(ol.lt),
-      needs_passcode: (pv & 64) !== 0,
-      profile_only: (pv & 32) === 0,
-      max_users: Number.isFinite(maxUsers) ? maxUsers : null,
+    // 뒤에 물어볼 봇이 있으면 한 봇은 전체 시간의 절반까지만 기다린다(답이 없는 봇 하나가 다음 봇의 시간을 다 쓰지 않게).
+    // 더 물어볼 봇이 없으면 남은 시간을 다 기다린다
+    const total = this.opts.resolveTotalMs || 0
+    const until = total ? now + total : Infinity
+    const saidGone = []  // 이 링크에 -324 를 준 봇(다른 봇이 읽으면 이용 제한으로 적는다)
+    let gone = null      // 믿은 -324(한 봇에 더 확인하는 중)
+    let goneBy = ''
+    let out = null       // 확정하지 못한 마지막 결과
+    for (let i = 0; i < cands.length; i++) {
+      const s = cands[i]
+      const t = this.now()
+      if ((out || gone) && until - t < Math.min(1000, total / 4)) break   // 남은 시간이 너무 짧으면 더 묻지 않는다
+      if (!can(s, t) || this.joinPausedUntil > t) continue
+      const why = s.unwell(t)
+      if (gone && why === 'restricted') continue   // 이용 제한으로 보이는 봇의 -324 는 확인이 되지 않는다
+      s.resolveM.add(t)
+      s.resolveD.add(t)
+      const last = !cands.slice(i + 1).some((x) => can(x, t) && !(gone && x.unwell(t) === 'restricted'))
+      const wait = total ? (last ? until - t : Math.min(until - t, total / 2)) : 0
+      const r = await s.raw('JOININFO', { lu: String(url), ref: 'EW' }, wait)
+      const st = R.locoStatus(r)
+      if (r && r.noSession) {
+        s.resolveFailed(code, st, r, why)
+        if (!out) out = { ok: false, error: 'no_bot' }
+        continue
+      }
+      if (st === -444) {
+        s.resolveFailed(code, st, r, why)
+        this.ipBlocked(t)
+        return { ok: false, error: 'budget' }
+      }
+      if (GONE_STATUS.has(st)) {
+        saidGone.push(s)
+        if (why === 'restricted') {
+          s.resolveFailed(code, st, r, why)
+          out = { ok: false, error: 'kakao_error', status: st }
+          continue
+        }
+        s.resolveAnswered(false)
+        if (gone) return gone   // 두 봇이 -324
+        gone = { ok: false, error: 'not_found', status: st }
+        goneBy = s.id
+        const t2 = this.now()
+        if (!cands.slice(i + 1).some((x) => can(x, t2) && x.unwell(t2) !== 'restricted')) return gone   // 확인할 봇이 없다
+        log(s.id, `resolve ${code}: JOININFO ${st} (no such link), asking another bot to confirm`)
+        continue
+      }
+      if (st !== 0) {
+        s.resolveFailed(code, st, r, why)
+        out = { ok: false, error: 'kakao_error', status: st }
+        continue
+      }
+      const got = resolvedLink(r, url)
+      if (!got) {
+        s.resolveFailed(code, st, r, why, 'answer without a link')
+        out = { ok: false, error: 'kakao_error', status: 0 }
+        continue
+      }
+      s.resolveAnswered(true)
+      // 이 링크를 -324(없음)라고 한 봇은 있는 방을 못 보는 계정이다
+      for (const d of saidGone) d.markDoubted(-324, 'JOININFO for a link another bot could read')
+      return got
     }
+    if (gone) {
+      log('pool', `resolve ${code}: -324 from ${goneBy} not confirmed by a second bot, reporting not_found`)
+      return gone
+    }
+    if (!out) log('pool', `resolve ${code}: no bot could take it`)
+    return out || { ok: false, error: 'budget' }
   }
 
   // ── /v1/bot/status ──────────────────────────────────────────────────────
@@ -849,6 +951,10 @@ export class BotSlot {
     this.emptyLinks = new Map()   // 옾링이 없다고 답한 pli → 그때(EMPTY_LINK_MS 동안 다시 묻지 않는다. 5000개 캐시와 따로)
     this.badLinks = new Map()     // 혼자서도 읽기가 실패한 pli → 그때(BAD_LINK_MS 동안 묶음 읽기에서 뺀다. 안내 전 읽기는 한다)
     this.readPauseUntil = 0       // GETMEM·MEMBER·INFOLINK 가 속도 제한(-312·-805·-819)에 걸리면 이때까지 명부를 읽지 않는다
+    this.limitedAt = 0            // 보내기가 LIMIT_STATUS 로 거절된 때(오픈채팅 이용 제한으로 보임). 본문 status 까지 본 보내기가 성공하면 0
+    this.doubtedAt = 0            // JOININFO 가 다른 봇이 읽은 링크에 -324, 또는 -997 을 준 때(조회 쪽 이용 제한). 이 봇의 JOININFO 가 링크를 읽으면 0
+    this.resolvePauseUntil = 0    // JOININFO 가 속도 제한(-312·-805·-819)이면 이때까지 조회를 다른 봇에 먼저 맡긴다(명부 읽기는 쉬지 않는다)
+    this.resolveBadUntil = 0      // 조회(JOININFO)가 확정되지 않은 답(카카오 오류·응답 없음)으로 끝나면 이때까지 다른 봇에 먼저 맡긴다
     this.lastProfileLi = null     // 지난번에 쓰던 li(고른 것이 없을 때 같은 것을 계속 쓴다)
     this.openProfile = null       // 지금 입장에 쓰는 {li,name,url}
     this.profileState = 'unknown' // ok | none | gone | unknown
@@ -1264,10 +1370,21 @@ export class BotSlot {
     this.resolveM.add(now)
     this.resolveD.add(now)
     await this.loadProfileCache()
+    const why = this.unwell(now)
     const r = await this.raw('JOININFO', { lu: u, ref: 'EW' })
     const st = R.locoStatus(r)
-    if (st !== 0) return { ok: false, error: GONE_STATUS.has(st) ? 'not_found' : 'kakao_error', status: st }
+    // -324(없음)는 이용 제한으로 보이는 봇이 아니면 믿는다 — 이 링크는 이 계정 것이라 다른 봇에 물어볼 수 없다(resolve 와 같은 판정).
+    // 이용 제한으로 보이는 봇의 -324 는 kakao_error(나중에 다시)
+    if (GONE_STATUS.has(st) && why !== 'restricted') {
+      this.resolveAnswered(false)
+      return { ok: false, error: 'not_found', status: st }
+    }
+    if (st !== 0) {
+      this.resolveFailed(linkCode(u), st, r, why)
+      return { ok: false, error: 'kakao_error', status: st }
+    }
     const ol = r.body && r.body.ol
+    if (ol && typeof ol === 'object') this.resolveAnswered(true)
     if (!ol || typeof ol !== 'object' || Number(ol.lt) !== 1) return { ok: false, error: 'not_profile' }
     const olu = ol.olu && typeof ol.olu === 'object' ? ol.olu : {}
     if (R.idText(olu.userId) !== this.userId) return { ok: false, error: 'not_mine' }
@@ -1288,9 +1405,67 @@ export class BotSlot {
     }
   }
 
+  // ── 링크 조회를 맡길 봇(/v1/bot/resolve) ────────────────────────────────
+  // 조회를 나중에 맡길 까닭: 'restricted'(오픈채팅 이용 제한으로 보임 — 보내기 -324·-997, 다른 봇이 읽은 링크에 JOININFO -324,
+  // JOININFO -997. 이 봇의 JOININFO -324 는 링크 없음으로 믿지 않는다) · 'rate_limited'(속도 제한: 조회나 명부 읽기) ·
+  // 'resolve_failed'(방금 조회가 확정되지 않은 답으로 끝남). 뒤의 둘은 묻는 차례만 바꾼다. '' = 괜찮음.
+  unwell(now) {
+    if (this.limitedAt || this.doubtedAt) return 'restricted'
+    if (this.resolvePauseUntil > now || this.readPauseUntil > now) return 'rate_limited'
+    if (this.resolveBadUntil > now) return 'resolve_failed'
+    return ''
+  }
+
+  // 보내기가 오픈채팅 이용 제한으로 보이는 답을 받았다. 표시가 없다가 생길 때만 남긴다(제한된 계정은 보낼 때마다 거절된다)
+  markLimited(status) {
+    if (!this.limitedAt) log(this.id, `send refused with status ${status}: looks like an open-chat restriction, link checks go to other bots first`)
+    this.limitedAt = this.now()
+  }
+
+  // 조회(JOININFO)가 오픈채팅 이용 제한으로 보이는 답을 받았다(다른 봇이 읽은 링크에 -324, -997). 보내기 표시와 따로 둔다 —
+  // 이미 들어간 방에는 보낼 수 있어도 링크 조회는 막힌 계정이 있다. 이 봇의 JOININFO 가 링크를 읽어야 내린다
+  markDoubted(status, what) {
+    if (!this.doubtedAt) log(this.id, `${what} refused with status ${status}: looks like an open-chat restriction, link checks go to other bots first`)
+    this.doubtedAt = this.now()
+  }
+
+  // 보내기 결과(deliver: 본문 status 까지 본 WRITE 답 · 사진은 실패 status 만). LIMIT_STATUS 면 표시, 성공(0)이면 보내기 표시를 내린다
+  sendResult(status) {
+    if (LIMIT_STATUS.has(status)) this.markLimited(status)
+    else if (status === 0 && this.limitedAt) {
+      this.limitedAt = 0
+      log(this.id, `send ok again: send restriction mark cleared${this.doubtedAt ? ' (link checks still go to other bots first)' : ''}`)
+    }
+  }
+
+  // 조회(JOININFO) 한 번이 확정되지 않은 답으로 끝났다: 계정 상태를 적고 봇·status 를 한 줄 남긴다(링크는 코드만).
+  // 속도 제한 → 잠시 조회를 다른 봇에 먼저(resolvePauseUntil — 명부 읽기 readPauseUntil 은 건드리지 않는다) · -997 → 조회 쪽 이용 제한 ·
+  // 믿지 않은 -324·서버 전체 -444 → 적지 않음 · 그 밖(카카오 오류·응답 없음·세션 없음·링크 없는 답) → 잠시 뒤로(resolveBadUntil)
+  resolveFailed(code, st, r, why, what) {
+    const back = this.now() + (this.opts.rateWaits[0] || 0)
+    if (RATE_STATUS.has(st)) this.resolvePauseUntil = Math.max(this.resolvePauseUntil, back)
+    else if (st === -997) this.markDoubted(st, 'JOININFO')
+    else if (!GONE_STATUS.has(st) && st !== -444) this.resolveBadUntil = Math.max(this.resolveBadUntil, back)
+    const got = what || (r && r.noSession ? 'no session' : r && r.timeout ? 'timeout' : 'status ' + st)
+    const note = why ? ` (bot ${why}${GONE_STATUS.has(st) && why === 'restricted' ? ', -324 not trusted' : ''})` : ''
+    log(this.id, `resolve ${code} failed: JOININFO ${got}${note}`)
+  }
+
+  // 조회가 확정된 답(링크를 읽음·not_group·믿은 -324)으로 끝났다: 잠시 뒤로 미룬 표시를 내린다.
+  // read = 링크를 읽었다(이 봇은 있는 방을 본다) → JOININFO 이용 제한 표시도 내린다
+  resolveAnswered(read) {
+    this.resolveBadUntil = 0
+    this.resolvePauseUntil = 0
+    if (read && this.doubtedAt) {
+      this.doubtedAt = 0
+      log(this.id, 'JOININFO read a link again: link-check restriction mark cleared')
+    }
+  }
+
   // ── 원시 패킷 ───────────────────────────────────────────────────────────
   // 같은 세션에 1회만 보낸다(5.3). 세션이 없거나 응답이 없으면 {statusCode:-1}. 다시 접속하지 않는다.
-  async raw(method, body) {
+  // ms = 이번 패킷만 더 짧게 기다릴 때(링크 조회가 부모의 20초 안에 끝나도록). 없으면 packetTimeoutMs
+  async raw(method, body, ms) {
     if (!this.client) return { statusCode: -1, body: {}, noSession: true }
     let s
     try {
@@ -1302,7 +1477,8 @@ export class BotSlot {
     if (!conn) return { statusCode: -1, body: {}, noSession: true }
     let out
     try {
-      const r = await withTimeout(conn.sendPacket(method, body), this.opts.packetTimeoutMs)
+      const wait = ms > 0 ? Math.min(ms, this.opts.packetTimeoutMs || ms) : this.opts.packetTimeoutMs
+      const r = await withTimeout(conn.sendPacket(method, body), wait)
       out = r || { statusCode: -1, body: {} }
     } catch (e) {
       out = { statusCode: -1, body: {}, error: errText(e), timeout: !!(e && e.timeout) }
@@ -4705,14 +4881,18 @@ export class BotSlot {
       try {
         up = this.client.sendPhoto(v.chat_id, png, name)
         const res = await withTimeout(up, this.opts.photoTimeoutMs)
-        if (res && res.success === true) {
+        // 올라간 것은 진짜 log_id 까지 있을 때만이다(본문 status 로 거절되면 라이브러리는 success 를 주고 log_id 를 '0' 으로 둔다).
+        // 아니면 글로 대신 보낸다 — 그 WRITE 답이 이용 제한(-324)도 알려 준다
+        if (res && res.success === true && hasLogId(res.log_id)) {
           if (name !== 'kbot.png' && !this.photoExtNoted) {
             this.photoExtNoted = true
             log(this.id, 'image send ok with jpg extension')
           }
           return true
         }
-        log(this.id, `image send failed install ${v.install_id} (${name}) status ${res ? res.status_code : '?'}`)
+        const st = res ? Number(res.status_code) || 0 : 0
+        log(this.id, `image send failed install ${v.install_id} (${name}) status ${res ? res.status_code : '?'}${res && res.success === true ? ', no log id' : ''}`)
+        if (st) this.sendResult(st)
         return false
       } catch (e) {
         const msg = errText(e)
@@ -4760,14 +4940,17 @@ export class BotSlot {
     }
     try {
       const extra = item.mention ? visitMentionExtra(item.text, item.mention) : ''
+      let r
       if (extra) {
         this.msgSeq = (this.msgSeq || 0) + 1
-        const r = await this.raw('WRITE', { chatId: L(v.chat_id), msgId: Long.fromNumber(this.msgSeq), msg: item.text, type: 1, noSeen: false, scope: 1, extra })
-        if (!R.locoOk(r)) log(this.id, `send failed status ${R.locoStatus(r)} install ${v.install_id}`)
-        return
+        r = await this.raw('WRITE', { chatId: L(v.chat_id), msgId: Long.fromNumber(this.msgSeq), msg: item.text, type: 1, noSeen: false, scope: 1, extra })
+      } else {
+        // 글만: 라이브러리 client.sendMessage 와 같은 WRITE(끊긴 세션은 다시 잇는다)를 보내되 답을 그대로 받는다 —
+        // client.sendMessage 의 success 는 패킷 status 만 보아, 카카오가 본문 status 로 주는 거절(이용 제한 -324 등)도 성공으로 돌려준다
+        r = await this.client.executeWithReconnect(({ session }) => session.sendMessage(L(v.chat_id), item.text))
       }
-      const res = await this.client.sendMessage(v.chat_id, item.text)
-      if (!res || res.success !== true) log(this.id, `send failed install ${v.install_id}`)
+      if (!R.locoOk(r)) log(this.id, `send failed status ${R.locoStatus(r)} install ${v.install_id}`)
+      this.sendResult(R.locoStatus(r))
     } catch (e) {
       log(this.id, `send failed install ${v.install_id}: ${errText(e)}`)
     }
